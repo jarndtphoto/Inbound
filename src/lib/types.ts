@@ -1,0 +1,267 @@
+import type { DecodedField, Metar, Taf } from "./metar";
+
+export type Traffic = {
+  hex: string;
+  callsign: string | null;
+  registration: string | null;
+  type: string | null;
+  typeName: string | null;
+  operator: string | null;
+  airline: string | null;
+  year: string | null;
+  lat: number | null;
+  lon: number | null;
+  altFt: number | null;
+  onGround: boolean;
+  gsKt: number | null;
+  track: number | null;
+  vertFpm: number | null;
+  distNm: number;
+  bearing: number;
+  category: string | null;
+  widebody: boolean;
+  interesting: boolean;
+  phase: "taxi" | "climb" | "cruise" | "descent" | "approach" | "parked";
+};
+
+export type FieldSnapshot = {
+  icao: string;
+  fetchedAt: number;
+  traffic: Traffic[];
+  airborne: number;
+  onField: number;
+  heavies: number;
+  weather: {
+    metar: Metar | null;
+    taf: Taf | null;
+    decoded: DecodedField | null;
+    delayHint: string;
+  };
+  error?: string | null;
+};
+
+export type LogKind = "sighting" | "trip";
+
+export type LogEntry = {
+  id: string;
+  kind: LogKind;
+  at: number;
+  airport: string;
+  callsign?: string;
+  registration?: string;
+  type?: string;
+  typeName?: string;
+  notes?: string;
+  from?: string;
+  to?: string;
+};
+
+export type TabId = "sky" | "field" | "seat" | "log";
+
+export type StageId = "inbound" | "push" | "taxi" | "ride" | "arrival" | "gate";
+
+export type Chop = "smooth" | "light" | "moderate" | "severe";
+
+export type RouteSample = {
+  lat: number;
+  lon: number;
+  frac: number;
+  distNm: number;
+  remainingNm: number;
+  etaMin: number;
+  chop: Chop;
+  cloud: boolean;
+  convective: boolean;
+  note: string | null;
+  fix: boolean;
+};
+
+export type Hazard = {
+  id: string;
+  kind: "turb" | "convective" | "ice" | "ifr" | "llws" | "pirep";
+  chop: Chop;
+  label: string;
+  detail: string;
+  remaining: boolean;
+  lat?: number;
+  lon?: number;
+};
+
+export type NasDelay = {
+  delayed: boolean;
+  type: string | null;
+  reason: string;
+  avg: string | null;
+  min: string | null;
+  max: string | null;
+  trend: string | null;
+};
+
+export type FieldBrief = {
+  icao: string;
+  iata: string;
+  name: string;
+  city: string;
+  lat: number;
+  lon: number;
+  tz?: string;
+  decoded: DecodedField | null;
+  rawMetar: string | null;
+  nas: NasDelay | null;
+  category: string;
+  windDir?: number | null;
+};
+
+export type LiveAircraft = {
+  hex: string;
+  registration: string | null;
+  type: string | null;
+  typeName: string | null;
+  year: string | null;
+  operator: string | null;
+  lat: number;
+  lon: number;
+  altFt: number | null;
+  gsKt: number | null;
+  track: number | null;
+  vertFpm: number | null;
+  onGround: boolean;
+  phase: Traffic["phase"];
+};
+
+export type InboundWatch = {
+  callsign: string;
+  iata: string;
+  type: string | null;
+  distNm: number;
+  etaMin: number;
+  altFt: number | null;
+  from: string | null;
+  gate: string | null;
+  clock: string | null;
+  landClock?: string | null;
+  gateClock?: string | null;
+  taxiing?: boolean;
+  locked?: boolean;
+  taxiMin?: number | null;
+};
+
+export type Comfort = {
+  score: number;
+  grade: "A" | "B" | "C" | "D" | "F";
+  label: string;
+  summary: string;
+  reasons: string[];
+  trend?: "up" | "down" | "steady";
+  trendWhy?: string | null;
+  segments?: Record<StageId, { grade: "A" | "B" | "C" | "D" | "F"; note: string | null }>;
+};
+
+export type FlightTimes = {
+  push: string | null;
+  takeoff: string | null;
+  taxiOutMin: number | null;
+  land: string | null;
+  taxiInMin: number | null;
+  taxiOutKind?: "measured" | "posted" | "typical" | "filed" | null;
+  taxiInKind?: "measured" | "posted" | "typical" | "filed" | null;
+  originGate: string | null;
+  destGate: string | null;
+  /** Original published push, kept even if the airline rewrites "scheduled". */
+  pushWas?: string | null;
+  takeoffWas?: string | null;
+  landWas?: string | null;
+  /** Minutes later than the original push. Negative = early. Null if unknown. */
+  delayMin?: number | null;
+  arriveDelayMin?: number | null;
+  /** Historical typical departure slip for this flight number, minutes. */
+  typicalDelayMin?: number | null;
+  pushed?: boolean;
+  airborne?: boolean;
+  pushUnix?: number | null;
+  takeoffUnix?: number | null;
+  landUnix?: number | null;
+  origPushUnix?: number | null;
+  origTakeoffUnix?: number | null;
+  origLandUnix?: number | null;
+};
+
+export type TaxiQueueItem = {
+  hex: string;
+  callsign: string;
+  iata: string;
+  type: string | null;
+  typeName: string | null;
+  gsKt: number | null;
+  holding: boolean;
+  you?: boolean;
+};
+
+export type TaxiQueue = {
+  /** 1 = first to the runway. Null if you haven’t joined the line yet. */
+  place: number | null;
+  ahead: number;
+  moving: number;
+  items: TaxiQueueItem[];
+  depRunway: string | null;
+  depSource: "takeoffs" | "wind" | "track" | null;
+  status: "taxi" | "gate" | "empty";
+  note: string;
+};
+
+export type FlightStory = {
+  fetchedAt: number;
+  query: string;
+  callsign: string;
+  iata: string;
+  airline: string | null;
+  live: boolean;
+  currentStage: StageId;
+  aircraft: LiveAircraft | null;
+  origin: FieldBrief;
+  dest: FieldBrief;
+  route: {
+    totalNm: number;
+    remainingNm: number;
+    flownNm: number;
+    etaMin: number;
+    progress: number;
+    heading: number;
+    source: "track" | "direct" | "filed";
+    samples: RouteSample[];
+  };
+  hazards: Hazard[];
+  comfort: Comfort;
+  inbound: {
+    status: "complete" | "airborne" | "at_field" | "watching" | "unknown";
+    headline: string;
+    detail: string;
+    watch: InboundWatch[];
+  };
+  times: FlightTimes;
+  taxiQueue?: TaxiQueue | null;
+  stages: Record<
+    StageId,
+    {
+      state: "done" | "now" | "next";
+      title: string;
+      body: string;
+      watchouts: string[];
+    }
+  >;
+  error?: string | null;
+};
+
+export type LiveCard = {
+  callsign: string;
+  iata: string;
+  airline: string | null;
+  from: string;
+  to: string;
+  fromCity: string;
+  toCity: string;
+  type: string | null;
+  altFt: number | null;
+  remainingNm: number | null;
+  delayedDest: boolean;
+};
