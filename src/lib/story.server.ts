@@ -482,7 +482,7 @@ function headingsCluster(degs, maxSpread) {
 	return circularMeanDeg(tight);
 }
 async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed }) {
-	if (live && !live.onGround) return null;
+	if (!live || !live.onGround || !origin) return null;
 	if (ourAirborne) return null;
 	const atOrigin = haversineNm({ lat: live.lat, lon: live.lon }, origin) < 8;
 	const atDest = dest ? haversineNm({ lat: live.lat, lon: live.lon }, dest) < 6 : false;
@@ -1243,7 +1243,7 @@ function applyGradeTrend(key, snap, comfort) {
 }
 function ianaFromFa(raw) {
 	if (!raw || typeof raw !== "string") return null;
-	const t = raw.trim();
+	const t = raw.trim().replace(/^:+/, "");
 	if (t.includes("/")) {
 		try {
 			Intl.DateTimeFormat("en-US", { timeZone: t }).format(new Date());
@@ -1609,18 +1609,18 @@ function buildInbound(args) {
 	};
 }
 function currentStageOf(args) {
-	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed } = args;
+	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed, faAirborne } = args;
 	if (ourLanded || ourLandingActual) return "gate";
 	const atOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const rolling = Boolean(live?.onGround && atOrigin && ((live.gsKt ?? 0) >= 8 || live.phase === "taxi"));
 	if (rolling) return "taxi";
 	if (live && !live.onGround) {
 		const dDest = dest ? haversineNm({ lat: live.lat, lon: live.lon }, dest) : 999;
-		if (live.onGround && dDest < 8) return "gate";
 		if (live.phase === "approach" || remainingNm < 40 || live.altFt != null && live.altFt < 8e3 && (live.vertFpm ?? 0) < 0) return "arrival";
+		if (dDest < 8 && live.onGround) return "gate";
 		return "ride";
 	}
-	if (Boolean(ourTakeoffActual)) {
+	if (faAirborne || Boolean(ourTakeoffActual)) {
 		if (remainingNm < 8) return "gate";
 		if (remainingNm < 40) return "arrival";
 		return "ride";
@@ -1702,7 +1702,7 @@ function buildStages(args) {
 		},
 		taxi: {
 			state: state("taxi"),
-			title: taxiQueue?.depRunway ? `Taxi · Rwy ${taxiQueue.depRunway}` : current === "taxi" ? `Taxi at ${origin.iata}` : "Taxied",
+			title: taxiQueue?.depRunway ? `Taxi · Rwy ${taxiQueue.depRunway}` : current === "ride" || current === "arrival" || current === "gate" ? "Taxied" : `Taxi at ${origin.iata}`,
 			body: taxiingNow
 				? (taxiQueue?.place != null ? `Number ${taxiQueue.place} for the runway.` : "Taxiing.")
 				: current === "ride" || current === "arrival" || current === "gate"
@@ -1878,7 +1878,7 @@ async function buildStory(query) {
 	});
 	const landed = inboundLanded(inboundAware) || Boolean(inboundSnapByFlight.get(snapKey)?.landUnix);
 	const atGateFa = inboundAtGate(inboundAware);
-	const ourAirborne = Boolean(live && !live.onGround) || (Boolean(aware?.takeoff.actual) && !(live && live.onGround));
+	const ourAirborne = Boolean(live && !live.onGround) || /airborne|en.?route|climbed/i.test(aware?.status ?? "") || (Boolean(aware?.takeoff.actual) && !(live && live.onGround));
 	let inboundRaw = null;
 	if (!inboundLocked && !atGateFa) {
 		const tail = inboundAware?.tail ?? existingSnap?.tail ?? null;
@@ -2112,6 +2112,9 @@ async function buildStory(query) {
 		haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10 &&
 		(live.gsKt ?? 0) >= 8
 	);
+	if (ourAirborne && !times.airborne) {
+		times = { ...times, airborne: true };
+	}
 	if (leftGate && !times.pushed) {
 		const now = Date.now() / 1e3;
 		const otz = tzOf(origin);
@@ -2235,7 +2238,8 @@ async function buildStory(query) {
 		ourLandingActual: aware?.landing.actual ?? null,
 		ourLanded,
 		inboundStatus: inbound.status,
-		pushed: Boolean(times.pushed || leftGate)
+		pushed: Boolean(times.pushed || leftGate),
+		faAirborne: ourAirborne
 	});
 	const taxiQueue = await loadTaxiQueue({
 		origin,
@@ -2377,7 +2381,7 @@ function nearestKnown(live) {
 }
 export async function loadFlightStory(query) {
 	try {
-		return await cached(`story37:${query.toUpperCase().replace(/[^A-Z0-9]/g, "")}`, 12e3, () => buildStory(query));
+		return await cached(`story38:${query.toUpperCase().replace(/[^A-Z0-9]/g, "")}`, 12e3, () => buildStory(query));
 	} catch (err) {
 		const msg = err instanceof Error && err.message && err.name !== "AbortError" ? err.message : "Could not load that flight. Try again.";
 		throw new Error(msg);
