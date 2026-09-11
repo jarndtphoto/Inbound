@@ -80,7 +80,7 @@ export function parseFlightQuery(raw: string): ParsedFlight | null {
     }
   }
 
-  const iataNum = s.match(/^([A-Z]{2})(\d{1,4}[A-Z]?)$/);
+  const iataNum = s.match(/^([A-Z][A-Z0-9])(\d{1,4}[A-Z]?)$/);
   if (iataNum && IATA_TO_ICAO[iataNum[1]]) {
     const icao = IATA_TO_ICAO[iataNum[1]];
     return {
