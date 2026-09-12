@@ -68,6 +68,27 @@ export function sampleAltFt(frac: number, remainingNm: number, liveAlt: number |
   return cruise;
 }
 
+/** Match a route sample to the advisory's actual or forecast validity window. */
+export function advisoryValidAt(properties: Record<string, unknown> | null | undefined, atUnix: number): boolean {
+  if (!properties || !Number.isFinite(atUnix)) return true;
+  const parse = (value: unknown): number | null => {
+    if (typeof value !== "string") return null;
+    const compact = value.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})$/);
+    const millis = Date.parse(compact
+      ? `${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:00Z`
+      : value);
+    return Number.isFinite(millis) ? millis / 1000 : null;
+  };
+  const from = parse(properties.validTimeFrom);
+  const to = parse(properties.validTimeTo);
+  if (from != null || to != null) return (from == null || atUnix >= from) && (to == null || atUnix <= to);
+  const forecast = parse(properties.validTime);
+  if (forecast == null) return true;
+  // G-AIRMETs are three-hourly snapshots; TCF is a shorter valid-hour forecast.
+  const tolerance = properties.data === "tcf" ? 60 * 60 : 90 * 60;
+  return Math.abs(atUnix - forecast) <= tolerance;
+}
+
 /** G-AIRMET top/base are usually flight levels ("210") or "SFC". */
 export function bandFt(base: unknown, top: unknown): { lo: number; hi: number } {
   const parse = (v: unknown): number | null => {

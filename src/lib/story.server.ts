@@ -20,6 +20,7 @@ import {
 } from "./geo";
 import { decodeMetar } from "./metar";
 import {
+	advisoryValidAt,
 	decodeTafPassenger,
 	digestWx,
 	gairmetApplies,
@@ -2431,6 +2432,7 @@ async function buildStory(query) {
 		: live?.track ?? initialBearing(start, end);
 	const hazards = [];
 	let sinceFix = 0;
+	const routeNowUnix = Date.now() / 1e3;
 	const samples = path.map((p, i) => {
 		const prev = path[i - 1];
 		const step = prev ? haversineNm(prev, p) : 0;
@@ -2444,11 +2446,14 @@ async function buildStory(query) {
 		const frac = distNm / totalNm;
 		const remainingHere = Math.max(0, totalNm - distNm);
 		const sampleAlt = sampleAltFt(frac, remainingHere, live?.altFt ?? null);
+		const etaHere = frac <= progress ? 0 : (frac - progress) / Math.max(.01, 1 - progress) * etaMin;
+		const sampleUnix = routeNowUnix + etaHere * 60;
 		let chop = "smooth";
 		let cloud = false;
 		let convective = false;
 		const notes = [];
 		for (const f of hazardsPack.gairmet) {
+			if (!advisoryValidAt(f.properties, sampleUnix)) continue;
 			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
 			const hazard = String(f.properties?.hazard ?? "");
 			const due = String(f.properties?.dueTo ?? "");
@@ -2479,6 +2484,7 @@ async function buildStory(query) {
 			}
 		}
 		for (const f of hazardsPack.sigmet) {
+			if (!advisoryValidAt(f.properties, sampleUnix)) continue;
 			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
 			const hz = String(f.properties?.hazard ?? f.properties?.airSigmetType ?? "").toUpperCase();
 			if (hz.includes("CONVECTIVE") || hz.includes("TS")) {
@@ -2514,6 +2520,7 @@ async function buildStory(query) {
 			}
 		}
 		for (const f of hazardsPack.cwa ?? []) {
+			if (!advisoryValidAt(f.properties, sampleUnix)) continue;
 			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
 			const txt = String(f.properties?.text ?? f.properties?.hazard ?? f.properties?.cwaText ?? "CWA").toUpperCase();
 			if (txt.includes("TS") || txt.includes("CONVECT")) {
@@ -2538,6 +2545,7 @@ async function buildStory(query) {
 			}
 		}
 		for (const f of hazardsPack.tcf ?? []) {
+			if (!advisoryValidAt(f.properties, sampleUnix)) continue;
 			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
 			const cov = String(f.properties?.coverage ?? "").toLowerCase();
 			const chopF = cov === "solid" || cov === "medium" ? "moderate" : "light";
@@ -2556,7 +2564,6 @@ async function buildStory(query) {
 				source: "forecast"
 			});
 		}
-		const etaHere = frac <= progress ? 0 : (frac - progress) / Math.max(.01, 1 - progress) * etaMin;
 		return {
 			lat: p.lat,
 			lon: p.lon,
@@ -2630,7 +2637,6 @@ async function buildStory(query) {
 		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
 	}
 	const offRamp = Boolean(live && live.onGround && atOrigLive && dOrigLive >= 0.65);
-	const parkedAtStand = Boolean(live && live.onGround && atOrigLive && (live.gsKt ?? 0) < 1.2 && dOrigLive < 0.38);
 	const leftGate = Boolean(
 		!ourLanded &&
 		(
@@ -2647,7 +2653,8 @@ async function buildStory(query) {
 	if (ourAirborne && !times.airborne) {
 		times = { ...times, airborne: true };
 	}
-	if (parkedAtStand) pushLatch.delete(landKey);
+	// A taxi hold can look stationary near the departure stand. Preserve the
+	// observed pushback until this flight's identity changes.
 	if (leftGate && !times.pushed) {
 		const now = Date.now() / 1e3;
 		const otz = tzOf(origin);
@@ -2672,7 +2679,7 @@ async function buildStory(query) {
 	}
 	const latched = pushLatch.get(landKey);
 	const latchUnix = latched && typeof latched === "object" ? latched.unix : typeof latched === "number" ? null : null;
-	if (latchUnix && !times.pushed && !parkedAtStand) {
+	if (latchUnix && !times.pushed) {
 		const age = Date.now() / 1e3 - (latched.at ?? latchUnix);
 		if (live || times.airborne || (latched.live && age < 180)) {
 			const otz = tzOf(origin);

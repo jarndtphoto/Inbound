@@ -45,4 +45,36 @@ describe('September 12 flight audit replay', () => {
       assert.ok(pireps.every(u => u.includes('&bbox=')), 'PIREP queries require a geographic boundary');
     });
   }
+
+  it('keeps pushback registered when a moving aircraft pauses near its stand', async (t) => {
+    const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
+    record.ident = 'UAL1533';
+    record.iataIdent = 'UA1533';
+    record.flightStatus = 'scheduled';
+    record.gateDepartureTimes.actual = null;
+    let now = 1789231976000;
+    let lat = 41.9786;
+    let lon = -87.9048;
+    let gs = 0;
+    t.mock.method(Date, 'now', () => now);
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
+        return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
+      }
+      return new Response(JSON.stringify({
+        ac: [{ hex: 'abc123', flight: 'UAL1533', lat, lon, gs, alt_baro: 'ground', seen_pos: 0 }],
+        features: [],
+      }), { headers: { 'content-type': 'application/json' } });
+    });
+    const load = () => loadFlightStory('UA1533', {fresh: true});
+    assert.equal((await load()).times.pushed, false, 'stationary aircraft has not left its stand');
+    now += 5000;
+    gs = 3;
+    assert.equal((await load()).times.pushed, true, 'movement registers pushback');
+    now += 5000;
+    gs = 0;
+    lon += 0.0002;
+    const paused = await load();
+    assert.equal(paused.times.pushed, true, 'taxi pause cannot erase the earlier pushback');
+  });
 });

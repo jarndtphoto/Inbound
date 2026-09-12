@@ -1,6 +1,7 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+	advisoryValidAt,
   altOverlaps,
   bandFt,
   digestWx,
@@ -39,6 +40,24 @@ describe("route PIREP bounds", () => {
       const [,west,,east] = box.split(',').map(Number);
       assert.ok(east! - west! < 20);
     }
+  });
+});
+
+describe("route advisory validity", () => {
+  const at = (iso: string) => Date.parse(iso) / 1000;
+
+  it("omits a SIGMET or CWA before issue validity and after expiry", () => {
+    const advisory = { validTimeFrom: "2026-09-12T17:55:00.000Z", validTimeTo: "2026-09-12T19:55:00.000Z" };
+    assert.equal(advisoryValidAt(advisory, at("2026-09-12T17:54:00Z")), false);
+    assert.equal(advisoryValidAt(advisory, at("2026-09-12T18:30:00Z")), true);
+    assert.equal(advisoryValidAt(advisory, at("2026-09-12T20:00:00Z")), false);
+  });
+
+  it("matches a forecast snapshot to the time the aircraft reaches it", () => {
+    assert.equal(advisoryValidAt({ validTime: "2026-09-12T18:00:00.000Z", forecast: 3 }, at("2026-09-12T18:40:00Z")), true);
+    assert.equal(advisoryValidAt({ validTime: "2026-09-12T18:00:00.000Z", forecast: 3 }, at("2026-09-12T21:00:00Z")), false);
+    assert.equal(advisoryValidAt({ validTime: "20260912_2100", data: "tcf" }, at("2026-09-12T17:00:00Z")), false);
+    assert.equal(advisoryValidAt({ validTime: "20260912_2100", data: "tcf" }, at("2026-09-12T20:30:00Z")), true);
   });
 });
 
