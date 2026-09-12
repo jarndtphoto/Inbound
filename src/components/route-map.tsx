@@ -20,6 +20,13 @@ function chopClass(c: Chop, past: boolean) {
   return "stroke-accent";
 }
 
+function turbLabel(c: Chop) {
+  if (c === "light") return "light turbulence";
+  if (c === "moderate") return "moderate turbulence";
+  if (c === "severe") return "severe turbulence";
+  return "";
+}
+
 function mercX(lon: number) {
   return (lon + 180) / 360;
 }
@@ -412,9 +419,9 @@ export function RouteMap({ story }: { story: FlightStory }) {
   const runs = pathRuns(samples, progress).build(sx, sy);
   const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
   const admin1 = ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
-  const hazards = (story.hazards ?? []).filter(
-    (h) => h.lat != null && h.lon != null && (h.kind === "convective" || h.kind === "pirep"),
-  ).slice(0, 6);
+  const hazards = (story.hazards ?? [])
+    .filter((h) => h.lat != null && h.lon != null && h.kind === "convective")
+    .slice(0, 6);
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -501,30 +508,29 @@ export function RouteMap({ story }: { story: FlightStory }) {
         <circle cx={sx(dest.lon)} cy={sy(dest.lat)} r="5.5" className="fill-fg stroke-bg" strokeWidth="2" />
 
         {hazards.map((h) => {
-            const storm = h.kind === "convective";
-            const cx = sx(h.lon!);
-            const cy = sy(h.lat!);
-            return (
-              <g key={h.id}>
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={storm ? 10 : 5}
-                  className={storm ? "fill-ifr/25 stroke-ifr/70" : "fill-mvfr/40"}
-                  strokeWidth="1"
-                />
-                <text
-                  x={cx + (storm ? 13 : 9)}
-                  y={cy + 3.5}
-                  className={storm ? "fill-ifr" : "fill-muted"}
-                  fontSize="11"
-                  fontFamily="IBM Plex Sans, system-ui, sans-serif"
-                >
-                  {storm ? "Storms" : "Bumps reported"}
-                </text>
-              </g>
-            );
-          })}
+          const cx = sx(h.lon!);
+          const cy = sy(h.lat!);
+          return (
+            <g key={h.id}>
+              <circle
+                cx={cx}
+                cy={cy}
+                r="10"
+                className="fill-ifr/25 stroke-ifr/70"
+                strokeWidth="1"
+              />
+              <text
+                x={cx + 13}
+                y={cy + 3.5}
+                className="fill-ifr"
+                fontSize="11"
+                fontFamily="IBM Plex Sans, system-ui, sans-serif"
+              >
+                Thunderstorms
+              </text>
+            </g>
+          );
+        })}
 
         {ticks.map((s) => (
           <g key={`t-${s.frac}`}>
@@ -538,7 +544,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
             >
               {s.chop === "smooth"
                 ? formatDuration(s.etaMin)
-                : `${formatDuration(s.etaMin)} ${s.chop === "light" ? "light bumps" : "bumpier"}`}
+                : `${formatDuration(s.etaMin)} ${turbLabel(s.chop)}`}
             </text>
           </g>
         ))}
@@ -615,15 +621,11 @@ export function RouteMap({ story }: { story: FlightStory }) {
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
         <Legend swatch="bg-accent" label="Smooth" />
-        <Legend swatch="bg-mvfr" label="Light bumps" />
-        <Legend swatch="bg-ifr" label="Bumpier" />
+        <Legend swatch="bg-mvfr" label="Light turbulence" />
+        <Legend swatch="bg-ifr" label="Moderate turbulence" />
         <span className="inline-flex items-center gap-1.5">
           <span className="size-2.5 rounded-full border border-ifr/70 bg-ifr/40" />
-          Storms nearby
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="size-1.5 rounded-full bg-mvfr" />
-          Bumps reported nearby
+          Thunderstorms
         </span>
         <button
           type="button"
