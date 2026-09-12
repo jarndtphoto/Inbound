@@ -631,7 +631,9 @@ function TimesStrip({ story, fetching }: { story: FlightStory; fetching: boolean
         </p>
         <p className="mt-1 text-xs text-muted">
           {late && t?.pushWas ? `Was ${t.pushWas}` : t?.originGate ? `Gate ${t.originGate}` : "Airline posted time"}
-          {t?.takeoff ? ` · Wheels up ${t.takeoff}` : ""}
+          {t?.takeoff
+            ? ` · ${t.airborne || story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "gate" ? "Wheels up" : "Est. wheels up"} ${t.takeoff}`
+            : ""}
         </p>
       </div>
       <Freshness at={story.fetchedAt} fetching={fetching} />
@@ -1040,7 +1042,16 @@ function extraFor(story: FlightStory, stage: StageId) {
           />
           <TimeChip
             label="Wheels up"
-            value={times.takeoff ?? "—"}
+            value={
+              times.takeoff == null
+                ? "—"
+                : times.airborne ||
+                    story.currentStage === "ride" ||
+                    story.currentStage === "arrival" ||
+                    story.currentStage === "gate"
+                  ? times.takeoff
+                  : `Est. ${times.takeoff}`
+            }
           />
         </dl>
         <TaxiQueueCard queue={story.taxiQueue} />

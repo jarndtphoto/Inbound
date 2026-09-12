@@ -378,6 +378,7 @@ function toLive(raw) {
 	const type = raw.t?.trim() || null;
 	return {
 		hex,
+		callsign: String(raw.flight ?? "").replace(/\s/g, "").toUpperCase() || null,
 		registration: raw.r?.trim() || null,
 		type,
 		typeName: airframeOf(type)?.name ?? raw.desc ?? type,
@@ -493,6 +494,29 @@ function identPrefixes(callsign) {
 	} else if (IATA_TO_ICAO[prefix]) out.add(IATA_TO_ICAO[prefix]);
 	return [...out].filter(Boolean);
 }
+function isAtcCallsign(fl, prefixes) {
+	const u = String(fl || "").replace(/\s/g, "").toUpperCase();
+	if (!u) return false;
+	return prefixes.some((p) => u.startsWith(p)) && /^[A-Z]{2,3}\d+[A-Z]+$/.test(u);
+}
+function flightIdentOk(fl, parsed, aware) {
+	const u = String(fl || "").replace(/\s/g, "").toUpperCase();
+	if (!u || !parsed) return false;
+	const vars = new Set(callsignVariants(parsed.callsign));
+	const atc = String(aware?.atcIdent ?? "").replace(/\s/g, "").toUpperCase();
+	if (atc) vars.add(atc);
+	if (vars.has(u)) return true;
+	return isAtcCallsign(u, identPrefixes(parsed.callsign));
+}
+function rawMatchesQuery(raw, parsed, aware) {
+	if (!raw) return false;
+	const fl = String(raw.flight ?? "").replace(/\s/g, "").toUpperCase();
+	const r = String(raw.r ?? "").replace(/[-\s]/g, "").toUpperCase();
+	const tail = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
+	if (flightIdentOk(fl, parsed, aware)) return true;
+	if (tail && r === tail) return true;
+	return false;
+}
 function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm) {
 	if (!near?.length || !origin) return null;
 	const vars = new Set(callsignVariants(parsed.callsign));
@@ -501,9 +525,10 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm) {
 	const tail = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
 	const type = String(aware?.type ?? "").toUpperCase();
 	const prefixes = identPrefixes(parsed.callsign);
-	const candidates = [];
+	const atcCands = [];
 	for (const a of near) {
 		if (typeof a.lat !== "number" || typeof a.lon !== "number") continue;
+		if (seenOf(a) > 40) continue;
 		const here = { lat: a.lat, lon: a.lon };
 		const dOrig = haversineNm(here, origin);
 		const dDest = dest ? haversineNm(here, dest) : 999;
@@ -513,31 +538,18 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm) {
 		const t = String(a.t ?? "").toUpperCase();
 		if (vars.has(fl)) return a;
 		if (tail && r === tail) return a;
-		if (!prefixes.some((p) => fl.startsWith(p))) continue;
-		candidates.push({
+		if (!isAtcCallsign(fl, prefixes)) continue;
+		atcCands.push({
 			a,
 			typeExact: Boolean(type) && t === type,
-			typeFam: Boolean(type) && t.slice(0, 3) === type.slice(0, 3),
 			gs: typeof a.gs === "number" ? a.gs : 0
 		});
 	}
-	const unique = (arr) => arr.length === 1 ? arr[0].a : null;
-	const exactType = candidates.filter((c) => c.typeExact);
-	const exactHit = unique(exactType);
-	if (exactHit) return exactHit;
+	if (atcCands.length === 1) return atcCands[0].a;
+	const exactType = atcCands.filter((c) => c.typeExact);
+	if (exactType.length === 1) return exactType[0].a;
 	const movingExact = exactType.filter((c) => c.gs >= 2);
 	if (movingExact.length === 1) return movingExact[0].a;
-	const fam = candidates.filter((c) => c.typeFam);
-	const famHit = unique(fam);
-	if (famHit) return famHit;
-	const movingFam = fam.filter((c) => c.gs >= 2);
-	if (movingFam.length === 1) return movingFam[0].a;
-	if (!type) {
-		const only = unique(candidates);
-		if (only) return only;
-		const moving = candidates.filter((c) => c.gs >= 2);
-		if (moving.length === 1) return moving[0].a;
-	}
 	return null;
 }
 function seenOf(a) {
@@ -725,8 +737,9 @@ function pickRunway(runways, us, ourTrack) {
 	if (Math.abs(best.cross) > 1.6 && (best.along < -0.6 || best.along > 4)) return null;
 	return best;
 }
-async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed, fieldList }) {
+async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed, fieldList, liveTrusted }) {
 	if (!live || !origin) return null;
+	if (!liveTrusted) return null;
 	if (ourAirborne) return null;
 	if (!live.onGround) return null;
 	const atOrigin = haversineNm({ lat: live.lat, lon: live.lon }, origin) < 8;
@@ -743,6 +756,8 @@ async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed, 
 		const hex = String(raw.hex ?? "").toLowerCase();
 		if (!hex || raw.lat == null || raw.lon == null) continue;
 		if (isVehicleType(raw.t, raw.category, raw.ownOp)) continue;
+		if (seenOf(raw) > 40) continue;
+		if (!String(raw.flight ?? "").trim() && !String(raw.r ?? "").trim()) continue;
 		const altRaw = raw.alt_baro;
 		const acGs = typeof raw.gs === "number" ? raw.gs : 0;
 		const altNum = typeof altRaw === "number" ? altRaw : 0;
@@ -2050,6 +2065,10 @@ async function buildStory(query) {
 		safe(loadRoute(parsed.callsign), null)
 	]);
 	let rawAc = rawAc0;
+	if (rawAc && !rawMatchesQuery(rawAc, parsed, aware) && String(rawAc.flight ?? "").trim()) {
+		rawAc = null;
+		hexByIdent.delete(identKey);
+	}
 	if (!rawAc && knownHex) rawAc = parsed.registration
 		? await safe(adsbByReg(parsed.registration), null)
 		: await safe(adsbByCallsign(parsed.callsign), null);
@@ -2089,9 +2108,11 @@ async function buildStory(query) {
 	const hexHint = (live?.hex || knownHex || aware?.hex || "").toLowerCase();
 	if (hexHint && /^[0-9a-f]{6}$/.test(hexHint)) {
 		const freshRaw = await safe(adsbByHex(hexHint), null);
-		if (freshRaw) {
+		if (freshRaw && (rawMatchesQuery(freshRaw, parsed, aware) || !String(freshRaw.flight ?? "").trim())) {
 			const cand = asOnGround(toLive(freshRaw), origin);
 			if (cand) live = cand;
+		} else if (freshRaw && String(freshRaw.flight ?? "").trim()) {
+			hexByIdent.delete(identKey);
 		}
 	}
 	if (origin && !Boolean(aware?.takeoff?.actual) && !Boolean(aware?.landing?.actual)) {
@@ -2438,34 +2459,18 @@ async function buildStory(query) {
 		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
 	}
 	const offRamp = Boolean(live && live.onGround && atOrigLive && dOrigLive >= 0.8);
-	const nowSec = Date.now() / 1e3;
-	const parkedAtStand = Boolean(live && live.onGround && atOrigLive && (live.gsKt ?? 0) < 2 && dOrigLive < 0.45);
-	const faPushUnix = times.pushUnix;
-	const faToUnix = times.takeoffUnix;
-	const faPushedClock = Boolean(
-		!ourLanded &&
-		!aware?.takeoff?.actual &&
-		!parkedAtStand &&
-		faPushUnix &&
-		nowSec > faPushUnix + 120
-	);
-	const faTaxiClock = Boolean(
-		faPushedClock &&
-		(nowSec > faPushUnix + 5 * 60 || (faToUnix != null && faToUnix - nowSec < 18 * 60 && faToUnix + 180 > nowSec))
-	);
 	const leftGate = Boolean(
 		!ourLanded &&
 		(
 			(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 2 || distPark >= 0.035 || live.phase === "taxi" || offRamp)) ||
 			motion.pushed ||
 			motion.taxiing ||
-			faPushedClock
+			Boolean(aware?.gateOut?.actual)
 		)
 	);
 	const taxiHint = Boolean(
 		motion.taxiing ||
 		offRamp ||
-		faTaxiClock ||
 		(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 3 || distPark >= 0.10 || live.phase === "taxi"))
 	);
 	if (ourAirborne && !times.airborne) {
@@ -2474,7 +2479,8 @@ async function buildStory(query) {
 	if (leftGate && !times.pushed) {
 		const now = Date.now() / 1e3;
 		const otz = tzOf(origin);
-		const pushUnix = times.pushUnix != null && times.pushUnix <= now + 120 ? Math.min(times.pushUnix, now) : now;
+		const actual = aware?.gateOut?.actual;
+		const pushUnix = actual ?? (times.pushUnix != null && times.pushUnix <= now + 120 ? Math.min(times.pushUnix, now) : now);
 		const origPush = times.origPushUnix ?? pushUnix;
 		const delayMin = slipMin(pushUnix, origPush);
 		times = {
@@ -2486,14 +2492,11 @@ async function buildStory(query) {
 			pushWas: delayMin != null && delayMin >= 5 ? clockAt(origPush, otz) : times.pushWas
 		};
 	}
-	if (times.pushed || leftGate || times.airborne || (live && !live.onGround)) {
-		const stamped = aware?.gateOut?.actual ?? times.pushUnix ?? pushLatch.get(landKey) ?? null;
+	if (leftGate || times.airborne || (live && !live.onGround) || Boolean(aware?.gateOut?.actual)) {
+		const stamped = aware?.gateOut?.actual ?? (leftGate ? times.pushUnix : null) ?? pushLatch.get(landKey) ?? null;
 		if (stamped) pushLatch.set(landKey, stamped);
-		else {
-			const now = Date.now() / 1e3;
-			const guess = times.pushUnix != null && times.pushUnix <= now + 120 ? Math.min(times.pushUnix, now) : now;
-			pushLatch.set(landKey, guess);
-		}
+	} else if (!live && !aware?.gateOut?.actual && !times.airborne) {
+		pushLatch.delete(landKey);
 	}
 	const latchedPush = pushLatch.get(landKey);
 	if (latchedPush && !times.pushed) {
@@ -2610,7 +2613,14 @@ async function buildStory(query) {
 		ourHex: live?.hex ?? aware?.hex ?? null,
 		ourAirborne: Boolean(ourAirborne && !live?.onGround && !taxiHint),
 		pushed: Boolean(times.pushed || leftGate),
-		fieldList
+		fieldList,
+		liveTrusted: Boolean(
+			live &&
+			(
+				flightIdentOk(live.callsign, parsed, aware) ||
+				(aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase())
+			)
+		)
 	});
 	const airline = airlineOf(liveCs) ?? route?.airline?.name ?? null;
 	let aircraft = live;
