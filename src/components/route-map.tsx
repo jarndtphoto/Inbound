@@ -1,7 +1,8 @@
 import { formatDuration, formatNm, haversineNm } from "@/lib/geo";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
-import { WORLD_LAND_RINGS } from "@/lib/world-land-lines";
+import { ADMIN1_RINGS } from "@/lib/admin1-lines";
+import { WORLD_COUNTRY_RINGS } from "@/lib/world-country-lines";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { CloudRain } from "lucide-react";
@@ -431,7 +432,8 @@ export function RouteMap({ story }: { story: FlightStory }) {
   });
   const fixes = samples.filter((s) => s.fix);
   const runs = pathRuns(samples, progress).build(sx, sy);
-  const lands = WORLD_LAND_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const admin1 = ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -454,20 +456,38 @@ export function RouteMap({ story }: { story: FlightStory }) {
           <RadarLayer minLon={minLon} maxLon={maxLon} minLat={minLat} maxLat={maxLat} sx={sx} sy={sy} />
         )}
 
-        <g strokeWidth="1">
-          {lands.map((ring, i) => {
+        <g>
+          {countries.map((ring, i) => {
+            if (!ringFillable(ring)) return null;
+            const points = ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ");
+            return <polygon key={`fill-${i}`} points={points} className="fill-fg/10 stroke-none" />;
+          })}
+          {admin1.map((ring, i) => {
+            const points = ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ");
+            return (
+              <polyline
+                key={`adm-${i}`}
+                points={points}
+                className="fill-none stroke-fg/20"
+                strokeWidth="0.9"
+              />
+            );
+          })}
+          {countries.map((ring, i) => {
             const points = ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ");
             return ringFillable(ring) ? (
               <polygon
-                key={`land-${i}`}
+                key={`c-${i}`}
                 points={points}
-                className="fill-fg/10 stroke-fg/20"
+                className="fill-none stroke-fg/35"
+                strokeWidth="1.25"
               />
             ) : (
               <polyline
-                key={`land-${i}`}
+                key={`c-${i}`}
                 points={points}
-                className="fill-none stroke-fg/20"
+                className="fill-none stroke-fg/35"
+                strokeWidth="1.25"
               />
             );
           })}
