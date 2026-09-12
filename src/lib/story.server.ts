@@ -24,13 +24,16 @@ var cache = /* @__PURE__ */ new Map();
 var inflight = /* @__PURE__ */ new Map();
 function cached(key, ttlMs, fn) {
 	const hit = cache.get(key);
-	if (hit && Date.now() - hit.at < ttlMs) return Promise.resolve(hit.value);
+	const ttl = hit?.ttl ?? ttlMs;
+	if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.value);
 	const pending = inflight.get(key);
 	if (pending) return pending;
 	const p = fn().then((value) => {
+		const empty = value == null || (Array.isArray(value) && value.length === 0);
 		cache.set(key, {
 			at: Date.now(),
-			value
+			value,
+			ttl: empty ? Math.min(1200, ttlMs) : ttlMs
 		});
 		inflight.delete(key);
 		return value;
@@ -416,6 +419,26 @@ function asOnGround(live, origin) {
 	}
 	return live;
 }
+function stillOnField(live, origin) {
+	if (!live || !origin) return false;
+	const d = haversineNm({ lat: live.lat, lon: live.lon }, origin);
+	if (d > 10) return false;
+	const gs = live.gsKt ?? 0;
+	if (live.onGround) return true;
+	if (gs < 50) return true;
+	const agl = (live.altFt ?? 0) - fieldElev(origin);
+	if (gs < 70 && agl < 400) return true;
+	return false;
+}
+function flightBegun(live, origin) {
+	if (!live) return false;
+	const gs = live.gsKt ?? 0;
+	if (gs < 70 && stillOnField(live, origin)) return false;
+	if (gs >= 70) return true;
+	if (live.onGround) return false;
+	const agl = (live.altFt ?? 0) - fieldElev(origin);
+	return gs >= 70 || agl > 500;
+}
 function motionFromTrace(points, origin) {
 	if (!points?.length || !origin) return { pushed: false, taxiing: false, flying: false };
 	const now = Date.now() / 1e3;
@@ -459,36 +482,135 @@ function callsignVariants(callsign) {
 	}
 	return [...out];
 }
+function identPrefixes(callsign) {
+	const u = String(callsign || "").replace(/\s/g, "").toUpperCase();
+	const m = u.match(/^([A-Z]{2,3})\d/);
+	const prefix = m ? m[1] : u.slice(0, 3);
+	const out = new Set([prefix]);
+	if (prefix.length === 3) {
+		const iata = Object.entries(IATA_TO_ICAO).find(([, v]) => v === prefix)?.[0];
+		if (iata) out.add(iata);
+	} else if (IATA_TO_ICAO[prefix]) out.add(IATA_TO_ICAO[prefix]);
+	return [...out].filter(Boolean);
+}
+function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm) {
+	if (!near?.length || !origin) return null;
+	const vars = new Set(callsignVariants(parsed.callsign));
+	const atc = String(aware?.atcIdent ?? "").replace(/\s/g, "").toUpperCase();
+	if (atc) vars.add(atc);
+	const tail = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
+	const type = String(aware?.type ?? "").toUpperCase();
+	const prefixes = identPrefixes(parsed.callsign);
+	const candidates = [];
+	for (const a of near) {
+		if (typeof a.lat !== "number" || typeof a.lon !== "number") continue;
+		const here = { lat: a.lat, lon: a.lon };
+		const dOrig = haversineNm(here, origin);
+		const dDest = dest ? haversineNm(here, dest) : 999;
+		if (dOrig > maxNm && dDest > maxNm) continue;
+		const fl = String(a.flight ?? "").replace(/\s/g, "").toUpperCase();
+		const r = String(a.r ?? "").replace(/[-\s]/g, "").toUpperCase();
+		const t = String(a.t ?? "").toUpperCase();
+		if (vars.has(fl)) return a;
+		if (tail && r === tail) return a;
+		if (!prefixes.some((p) => fl.startsWith(p))) continue;
+		candidates.push({
+			a,
+			typeExact: Boolean(type) && t === type,
+			typeFam: Boolean(type) && t.slice(0, 3) === type.slice(0, 3),
+			gs: typeof a.gs === "number" ? a.gs : 0
+		});
+	}
+	const unique = (arr) => arr.length === 1 ? arr[0].a : null;
+	const exactType = candidates.filter((c) => c.typeExact);
+	const exactHit = unique(exactType);
+	if (exactHit) return exactHit;
+	const movingExact = exactType.filter((c) => c.gs >= 2);
+	if (movingExact.length === 1) return movingExact[0].a;
+	const fam = candidates.filter((c) => c.typeFam);
+	const famHit = unique(fam);
+	if (famHit) return famHit;
+	const movingFam = fam.filter((c) => c.gs >= 2);
+	if (movingFam.length === 1) return movingFam[0].a;
+	if (!type) {
+		const only = unique(candidates);
+		if (only) return only;
+		const moving = candidates.filter((c) => c.gs >= 2);
+		if (moving.length === 1) return moving[0].a;
+	}
+	return null;
+}
+function seenOf(a) {
+	if (!a) return 999;
+	const s = typeof a.seen_pos === "number" ? a.seen_pos : typeof a.seen === "number" ? a.seen : null;
+	return s != null && Number.isFinite(s) ? s : 999;
+}
+function acScore(a) {
+	if (!a) return -1;
+	let s = 0;
+	if (String(a.flight ?? "").trim()) s += 4;
+	if (a.alt_baro === "ground" || a.alt_baro === 0) s += 2;
+	if (typeof a.gs === "number") s += 1;
+	if (a.r) s += 1;
+	if (typeof a.lat === "number") s += 2;
+	const seen = seenOf(a);
+	if (seen < 2) s += 5;
+	else if (seen < 8) s += 3;
+	else if (seen < 20) s += 1;
+	return s;
+}
+function preferAc(a, b) {
+	if (!a) return b;
+	if (!b) return a;
+	const sa = seenOf(a);
+	const sb = seenOf(b);
+	if (sa + 0.7 < sb) return a;
+	if (sb + 0.7 < sa) return b;
+	return acScore(b) > acScore(a) ? b : a;
+}
+function mergeAc(lists) {
+	const by = new Map();
+	for (const list of lists) {
+		for (const a of list ?? []) {
+			const hex = String(a.hex ?? "").toLowerCase();
+			if (!hex) continue;
+			by.set(hex, preferAc(by.get(hex), a));
+		}
+	}
+	return [...by.values()];
+}
 async function adsbByCallsign(callsign) {
 	const u = String(callsign || "").replace(/\s/g, "").toUpperCase();
-	const iata = displayIata(u, null).replace(/\s/g, "");
-	const tryList = [...new Set([u, iata])].filter(Boolean).slice(0, 2);
-	const hits = await Promise.all(tryList.map((v) => cached(`cs:${v}`, 6e3, async () => {
-		return acList(await fetchJson(`https://opendata.adsb.fi/api/v2/callsign/${encodeURIComponent(v)}`))[0] ?? null;
-	}).catch(() => null)));
-	return hits.find(Boolean) ?? null;
+	if (!u) return null;
+	return cached(`cs3:${u}`, 2500, async () => {
+		const iata = displayIata(u, null).replace(/\s/g, "");
+		const idents = [...new Set([u, iata])].filter(Boolean).slice(0, 2);
+		const chunks = await Promise.all(idents.flatMap((v) => [
+			safe(fetchJson(`https://opendata.adsb.fi/api/v2/callsign/${encodeURIComponent(v)}`, 5e3).then(acList), []),
+			safe(fetchJson(`https://api.adsb.lol/v2/callsign/${encodeURIComponent(v)}`, 5e3).then(acList), []),
+			safe(fetchJson(`https://api.airplanes.live/v2/callsign/${encodeURIComponent(v)}`, 5e3).then(acList), [])
+		]));
+		return mergeAc(chunks)[0] ?? null;
+	});
 }
 async function adsbByReg(reg) {
-	return cached(`reg:${reg}`, 6e3, async () => {
-		return acList(await fetchJson(`https://opendata.adsb.fi/api/v2/registration/${encodeURIComponent(reg)}`))[0] ?? null;
+	return cached(`reg3:${reg}`, 2500, async () => {
+		const [fi, lol, al] = await Promise.all([
+			safe(fetchJson(`https://opendata.adsb.fi/api/v2/registration/${encodeURIComponent(reg)}`, 5e3).then(acList), []),
+			safe(fetchJson(`https://api.adsb.lol/v2/registration/${encodeURIComponent(reg)}`, 5e3).then(acList), []),
+			safe(fetchJson(`https://api.airplanes.live/v2/reg/${encodeURIComponent(reg)}`, 5e3).then(acList), [])
+		]);
+		return mergeAc([fi, lol, al])[0] ?? null;
 	});
 }
 async function adsbAround(lat, lon, dist) {
-	return cached(`around:${lat.toFixed(2)}:${lon.toFixed(2)}:${dist}`, dist > 20 ? 14e3 : 8e3, async () => {
-		const fi = acList(await fetchJson(`https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${dist}`, 12e3));
-		if (fi.length >= 24) return fi;
-		const lol = await safe(fetchJson(`https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${dist}`, 10e3).then(acList), []);
-		if (!lol.length) return fi;
-		const by = new Map();
-		for (const a of fi) {
-			const hex = String(a.hex ?? "").toLowerCase();
-			if (hex) by.set(hex, a);
-		}
-		for (const a of lol) {
-			const hex = String(a.hex ?? "").toLowerCase();
-			if (hex && !by.has(hex)) by.set(hex, a);
-		}
-		return [...by.values()];
+	return cached(`around6:${lat.toFixed(2)}:${lon.toFixed(2)}:${dist}`, 2500, async () => {
+		const [fi, lol, al] = await Promise.all([
+			safe(fetchJson(`https://opendata.adsb.fi/api/v2/lat/${lat}/lon/${lon}/dist/${dist}`, 6e3).then(acList), []),
+			safe(fetchJson(`https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${dist}`, 6e3).then(acList), []),
+			safe(fetchJson(`https://api.airplanes.live/v2/point/${lat}/${lon}/${dist}`, 6e3).then(acList), [])
+		]);
+		return mergeAc([fi, lol, al]);
 	});
 }
 function headingDelta(a, b) {
@@ -603,7 +725,7 @@ function pickRunway(runways, us, ourTrack) {
 	if (Math.abs(best.cross) > 1.6 && (best.along < -0.6 || best.along > 4)) return null;
 	return best;
 }
-async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed }) {
+async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed, fieldList }) {
 	if (!live || !origin) return null;
 	if (ourAirborne) return null;
 	if (!live.onGround) return null;
@@ -612,18 +734,20 @@ async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed }
 	if (atDest && !atOrigin) return null;
 	if (!atOrigin) return null;
 	const gs = live.gsKt ?? 0;
-	const moving = gs >= 4;
-	if (!moving) return null;
-	const rawList = await safe(adsbAround(origin.lat, origin.lon, 12), []);
+	if (!pushed && gs < 2) return null;
+	const rawList = fieldList ?? await safe(adsbAround(origin.lat, origin.lon, 12), []);
 	const field = [];
 	const takeoffs = [];
+	const elev = fieldElev(origin);
 	for (const raw of rawList) {
 		const hex = String(raw.hex ?? "").toLowerCase();
 		if (!hex || raw.lat == null || raw.lon == null) continue;
 		if (isVehicleType(raw.t, raw.category, raw.ownOp)) continue;
-		const onGround = raw.alt_baro === "ground" || raw.alt_baro === 0;
-		const alt = typeof raw.alt_baro === "number" && raw.alt_baro > 0 ? raw.alt_baro : 0;
+		const altRaw = raw.alt_baro;
 		const acGs = typeof raw.gs === "number" ? raw.gs : 0;
+		const altNum = typeof altRaw === "number" ? altRaw : 0;
+		const onGround = altRaw === "ground" || altRaw === 0 || altRaw === "0" || (typeof altRaw === "number" && acGs < 55 && altRaw - elev < 380);
+		const alt = onGround ? 0 : altNum;
 		const track = typeof raw.track === "number" ? raw.track : null;
 		const vert = typeof raw.baro_rate === "number" ? raw.baro_rate : 0;
 		const here = { lat: raw.lat, lon: raw.lon };
@@ -652,7 +776,7 @@ async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed }
 	};
 	if (!picked) {
 		const nearby = field
-			.filter((ac) => (!ourHex || ac.hex !== ourHex) && ac.gs >= 5 && haversineNm(ac.here, us) < 2.4)
+			.filter((ac) => (!ourHex || ac.hex !== ourHex) && (ac.gs >= 2 || haversineNm(ac.here, us) < 1.2))
 			.sort((a, b) => haversineNm(a.here, us) - haversineNm(b.here, us))
 			.slice(0, 12)
 			.map((ac) => queueItemFromRaw(ac.raw, false));
@@ -966,6 +1090,7 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 		type: typeof ac.type === "string" ? ac.type : null,
 		tail: typeof ac.tail === "string" ? ac.tail : typeof ac.registration === "string" ? ac.registration : typeof f.registration === "string" ? f.registration : null,
 		hex: typeof f.hexid === "string" ? f.hexid : typeof ac.hexid === "string" ? ac.hexid : null,
+		atcIdent: typeof f.atcIdent === "string" && f.atcIdent.trim() ? f.atcIdent.trim().toUpperCase() : null,
 		cancelled: Boolean(f.cancelled),
 		averageDelaySec: {
 			departure: asDelaySec(avg.departure),
@@ -1053,7 +1178,7 @@ function stubAwareFromHistory(loc, fallbackIdent) {
 	};
 }
 async function loadAware(callsign) {
-	return cached(`aware:${callsign}`, 12e3, async () => {
+	return cached(`aware:${callsign}`, 8e3, async () => {
 		return fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true);
 	});
 }
@@ -1635,8 +1760,13 @@ function snapFromAware(inb, originTz) {
 async function adsbByHex(hex) {
 	const id = String(hex || "").toLowerCase();
 	if (!/^[0-9a-f]{6}$/.test(id)) return null;
-	return cached(`hex:${id}`, 6e3, async () => {
-		return acList(await fetchJson(`https://opendata.adsb.fi/api/v2/hex/${encodeURIComponent(id)}`))[0] ?? null;
+	return cached(`hex3:${id}`, 2500, async () => {
+		const [fi, lol, al] = await Promise.all([
+			safe(fetchJson(`https://opendata.adsb.fi/api/v2/hex/${encodeURIComponent(id)}`, 5e3).then((j) => acList(j)[0] ?? null), null),
+			safe(fetchJson(`https://api.adsb.lol/v2/hex/${encodeURIComponent(id)}`, 5e3).then((j) => acList(j)[0] ?? null), null),
+			safe(fetchJson(`https://api.airplanes.live/v2/hex/${encodeURIComponent(id)}`, 5e3).then((j) => acList(j)[0] ?? null), null)
+		]);
+		return preferAc(preferAc(fi, lol), al);
 	});
 }
 function buildInbound(args) {
@@ -1749,24 +1879,30 @@ function buildInbound(args) {
 function currentStageOf(args) {
 	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed, faAirborne, taxiHint, distPark } = args;
 	if (ourLanded || ourLandingActual) return "gate";
+	if (!flightBegun(live, origin) && taxiHint && !faAirborne) return "taxi";
+	if (!flightBegun(live, origin) && pushed && !(faAirborne || Boolean(ourTakeoffActual))) return "push";
 	const atOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
-	const rolling = Boolean(
+	const begun = flightBegun(live, origin);
+	const taxiing = Boolean(
 		taxiHint ||
-		(live?.onGround && atOrigin && ((live.gsKt ?? 0) >= 4 || live.phase === "taxi" || (distPark ?? 0) >= 0.12))
+		(live && atOrigin && ((live.gsKt ?? 0) >= 4 || live.phase === "taxi" || (distPark ?? 0) >= 0.12))
 	);
-	if (rolling) return "taxi";
-	if (live && !live.onGround) {
-		const dDest = dest ? haversineNm({ lat: live.lat, lon: live.lon }, dest) : 999;
-		if (live.phase === "approach" || remainingNm < 40 || live.altFt != null && live.altFt < 8e3 && (live.vertFpm ?? 0) < 0) return "arrival";
-		if (dDest < 8 && live.onGround) return "gate";
-		return "ride";
+	if (live && atOrigin && !begun) {
+		if (taxiing) return "taxi";
+		return "push";
 	}
-	if (faAirborne || Boolean(ourTakeoffActual)) {
+	if (begun || ((faAirborne || Boolean(ourTakeoffActual)) && !(live && stillOnField(live, origin)))) {
+		if (live && !live.onGround) {
+			const dDest = dest ? haversineNm({ lat: live.lat, lon: live.lon }, dest) : 999;
+			if (live.phase === "approach" || remainingNm < 40 || live.altFt != null && live.altFt < 8e3 && (live.vertFpm ?? 0) < 0) return "arrival";
+			if (dDest < 8 && live.onGround) return "gate";
+			return "ride";
+		}
 		if (remainingNm < 8) return "gate";
 		if (remainingNm < 40) return "arrival";
 		return "ride";
 	}
-	if (atOrigin && live?.onGround) return "push";
+	if (atOrigin && live) return taxiing ? "taxi" : "push";
 	if (inboundStatus === "airborne" || inboundStatus === "watching" || inboundStatus === "at_field") return "inbound";
 	if (inboundStatus === "complete" || pushed) return "push";
 	return "inbound";
@@ -1917,7 +2053,7 @@ async function buildStory(query) {
 	if (!rawAc && knownHex) rawAc = parsed.registration
 		? await safe(adsbByReg(parsed.registration), null)
 		: await safe(adsbByCallsign(parsed.callsign), null);
-	const liveCs = (rawAc?.flight ?? "").trim().toUpperCase() || parsed.callsign;
+	const liveCs = parsed.callsign;
 	let live = rawAc ? toLive(rawAc) : null;
 	let origin = fieldFromKnown(aware?.originIata ?? null, aware?.originIcao ?? null, aware?.originLat ?? null, aware?.originLon ?? null, aware?.originName ?? null, aware?.originCity ?? null, aware?.originTz ?? null) ?? fieldFromAdsbdb(route?.origin);
 	let dest = fieldFromKnown(aware?.destIata ?? null, aware?.destIcao ?? null, aware?.destLat ?? null, aware?.destLon ?? null, aware?.destName ?? null, aware?.destCity ?? null, aware?.destTz ?? null) ?? fieldFromAdsbdb(route?.destination);
@@ -1949,11 +2085,32 @@ async function buildStory(query) {
 		category: "UNK"
 	};
 	live = asOnGround(live, origin);
-	if (!live && origin) {
-		const near = await safe(adsbAround(origin.lat, origin.lon, 12), []);
-		const vars = new Set(callsignVariants(parsed.callsign));
-		const match = near.find((a) => vars.has(String(a.flight ?? "").trim().toUpperCase()));
-		if (match) live = asOnGround(toLive(match), origin);
+	let fieldList = [];
+	const hexHint = (live?.hex || knownHex || aware?.hex || "").toLowerCase();
+	if (hexHint && /^[0-9a-f]{6}$/.test(hexHint)) {
+		const freshRaw = await safe(adsbByHex(hexHint), null);
+		if (freshRaw) {
+			const cand = asOnGround(toLive(freshRaw), origin);
+			if (cand) live = cand;
+		}
+	}
+	if (origin && !Boolean(aware?.takeoff?.actual) && !Boolean(aware?.landing?.actual)) {
+		fieldList = await safe(adsbAround(origin.lat, origin.lon, 12), []);
+		const match = pickAroundAircraft(fieldList, parsed, aware, origin, dest, 12);
+		if (match) {
+			const cand = asOnGround(toLive(match), origin);
+			if (cand && stillOnField(cand, origin)) live = cand;
+		}
+	} else if (live && dest && !live.onGround) {
+		const dDest = haversineNm({ lat: live.lat, lon: live.lon }, dest);
+		if (dDest < 50) {
+			const nearDest = await safe(adsbAround(dest.lat, dest.lon, 20), []);
+			const match = pickAroundAircraft(nearDest, parsed, aware, dest, origin, 20);
+			if (match) {
+				const cand = toLive(match);
+				if (cand) live = asOnGround(cand, dest);
+			}
+		}
 	}
 	const faLanded = Boolean(aware?.landing?.actual) || /arrived|landed/i.test(aware?.status ?? "");
 	const dLiveDest = live && dest ? haversineNm({ lat: live.lat, lon: live.lon }, dest) : 999;
@@ -1980,8 +2137,7 @@ async function buildStory(query) {
 	}
 	if (!live && origin && !ourLanded) {
 		const near = await safe(adsbAround(origin.lat, origin.lon, 48), []);
-		const vars = new Set(callsignVariants(parsed.callsign));
-		const match = near.find((a) => vars.has(String(a.flight ?? "").trim().toUpperCase()));
+		const match = pickAroundAircraft(near, parsed, aware, origin, dest, 48);
 		if (match) live = asOnGround(toLive(match), origin);
 	}
 	if (!live && origin && dest) {
@@ -2037,9 +2193,9 @@ async function buildStory(query) {
 	});
 	const landed = inboundLanded(inboundAware) || Boolean(inboundSnapByFlight.get(snapKey)?.landUnix);
 	const atGateFa = inboundAtGate(inboundAware);
-	const onField = Boolean(live && live.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
+	const onField = Boolean(live && stillOnField(live, origin));
 	const faSaysAir = /airborne|en.?route|climbed|departed/i.test(aware?.status ?? "");
-	const ourAirborne = Boolean(live && !live.onGround) || (Boolean(aware?.takeoff?.actual) && !onField) || (faSaysAir && !onField);
+	const ourAirborne = Boolean(flightBegun(live, origin)) || (!live && (Boolean(aware?.takeoff?.actual) || faSaysAir));
 	let inboundRaw = null;
 	if (!inboundLocked && !atGateFa) {
 		const tail = inboundAware?.tail ?? existingSnap?.tail ?? null;
@@ -2266,7 +2422,8 @@ async function buildStory(query) {
 	});
 	let times = timesOf(aware, origin, dest);
 	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
-	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.8 && !pushLatch.get(landKey) && !times.pushed) {
+	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
+	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.8 && dOrigLive < 0.5 && !pushLatch.get(landKey) && !times.pushed) {
 		const prev = parkByFlight.get(landKey);
 		if (!prev) parkByFlight.set(landKey, { lat: live.lat, lon: live.lon, at: Date.now() });
 		else if (haversineNm({ lat: live.lat, lon: live.lon }, prev) < 0.03) {
@@ -2280,17 +2437,36 @@ async function buildStory(query) {
 	if (hexNow && origin && !ourLanded && (!live || (live.onGround && (live.gsKt ?? 0) < 4 && distPark < 0.12))) {
 		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
 	}
+	const offRamp = Boolean(live && live.onGround && atOrigLive && dOrigLive >= 0.8);
+	const nowSec = Date.now() / 1e3;
+	const parkedAtStand = Boolean(live && live.onGround && atOrigLive && (live.gsKt ?? 0) < 2 && dOrigLive < 0.45);
+	const faPushUnix = times.pushUnix;
+	const faToUnix = times.takeoffUnix;
+	const faPushedClock = Boolean(
+		!ourLanded &&
+		!aware?.takeoff?.actual &&
+		!parkedAtStand &&
+		faPushUnix &&
+		nowSec > faPushUnix + 120
+	);
+	const faTaxiClock = Boolean(
+		faPushedClock &&
+		(nowSec > faPushUnix + 5 * 60 || (faToUnix != null && faToUnix - nowSec < 18 * 60 && faToUnix + 180 > nowSec))
+	);
 	const leftGate = Boolean(
 		!ourLanded &&
 		(
-			(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 2 || distPark >= 0.035 || live.phase === "taxi")) ||
+			(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 2 || distPark >= 0.035 || live.phase === "taxi" || offRamp)) ||
 			motion.pushed ||
-			motion.taxiing
+			motion.taxiing ||
+			faPushedClock
 		)
 	);
 	const taxiHint = Boolean(
 		motion.taxiing ||
-		(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 4 || distPark >= 0.12 || live.phase === "taxi"))
+		offRamp ||
+		faTaxiClock ||
+		(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 3 || distPark >= 0.10 || live.phase === "taxi"))
 	);
 	if (ourAirborne && !times.airborne) {
 		times = { ...times, airborne: true };
@@ -2433,7 +2609,8 @@ async function buildStory(query) {
 		live,
 		ourHex: live?.hex ?? aware?.hex ?? null,
 		ourAirborne: Boolean(ourAirborne && !live?.onGround && !taxiHint),
-		pushed: Boolean(times.pushed || leftGate)
+		pushed: Boolean(times.pushed || leftGate),
+		fieldList
 	});
 	const airline = airlineOf(liveCs) ?? route?.airline?.name ?? null;
 	let aircraft = live;
@@ -2568,7 +2745,7 @@ function nearestKnown(live) {
 }
 export async function loadFlightStory(query) {
 	try {
-		return await cached(`story39:${query.toUpperCase().replace(/[^A-Z0-9]/g, "")}`, 4e3, () => buildStory(query));
+		return await cached(`story42:${query.toUpperCase().replace(/[^A-Z0-9]/g, "")}`, 2e3, () => buildStory(query));
 	} catch (err) {
 		const msg = err instanceof Error && err.message && err.name !== "AbortError" ? err.message : "Could not load that flight. Try again.";
 		throw new Error(msg);

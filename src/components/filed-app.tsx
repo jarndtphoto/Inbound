@@ -317,12 +317,13 @@ export function FiledApp() {
     },
     enabled: cacheOk && query.length > 0,
     refetchInterval: (q) => {
-      const st = q.state.data?.currentStage;
-      if (st === "inbound" || st === "push" || st === "taxi") return 4_000;
-      if (st === "arrival") return 7_000;
-      return 10_000;
+      const s = q.state.data;
+      if (!s) return 5_000;
+      if (s.live || s.currentStage === "push" || s.currentStage === "taxi" || s.currentStage === "ride" || s.currentStage === "arrival") return 4_000;
+      if (s.currentStage === "inbound") return 5_000;
+      return 8_000;
     },
-    staleTime: 2_000,
+    staleTime: 1_500,
     gcTime: 10 * 60_000,
     retry: 2,
     refetchOnWindowFocus: true,
