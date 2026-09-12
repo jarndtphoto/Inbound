@@ -1,5 +1,5 @@
 import { briefRide } from "@/lib/brief";
-import { composeBrief, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
+import { composeBrief, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
 import { formatDuration, formatNm, feetPretty } from "@/lib/geo";
 import { storyMatchesQuery } from "@/lib/flight-parse";
@@ -216,6 +216,13 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     delayMin: story.times?.delayMin ?? null,
     pushWas: story.times?.pushWas ?? null,
     typicalDelayMin: story.times?.typicalDelayMin ?? null,
+    pushUnix: story.times?.pushUnix ?? null,
+    takeoffUnix: story.times?.takeoffUnix ?? null,
+    landUnix: story.times?.landUnix ?? null,
+    arriveDelayMin: story.times?.arriveDelayMin ?? null,
+    convective: Boolean(story.wx?.live?.convective),
+    destCat: story.dest.decoded?.category ?? story.wx?.live?.destCat ?? null,
+    originCat: story.origin.decoded?.category ?? story.wx?.live?.originCat ?? null,
   };
 }
 
@@ -286,6 +293,7 @@ export function FiledApp() {
   const splashAt = useRef(Date.now());
   const briefGen = useRef(0);
   const lastBriefKey = useRef("");
+  const briefingRef = useRef<CompiledBrief | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const flightKey = normFlight(query);
   const shellStyle = {
@@ -397,6 +405,7 @@ export function FiledApp() {
       ? (rawStage as StageId)
       : "inbound";
   const shownBrief = briefing && briefingFor === flightKey ? briefing : null;
+  briefingRef.current = shownBrief;
 
   const briefM = useMutation({
     mutationFn: async () => {
@@ -404,7 +413,7 @@ export function FiledApp() {
       const gen = briefGen.current;
       const flight = flightKey;
       const facts = rideFacts(story, query, active);
-      const local = composeBrief(facts);
+      const local = composeBrief(facts, briefingRef.current);
       try {
         const remote = await briefRide({ data: facts });
         if (remote && "ok" in remote && remote.ok && remote.text?.trim()) {
@@ -418,7 +427,9 @@ export function FiledApp() {
     onMutate: () => {
       if (!story) return;
       setBriefingFor(flightKey);
-      setBriefing(composeBrief(rideFacts(story, query, active), briefing));
+      const next = composeBrief(rideFacts(story, query, active), briefingRef.current);
+      briefingRef.current = next;
+      setBriefing(next);
     },
     onSuccess: (data) => {
       if (data.gen !== briefGen.current) return;
@@ -434,12 +445,15 @@ export function FiledApp() {
           why = m[0].trim();
         }
         setBriefingFor(data.flight);
-        setBriefing({
+        const next = {
           ...data.local,
           lead,
           why,
           snap: data.local.snap,
-        });
+          log: data.local.log ?? briefingRef.current?.log ?? [],
+        };
+        briefingRef.current = next;
+        setBriefing(next);
       }
     },
   });
@@ -449,6 +463,7 @@ export function FiledApp() {
     setBriefing(null);
     setBriefingFor("");
     lastBriefKey.current = "";
+    briefingRef.current = null;
     briefM.reset();
     setStage("auto");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the flight changes
@@ -466,7 +481,10 @@ export function FiledApp() {
     if (key === lastBriefKey.current) return;
     lastBriefKey.current = key;
     const next = composeBrief(rideFacts(story, query, active), briefing);
-    if (next.why) setBriefing(next);
+    if (next !== briefing) {
+      briefingRef.current = next;
+      setBriefing(next);
+    }
   }, [story, briefing, briefingFor, flightKey, query, active]);
 
   function onSearch(e: FormEvent) {
@@ -826,12 +844,7 @@ function BreakdownCard({
   const asOf = briefing?.filedAt
     ? new Date(briefing.filedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
     : null;
-  const liveAt = briefing?.liveAt
-    ? new Date(briefing.liveAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : null;
-  const why = briefing?.why
-    ? briefing.why.replace(/^Updated because\s+/i, "").replace(/\.+$/, "")
-    : null;
+  const log = briefing?.log ?? [];
   return (
     <div className="mt-4 rounded-xl border border-accent/35 bg-surface p-4">
       <p className="font-mono text-xs tracking-widest text-muted uppercase">Briefing</p>
@@ -846,13 +859,26 @@ function BreakdownCard({
       {briefing && (
         <div className="mt-3 space-y-3">
           {asOf ? (
-            <p className="font-mono text-xs tracking-wide text-subtle uppercase">
-              Briefing as of {asOf}
-              {liveAt && liveAt !== asOf ? ` · live ${liveAt}` : ""}
-            </p>
+            <p className="font-mono text-xs tracking-wide text-subtle uppercase">Briefing as of {asOf}</p>
           ) : null}
           <p className="text-sm leading-relaxed text-fg whitespace-pre-wrap">{briefing.lead}</p>
-          {why ? <p className="text-sm leading-relaxed text-muted">Live update · {why}.</p> : null}
+          {log.length > 0 ? (
+            <div className="border-t border-border pt-3">
+              <p className="font-mono text-xs tracking-widest text-subtle uppercase">Updates</p>
+              <ol className="mt-2 max-h-56 space-y-2 overflow-y-auto">
+                {log.map((entry, i) => (
+                  <li key={`${entry.at}-${i}`} className="text-sm leading-snug">
+                    <p className="font-mono text-[11px] tracking-wide text-subtle uppercase">
+                      {new Date(entry.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                      {" · "}
+                      {BRIEF_LOG_LABEL[entry.kind]}
+                    </p>
+                    <p className="text-muted">{entry.text}.</p>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
         </div>
       )}
       <Button type="button" className="mt-4 w-full" disabled={pending} onClick={onCompile}>

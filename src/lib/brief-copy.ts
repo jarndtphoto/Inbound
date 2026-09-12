@@ -1,4 +1,28 @@
-import { formatHoursMinutes } from "./geo";
+import { formatHoursMinutes } from "./geo.ts";
+
+export type BriefLogKind = "weather" | "schedule" | "stage" | "delay" | "update";
+
+export type BriefLogEntry = {
+  at: number;
+  kind: BriefLogKind;
+  text: string;
+};
+
+export const BRIEF_LOG_LABEL: Record<BriefLogKind, string> = {
+  weather: "Weather",
+  schedule: "Schedule",
+  stage: "Trip stage",
+  delay: "Delay",
+  update: "Update",
+};
+
+const LOG_CAP = 80;
+const DELAY_JITTER_MIN = 5;
+const CLOCK_JITTER_SEC = 4 * 60;
+const TAXI_JITTER_MIN = 3;
+
+const JARGON =
+  /\b(SIGMET|AIRMET|PIREP|G-?AIRMET|METAR|TAF|NAS|OOOI|GDP|AFP|FL\d{2,3}|OUT\/OFF|IFR|LIFR|MVFR|VFR)\b/i;
 
 export type RideFacts = {
   q: string;
@@ -47,6 +71,13 @@ export type RideFacts = {
   filedAt?: number | null;
   worstChop?: string | null;
   corridorWx?: string | null;
+  pushUnix?: number | null;
+  takeoffUnix?: number | null;
+  landUnix?: number | null;
+  arriveDelayMin?: number | null;
+  convective?: boolean;
+  destCat?: string | null;
+  originCat?: string | null;
 };
 
 export type BriefSegment = {
@@ -58,14 +89,27 @@ export type BriefSegment = {
 export type BriefSnap = {
   stage: string;
   delay: number | null;
+  arriveDelay: number | null;
   taxiOut: number | null;
+  taxiOutKind: string | null;
   taxiIn: number | null;
   taxiInKind: string | null;
   ride: string;
   destNas: string;
+  originNas: string;
   inbound: string;
   land: string | null;
+  takeoff: string | null;
+  push: string | null;
+  destGate: string | null;
   wx: string;
+  worstChop: string | null;
+  convective: boolean;
+  destCat: string | null;
+  originCat: string | null;
+  pushUnix: number | null;
+  takeoffUnix: number | null;
+  landUnix: number | null;
 };
 
 export type CompiledBrief = {
@@ -76,6 +120,7 @@ export type CompiledBrief = {
   segments: BriefSegment[];
   filedAt?: number | null;
   liveAt?: number | null;
+  log: BriefLogEntry[];
 };
 
 function clean(s: string) {
@@ -93,61 +138,219 @@ function nasLine(raw: string) {
   return raw.replace(/\.+$/, "").trim();
 }
 
+function passengerDelay(raw: string): string {
+  const s = nasLine(raw);
+  if (!s) return "";
+  const u = s.toUpperCase();
+  if (/THUNDER|TSRA|TSTM/.test(u)) return "thunderstorms";
+  if (/GROUND STOP|\bGS\b/.test(u)) return "flights being held";
+  if (/GDP|GROUND DELAY/.test(u)) return "a delay program";
+  if (/VOLUME|CAPACITY/.test(u)) return "a busy airport";
+  if (/\bSNOW|\bICE|WINTER/.test(u)) return "snow and ice";
+  if (/\bFOG\b/.test(u)) return "fog";
+  if (/\bWIND/.test(u)) return "wind";
+  return s
+    .replace(/\b(GDP|GS|AFP|NAS|SIGMET|AIRMET|METAR|TAF)\b/gi, "")
+    .replace(/[:/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+}
+
+function chopRank(c: string | null | undefined) {
+  const k = String(c || "smooth").toLowerCase();
+  if (k.includes("severe")) return 3;
+  if (k.includes("moderate")) return 2;
+  if (k.includes("light")) return 1;
+  return 0;
+}
+
+function catRank(c: string | null | undefined) {
+  const k = String(c || "").toUpperCase();
+  if (k === "LIFR" || k === "IFR") return 3;
+  if (k === "MVFR") return 2;
+  if (k === "VFR") return 1;
+  return 0;
+}
+
+function clockMoved(prevUnix: number | null, nextUnix: number | null) {
+  if (prevUnix == null || nextUnix == null) return false;
+  return Math.abs(nextUnix - prevUnix) >= CLOCK_JITTER_SEC;
+}
+
+function minutesLater(prevUnix: number | null, nextUnix: number | null) {
+  if (prevUnix == null || nextUnix == null) return null;
+  return Math.round((nextUnix - prevUnix) / 60);
+}
+
 function snapOf(d: RideFacts): BriefSnap {
   return {
     stage: d.now,
     delay: d.delayMin ?? null,
+    arriveDelay: d.arriveDelayMin ?? null,
     taxiOut: d.taxiOutMin ?? null,
+    taxiOutKind: d.taxiOutKind ?? null,
     taxiIn: d.taxiInMin ?? null,
     taxiInKind: d.taxiInKind ?? null,
     ride: d.rideLabel ?? "Smooth",
     destNas: nasLine(d.destNas),
+    originNas: nasLine(d.originNas),
     inbound: d.inboundStatus ?? d.inboundHeadline,
     land: d.land,
+    takeoff: d.takeoff,
+    push: d.push,
+    destGate: d.destGate,
     wx: d.wxHash ?? "",
+    worstChop: d.worstChop ?? null,
+    convective: Boolean(d.convective),
+    destCat: d.destCat ?? null,
+    originCat: d.originCat ?? null,
+    pushUnix: d.pushUnix ?? null,
+    takeoffUnix: d.takeoffUnix ?? null,
+    landUnix: d.landUnix ?? null,
   };
 }
 
-function whyChanged(prev: BriefSnap | undefined, next: BriefSnap, d?: RideFacts): string | null {
-  if (!prev) return null;
-  const bits: string[] = [];
+function stageLine(stage: string): string | null {
+  if (stage === "push") return "Plane is at the gate";
+  if (stage === "taxi") return "Taxiing to the runway";
+  if (stage === "ride") return "Taking off";
+  if (stage === "arrival") return "Landing";
+  if (stage === "gate") return "Arriving at the gate";
+  if (stage === "inbound") return "Still waiting on the inbound plane";
+  return null;
+}
+
+export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: RideFacts): Omit<BriefLogEntry, "at">[] {
+  if (!prev) return [];
+  const out: Omit<BriefLogEntry, "at">[] = [];
+
   if (prev.stage !== next.stage) {
-    if (next.stage === "ride") bits.push("you're off the ground — inbound is done and this is now an airborne brief");
-    else if (next.stage === "arrival") bits.push("you're on the arrival, so high-altitude chop drops out");
-    else if (next.stage === "gate") bits.push("you're at the gate, so taxi times are actual");
-    else if (next.stage === "push") bits.push("you're at the gate waiting on push");
-    else if (next.stage === "taxi") bits.push("they've left the gate and taxi has started");
+    const line = stageLine(next.stage);
+    if (line) out.push({ kind: "stage", text: line });
   }
-  if (prev.delay != null && next.delay != null && Math.abs(next.delay - prev.delay) >= 5) {
-    bits.push(`the push delay moved to ${next.delay} minutes`);
-  } else if ((prev.delay ?? 0) < 5 && (next.delay ?? 0) >= 5) {
-    bits.push(`a ${next.delay}-minute push delay showed up`);
+
+  const delayPrev = prev.delay ?? 0;
+  const delayNext = next.delay ?? 0;
+  if (delayPrev < DELAY_JITTER_MIN && delayNext >= DELAY_JITTER_MIN) {
+    out.push({ kind: "delay", text: `Delay at the airport — about ${delayNext} minutes` });
+  } else if (delayNext >= DELAY_JITTER_MIN && Math.abs(delayNext - delayPrev) >= DELAY_JITTER_MIN) {
+    out.push({ kind: "delay", text: `Delay is now about ${delayNext} minutes` });
+  } else if (delayPrev >= DELAY_JITTER_MIN && delayNext < DELAY_JITTER_MIN) {
+    out.push({ kind: "delay", text: "The departure delay has lifted" });
   }
-  if (prev.ride !== next.ride && next.stage !== "arrival" && next.stage !== "gate") {
-    bits.push(`the ride call changed to ${next.ride.toLowerCase()}`);
-  }
+
   if (prev.destNas !== next.destNas) {
-    bits.push(next.destNas ? `arrival delay is now ${next.destNas}` : "the arrival delay program dropped off");
+    if (next.destNas) {
+      const why = passengerDelay(next.destNas);
+      out.push({
+        kind: "delay",
+        text: why ? `Delay at the arrival airport — ${why}` : "Delay at the arrival airport",
+      });
+    } else if (prev.destNas) {
+      out.push({ kind: "delay", text: "The arrival delay has lifted" });
+    }
   }
-  if (prev.taxiInKind !== "measured" && next.taxiInKind === "measured") {
-    bits.push(`taxi in is now the actual ${next.taxiIn} minutes`);
-  } else if (prev.taxiIn !== next.taxiIn && next.taxiIn != null && next.stage !== "gate") {
-    bits.push(`estimated taxi in moved to ${next.taxiIn} minutes`);
+
+  if (clockMoved(prev.landUnix, next.landUnix)) {
+    const later = minutesLater(prev.landUnix, next.landUnix);
+    if (later != null && Math.abs(later) >= 5) {
+      out.push({
+        kind: "schedule",
+        text:
+          later > 0
+            ? `Arrival now looks about ${later} minutes later`
+            : `Arrival now looks about ${Math.abs(later)} minutes earlier`,
+      });
+    } else if (next.land) {
+      out.push({ kind: "schedule", text: `Arrival now looks like ${next.land}` });
+    }
+  } else if (!prev.landUnix && !next.landUnix && prev.land && next.land && prev.land !== next.land) {
+    out.push({ kind: "schedule", text: `Arrival now looks like ${next.land}` });
   }
-  if (prev.land && next.land && prev.land !== next.land) {
-    bits.push(`landing time moved to ${next.land}`);
+
+  if (clockMoved(prev.pushUnix, next.pushUnix) && next.push) {
+    out.push({ kind: "schedule", text: `Departure time moved to ${next.push}` });
+  } else if (!prev.pushUnix && !next.pushUnix && prev.push && next.push && prev.push !== next.push) {
+    out.push({ kind: "schedule", text: `Departure time moved to ${next.push}` });
   }
-  if (prev.inbound !== next.inbound && (next.stage === "inbound" || next.stage === "push")) {
-    bits.push("the inbound status changed");
+
+  if (clockMoved(prev.takeoffUnix, next.takeoffUnix) && next.takeoff && next.stage !== "ride" && next.stage !== "arrival" && next.stage !== "gate") {
+    out.push({ kind: "schedule", text: `Takeoff now looks like ${next.takeoff}` });
   }
-  if (prev.wx !== next.wx) {
-    const extra = (d?.wxDeltas ?? []).filter(Boolean);
-    if (extra.length) bits.push(extra.join(", and "));
-    else bits.push("the remaining-route weather changed");
+
+  if (prev.taxiOutKind !== "measured" && next.taxiOutKind === "measured" && next.taxiOut != null) {
+    out.push({ kind: "schedule", text: `Taxi out was ${next.taxiOut} minutes` });
+  } else if (
+    prev.taxiOut != null &&
+    next.taxiOut != null &&
+    Math.abs(next.taxiOut - prev.taxiOut) >= TAXI_JITTER_MIN &&
+    next.stage !== "ride" &&
+    next.stage !== "arrival" &&
+    next.stage !== "gate"
+  ) {
+    out.push({ kind: "schedule", text: `Estimated taxi out is now ${next.taxiOut} minutes` });
   }
+
+  if (prev.taxiInKind !== "measured" && next.taxiInKind === "measured" && next.taxiIn != null) {
+    out.push({ kind: "schedule", text: `Taxi in was ${next.taxiIn} minutes` });
+  } else if (
+    prev.taxiIn != null &&
+    next.taxiIn != null &&
+    Math.abs(next.taxiIn - prev.taxiIn) >= TAXI_JITTER_MIN &&
+    next.stage !== "gate"
+  ) {
+    out.push({ kind: "schedule", text: `Estimated taxi in is now ${next.taxiIn} minutes` });
+  }
+
+  const ridePrev = chopRank(prev.worstChop ?? prev.ride);
+  const rideNext = chopRank(next.worstChop ?? next.ride);
+  if (rideNext > ridePrev && next.stage !== "arrival" && next.stage !== "gate") {
+    out.push({ kind: "weather", text: "Reports of a bumpier stretch ahead" });
+  } else if (rideNext < ridePrev && next.stage !== "arrival" && next.stage !== "gate") {
+    out.push({ kind: "weather", text: "Smoother ride expected" });
+  }
+
+  if (!prev.convective && next.convective) {
+    out.push({ kind: "weather", text: "Storms along the route" });
+  } else if (prev.convective && !next.convective) {
+    out.push({ kind: "weather", text: "Storms along the route have eased" });
+  }
+
+  if (catRank(next.destCat) > catRank(prev.destCat)) {
+    out.push({ kind: "weather", text: "Weather at arrival looks worse" });
+  } else if (catRank(next.destCat) < catRank(prev.destCat) && prev.destCat) {
+    out.push({ kind: "weather", text: "Weather at arrival looks better" });
+  }
+
+  if (prev.wx !== next.wx && !out.some((e) => e.kind === "weather")) {
+    const extras = (d?.wxDeltas ?? []).map(passengerWxDelta).filter((x): x is string => Boolean(x));
+    if (extras[0]) out.push({ kind: "weather", text: extras[0] });
+  }
+
+  return out.filter((e) => e.text && !JARGON.test(e.text));
+}
+
+function passengerWxDelta(raw: string): string | null {
+  const s = String(raw || "");
+  if (!s) return null;
+  if (/thunder|storm/i.test(s) && /drop|ease|off/i.test(s)) return "Storms along the route have eased";
+  if (/thunder|storm/i.test(s)) return "Storms along the route";
+  if (/chop|pirep|turb/i.test(s) && /smooth|drop|ease/i.test(s)) return "Smoother ride expected";
+  if (/chop|pirep|turb/i.test(s)) return "Reports of a bumpier stretch ahead";
+  if (/arrival weather|dest/i.test(s) && /worse|ifr/i.test(s)) return "Weather at arrival looks worse";
+  if (/arrival weather/i.test(s)) return "Weather at arrival has changed";
+  if (/forecast|taf/i.test(s)) return "The arrival forecast changed";
+  if (JARGON.test(s)) return null;
+  const plain = s.replace(/\.+$/, "").trim();
+  if (plain.length > 90) return null;
+  return plain.charAt(0).toUpperCase() + plain.slice(1);
+}
+
+function whyChanged(prev: BriefSnap | undefined, next: BriefSnap, d?: RideFacts): string | null {
+  const bits = diffBriefLog(prev, next, d).map((e) => e.text.charAt(0).toLowerCase() + e.text.slice(1));
   if (!bits.length) return null;
-  const text = bits.join(", and ");
-  return `Updated because ${text}.`;
+  return `Updated because ${bits.join(", and ")}.`;
 }
 
 function inboundClause(d: RideFacts) {
@@ -243,10 +446,29 @@ function composeLead(d: RideFacts) {
   ]);
 }
 
+function appendLog(log: BriefLogEntry[], added: Omit<BriefLogEntry, "at">[], at: number): BriefLogEntry[] {
+  let next = log.slice();
+  for (const e of added) {
+    const text = clean(e.text).replace(/\.+$/, "");
+    if (!text || JARGON.test(text)) continue;
+    if (next.slice(-6).some((x) => x.text === text && at - x.at < 12 * 60_000)) continue;
+    next.push({ at, kind: e.kind, text });
+  }
+  if (next.length > LOG_CAP) next = next.slice(-LOG_CAP);
+  return next;
+}
+
 export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): CompiledBrief {
   const snap = snapOf(d);
   const ac = [d.typeName, d.registration].filter(Boolean).join(" · ") || null;
   const lead = composeLead(d);
+  const at = Date.now();
+  const seed: BriefLogEntry[] = previous?.log?.length
+    ? previous.log
+    : [{ at, kind: "update", text: "Filed briefing is up" }];
+  const added = previous?.snap ? diffBriefLog(previous.snap, snap, d) : [];
+  if (previous && added.length === 0) return previous;
+  const log = appendLog(seed, added, at);
   const why = whyChanged(previous?.snap, snap, d);
   return {
     lead,
@@ -255,7 +477,8 @@ export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): Com
     snap,
     segments: [],
     filedAt: d.filedAt ?? previous?.filedAt ?? null,
-    liveAt: Date.now(),
+    liveAt: at,
+    log,
   };
 }
 
