@@ -8,6 +8,7 @@ import {
   gairmetApplies,
   gairmetChop,
   pirepAltFt,
+  pirepRouteBounds,
   pirepMatchesSample,
   rememberFiledWx,
   resetFiledWx,
@@ -21,6 +22,24 @@ import type { Taf } from "./metar.ts";
 
 beforeEach(() => {
   resetFiledWx();
+});
+
+describe("route PIREP bounds", () => {
+  it("bounds Chicago to Los Angeles and ignores invalid coordinates", () => {
+    const boxes = pirepRouteBounds([{lat: 42, lon: -88}, {lat: 34, lon: -118}, {lat: NaN, lon: 0}]);
+    assert.equal(boxes.length, 1);
+    const [south, west, north, east] = boxes[0]!.split(',').map(Number);
+    assert.ok(south! < 34 && west! < -118 && north! > 42 && east! > -88);
+    assert.deepEqual(pirepRouteBounds([]), []);
+  });
+  it("splits a dateline crossing into two narrow boxes", () => {
+    const boxes = pirepRouteBounds([{lat: 50, lon: 175}, {lat: 50, lon: -175}]);
+    assert.equal(boxes.length, 2);
+    for (const box of boxes) {
+      const [,west,,east] = box.split(',').map(Number);
+      assert.ok(east! - west! < 20);
+    }
+  });
 });
 
 describe("altitude-aware AIRMET", () => {

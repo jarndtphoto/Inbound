@@ -1,0 +1,48 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+
+// Match the app's extensionless TypeScript imports in the Node test runner.
+registerHooks({ resolve(specifier, context, nextResolve) {
+  if (specifier.startsWith('.') && !/\.[a-z]+$/.test(specifier)) {
+    try { return nextResolve(specifier + '.ts', context); } catch {}
+  }
+  return nextResolve(specifier, context);
+}});
+const { loadFlightStory } = await import('../src/lib/story.server.ts');
+
+describe('September 12 flight audit replay', () => {
+  for (const [ident, query, destination, pushed] of [
+    ['ual1532', 'UA1532', 'MSY', true],
+    ['aal3008', 'AA3008', 'LAX', false],
+  ]) {
+    it(`${query}: preserves departure facts when no position is available`, async (t) => {
+      const record = JSON.parse(readFileSync(new URL(`./fixtures/${ident}-2026-09-12.json`, import.meta.url), 'utf8'));
+      t.mock.method(Date, 'now', () => 1789231976000);
+      const requests = [];
+      t.mock.method(globalThis, 'fetch', async (url) => {
+        const u = String(url); requests.push(u);
+        if (u.startsWith('https://www.flightaware.com/live/flight/')) {
+          return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
+        }
+        return new Response(JSON.stringify({ ac: [], features: [] }), { headers: { 'content-type': 'application/json' } });
+      });
+      const story = await loadFlightStory(query, {fresh: true});
+      assert.equal(story.origin.iata, 'ORD');
+      assert.equal(story.dest.iata, destination);
+      assert.equal(story.live, false, 'an estimated route position must not become a live fix');
+      assert.equal(story.times.airborne, false);
+      assert.equal(story.times.pushed, pushed);
+      assert.notEqual(story.times.taxiOutKind, 'measured');
+      if (pushed) {
+        assert.equal(story.times.pushUnix, 1789231380);
+        assert.equal(story.times.pushKind, 'actual');
+        assert.equal(story.currentStage, 'push');
+      }
+      const pireps = requests.filter(u => u.includes('/api/data/pirep?'));
+      assert.ok(pireps.length > 0);
+      assert.ok(pireps.every(u => u.includes('&bbox=')), 'PIREP queries require a geographic boundary');
+    });
+  }
+});

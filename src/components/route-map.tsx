@@ -391,7 +391,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
   const origin = { lat: story.origin.lat, lon: story.origin.lon };
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
   const ac = story.aircraft;
-  const hasFix = Boolean(ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
+  const hasFix = Boolean(story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
   const onField = Boolean(hasFix && ac?.onGround && haversineNm(ac, dest) < 8);
   const atGate = story.currentStage === "gate";
   const landed = atGate || onField;
@@ -550,9 +550,9 @@ export function RouteMap({ story }: { story: FlightStory }) {
           </g>
         ))}
 
-        <g transform={`translate(${ax} ${ay}) rotate(${rot})`}>
+        {hasFix && <g transform={`translate(${ax} ${ay}) rotate(${rot})`}>
           <polygon points="0,-10 8,11 -8,11" className="fill-fg stroke-bg" strokeWidth="1.4" />
-        </g>
+        </g>}
 
         <text
           x={sx(origin.lon)}

@@ -1,6 +1,26 @@
 import type { Chop, Hazard, RouteSample } from "./types";
 import type { Taf } from "./metar";
 
+/** AWC bbox order is south,west,north,east. Split routes across the dateline. */
+export function pirepRouteBounds(path: { lat: number; lon: number }[]): string[] {
+  const points = path.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180);
+  if (!points.length) return [];
+  const south = Math.max(-90, Math.floor(Math.min(...points.map(p => p.lat)) - 2));
+  const north = Math.min(90, Math.ceil(Math.max(...points.map(p => p.lat)) + 2));
+  const west = Math.min(...points.map(p => p.lon));
+  const east = Math.max(...points.map(p => p.lon));
+  const pad = 2 / Math.max(0.1, Math.cos(Math.max(Math.abs(south), Math.abs(north)) * Math.PI / 180));
+  if (east - west > 180) {
+    const positive = points.filter(p => p.lon >= 0);
+    const negative = points.filter(p => p.lon < 0);
+    return [
+      `${south},${Math.max(-180, Math.floor(Math.min(...positive.map(p => p.lon)) - pad))},${north},180`,
+      `${south},-180,${north},${Math.min(180, Math.ceil(Math.max(...negative.map(p => p.lon)) + pad))}`,
+    ];
+  }
+  return [`${south},${Math.max(-180, Math.floor(west - pad))},${north},${Math.min(180, Math.ceil(east + pad))}`];
+}
+
 export type WxDigest = {
   at: number;
   hash: string;

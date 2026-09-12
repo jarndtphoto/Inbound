@@ -25,6 +25,7 @@ import {
 	gairmetApplies,
 	gairmetChop as gairmetChopOf,
 	pirepAltFt,
+	pirepRouteBounds,
 	pirepChop as pirepChopOf,
 	pirepMatchesSample,
 	rememberFiledWx,
@@ -32,7 +33,7 @@ import {
 	corridorStations,
 	wxDeltas,
 } from "./wx-brief";
-import { faAltFt, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
+import { faAltFt, hasAirborneEvidence, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
 import {
 	fetchAround,
 	fetchByCallsign,
@@ -1235,7 +1236,7 @@ async function loadHazards() {
 		const [gairmet, sigmet, pirep, cwa, tcf] = await Promise.all([
 			safe(fetchJson("https://aviationweather.gov/api/data/gairmet?format=geojson").then((d) => d.features ?? []), []),
 			safe(fetchJson("https://aviationweather.gov/api/data/airsigmet?format=geojson").then((d) => d.features ?? []), []),
-			safe(fetchJson("https://aviationweather.gov/api/data/pirep?format=geojson").then((d) => d.features ?? []), []),
+			Promise.resolve([]),
 			safe(fetchJson("https://aviationweather.gov/api/data/cwa?format=geojson").then((d) => d.features ?? []), []),
 			safe(fetchJson("https://aviationweather.gov/api/data/tcf?format=geojson").then((d) => d.features ?? []), [])
 		]);
@@ -1618,7 +1619,7 @@ function timesOf(aware, origin, dest) {
 		delayMin,
 		arriveDelayMin,
 		typicalDelayMin,
-		pushed: false,
+		pushed: Boolean(aware.gateOut.actual),
 		airborne: Boolean(aware.takeoff.actual),
 		pushUnix: go,
 		takeoffUnix: to,
@@ -2310,9 +2311,8 @@ async function buildStory(query) {
 	const landed = inboundLanded(inboundAware) || Boolean(inboundSnapByFlight.get(snapKey)?.landUnix);
 	const atGateFa = inboundAtGate(inboundAware);
 	const onField = Boolean(live && stillOnField(live, origin));
-	const faSaysAir = /airborne|en.?route|climbed|departed/i.test(aware?.status ?? "");
+	const faSaysAir = hasAirborneEvidence(aware);
 	const ourAirborne = Boolean(flightBegun(live, origin))
-		|| Boolean(aware?.takeoff?.actual)
 		|| (Boolean(faSaysAir) && !(aware?.landing?.actual) && !(live && live.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 8));
 	let inboundRaw = null;
 	if (!inboundLocked && !atGateFa && !inboundAlreadyDone) {
@@ -2394,33 +2394,8 @@ async function buildStory(query) {
 			const fromFa = liveFromAware(aware);
 			if (fromFa && !fromFa.onGround) live = fromFa;
 		}
-		if (!live || !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) {
-			const frac = Math.max(0.03, timeFracOf(aware) || 0.03);
-			const p = pointAtFrac(path, frac);
-			if (p) {
-				const i = Math.max(0, Math.min(path.length - 2, Math.floor(frac * (path.length - 1))));
-				const hdg = aware?.heading ?? initialBearing(path[i], path[i + 1] ?? end);
-				live = {
-					hex: String(aware?.hex || "").toLowerCase(),
-					callsign: parsed.callsign,
-					registration: aware?.tail ?? null,
-					type: aware?.type ?? null,
-					typeName: airframeOf(aware?.type)?.name ?? aware?.type ?? null,
-					year: null,
-					operator: null,
-					lat: p.lat,
-					lon: p.lon,
-					altFt: aware?.altFt ?? null,
-					gsKt: aware?.gsKt ?? null,
-					track: hdg,
-					vertFpm: null,
-					onGround: false,
-					phase: (aware?.altFt ?? 0) < 10000 ? "climb" : "cruise",
-					extrapolated: true,
-					seenSec: 0
-				};
-			}
-		}
+		// Elapsed time is an ETA input, never an observed aircraft position.
+
 		if (live && Number.isFinite(live.lat) && Number.isFinite(live.lon) && (!live.hex || live.extrapolated)) {
 			const nearby = await safe(adsbAround(live.lat, live.lon, 90), []);
 			const match = pickAroundAircraft(nearby, parsed, aware, origin, dest, 90, live.hex || knownHex);
@@ -2596,7 +2571,10 @@ async function buildStory(query) {
 			fix: isFix
 		};
 	});
-	for (const f of hazardsPack.pirep) {
+	const pirepPacks = await Promise.all(pirepRouteBounds(path).map((bbox) =>
+		cached(`pirep:${bbox}`, 120_000, () => safe(fetchJson(`https://aviationweather.gov/api/data/pirep?format=geojson&bbox=${bbox}`).then((d) => d.features ?? []), []))
+	));
+	for (const f of pirepPacks.flat()) {
 		const coords = f.geometry?.type === "Point" ? f.geometry.coordinates : null;
 		if (!coords || coords.length < 2) continue;
 		const lon = coords[0];
@@ -2726,8 +2704,8 @@ async function buildStory(query) {
 	if (times.taxiOutKind !== "measured") {
 		const wheelsUp = Boolean(live && !live.onGround) || (Boolean(aware?.takeoff?.actual) && !(live && live.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 12));
 		if (wheelsUp) {
-			const pushU = aware?.gateOut?.actual ?? times.pushUnix;
-			const toU = aware?.takeoff?.actual ?? times.takeoffUnix;
+			const pushU = aware?.gateOut?.actual;
+			const toU = aware?.takeoff?.actual;
 			if (pushU && toU && toU > pushU) {
 				const m = Math.round((toU - pushU) / 60);
 				if (m >= 1 && m <= 180) times = { ...times, taxiOutMin: m, taxiOutKind: "measured" };
