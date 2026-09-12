@@ -1,7 +1,7 @@
 import { formatDuration, formatNm, haversineNm } from "@/lib/geo";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
-import { US_STATE_RINGS } from "@/lib/us-state-lines";
+import { WORLD_LAND_RINGS } from "@/lib/world-land-lines";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { CloudRain } from "lucide-react";
@@ -352,6 +352,23 @@ function ringHits(
   return b >= minLon && a <= maxLon && d >= minLat && c <= maxLat;
 }
 
+function ringFillable(ring: [number, number][]) {
+  if (ring.length < 4) return false;
+  let span = 0;
+  for (let i = 1; i < ring.length; i++) {
+    const step = Math.abs(ring[i][0] - ring[i - 1][0]);
+    if (step > 170) return false;
+    if (step > span) span = step;
+  }
+  let minL = 180;
+  let maxL = -180;
+  for (const [lo] of ring) {
+    if (lo < minL) minL = lo;
+    if (lo > maxL) maxL = lo;
+  }
+  return maxL - minL < 180;
+}
+
 export function RouteMap({ story }: { story: FlightStory }) {
   const weatherOn = useFiled((s) => s.weatherOn);
   const setWeatherOn = useFiled((s) => s.setWeatherOn);
@@ -414,7 +431,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
   });
   const fixes = samples.filter((s) => s.fix);
   const runs = pathRuns(samples, progress).build(sx, sy);
-  const states = US_STATE_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const lands = WORLD_LAND_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -437,13 +454,23 @@ export function RouteMap({ story }: { story: FlightStory }) {
           <RadarLayer minLon={minLon} maxLon={maxLon} minLat={minLat} maxLat={maxLat} sx={sx} sy={sy} />
         )}
 
-        <g className="fill-none stroke-fg/20" strokeWidth="1">
-          {states.map((ring, i) => (
-            <polyline
-              key={`st-${i}`}
-              points={ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ")}
-            />
-          ))}
+        <g strokeWidth="1">
+          {lands.map((ring, i) => {
+            const points = ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ");
+            return ringFillable(ring) ? (
+              <polygon
+                key={`land-${i}`}
+                points={points}
+                className="fill-fg/10 stroke-fg/20"
+              />
+            ) : (
+              <polyline
+                key={`land-${i}`}
+                points={points}
+                className="fill-none stroke-fg/20"
+              />
+            );
+          })}
         </g>
 
         {runs.map((run, i) => {
