@@ -13,7 +13,9 @@ export type AdsbRaw = {
   lat?: number;
   lon?: number;
   alt_baro?: number | "ground";
+  alt_geom?: number;
   gs?: number;
+  spd?: number;
   track?: number;
   baro_rate?: number;
   seen?: number;
@@ -229,7 +231,7 @@ export function rawToObservation(raw: AdsbRaw, provider: ProviderId, receivedAt:
     lat: raw.lat,
     lon: raw.lon,
     altBaro: alt,
-    gs: typeof raw.gs === "number" ? raw.gs : null,
+    gs: typeof raw.gs === "number" ? raw.gs : typeof raw.spd === "number" ? raw.spd : null,
     track: typeof raw.track === "number" ? raw.track : null,
     seen: seenOf(raw),
     receivedAt,

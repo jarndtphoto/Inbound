@@ -191,6 +191,12 @@ export type FlightTimes = {
   origPushUnix?: number | null;
   origTakeoffUnix?: number | null;
   origLandUnix?: number | null;
+  pushKind?: "scheduled" | "estimated" | "actual" | null;
+  takeoffKind?: "scheduled" | "estimated" | "actual" | null;
+  landKind?: "scheduled" | "estimated" | "actual" | null;
+  gateKind?: "scheduled" | "estimated" | "actual" | null;
+  gate?: string | null;
+  gateUnix?: number | null;
 };
 
 export type WxDigest = {

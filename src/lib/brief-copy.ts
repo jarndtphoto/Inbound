@@ -78,6 +78,9 @@ export type RideFacts = {
   convective?: boolean;
   destCat?: string | null;
   originCat?: string | null;
+  landKind?: string | null;
+  gateKind?: string | null;
+  gate?: string | null;
 };
 
 export type BriefSegment = {
@@ -165,12 +168,24 @@ function chopRank(c: string | null | undefined) {
   return 0;
 }
 
-function catRank(c: string | null | undefined) {
-  const k = String(c || "").toUpperCase();
-  if (k === "LIFR" || k === "IFR") return 3;
-  if (k === "MVFR") return 2;
-  if (k === "VFR") return 1;
-  return 0;
+function chopWord(c: string | null | undefined) {
+  const r = chopRank(c);
+  if (r >= 3) return "severe turbulence";
+  if (r === 2) return "moderate turbulence";
+  if (r === 1) return "light turbulence";
+  return "smooth";
+}
+
+function chopPhrase(from: string | null | undefined, to: string | null | undefined, worse: boolean) {
+  const a = chopWord(from);
+  const b = chopWord(to);
+  if (a === b) return null;
+  if (worse) {
+    if (a === "smooth") return `${b.charAt(0).toUpperCase()}${b.slice(1)} ahead`;
+    return `Ride was ${a} → now ${b}`;
+  }
+  if (b === "smooth") return "Turbulence easing — ride looks smooth";
+  return `Ride was ${a} → now ${b}`;
 }
 
 function clockMoved(prevUnix: number | null, nextUnix: number | null) {
@@ -305,22 +320,18 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
 
   const ridePrev = chopRank(prev.worstChop ?? prev.ride);
   const rideNext = chopRank(next.worstChop ?? next.ride);
-  if (rideNext > ridePrev && next.stage !== "arrival" && next.stage !== "gate") {
-    out.push({ kind: "weather", text: "Reports of a bumpier stretch ahead" });
-  } else if (rideNext < ridePrev && next.stage !== "arrival" && next.stage !== "gate") {
-    out.push({ kind: "weather", text: "Smoother ride expected" });
+  if (rideNext !== ridePrev && next.stage !== "arrival" && next.stage !== "gate") {
+    const material = Math.max(ridePrev, rideNext) >= 2 || Math.abs(rideNext - ridePrev) >= 2;
+    if (material) {
+      const line = chopPhrase(prev.worstChop ?? prev.ride, next.worstChop ?? next.ride, rideNext > ridePrev);
+      if (line) out.push({ kind: "weather", text: line });
+    }
   }
 
   if (!prev.convective && next.convective) {
-    out.push({ kind: "weather", text: "Storms along the route" });
+    out.push({ kind: "weather", text: "Thunderstorms along the route" });
   } else if (prev.convective && !next.convective) {
-    out.push({ kind: "weather", text: "Storms along the route have eased" });
-  }
-
-  if (catRank(next.destCat) > catRank(prev.destCat)) {
-    out.push({ kind: "weather", text: "Weather at arrival looks worse" });
-  } else if (catRank(next.destCat) < catRank(prev.destCat) && prev.destCat) {
-    out.push({ kind: "weather", text: "Weather at arrival looks better" });
+    out.push({ kind: "weather", text: "Thunderstorms along the route have eased" });
   }
 
   if (prev.wx !== next.wx && !out.some((e) => e.kind === "weather")) {
@@ -334,13 +345,13 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
 function passengerWxDelta(raw: string): string | null {
   const s = String(raw || "");
   if (!s) return null;
-  if (/thunder|storm/i.test(s) && /drop|ease|off/i.test(s)) return "Storms along the route have eased";
-  if (/thunder|storm/i.test(s)) return "Storms along the route";
-  if (/chop|pirep|turb/i.test(s) && /smooth|drop|ease/i.test(s)) return "Smoother ride expected";
-  if (/chop|pirep|turb/i.test(s)) return "Reports of a bumpier stretch ahead";
-  if (/arrival weather|dest/i.test(s) && /worse|ifr/i.test(s)) return "Weather at arrival looks worse";
-  if (/arrival weather/i.test(s)) return "Weather at arrival has changed";
-  if (/forecast|taf/i.test(s)) return "The arrival forecast changed";
+  if (/thunder|storm/i.test(s) && /drop|ease|off/i.test(s)) return "Thunderstorms along the route have eased";
+  if (/thunder|storm/i.test(s)) return "Thunderstorms along the route";
+  if (/chop|pirep|turb/i.test(s) && /smooth|drop|ease/i.test(s)) return "Turbulence easing — ride looks smooth";
+  if (/severe/i.test(s) && /chop|pirep|turb/i.test(s)) return "Severe turbulence ahead";
+  if (/moderate/i.test(s) && /chop|pirep|turb/i.test(s)) return "Moderate turbulence ahead";
+  if (/chop|pirep|turb/i.test(s)) return "Light turbulence ahead";
+  if (/arrival weather|dest cat|forecast|taf/i.test(s)) return null;
   if (JARGON.test(s)) return null;
   const plain = s.replace(/\.+$/, "").trim();
   if (plain.length > 90) return null;
@@ -389,10 +400,23 @@ function rideClause(d: RideFacts) {
 
 function destClause(d: RideFacts) {
   const delay = nasLine(d.destNas);
-  const land = d.land ? `Landing around ${d.land}` : `Into ${d.toCity}`;
+  const land =
+    d.landKind === "actual" && d.land
+      ? `Landed at ${d.land}`
+      : d.land
+        ? `Landing around ${d.land}`
+        : `Into ${d.toCity}`;
+  const gate =
+    d.gate && d.now === "gate" && d.gateKind === "actual"
+      ? ` At the gate ${d.gate}.`
+      : d.gate && (d.now === "arrival" || d.now === "ride")
+        ? d.gateKind === "actual"
+          ? ` At the gate ${d.gate}.`
+          : ` At the gate around ${d.gate}.`
+        : "";
   const taf = d.destTaf && !/n\/a/i.test(d.destTaf) ? ` Arrival forecast: ${d.destTaf}.` : "";
-  if (delay) return `${land}. ${d.toIata} delay: ${delay}.${taf}`;
-  return `${land}.${taf}`;
+  if (delay) return `${land}. ${d.toIata} delay: ${delay}.${gate}${taf}`;
+  return `${land}.${gate}${taf}`;
 }
 
 function taxiInClause(d: RideFacts) {
@@ -416,6 +440,18 @@ function composeLead(d: RideFacts) {
   }
 
   if (stage === "arrival") {
+    const landed = d.landKind === "actual";
+    if (landed) {
+      return joinSentences([
+        open,
+        `Landed${d.land ? ` at ${d.land}` : ""}. Taxiing in.`,
+        d.gate
+          ? d.gateKind === "actual"
+            ? `At the gate ${d.gate}.`
+            : `At the gate around ${d.gate}.`
+          : taxiInClause(d),
+      ]);
+    }
     return joinSentences([
       open,
       `On the arrival into ${d.toIata}.`,

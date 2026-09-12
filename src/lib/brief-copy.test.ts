@@ -95,12 +95,12 @@ describe("briefing update log", () => {
     assert.equal(next, b);
   });
 
-  it("logs bumpier air and storms without aviation codes", () => {
+  it("logs material turbulence and thunderstorms without aviation codes", () => {
     let b = composeBrief(facts({ worstChop: "smooth", convective: false, wxHash: "a" }));
     b = composeBrief(
       facts({
-        worstChop: "light",
-        rideLabel: "Light chop",
+        worstChop: "moderate",
+        rideLabel: "Moderate turbulence",
         convective: true,
         wxHash: "b",
         wxDeltas: ["a new chop PIREP showed up", "thunderstorm SIGMET"],
@@ -108,9 +108,31 @@ describe("briefing update log", () => {
       b,
     );
     const wx = b.log.filter((e) => e.kind === "weather").map((e) => e.text);
-    assert.ok(wx.some((t) => /bumpier/i.test(t)));
-    assert.ok(wx.some((t) => /storms along the route/i.test(t)));
+    assert.ok(wx.some((t) => /moderate turbulence/i.test(t)));
+    assert.ok(wx.some((t) => /thunderstorms along the route/i.test(t)));
+    assert.equal(wx.some((t) => /bump/i.test(t)), false);
     assert.equal(wx.some((t) => JARGON.test(t)), false);
+  });
+
+  it("ignores light-smooth chop chatter and dest-category flips", () => {
+    let b = composeBrief(facts({ worstChop: "smooth", destCat: "VFR", wxHash: "a" }));
+    const light = composeBrief(facts({ worstChop: "light", rideLabel: "Light turbulence", destCat: "MVFR", wxHash: "b" }), b);
+    assert.equal(light.log.filter((e) => e.kind === "weather").length, 0);
+    b = composeBrief(
+      facts({ worstChop: "moderate", rideLabel: "Moderate turbulence", destCat: "IFR", wxHash: "c" }),
+      light,
+    );
+    const wx = b.log.filter((e) => e.kind === "weather").map((e) => e.text);
+    assert.ok(wx.some((t) => /moderate turbulence/i.test(t)));
+    assert.equal(wx.some((t) => /arrival looks/i.test(t)), false);
+    assert.equal(wx.some((t) => /bump/i.test(t)), false);
+  });
+
+  it("uses was → now when turbulence eases", () => {
+    let b = composeBrief(facts({ worstChop: "moderate", rideLabel: "Moderate turbulence", wxHash: "a" }));
+    b = composeBrief(facts({ worstChop: "light", rideLabel: "Light turbulence", wxHash: "b" }), b);
+    const wx = b.log.filter((e) => e.kind === "weather").map((e) => e.text);
+    assert.ok(wx.some((t) => /was moderate turbulence → now light turbulence/i.test(t)));
   });
 
   it("ride briefing uses miles and does not mix airborne with no-signal", () => {
@@ -122,6 +144,22 @@ describe("briefing update log", () => {
     assert.match(dark.lead, /3,533 miles/);
     assert.match(dark.lead, /live position unavailable/i);
     assert.equal(/you're airborne/i.test(dark.lead), false);
+  });
+
+  it("separates landed from at-the-gate in the arrival brief", () => {
+    const b = composeBrief(
+      facts({
+        now: "arrival",
+        land: "4:51 PM",
+        landKind: "actual",
+        gate: "5:00 PM",
+        gateKind: "estimated",
+      }),
+    );
+    assert.match(b.lead, /landed at 4:51 pm/i);
+    assert.match(b.lead, /taxiing in/i);
+    assert.match(b.lead, /at the gate around 5:00 pm/i);
+    assert.equal(/you're at the gate/i.test(b.lead), false);
   });
 
   it("does not repeat the same line", () => {

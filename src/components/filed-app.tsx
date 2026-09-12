@@ -19,10 +19,10 @@ const STAGES: { id: StageId; label: string }[] = [
   { id: "taxi", label: "Taxi" },
   { id: "ride", label: "Flight" },
   { id: "arrival", label: "Arrival" },
-  { id: "gate", label: "Parked" },
+  { id: "gate", label: "At the gate" },
 ];
 
-const STORY_CACHE_KEY = "filed-story-cache-v6";
+const STORY_CACHE_KEY = "filed-story-cache-v7";
 const ORIG_MEM_KEY = "filed-orig-sched-v2";
 
 function normFlight(q: string) {
@@ -46,9 +46,18 @@ function readCachedStory(q: string): FlightStory | undefined {
 
 function writeCachedStory(q: string, story: FlightStory) {
   try {
+    const samples = story.route.samples;
+    let slimSamples = samples;
+    if (samples.length > 96) {
+      slimSamples = [samples[0]!];
+      const last = samples[samples.length - 1]!;
+      const step = (samples.length - 1) / 94;
+      for (let i = 1; i < 94; i++) slimSamples.push(samples[Math.round(i * step)]!);
+      slimSamples.push(last);
+    }
     const slim: FlightStory = {
       ...story,
-      route: { ...story.route, samples: story.route.samples.slice(0, 80) },
+      route: { ...story.route, samples: slimSamples },
     };
     localStorage.setItem(STORY_CACHE_KEY, JSON.stringify({ k: normFlight(q), story: slim, at: Date.now() }));
   } catch {
@@ -162,9 +171,9 @@ function rideLabelOf(story: FlightStory) {
     return "Smooth";
   }
   const ahead = story.route.samples.filter((s) => s.frac >= story.route.progress);
-  if (ahead.some((s) => s.chop === "severe")) return "Severe chop";
-  if (ahead.some((s) => s.chop === "moderate")) return "Moderate chop";
-  if (ahead.some((s) => s.chop === "light")) return "Light chop";
+  if (ahead.some((s) => s.chop === "severe")) return "Severe turbulence";
+  if (ahead.some((s) => s.chop === "moderate")) return "Moderate turbulence";
+  if (ahead.some((s) => s.chop === "light")) return "Light turbulence";
   return "Smooth";
 }
 
@@ -223,6 +232,9 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     convective: Boolean(story.wx?.live?.convective),
     destCat: story.dest.decoded?.category ?? story.wx?.live?.destCat ?? null,
     originCat: story.origin.decoded?.category ?? story.wx?.live?.originCat ?? null,
+    landKind: story.times?.landKind ?? null,
+    gateKind: story.times?.gateKind ?? null,
+    gate: story.times?.gate ?? null,
   };
 }
 
@@ -715,6 +727,19 @@ export function FiledApp() {
   );
 }
 
+function wheelsDown(story: FlightStory) {
+  if (story.currentStage === "gate") return true;
+  if (story.times?.landKind === "actual") return true;
+  if (story.currentStage === "arrival" && story.aircraft?.onGround) return true;
+  return false;
+}
+
+function stageHeadline(story: FlightStory) {
+  if (story.currentStage === "gate") return "At the gate";
+  if (story.currentStage === "arrival" && wheelsDown(story)) return "Landed";
+  return STAGES.find((s) => s.id === story.currentStage)?.label ?? story.currentStage;
+}
+
 function liveFix(story: FlightStory) {
   const ac = story.aircraft;
   return Boolean(story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
@@ -739,6 +764,7 @@ function headStatus(story: FlightStory) {
   const live = liveFix(story);
   const inAirLive = Boolean(live && story.aircraft && !story.aircraft.onGround);
   if (story.currentStage === "gate") return airline ?? "Parked";
+  if (wheelsDown(story)) return airline ? `Landed · ${airline}` : "Landed";
   if (air && inAirLive) return airline ? `In the air · ${airline}` : "In the air";
   if (air) return "In the air — live position unavailable right now";
   if (live) return airline ? `On the ground · ${airline}` : "On the ground";
@@ -775,7 +801,7 @@ function FlightHead({
         <div className="text-right">
           <p className="font-mono text-xs tracking-widest text-muted uppercase">Stage</p>
           <p className="font-display text-2xl font-semibold">
-            {STAGES.find((s) => s.id === story.currentStage)?.label ?? story.currentStage}
+            {stageHeadline(story)}
           </p>
         </div>
       </div>
@@ -807,6 +833,34 @@ function FlightHead({
   );
 }
 
+function kindLabel(kind: FlightStory["times"]["pushKind"]) {
+  if (kind === "actual") return "Actual";
+  if (kind === "estimated") return "Estimated";
+  if (kind === "scheduled") return "Scheduled";
+  return "";
+}
+
+function ClockCell({
+  title,
+  time,
+  kind,
+  hint,
+}: {
+  title: string;
+  time: string | null | undefined;
+  kind?: FlightStory["times"]["pushKind"];
+  hint?: string | null;
+}) {
+  const sub = [kindLabel(kind), hint].filter(Boolean).join(" · ");
+  return (
+    <div className="min-w-0">
+      <p className="font-mono text-xs tracking-widest text-subtle uppercase">{title}</p>
+      <p className="mt-1 font-display text-xl font-semibold leading-none">{time ?? "—"}</p>
+      <p className="mt-1 text-xs text-muted">{sub || "\u00a0"}</p>
+    </div>
+  );
+}
+
 function TimesStrip({
   story,
   fetching,
@@ -819,72 +873,91 @@ function TimesStrip({
   onRefresh: () => void;
 }) {
   const t = story.times;
-  const airborne = flightAirborne(story);
-  if (story.currentStage === "gate" && t?.airborne) {
-    return (
-      <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
-        <div>
-          <p className="flex items-center gap-1.5 font-mono text-xs tracking-widest text-subtle uppercase">
-            <Clock className="size-3" />
-            Landed
-          </p>
-          <p className="mt-1 font-display text-2xl font-semibold leading-none">{t?.land ?? "—"}</p>
-          <p className="mt-1 text-xs text-muted">
-            {t?.destGate ? `Gate ${t.destGate}` : story.dest.iata}
-            {t?.taxiInMin != null ? ` · Taxi in ${t.taxiInKind === "measured" ? `${t.taxiInMin} min` : `est. ${t.taxiInMin} min`}` : ""}
-          </p>
-        </div>
-        <Freshness at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
-      </div>
-    );
-  }
-  if (airborne) {
-    const remaining = formatDuration(story.route.etaMin);
-    const dist = formatMiles(story.route.remainingNm);
-    return (
-      <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
-        <div>
-          <p className="flex items-center gap-1.5 font-mono text-xs tracking-widest text-subtle uppercase">
-            <Clock className="size-3" />
-            Remaining
-          </p>
-          <p className="mt-1 font-display text-2xl font-semibold leading-none">{remaining}</p>
-          <p className="mt-1 text-xs text-muted">
-            {dist}
-            {t?.land ? ` · Land ${t.land}` : ""}
-          </p>
-        </div>
-        <Freshness at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
-      </div>
-    );
-  }
+  const down = wheelsDown(story);
+  const airborne = flightAirborne(story) && !down;
+  const parked = story.currentStage === "gate";
   const delay = t?.delayMin ?? null;
   const late = (delay ?? 0) >= 5;
   const phrase = delayPhrase(delay);
-  const tone = late ? ((delay ?? 0) >= 40 ? "text-ifr" : "text-mvfr") : "text-fg";
+  const landHint = down && !parked
+    ? "Taxiing in"
+    : t?.landWas && t.landWas !== t.land
+      ? `Was ${t.landWas}`
+      : null;
+  const gateHint = t?.destGate
+    ? `Gate ${t.destGate}`
+    : parked
+      ? "Parked"
+      : t?.taxiInMin != null
+        ? t.taxiInKind === "measured"
+          ? `Taxi in ${t.taxiInMin} min`
+          : `Est. taxi in ${t.taxiInMin} min`
+        : null;
+  const landClock = (
+    <ClockCell
+      title="Landed"
+      time={t?.land}
+      kind={t?.landKind ?? (t?.land ? "scheduled" : null)}
+      hint={landHint}
+    />
+  );
+  const gateClock = (
+    <ClockCell
+      title="At the gate"
+      time={t?.gate}
+      kind={t?.gateKind ?? (t?.gate ? "scheduled" : null)}
+      hint={gateHint}
+    />
+  );
   return (
-    <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
-      <div>
-        <p className="flex items-center gap-1.5 font-mono text-xs tracking-widest text-subtle uppercase">
-          <Clock className="size-3" />
-          {t?.pushed ? "Pushed" : "Posted push"}
-        </p>
-        <p className={cn("mt-1 font-display text-2xl font-semibold leading-none", tone)}>
-          {t?.push ?? "—"}
-          {phrase ? (
-            <span className="ml-2 text-lg">{phrase}</span>
-          ) : t?.push ? (
-            <span className="ml-2 text-lg text-muted">On time</span>
-          ) : null}
-        </p>
-        <p className="mt-1 text-xs text-muted">
-          {late && t?.pushWas ? `Was ${t.pushWas}` : t?.originGate ? `Gate ${t.originGate}` : "Airline posted time"}
-          {t?.takeoff
-            ? ` · ${t.airborne || story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "gate" ? "Wheels up" : "Est. wheels up"} ${t.takeoff}`
-            : ""}
-        </p>
+    <div className="mt-4 border-t border-border pt-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        {airborne ? (
+          <div>
+            <p className="flex items-center gap-1.5 font-mono text-xs tracking-widest text-subtle uppercase">
+              <Clock className="size-3" />
+              Remaining
+            </p>
+            <p className="mt-1 font-display text-2xl font-semibold leading-none">
+              {formatDuration(story.route.etaMin)}
+            </p>
+            <p className="mt-1 text-xs text-muted">{formatMiles(story.route.remainingNm)}</p>
+          </div>
+        ) : down ? (
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
+            {landClock}
+            {gateClock}
+          </div>
+        ) : (
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
+            <ClockCell
+              title="Push"
+              time={t?.push}
+              kind={t?.pushKind ?? (t?.pushed ? "actual" : t?.push ? "scheduled" : null)}
+              hint={
+                late
+                  ? [phrase, t?.pushWas ? `Was ${t.pushWas}` : null].filter(Boolean).join(" · ")
+                  : t?.originGate
+                    ? `Gate ${t.originGate}`
+                    : phrase
+              }
+            />
+            <ClockCell
+              title="Takeoff"
+              time={t?.takeoff}
+              kind={t?.takeoffKind ?? (t?.takeoff ? "scheduled" : null)}
+              hint={t?.takeoffWas && t.takeoffWas !== t.takeoff ? `Was ${t.takeoffWas}` : null}
+            />
+          </div>
+        )}
+        <Freshness at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       </div>
-      <Freshness at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
+      {!down ? (
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {landClock}
+          {gateClock}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -989,10 +1062,10 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
   if (!arriving) {
     const ahead = story.route.samples.filter((s) => s.frac >= story.route.progress);
     let ride = "Smooth";
-    if (ahead.some((s) => s.chop === "severe")) ride = "Severe chop";
-    else if (ahead.some((s) => s.chop === "moderate")) ride = "Moderate chop";
-    else if (ahead.some((s) => s.chop === "light")) ride = "Light chop";
-    if (ahead.some((s) => s.convective)) ride = `${ride} · storms`;
+    if (ahead.some((s) => s.chop === "severe")) ride = "Severe turbulence";
+    else if (ahead.some((s) => s.chop === "moderate")) ride = "Moderate turbulence";
+    else if (ahead.some((s) => s.chop === "light")) ride = "Light turbulence";
+    if (ahead.some((s) => s.convective)) ride = `${ride} · thunderstorms`;
     rows.push({ label: "Ride", value: ride });
   }
   if (story.dest.nas?.delayed) {
@@ -1010,7 +1083,7 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
   if (story.origin.category === "IFR" || story.origin.category === "LIFR") {
     rows.push({ label: "Origin", value: `Low weather at ${story.origin.iata}` });
   }
-  if (!rows.length) rows.push({ label: "Notes", value: "No delay or chop flagged." });
+  if (!rows.length) rows.push({ label: "Notes", value: "No delay or turbulence flagged." });
   return rows;
 }
 

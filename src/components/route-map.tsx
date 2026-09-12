@@ -305,11 +305,11 @@ function pathRuns(samples: RouteSample[], progress: number) {
         const dx = pt.x - cur.pts[cur.pts.length - 1]!.x;
         const dy = pt.y - cur.pts[cur.pts.length - 1]!.y;
         const jump = Math.hypot(dx, dy);
-        if (cur.chop === chop && cur.past === past && jump < 90) {
+        if (cur.chop === chop && cur.past === past && jump < 240) {
           cur.pts.push(pt);
         } else {
           if (cur.pts.length >= 2) out.push(cur);
-          cur = { chop, past, pts: jump < 90 ? [cur.pts[cur.pts.length - 1]!, pt] : [pt] };
+          cur = { chop, past, pts: jump < 240 ? [cur.pts[cur.pts.length - 1]!, pt] : [pt] };
         }
       }
       if (cur && cur.pts.length >= 2) out.push(cur);
@@ -393,7 +393,8 @@ export function RouteMap({ story }: { story: FlightStory }) {
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
   const ac = story.aircraft;
   const onField = Boolean(ac?.onGround && haversineNm(ac, dest) < 8);
-  const landed = story.currentStage === "gate" || onField;
+  const atGate = story.currentStage === "gate";
+  const landed = atGate || onField;
   const progress = landed ? 1 : story.route.progress;
   const ax = landed
     ? sx(dest.lon)
@@ -583,7 +584,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
           {story.route.source === "track" ? "ACTUAL TRACK · FIXES" : "PLANNED PATH"}
         </p>
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {landed ? "Landed" : `${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
+          {atGate ? "At the gate" : landed ? "Landed" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
         </p>
       </div>
         {zoom.s > 1.02 ? (
