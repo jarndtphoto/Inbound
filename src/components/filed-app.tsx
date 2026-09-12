@@ -303,6 +303,7 @@ export function FiledApp() {
   const [manualBusy, setManualBusy] = useState(false);
   const freshRef = useRef(false);
   const refreshingRef = useRef(false);
+  const pullPxRef = useRef(0);
   const briefGen = useRef(0);
   const lastBriefKey = useRef("");
   const briefingRef = useRef<CompiledBrief | null>(null);
@@ -510,6 +511,17 @@ export function FiledApp() {
     setManualBusy(true);
     setRefreshErr(null);
     freshRef.current = true;
+    pullPxRef.current = 44;
+    setPullPx(44);
+    let settled = false;
+    const failsafe = window.setTimeout(() => {
+      if (settled) return;
+      refreshingRef.current = false;
+      setManualBusy(false);
+      pullPxRef.current = 0;
+      setPullPx(0);
+      setRefreshErr("Couldn't update right now — try again.");
+    }, 14_000);
     try {
       await storyQ.refetch({ throwOnError: true });
       setBriefing((b) => {
@@ -521,8 +533,11 @@ export function FiledApp() {
     } catch {
       setRefreshErr("Couldn't update right now — try again.");
     } finally {
+      settled = true;
+      window.clearTimeout(failsafe);
       refreshingRef.current = false;
       setManualBusy(false);
+      pullPxRef.current = 0;
       setPullPx(0);
     }
   }
@@ -543,25 +558,33 @@ export function FiledApp() {
       pulling = true;
     };
     const onMove = (e: TouchEvent) => {
-      if (!pulling) return;
+      if (!pulling || refreshingRef.current) return;
       const t = e.touches[0];
       if (!t) return;
       const dy = t.clientY - startY;
       const dx = t.clientX - startX;
       if (dy < 8 || Math.abs(dx) > 28 || el.scrollTop > 2) {
-        if (dy <= 0) setPullPx(0);
+        if (dy <= 0) {
+          pullPxRef.current = 0;
+          setPullPx(0);
+        }
         return;
       }
       e.preventDefault();
-      setPullPx(Math.min(88, dy * 0.42));
+      const next = Math.min(88, dy * 0.42);
+      pullPxRef.current = next;
+      setPullPx(next);
     };
     const onEnd = () => {
       if (!pulling) return;
       pulling = false;
-      setPullPx((px) => {
-        if (px >= 52) void refreshNow();
-        return px >= 52 ? 56 : 0;
-      });
+      const px = pullPxRef.current;
+      if (px >= 52) {
+        void refreshNow();
+        return;
+      }
+      pullPxRef.current = 0;
+      setPullPx(0);
     };
     el.addEventListener("touchstart", onStart, { passive: true });
     el.addEventListener("touchmove", onMove, { passive: false });
@@ -599,7 +622,7 @@ export function FiledApp() {
             aria-hidden={pullPx < 8}
           >
             <span className="flex items-center gap-1.5 pb-1 font-mono text-[11px] tracking-wide">
-              <RefreshCw className={cn("size-3.5", (manualBusy || pullPx >= 52) && "animate-spin")} />
+              <RefreshCw className={cn("size-3.5", manualBusy && "animate-spin")} />
               {manualBusy ? "Updating…" : pullPx >= 52 ? "Release to update" : "Pull to update"}
             </span>
           </div>
@@ -894,7 +917,7 @@ function Freshness({
         {refreshing ? "Updating…" : "Refresh"}
       </button>
       <p className="font-mono text-xs tracking-widest text-muted uppercase">
-        {refreshing ? "Updating…" : agoLabel(at, fetching)}
+        {refreshing ? "Updating…" : agoLabel(at, false)}
       </p>
     </div>
   );
