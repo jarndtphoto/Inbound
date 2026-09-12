@@ -309,7 +309,7 @@ export function FiledApp() {
     setQuery(next);
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     hydrate();
     setCacheOk(true);
   }, [hydrate]);
@@ -359,14 +359,18 @@ export function FiledApp() {
       if (s.currentStage === "inbound") return 5_000;
       return 8_000;
     },
-    staleTime: 1_500,
+    staleTime: 2_500,
     gcTime: 10 * 60_000,
-    retry: 2,
+    retry: (count, err) => {
+      if (count >= 1) return false;
+      const msg = err instanceof Error ? err.message : "";
+      if (/Could not load that flight/.test(msg)) return false;
+      return true;
+    },
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     placeholderData: (previousData) => {
       if (storyForQuery(previousData, query)) return previousData;
-      if (!cacheOk) return undefined;
       return storyForQuery(readCachedStory(query), query);
     },
   });
@@ -589,7 +593,7 @@ export function FiledApp() {
             <p className="text-sm text-ifr">{refreshErr}</p>
           </div>
         ) : null}
-        {storyQ.isError && !story && cacheOk && (
+        {storyQ.isError && !story && (
           <div className="mb-4 rounded-md border border-ifr/40 bg-surface px-4 py-3">
             <p className="text-sm text-ifr">
               {(storyQ.error as Error).message || "Could not load that flight. Try another number."}
@@ -600,9 +604,9 @@ export function FiledApp() {
           </div>
         )}
 
-        {(!cacheOk || (!story && !storyQ.isError)) && <Skeleton query={cacheOk ? query : "the flight"} />}
+        {!story && !storyQ.isError && <Skeleton query={query || "the flight"} />}
 
-        {cacheOk && story && (
+        {story && (
           <div key={normFlight(query)} className="grid min-w-0 gap-5 lg:grid-cols-12">
             <section className="min-w-0 lg:col-span-7">
               <FlightHead
@@ -630,7 +634,7 @@ export function FiledApp() {
         </div>
       </main>
       <footer className="shrink-0 border-t border-border bg-bg px-4 pt-2 pb-2 lg:px-8">
-        {cacheOk && recents.length > 0 && (
+        {recents.length > 0 && (
           <div className="mx-auto mb-2 flex max-w-6xl gap-2 overflow-x-auto" style={{ touchAction: "pan-x" }}>
             {recents.map((r) => (
               <button
@@ -1506,14 +1510,34 @@ function WxBlock({
 }
 
 function Skeleton({ query }: { query: string }) {
+  const label = query.trim() || "the flight";
   return (
     <div>
-      <p className="mb-3 font-mono text-xs tracking-widest text-muted uppercase">
-        Pulling {query} off the live feed
+      <p className="mb-3 flex items-center gap-2 font-mono text-xs tracking-widest text-muted uppercase">
+        <RefreshCw className="size-3.5 animate-spin text-accent" />
+        Getting {label}
       </p>
-      <div className="grid gap-5 lg:grid-cols-12">
-        <div className="h-80 animate-pulse rounded-xl border border-border bg-surface lg:col-span-7" />
-        <div className="h-80 animate-pulse rounded-xl border border-border bg-surface lg:col-span-5" />
+      <div className="grid min-w-0 gap-5 lg:grid-cols-12">
+        <section className="min-w-0 lg:col-span-7">
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <p className="font-mono text-xs tracking-wide text-muted">Live position</p>
+            <h2 className="font-display text-display font-semibold leading-none">{label}</h2>
+            <p className="mt-3 text-sm text-muted">Getting times, weather, and the map…</p>
+          </div>
+          <div className="mt-4 flex h-64 items-center justify-center rounded-xl border border-border bg-surface-2">
+            <p className="text-sm text-muted">Loading map…</p>
+          </div>
+        </section>
+        <section className="min-w-0 lg:col-span-5">
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <p className="font-mono text-xs tracking-widest text-subtle uppercase">Times</p>
+            <p className="mt-3 text-sm text-muted">Scheduled and estimated clocks load with the flight.</p>
+          </div>
+          <div className="mt-4 rounded-xl border border-border bg-surface p-4">
+            <p className="font-mono text-xs tracking-widest text-subtle uppercase">Briefing</p>
+            <p className="mt-3 text-sm text-muted">Ride notes appear as soon as weather is in.</p>
+          </div>
+        </section>
       </div>
     </div>
   );

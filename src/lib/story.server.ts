@@ -123,25 +123,21 @@ function parseTraceJson(data) {
 async function fetchTrace(hex, kind) {
 	const id = hex.toLowerCase();
 	return cached(`trace3:${kind}:${id}`, kind === "trace_recent" ? 8e3 : 25e3, async () => {
-		for (const host of TRACE_HOSTS) {
-			try {
-				const url = `${host}/data/traces/${id.slice(-2)}/${kind}_${id}.json`;
-				const res = await fetch(url, {
-					headers: {
-						"User-Agent": UA,
-						Accept: "application/json"
-					},
-					signal: AbortSignal.timeout(7e3)
-				});
-				if (!res.ok) continue;
-				const data = await res.json();
-				const parsed = parseTraceJson(data);
-				if (parsed.length) return parsed;
-			} catch {
-				/* next host */
-			}
-		}
-		return [];
+		const attempts = TRACE_HOSTS.map(async (host) => {
+			const url = `${host}/data/traces/${id.slice(-2)}/${kind}_${id}.json`;
+			const res = await fetch(url, {
+				headers: {
+					"User-Agent": UA,
+					Accept: "application/json"
+				},
+				signal: AbortSignal.timeout(2800)
+			});
+			if (!res.ok) throw new Error("trace miss");
+			const parsed = parseTraceJson(await res.json());
+			if (!parsed.length) throw new Error("trace empty");
+			return parsed;
+		});
+		return await Promise.any(attempts).catch(() => []);
 	});
 }
 function uniqueTrack(points) {
@@ -737,7 +733,7 @@ function remainingEtaMin(remainingNm, live, aware) {
 }
 async function loadRoute(callsign) {
 	return cached(`route:${callsign}`, 18e5, async () => {
-		return (await fetchJson(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(callsign)}`, 8e3)).response?.flightroute ?? null;
+		return (await fetchJson(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(callsign)}`, 5e3)).response?.flightroute ?? null;
 	});
 }
 function parseJsonObject(raw) {
@@ -1024,7 +1020,7 @@ async function fetchAwarePage(url, fallbackIdent, withInbound, redirect = "follo
 			Accept: "text/html"
 		},
 		redirect,
-		signal: AbortSignal.timeout(9e3)
+		signal: AbortSignal.timeout(5e3)
 	});
 	if (res.status >= 300 && res.status < 400) {
 		const stub = stubAwareFromHistory(res.headers.get("location"), fallbackIdent);
@@ -1150,7 +1146,7 @@ async function loadNas(iata) {
 	if (!/^[A-Z]{3}$/.test(iata)) return null;
 	return cached(`nas2:${iata}`, 22e3, async () => {
 		try {
-			const st = (await fetchJson(`https://external-api.faa.gov/asws/api/airport/status/${iata}`, 7e3)).Status?.[0];
+			const st = (await fetchJson(`https://external-api.faa.gov/asws/api/airport/status/${iata}`, 5e3)).Status?.[0];
 			const reason = (st?.Reason ?? "").trim();
 			const type = st?.Type ?? null;
 			const isNotam = reason.startsWith("!") || /NON SKED|PPR CTC/i.test(reason);
@@ -2002,6 +1998,7 @@ async function buildStory(query) {
 	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
 	const identKey = parsed.callsign.toUpperCase();
 	let knownHex = hexByIdent.get(identKey) || null;
+	const hazardsP = loadHazards();
 	const [rawAc0, aware, route] = await Promise.all([
 		knownHex
 			? safe(adsbByHex(knownHex), null)
@@ -2051,6 +2048,8 @@ async function buildStory(query) {
 		nas: null,
 		category: "UNK"
 	};
+	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
+	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
 	live = asOnGround(live, origin);
 	const routeKey = `${origin.iata}|${dest.iata}`;
 	if (hexRouteByIdent.get(identKey) && hexRouteByIdent.get(identKey) !== routeKey) {
@@ -2073,7 +2072,7 @@ async function buildStory(query) {
 	}
 	let fieldList = [];
 	const hexHint = (live?.hex || knownHex || aware?.hex || "").toLowerCase();
-	if (hexHint && /^[0-9a-f]{6}$/.test(hexHint)) {
+	if (hexHint && /^[0-9a-f]{6}$/.test(hexHint) && live?.hex !== hexHint) {
 		const freshRaw = await safe(adsbByHex(hexHint), null);
 		if (freshRaw && rawMatchesQuery(freshRaw, parsed, aware)) {
 			const cand = asOnGround(toLive(freshRaw), origin);
@@ -2104,7 +2103,7 @@ async function buildStory(query) {
 				}
 			}
 		}
-	} else if (live && dest && !live.onGround) {
+	} else if (live && dest && !live.onGround && !flightIdentOk(live.callsign, parsed, aware)) {
 		const dDest = haversineNm({ lat: live.lat, lon: live.lon }, dest);
 		if (dDest < 50) {
 			const nearDest = await safe(adsbAround(dest.lat, dest.lon, 20), []);
@@ -2221,19 +2220,14 @@ async function buildStory(query) {
 	const snapKey = inboundSnapKey(aware, origin, dest, query);
 	const existingSnap = inboundSnapByFlight.get(snapKey);
 	const inboundLocked = Boolean(existingSnap?.frozen);
-	const inboundFetch = inboundLocked
+	const inboundFetch = inboundAlreadyDone || inboundLocked
 		? Promise.resolve(null)
 		: inboundFlightId
 			? safe(loadAwareById(inboundFlightId), null)
 			: inboundIdent && !existingSnap
 				? safe(loadAware(inboundIdent), null)
 				: Promise.resolve(inboundAware);
-	const [hydOrigin, hydDest, hazardsPack, inboundFetched] = await Promise.all([
-		hydrateField(origin),
-		hydrateField(dest),
-		loadHazards(),
-		inboundFetch
-	]);
+	const [[hydOrigin, hydDest, hazardsPack], inboundFetched] = await Promise.all([fieldsP, inboundFetch]);
 	origin = hydOrigin;
 	dest = hydDest;
 	if (inboundFetched) inboundAware = inboundFetched;
@@ -2249,7 +2243,7 @@ async function buildStory(query) {
 	const faSaysAir = /airborne|en.?route|climbed|departed/i.test(aware?.status ?? "");
 	const ourAirborne = Boolean(flightBegun(live, origin)) || Boolean(aware?.takeoff?.actual) || (Boolean(faSaysAir) && live && !live.onGround);
 	let inboundRaw = null;
-	if (!inboundLocked && !atGateFa) {
+	if (!inboundLocked && !atGateFa && !inboundAlreadyDone) {
 		const tail = inboundAware?.tail ?? existingSnap?.tail ?? null;
 		const inHex = (inboundAware?.hex ?? existingSnap?.hex ?? "").toLowerCase() || null;
 		if (tail) inboundRaw = await safe(adsbByReg(tail), null);
@@ -2903,7 +2897,7 @@ export async function loadFlightStory(query, opts) {
 				if (/^(hex4:|cs4:|reg4:|trace3:)/.test(k)) cache.delete(k);
 			}
 		}
-		const work = cached(key, fresh ? 0 : 2e3, () => buildStory(query));
+		const work = cached(key, fresh ? 0 : 4e3, () => buildStory(query));
 		let timer;
 		const timed = new Promise((_, rej) => {
 			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 12e3);
