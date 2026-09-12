@@ -2,6 +2,7 @@ import { formatDuration, formatMiles, haversineNm } from "@/lib/geo";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
+import { GREAT_LAKES } from "@/lib/great-lakes";
 import { latToTileY, pickRadarTiles, tileXToLon, tileYToLat } from "@/lib/radar-tiles";
 import { WORLD_COUNTRY_RINGS } from "@/lib/world-country-lines";
 import { cn } from "@/lib/utils";
@@ -420,6 +421,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
   const runs = pathRuns(samples, progress).build(sx, sy);
   const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
   const admin1 = ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const lakes = GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
   const hazards = (story.hazards ?? [])
     .filter((h) => h.lat != null && h.lon != null && h.kind === "convective")
     .slice(0, 6);
@@ -480,6 +482,15 @@ export function RouteMap({ story }: { story: FlightStory }) {
               />
             );
           })}
+          {lakes.map((lake) => (
+            <path
+              key={lake.name}
+              d={lake.rings.map((ring) => `${ring.map(([lo, la], i) => `${i ? "L" : "M"}${sx(lo).toFixed(1)} ${sy(la).toFixed(1)}`).join(" ")} Z`).join(" ")}
+              fillRule="evenodd"
+              className="fill-bg/95 stroke-fg/35"
+              strokeWidth="1.25"
+            />
+          ))}
         </g>
 
         {runs.map((run, i) => {

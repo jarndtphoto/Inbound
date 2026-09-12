@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ADMIN1_RINGS } from "./admin1-lines.ts";
+import { GREAT_LAKES } from "./great-lakes.ts";
 import { WORLD_COUNTRY_RINGS } from "./world-country-lines.ts";
 
 function hits(
@@ -65,5 +66,25 @@ describe("admin1 rings", () => {
 
   it("does not scribble across the antimeridian", () => {
     noWrap(ADMIN1_RINGS);
+  });
+});
+
+function inside(ring: [number, number][], lon: number, lat: number) {
+  let hit = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i]!, b = ring[j]!;
+    if ((a[1] > lat) !== (b[1] > lat) && lon < ((b[0] - a[0]) * (lat - a[1])) / (b[1] - a[1]) + a[0]) hit = !hit;
+  }
+  return hit;
+}
+
+describe("Great Lakes shoreline", () => {
+  it("distinguishes Lake Michigan from Michigan land and preserves its islands", () => {
+    const lake = GREAT_LAKES.find((l) => l.name === "Lake Michigan");
+    assert.ok(lake);
+    const water = (lon: number, lat: number) => lake.rings.reduce((hit, ring) => hit !== inside(ring, lon, lat), false);
+    assert.equal(water(-87, 44), true, "Lake Michigan water");
+    assert.equal(water(-85.5, 44), false, "lower peninsula land");
+    assert.ok(lake.rings.length > 1, "lake islands retained");
   });
 });
