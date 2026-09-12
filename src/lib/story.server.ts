@@ -32,6 +32,7 @@ import {
 	corridorStations,
 	wxDeltas,
 } from "./wx-brief";
+import { faAltFt, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
 import {
 	fetchAround,
 	fetchByCallsign,
@@ -140,11 +141,12 @@ async function fetchTrace(hex, kind) {
 		return await Promise.any(attempts).catch(() => []);
 	});
 }
-function uniqueTrack(points) {
+function uniqueTrack(points, minNm = 6) {
 	const out = [];
+	const gap = Math.max(0.4, minNm);
 	for (const p of points) {
 		const last = out[out.length - 1];
-		if (last && haversineNm(last, p) < 6) continue;
+		if (last && haversineNm(last, p) < gap) continue;
 		out.push({
 			lat: p.lat,
 			lon: p.lon
@@ -367,15 +369,22 @@ function directSpine(origin, dest, live) {
 }
 async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, faTrack) {
 	const spine = makeSpine(origin, dest, waypoints);
-	let raw = [];
+	let hexRaw = [];
 	if (hex) try {
 		const [full, recent] = await Promise.all([fetchTrace(hex, "trace_full"), fetchTrace(hex, "trace_recent")]);
-		raw = mergeTraces(full, recent);
+		hexRaw = mergeTraces(full, recent);
 	} catch {
-		raw = [];
+		hexRaw = [];
 	}
-	if (!raw.length && Array.isArray(faTrack) && faTrack.length >= 4) raw = faTrack;
-	const flown = uniqueTrack(legsForThisSector(splitTraceLegs(raw), origin, dest, live, takeoffUnix ?? null));
+	const faRaw = Array.isArray(faTrack) && faTrack.length >= 2 ? faTrack : [];
+	// FA track is this flight. A hex trace can be another tail's whole day — only
+	// keep it when we have no FA points, or after sector-splitting onto this city pair.
+	let raw = faRaw.length ? faRaw.slice() : [];
+	if (hexRaw.length) {
+		if (!raw.length) raw = hexRaw;
+		else raw = mergeTraces(raw, hexRaw);
+	}
+	const flown = uniqueTrack(legsForThisSector(splitTraceLegs(raw), origin, dest, live, takeoffUnix ?? null), faRaw.length ? 1.6 : 6);
 	if (live && haversineNm({ lat: live.lat, lon: live.lon }, dest) < 68) {
 		const arrival = stitchArrival(flown, live, dest);
 		if (arrival && arrival.length >= 4) return { points: arrival, source: flown.length >= 6 ? "track" : "direct" };
@@ -383,6 +392,12 @@ async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, fa
 	if (flown.length >= 8) {
 		return {
 			points: densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48),
+			source: "track"
+		};
+	}
+	if (flown.length >= 2) {
+		return {
+			points: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36),
 			source: "track"
 		};
 	}
@@ -489,46 +504,6 @@ function restoreKin(identKey, live, dest, aware) {
 		altFt: live.altFt ?? prev.altFt,
 		gsKt: live.gsKt ?? prev.gsKt,
 		track: live.track ?? prev.track
-	};
-}
-function liveFromAware(aware) {
-	if (!aware) return null;
-	const pts = aware.faTrack;
-	const last = Array.isArray(pts) && pts.length ? pts[pts.length - 1] : null;
-	if (!last || typeof last.lat !== "number" || typeof last.lon !== "number") return null;
-	const now = Date.now() / 1e3;
-	const age = last.t ? Math.max(0, now - last.t) : 0;
-	if (age > 20 * 60) return null;
-	let lat = last.lat;
-	let lon = last.lon;
-	const gs = last.gs ?? aware.gsKt ?? null;
-	const hdg = last.track ?? aware.heading ?? null;
-	if (age > 25 && (gs ?? 0) > 80 && hdg != null && Number.isFinite(hdg)) {
-		const moved = destPoint({ lat, lon }, hdg, (gs / 3600) * Math.min(age, 8 * 60));
-		lat = moved.lat;
-		lon = moved.lon;
-	}
-	const altFt = last.alt ?? null;
-	const onGround = Boolean(last.ground) || (altFt != null && altFt < 50);
-	const type = aware.type ?? null;
-	return {
-		hex: String(aware.hex || "").toLowerCase(),
-		callsign: String(aware.ident || "").replace(/\s/g, "").toUpperCase() || null,
-		registration: aware.tail ?? null,
-		type,
-		typeName: airframeOf(type)?.name ?? type,
-		year: null,
-		operator: null,
-		lat,
-		lon,
-		altFt,
-		gsKt: gs,
-		track: hdg,
-		vertFpm: null,
-		onGround,
-		phase: onGround ? ((gs ?? 0) >= 2 ? "taxi" : "parked") : "cruise",
-		extrapolated: age > 45,
-		seenSec: age
 	};
 }
 function toLive(raw) {
@@ -785,25 +760,6 @@ async function loadRoute(callsign) {
 		return (await fetchJson(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(callsign)}`, 5e3)).response?.flightroute ?? null;
 	});
 }
-function parseJsonObject(raw) {
-	let depth = 0;
-	let start = -1;
-	for (let k = 0; k < raw.length; k++) {
-		const ch = raw[k];
-		if (ch === "{") {
-			if (depth === 0) start = k;
-			depth++;
-		} else if (ch === "}") {
-			depth--;
-			if (depth === 0 && start >= 0) try {
-				return JSON.parse(raw.slice(start, k + 1));
-			} catch {
-				return null;
-			}
-		}
-	}
-	return null;
-}
 function asTimes(v) {
 	const o = v ?? {};
 	return {
@@ -1007,7 +963,7 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 			const c = coordPair(p?.coord);
 			if (!c) continue;
 			const altRaw = p.alt;
-			const alt = typeof altRaw === "number" ? (altRaw > 1000 ? altRaw : altRaw * 100) : null;
+			const alt = faAltFt(altRaw);
 			faTrack.push({
 				t: typeof p.timestamp === "number" ? p.timestamp : 0,
 				lat: c.lat,
@@ -1028,7 +984,7 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 	const here = coordPair(f.coord);
 	if (here) {
 		const altRaw = f.altitude;
-		const alt = typeof altRaw === "number" ? (altRaw > 1000 ? altRaw : altRaw * 100) : null;
+		const alt = faAltFt(altRaw);
 		const last = faTrack[faTrack.length - 1];
 		const same = last && Math.abs(last.lat - here.lat) < 1e-4 && Math.abs(last.lon - here.lon) < 1e-4;
 		if (!same) {
@@ -1106,6 +1062,7 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 		filedTaxiInMin: asTaxiMin(f.taxiIn),
 		gsKt: typeof f.groundspeed === "number" ? f.groundspeed : null,
 		heading: typeof f.heading === "number" ? f.heading : null,
+		altFt: faAltFt(f.altitude),
 		faTrack
 	};
 }
@@ -2067,14 +2024,18 @@ function buildStages(args) {
 		}
 	};
 }
-function timeFracOf(aware) {
-	const to = aware?.takeoff?.actual;
-	if (!to) return 0;
-	if (aware.landing?.actual) return 1;
-	const ld = aware.landing?.estimated ?? aware.landing?.scheduled;
-	const now = Date.now() / 1e3;
-	if (!ld || ld <= to) return Math.max(0.04, Math.min(0.92, (now - to) / 7200));
-	return Math.max(0, Math.min(1, (now - to) / (ld - to)));
+function liveFromAware(aware) {
+	const live = liveFromAwareTrack(aware);
+	if (!live) return null;
+	const type = live.type ?? aware?.type ?? null;
+	return {
+		...live,
+		type,
+		typeName: airframeOf(type)?.name ?? type,
+		year: null,
+		operator: null,
+		vertFpm: null,
+	};
 }
 function pointAtFrac(path, frac) {
 	if (!path?.length) return null;
@@ -2350,7 +2311,9 @@ async function buildStory(query) {
 	const atGateFa = inboundAtGate(inboundAware);
 	const onField = Boolean(live && stillOnField(live, origin));
 	const faSaysAir = /airborne|en.?route|climbed|departed/i.test(aware?.status ?? "");
-	const ourAirborne = Boolean(flightBegun(live, origin)) || Boolean(aware?.takeoff?.actual) || (Boolean(faSaysAir) && live && !live.onGround);
+	const ourAirborne = Boolean(flightBegun(live, origin))
+		|| Boolean(aware?.takeoff?.actual)
+		|| (Boolean(faSaysAir) && !(aware?.landing?.actual) && !(live && live.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 8));
 	let inboundRaw = null;
 	if (!inboundLocked && !atGateFa && !inboundAlreadyDone) {
 		const tail = inboundAware?.tail ?? existingSnap?.tail ?? null;
@@ -2426,21 +2389,62 @@ async function buildStory(query) {
 	}
 	path = ensureEnds(path, start, end);
 	if (haversineNm(path[path.length - 1], end) > 8) path = path.concat([end]);
+	if (!ourLanded && ourAirborne) {
+		if (!live || !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) {
+			const fromFa = liveFromAware(aware);
+			if (fromFa && !fromFa.onGround) live = fromFa;
+		}
+		if (!live || !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) {
+			const frac = Math.max(0.03, timeFracOf(aware) || 0.03);
+			const p = pointAtFrac(path, frac);
+			if (p) {
+				const i = Math.max(0, Math.min(path.length - 2, Math.floor(frac * (path.length - 1))));
+				const hdg = aware?.heading ?? initialBearing(path[i], path[i + 1] ?? end);
+				live = {
+					hex: String(aware?.hex || "").toLowerCase(),
+					callsign: parsed.callsign,
+					registration: aware?.tail ?? null,
+					type: aware?.type ?? null,
+					typeName: airframeOf(aware?.type)?.name ?? aware?.type ?? null,
+					year: null,
+					operator: null,
+					lat: p.lat,
+					lon: p.lon,
+					altFt: aware?.altFt ?? null,
+					gsKt: aware?.gsKt ?? null,
+					track: hdg,
+					vertFpm: null,
+					onGround: false,
+					phase: (aware?.altFt ?? 0) < 10000 ? "climb" : "cruise",
+					extrapolated: true,
+					seenSec: 0
+				};
+			}
+		}
+		if (live && Number.isFinite(live.lat) && Number.isFinite(live.lon) && (!live.hex || live.extrapolated)) {
+			const nearby = await safe(adsbAround(live.lat, live.lon, 90), []);
+			const match = pickAroundAircraft(nearby, parsed, aware, origin, dest, 90, live.hex || knownHex);
+			if (match) {
+				const cand = asOnGround(toLive(match), origin);
+				if (cand && !destParkedLeftover(cand, dest, aware) && !cand.onGround) live = cand;
+			}
+		}
+	}
 	const totalNm = Math.max(1, polylineLengthNm(path));
 	let remainingNm;
 	let progress;
 	if (ourLanded) {
 		progress = 1;
 		remainingNm = 0;
-	} else if (live) {
+	} else if (live && Number.isFinite(live.lat) && Number.isFinite(live.lon) && !(live.extrapolated && haversineNm({ lat: live.lat, lon: live.lon }, start) < 4)) {
 		const along = progressAlongPath(path, {
 			lat: live.lat,
 			lon: live.lon
 		});
 		progress = along.frac;
 		remainingNm = along.remainingNm;
-	} else if (aware?.takeoff?.actual) {
-		progress = timeFracOf(aware);
+	} else if (ourAirborne || aware?.takeoff?.actual) {
+		progress = timeFracOf(aware) || 0.03;
 		remainingNm = (1 - progress) * totalNm;
 	} else {
 		progress = 0;
@@ -2848,8 +2852,9 @@ async function buildStory(query) {
 				phase: "parked"
 			};
 		}
-	} else if (!aircraft && inboundLive && (inbound.status === "at_field" || inbound.status === "complete")) aircraft = inboundLive;
-	else if (!aircraft) {
+	} else if (!aircraft && inboundLive && (inbound.status === "at_field" || inbound.status === "complete") && !ourAirborne) {
+		aircraft = inboundLive;
+	} else if (!aircraft) {
 		const fromFa = liveFromAware(aware);
 		if (fromFa) aircraft = fromFa;
 		else if (aware?.type || aware?.tail) {
@@ -3066,3 +3071,4 @@ export async function loadLiveBoard() {
 		return cards.slice(0, 8);
 	});
 }
+

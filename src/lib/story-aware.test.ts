@@ -1,0 +1,57 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { faAltFt, liveFromAware, parseJsonObject, timeFracOf } from "./fa-track.ts";
+
+describe("FlightAware JSON", () => {
+  it("parses an object even when a string contains braces", () => {
+    const raw = '{"flights":{"SWA1":{"ident":"SWA1","note":"hello } { world"}},"x":1}; other({';
+    const parsed = parseJsonObject(raw);
+    assert.ok(parsed);
+    const out = parsed as { flights: { SWA1: { ident: string } }; x: number };
+    assert.equal(out.flights.SWA1.ident, "SWA1");
+    assert.equal(out.x, 1);
+  });
+});
+
+describe("FA altitude", () => {
+  it("treats FlightAware hundreds as feet", () => {
+    assert.equal(faAltFt(90), 9000);
+    assert.equal(faAltFt(8), 800);
+    assert.equal(faAltFt(35000), 35000);
+  });
+});
+
+describe("airborne without takeoff actual", () => {
+  it("uses estimated takeoff once the flight is airborne", () => {
+    const now = Date.now() / 1e3;
+    const frac = timeFracOf({
+      status: "airborne",
+      takeoff: { actual: null, estimated: now - 10 * 60, scheduled: now - 8 * 60 },
+      landing: { actual: null, estimated: now + 70 * 60, scheduled: now + 80 * 60 },
+    });
+    assert.ok(frac > 0.08 && frac < 0.25);
+  });
+});
+
+describe("live from FA track", () => {
+  it("uses the last track point when top-level coord is missing", () => {
+    const now = Date.now() / 1e3;
+    const live = liveFromAware({
+      ident: "SWA3745",
+      type: "B737",
+      gsKt: 297,
+      heading: 195,
+      altFt: 9000,
+      faTrack: [
+        { t: now - 40, lat: 41.78, lon: -87.76, alt: 800, gs: 160, track: 180, ground: false },
+        { t: now - 8, lat: 41.5673, lon: -87.8213, alt: 9000, gs: 297, track: 195, ground: false },
+      ],
+    });
+    assert.ok(live);
+    assert.ok(Math.abs(live.lat - 41.5673) < 0.02);
+    assert.ok(Math.abs(live.lon - -87.8213) < 0.05);
+    assert.equal(live.onGround, false);
+    assert.equal(live.gsKt, 297);
+    assert.equal(live.track, 195);
+  });
+});
