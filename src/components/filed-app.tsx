@@ -844,7 +844,7 @@ function TimesStrip({
         : null;
   const landClock = (
     <ClockCell
-      title="Landed"
+      title={down ? "Landed" : "Landing"}
       time={t?.land}
       kind={t?.landKind ?? (t?.land ? "scheduled" : null)}
       hint={landHint}
@@ -852,7 +852,7 @@ function TimesStrip({
   );
   const gateClock = (
     <ClockCell
-      title="At the gate"
+      title={parked ? "At the gate" : "Gate arrival"}
       time={t?.gate}
       kind={t?.gateKind ?? (t?.gate ? "scheduled" : null)}
       hint={gateHint}

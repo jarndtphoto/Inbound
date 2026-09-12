@@ -88,4 +88,34 @@ describe('September 12 flight audit replay', () => {
     }));
     await assert.rejects(loadFlightStory('UA9087', {fresh: true}), /route unavailable/i);
   });
+
+  it('WN2512: ignores a different airborne tail and future actual push/takeoff', async (t) => {
+    const record = JSON.parse(readFileSync(new URL('./fixtures/aal3008-2026-09-12.json', import.meta.url), 'utf8'));
+    record.ident = 'SWA2512'; record.iataIdent = 'WN2512'; record.flightStatus = 'scheduled';
+    record.origin = { ...record.origin, iata: 'MDW', icao: 'KMDW', coord: [-87.7524, 41.7868], gate: 'B3' };
+    record.destination = { ...record.destination, iata: 'LGB', icao: 'KLGB', coord: [-118.1516, 33.8177], gate: '3' };
+    record.aircraft = { type: 'B38M', tail: 'N8961K' };
+    record.waypoints = []; record.track = null; record.coord = null;
+    record.gateDepartureTimes = { scheduled: 1789239000, estimated: 1789240320, actual: 1789240320 };
+    record.takeoffTimes = { scheduled: 1789240200, estimated: 1789241220, actual: 1789241220 };
+    t.mock.method(Date, 'now', () => 1789238100000); // 1:35 PM CDT
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
+        return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
+      }
+      return new Response(JSON.stringify({
+        ac: [{ hex: 'a12345', flight: 'SWA2512', r: 'N14019', t: 'B78X', lat: 38, lon: -100, gs: 451, alt_baro: 34000, seen_pos: 0 }],
+        features: [],
+      }), { headers: { 'content-type': 'application/json' } });
+    });
+    const story = await loadFlightStory('WN2512', { fresh: true });
+    assert.equal(story.origin.iata, 'MDW');
+    assert.equal(story.dest.iata, 'LGB');
+    assert.equal(story.times.pushed, false);
+    assert.equal(story.times.airborne, false);
+    assert.notEqual(story.currentStage, 'ride');
+    assert.equal(story.live, false);
+    assert.equal(story.aircraft?.registration, 'N8961K');
+    assert.equal(story.times.pushKind, 'estimated');
+  });
 });
