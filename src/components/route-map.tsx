@@ -499,16 +499,31 @@ export function RouteMap({ story }: { story: FlightStory }) {
         {story.hazards
           .filter((h) => h.lat != null && h.lon != null && (h.kind === "convective" || h.kind === "pirep"))
           .slice(0, 6)
-          .map((h) => (
-            <circle
-              key={h.id}
-              cx={sx(h.lon!)}
-              cy={sy(h.lat!)}
-              r={h.kind === "convective" ? 10 : 5}
-              className={h.kind === "convective" ? "fill-ifr/25 stroke-ifr/70" : "fill-mvfr/40"}
-              strokeWidth="1"
-            />
-          ))}
+          .map((h) => {
+            const storm = h.kind === "convective";
+            const cx = sx(h.lon!);
+            const cy = sy(h.lat!);
+            return (
+              <g key={h.id}>
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={storm ? 10 : 5}
+                  className={storm ? "fill-ifr/25 stroke-ifr/70" : "fill-mvfr/40"}
+                  strokeWidth="1"
+                />
+                <text
+                  x={cx + (storm ? 13 : 9)}
+                  y={cy + 3.5}
+                  className={storm ? "fill-ifr" : "fill-muted"}
+                  fontSize="11"
+                  fontFamily="IBM Plex Sans, system-ui, sans-serif"
+                >
+                  {storm ? "Storms" : "Bumps reported"}
+                </text>
+              </g>
+            );
+          })}
 
         {ticks.map((s) => (
           <g key={`t-${s.frac}`}>
@@ -520,7 +535,9 @@ export function RouteMap({ story }: { story: FlightStory }) {
               fontSize="11"
               fontFamily="IBM Plex Mono, ui-monospace, monospace"
             >
-              {s.chop === "smooth" ? formatDuration(s.etaMin) : `${formatDuration(s.etaMin)} ${s.chop}`}
+              {s.chop === "smooth"
+                ? formatDuration(s.etaMin)
+                : `${formatDuration(s.etaMin)} ${s.chop === "light" ? "light bumps" : "bumpier"}`}
             </text>
           </g>
         ))}
@@ -595,10 +612,18 @@ export function RouteMap({ story }: { story: FlightStory }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 border-t border-border px-3 py-2 text-xs text-muted">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
         <Legend swatch="bg-accent" label="Smooth" />
-        <Legend swatch="bg-mvfr" label="Light chop" />
-        <Legend swatch="bg-ifr" label="Moderate+" />
+        <Legend swatch="bg-mvfr" label="Light bumps" />
+        <Legend swatch="bg-ifr" label="Bumpier" />
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-2.5 rounded-full border border-ifr/70 bg-ifr/40" />
+          Storms nearby
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-1.5 rounded-full bg-mvfr" />
+          Bumps reported nearby
+        </span>
         <button
           type="button"
           onClick={() => setWeatherOn(!weatherOn)}
