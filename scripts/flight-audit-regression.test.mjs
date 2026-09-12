@@ -77,4 +77,11 @@ describe('September 12 flight audit replay', () => {
     const paused = await load();
     assert.equal(paused.times.pushed, true, 'taxi pause cannot erase the earlier pushback');
   });
+
+  it('does not invent ORD to LAX when the route feeds have no flight', async (t) => {
+    t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ ac: [], features: [] }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    await assert.rejects(loadFlightStory('UA9087', {fresh: true}), /route unavailable/i);
+  });
 });

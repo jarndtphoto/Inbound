@@ -2087,33 +2087,7 @@ async function buildStory(query) {
 	let live = rawAc ? toLive(rawAc) : liveFromAware(aware);
 	let origin = fieldFromKnown(aware?.originIata ?? null, aware?.originIcao ?? null, aware?.originLat ?? null, aware?.originLon ?? null, aware?.originName ?? null, aware?.originCity ?? null, aware?.originTz ?? null) ?? fieldFromAdsbdb(route?.origin);
 	let dest = fieldFromKnown(aware?.destIata ?? null, aware?.destIcao ?? null, aware?.destLat ?? null, aware?.destLon ?? null, aware?.destName ?? null, aware?.destCity ?? null, aware?.destTz ?? null) ?? fieldFromAdsbdb(route?.destination);
-	if (!origin && live) origin = nearestKnown(live);
-	if (!origin) origin = {
-		icao: "KORD",
-		iata: "ORD",
-		name: "O'Hare",
-		city: "Chicago",
-		lat: 41.9786,
-		lon: -87.9048,
-		tz: "America/Chicago",
-		decoded: null,
-		rawMetar: null,
-		nas: null,
-		category: "UNK"
-	};
-	if (!dest) dest = {
-		icao: "KLAX",
-		iata: "LAX",
-		name: "Los Angeles",
-		city: "Los Angeles",
-		lat: 33.9425,
-		lon: -118.408,
-		tz: "America/Los_Angeles",
-		decoded: null,
-		rawMetar: null,
-		nas: null,
-		category: "UNK"
-	};
+	if (!origin || !dest) throw new Error("Flight route unavailable. Try again when the flight feeds respond.");
 	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
 	live = asOnGround(live, origin);
@@ -2943,33 +2917,6 @@ async function buildStory(query) {
 			parkedAtGate
 		})
 	};
-}
-function nearestKnown(live) {
-	let best = null;
-	let bestD = Infinity;
-	for (const ap of Object.values(AIRPORT_BY_ICAO)) {
-		const d = haversineNm({
-			lat: live.lat,
-			lon: live.lon
-		}, ap);
-		if (d < bestD) {
-			bestD = d;
-			best = {
-				icao: ap.icao,
-				iata: ap.iata,
-				name: ap.name,
-				city: ap.city,
-				lat: ap.lat,
-				lon: ap.lon,
-				tz: ap.tz,
-				decoded: null,
-				rawMetar: null,
-				nas: null,
-				category: "UNK"
-			};
-		}
-	}
-	return best;
 }
 export async function loadFlightStory(query, opts) {
 	const fresh = Boolean(opts?.fresh);
