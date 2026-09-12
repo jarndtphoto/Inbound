@@ -29,7 +29,7 @@ export const briefRide = createServerFn({ method: "POST" })
       /* keep fallback sentence */
     }
 
-    const cacheKey = `${data.iata}:${data.now}:${data.delayMin}:${data.rideLabel}:${data.destNas}:${data.taxiInKind}:${data.land}`;
+    const cacheKey = `${data.iata}:${data.now}:${data.delayMin}:${data.rideLabel}:${data.destNas}:${data.taxiInKind}:${data.land}:${data.wxHash ?? ""}`;
     const hit = briefCache.get(cacheKey);
     if (hit && Date.now() - hit.at < 10 * 60_000) {
       return { ok: true as const, text: hit.text };
@@ -69,8 +69,9 @@ export const briefRide = createServerFn({ method: "POST" })
                 `Remaining ${Math.round(data.remainingNm)} nm, about ${formatHoursMinutes(data.etaMin)}.`,
                 `Push ${data.push ?? "n/a"}; taxi out ${data.taxiOutMin ?? "n/a"} min (${data.taxiOutKind ?? "n/a"}); wheels up ${data.takeoff ?? "n/a"}; land ${data.land ?? "n/a"}; taxi in ${data.taxiInMin ?? "n/a"} min (${data.taxiInKind ?? "n/a"}); dest gate ${data.destGate ?? "n/a"}.`,
                 `Departure delay vs original: ${data.delayMin ?? "n/a"} min. Typical slip: ${data.typicalDelayMin ?? "n/a"} min.`,
-                `Origin weather: ${data.originWx}. Origin NAS: ${data.originNas}.`,
-                `Dest weather: ${data.destWx}. Dest NAS: ${data.destNas}.`,
+                `Origin weather: ${data.originWx}. Origin TAF: ${data.originTaf ?? "n/a"}. Origin NAS: ${data.originNas}.`,
+                `Dest weather: ${data.destWx}. Dest TAF: ${data.destTaf ?? "n/a"}. Dest NAS: ${data.destNas}.`,
+                `Ride/weather hash: ${data.wxHash ?? "n/a"}. Weather deltas: ${(data.wxDeltas ?? []).join("; ") || "none"}. Corridor: ${data.corridorWx ?? "n/a"}.`,
                 `Inbound status: ${data.inboundStatus ?? "n/a"}. ${data.inbound}`,
                 `If this is an update, end with one short sentence starting "Updated because" explaining what changed in the facts, not that the app refreshed.`,
               ].join("\n"),

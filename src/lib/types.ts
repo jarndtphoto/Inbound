@@ -87,6 +87,7 @@ export type Hazard = {
   remaining: boolean;
   lat?: number;
   lon?: number;
+  source?: "observed" | "advisory" | "forecast";
 };
 
 export type NasDelay = {
@@ -112,6 +113,7 @@ export type FieldBrief = {
   nas: NasDelay | null;
   category: string;
   windDir?: number | null;
+  taf?: string | null;
 };
 
 export type LiveAircraft = {
@@ -191,6 +193,29 @@ export type FlightTimes = {
   origLandUnix?: number | null;
 };
 
+export type WxDigest = {
+  at: number;
+  hash: string;
+  worstChop: Chop;
+  ride: string;
+  convective: boolean;
+  pirepCount: number;
+  originCat: string;
+  destCat: string;
+  originTaf: string | null;
+  destTaf: string | null;
+  corridor: { iata: string; summary: string }[];
+  hazardLabels: string[];
+};
+
+export type WxBrief = {
+  filedAt: number;
+  filed: WxDigest;
+  live: WxDigest;
+  deltas: string[];
+  hash: string;
+};
+
 export type FlightStory = {
   fetchedAt: number;
   query: string;
@@ -214,6 +239,7 @@ export type FlightStory = {
   };
   hazards: Hazard[];
   comfort: Comfort;
+  wx?: WxBrief;
   inbound: {
     status: "complete" | "airborne" | "at_field" | "watching" | "unknown";
     headline: string;

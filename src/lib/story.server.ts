@@ -20,6 +20,19 @@ import {
 } from "./geo";
 import { decodeMetar } from "./metar";
 import {
+	decodeTafPassenger,
+	digestWx,
+	gairmetApplies,
+	gairmetChop as gairmetChopOf,
+	pirepAltFt,
+	pirepChop as pirepChopOf,
+	pirepMatchesSample,
+	rememberFiledWx,
+	sampleAltFt,
+	corridorStations,
+	wxDeltas,
+} from "./wx-brief";
+import {
 	fetchAround,
 	fetchByCallsign,
 	fetchByHex,
@@ -536,9 +549,8 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex)
 	const atc = String(aware?.atcIdent ?? "").replace(/\s/g, "").toUpperCase();
 	if (atc) vars.add(atc);
 	const tail = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
-	const type = String(aware?.type ?? "").toUpperCase();
+	const wantNum = String(parsed.callsign || "").replace(/\s/g, "").toUpperCase().match(/^[A-Z]{2,3}(\d+)/)?.[1]?.replace(/^0+/, "") || "";
 	const prefixes = identPrefixes(parsed.callsign);
-	const atcCands = [];
 	let locked = null;
 	for (const a of near) {
 		if (typeof a.lat !== "number" || typeof a.lon !== "number") continue;
@@ -549,30 +561,15 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex)
 		if (dOrig > maxNm && dDest > maxNm) continue;
 		const fl = String(a.flight ?? "").replace(/\s/g, "").toUpperCase();
 		const r = String(a.r ?? "").replace(/[-\s]/g, "").toUpperCase();
-		const t = String(a.t ?? "").toUpperCase();
 		const hex = String(a.hex ?? "").toLowerCase();
-		if (lockedHex && hex === String(lockedHex).toLowerCase()) locked = a;
-		if (vars.has(fl)) {
-			const exact = stickyPick(lockedHex, [a, locked].filter(Boolean), {
-				isExact: (raw) => vars.has(String(raw.flight ?? "").replace(/\s/g, "").toUpperCase())
-			});
-			if (exact) return exact;
-			return a;
-		}
+		if (lockedHex && hex === String(lockedHex).toLowerCase() && rawMatchesQuery(a, parsed, aware)) locked = a;
+		if (vars.has(fl)) return a;
 		if (tail && r === tail) return a;
-		if (!isAtcCallsign(fl, prefixes)) continue;
-		atcCands.push({
-			a,
-			typeExact: Boolean(type) && t === type,
-			gs: typeof a.gs === "number" ? a.gs : 0
-		});
+		if (wantNum && prefixes.some((p) => fl.startsWith(p))) {
+			const num = fl.match(/^[A-Z]{2,3}(\d+)/)?.[1]?.replace(/^0+/, "");
+			if (num && num === wantNum) return a;
+		}
 	}
-	if (locked && fusionSeen(locked) <= 32) return locked;
-	if (atcCands.length === 1) return atcCands[0].a;
-	const exactType = atcCands.filter((c) => c.typeExact);
-	if (exactType.length === 1) return exactType[0].a;
-	const movingExact = exactType.filter((c) => c.gs >= 2);
-	if (movingExact.length === 1) return movingExact[0].a;
 	return locked;
 }
 function seenOf(a) {
@@ -613,6 +610,18 @@ async function adsbAround(lat, lon, dist) {
 function headingDelta(a, b) {
 	const d = Math.abs(wrap360(a) - wrap360(b));
 	return Math.min(d, 360 - d);
+}
+function remainingEtaMin(remainingNm, live, aware) {
+	const now = Date.now() / 1e3;
+	const fa = aware?.landing?.estimated ?? aware?.landing?.scheduled ?? null;
+	const faMin = typeof fa === "number" && fa > now ? (fa - now) / 60 : null;
+	const gs = live?.gsKt ?? 0;
+	const nearDest = remainingNm < 80;
+	const speed = gs > 120 && nearDest ? gs : Math.max(420, gs > 300 ? gs : 0) || 440;
+	const kin = remainingNm / speed * 60;
+	if (nearDest && gs > 120) return Math.max(1, kin);
+	if (faMin != null && faMin > 1) return faMin;
+	return Math.max(1, kin);
 }
 async function loadRoute(callsign) {
 	return cached(`route:${callsign}`, 18e5, async () => {
@@ -1045,17 +1054,28 @@ async function loadMetar(icao) {
 		return { metar: (await safe(fetchJson(`https://aviationweather.gov/api/data/metar?ids=${icao}&format=json&hours=2`), []))[0] ?? null };
 	});
 }
+async function loadTaf(icao) {
+	if (!icao) return null;
+	return cached(`taf:${icao}`, 60e3, async () => {
+		const rows = await safe(fetchJson(`https://aviationweather.gov/api/data/taf?ids=${icao}&format=json`), []);
+		return Array.isArray(rows) ? rows[0] ?? null : null;
+	});
+}
 async function loadHazards() {
 	return cached("hazards", 22e3, async () => {
-		const [gairmet, sigmet, pirep] = await Promise.all([
+		const [gairmet, sigmet, pirep, cwa, tcf] = await Promise.all([
 			safe(fetchJson("https://aviationweather.gov/api/data/gairmet?format=geojson").then((d) => d.features ?? []), []),
 			safe(fetchJson("https://aviationweather.gov/api/data/airsigmet?format=geojson").then((d) => d.features ?? []), []),
-			safe(fetchJson("https://aviationweather.gov/api/data/pirep?format=geojson&age=2").then((d) => d.features ?? []), [])
+			safe(fetchJson("https://aviationweather.gov/api/data/pirep?format=geojson").then((d) => d.features ?? []), []),
+			safe(fetchJson("https://aviationweather.gov/api/data/cwa?format=geojson").then((d) => d.features ?? []), []),
+			safe(fetchJson("https://aviationweather.gov/api/data/tcf?format=geojson").then((d) => d.features ?? []), [])
 		]);
 		return {
 			gairmet,
 			sigmet,
-			pirep
+			pirep,
+			cwa,
+			tcf
 		};
 	});
 }
@@ -1108,20 +1128,11 @@ function chopRank(c) {
 function worse(a, b) {
 	return chopRank(a) >= chopRank(b) ? a : b;
 }
-function gairmetChop(hazard) {
-	const h = hazard.toUpperCase();
-	if (h === "TURB-HI") return "moderate";
-	if (h === "TURB-LO") return "light";
-	if (h === "LLWS") return "light";
-	return null;
+function gairmetChop(hazard, severity) {
+	return gairmetChopOf(hazard, severity);
 }
 function pirepChop(tb) {
-	const t = (tb ?? "").toUpperCase();
-	if (!t) return null;
-	if (t.includes("SEV") || t.includes("EXT")) return "severe";
-	if (t.includes("MOD")) return "moderate";
-	if (t.includes("LGT") || t.includes("LIGHT")) return "light";
-	return null;
+	return pirepChopOf(tb);
 }
 function letterOf(score) {
 	const s = Math.max(22, Math.min(99, Math.round(score)));
@@ -1432,7 +1443,7 @@ function timesOf(aware, origin, dest) {
 		delayMin,
 		arriveDelayMin,
 		typicalDelayMin,
-		pushed: Boolean(aware.gateOut.actual),
+		pushed: false,
 		airborne: Boolean(aware.takeoff.actual),
 		pushUnix: go,
 		takeoffUnix: to,
@@ -1481,6 +1492,7 @@ const gateLatch = /* @__PURE__ */ new Map();
 const pushLatch = /* @__PURE__ */ new Map();
 const parkByFlight = /* @__PURE__ */ new Map();
 const hexByIdent = /* @__PURE__ */ new Map();
+const hexRouteByIdent = /* @__PURE__ */ new Map();
 function inboundSnapKey(aware, origin, dest, query) {
 	if (aware) return origKey(aware);
 	const day = new Date().toISOString().slice(0, 10);
@@ -1690,7 +1702,7 @@ function currentStageOf(args) {
 	return "inbound";
 }
 async function hydrateField(base) {
-	const [{ metar }, nas] = await Promise.all([loadMetar(base.icao), loadNas(base.iata)]);
+	const [{ metar }, nas, taf] = await Promise.all([loadMetar(base.icao), loadNas(base.iata), loadTaf(base.icao)]);
 	const decoded = metar ? decodeMetar(metar) : null;
 	const wd = typeof metar?.wdir === "number" ? metar.wdir : Number(metar?.wdir);
 	return {
@@ -1700,7 +1712,9 @@ async function hydrateField(base) {
 		nas,
 		category: decoded?.category ?? "UNK",
 		windDir: Number.isFinite(wd) ? wd : null,
-		windKt: typeof metar?.wspd === "number" ? metar.wspd : null
+		windKt: typeof metar?.wspd === "number" ? metar.wspd : null,
+		taf: decodeTafPassenger(taf, Date.now() / 1e3),
+		tafRaw: taf
 	};
 }
 function rampWx(decoded) {
@@ -1825,7 +1839,7 @@ async function buildStory(query) {
 	const parsed = parseFlightQuery(query);
 	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
 	const identKey = parsed.callsign.toUpperCase();
-	const knownHex = hexByIdent.get(identKey) || null;
+	let knownHex = hexByIdent.get(identKey) || null;
 	const [rawAc0, aware, route] = await Promise.all([
 		knownHex
 			? safe(adsbByHex(knownHex), null)
@@ -1836,9 +1850,10 @@ async function buildStory(query) {
 		safe(loadRoute(parsed.callsign), null)
 	]);
 	let rawAc = rawAc0;
-	if (rawAc && !rawMatchesQuery(rawAc, parsed, aware) && String(rawAc.flight ?? "").trim()) {
+	if (rawAc && !rawMatchesQuery(rawAc, parsed, aware)) {
 		rawAc = null;
 		hexByIdent.delete(identKey);
+		hexRouteByIdent.delete(identKey);
 	}
 	if (!rawAc && knownHex) rawAc = parsed.registration
 		? await safe(adsbByReg(parsed.registration), null)
@@ -1875,18 +1890,33 @@ async function buildStory(query) {
 		category: "UNK"
 	};
 	live = asOnGround(live, origin);
+	const routeKey = `${origin.iata}|${dest.iata}`;
+	if (hexRouteByIdent.get(identKey) && hexRouteByIdent.get(identKey) !== routeKey) {
+		hexByIdent.delete(identKey);
+		hexRouteByIdent.delete(identKey);
+		knownHex = null;
+		if (live && !flightIdentOk(live.callsign, parsed, aware) && !(aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase())) {
+			live = null;
+		}
+	}
+	if (aware?.takeoff?.actual && live?.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 15 && Date.now() / 1e3 - aware.takeoff.actual > 4 * 60) {
+		live = null;
+		hexByIdent.delete(identKey);
+		hexRouteByIdent.delete(identKey);
+	}
 	let fieldList = [];
 	const hexHint = (live?.hex || knownHex || aware?.hex || "").toLowerCase();
 	if (hexHint && /^[0-9a-f]{6}$/.test(hexHint)) {
 		const freshRaw = await safe(adsbByHex(hexHint), null);
-		if (freshRaw && (rawMatchesQuery(freshRaw, parsed, aware) || !String(freshRaw.flight ?? "").trim())) {
+		if (freshRaw && rawMatchesQuery(freshRaw, parsed, aware)) {
 			const cand = asOnGround(toLive(freshRaw), origin);
 			if (cand) live = cand;
 		} else if (freshRaw && String(freshRaw.flight ?? "").trim()) {
 			hexByIdent.delete(identKey);
+			hexRouteByIdent.delete(identKey);
 		}
 	}
-	if (origin && !Boolean(aware?.landing?.actual) && !flightBegun(live, origin)) {
+	if (origin && !Boolean(aware?.landing?.actual) && !Boolean(aware?.takeoff?.actual) && !flightBegun(live, origin)) {
 		const alreadyAtDest = Boolean(live && dest && haversineNm({ lat: live.lat, lon: live.lon }, dest) < 12);
 		if (!alreadyAtDest) {
 			fieldList = await safe(adsbAround(origin.lat, origin.lon, 12), []);
@@ -1940,9 +1970,10 @@ async function buildStory(query) {
 		const identOk = flightIdentOk(live.callsign, parsed, aware) ||
 			(aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase());
 		if (ourLanded && dDest > 20 && !identOk) live = null;
+		else if (!identOk && dOrig < 15 && Boolean(aware?.takeoff?.actual)) live = null;
 		else if (!ourLanded && !identOk && !aware?.takeoff?.actual && dDest < 12 && dOrig > 20) live = null;
 	}
-	if (!live && origin && !ourLanded) {
+	if (!live && origin && !ourLanded && !Boolean(aware?.takeoff?.actual)) {
 		const near = await safe(adsbAround(origin.lat, origin.lon, 48), []);
 		const match = pickAroundAircraft(near, parsed, aware, origin, dest, 48, knownHex);
 		if (match) live = asOnGround(toLive(match), origin);
@@ -1962,8 +1993,14 @@ async function buildStory(query) {
 			if (!ourLanded && !cand.onGround && dDest > 25) { live = cand; break; }
 		}
 	}
-	if (live?.hex) hexByIdent.set(identKey, live.hex);
-	if (aware?.hex && !hexByIdent.get(identKey)) hexByIdent.set(identKey, String(aware.hex).toLowerCase());
+	if (live?.hex && (flightIdentOk(live.callsign, parsed, aware) || (aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase()))) {
+		hexByIdent.set(identKey, live.hex);
+		hexRouteByIdent.set(identKey, routeKey);
+	}
+	if (aware?.hex && !hexByIdent.get(identKey)) {
+		hexByIdent.set(identKey, String(aware.hex).toLowerCase());
+		hexRouteByIdent.set(identKey, routeKey);
+	}
 	if (live && dest && !live.onGround && ((live.altFt ?? 0) > 1500 || (live.gsKt ?? 0) > 80) && haversineNm({ lat: live.lat, lon: live.lon }, dest) > 6) {
 		if (landedLatch.get(landKey)) {
 			live = null;
@@ -2002,7 +2039,7 @@ async function buildStory(query) {
 	const atGateFa = inboundAtGate(inboundAware);
 	const onField = Boolean(live && stillOnField(live, origin));
 	const faSaysAir = /airborne|en.?route|climbed|departed/i.test(aware?.status ?? "");
-	const ourAirborne = Boolean(flightBegun(live, origin)) || (!live && (Boolean(aware?.takeoff?.actual) || faSaysAir));
+	const ourAirborne = Boolean(flightBegun(live, origin)) || Boolean(aware?.takeoff?.actual) || (Boolean(faSaysAir) && live && !live.onGround);
 	let inboundRaw = null;
 	if (!inboundLocked && !atGateFa) {
 		const tail = inboundAware?.tail ?? existingSnap?.tail ?? null;
@@ -2096,7 +2133,7 @@ async function buildStory(query) {
 		progress = 0;
 		remainingNm = totalNm;
 	}
-	const etaMin = remainingNm / (live?.gsKt && live.gsKt > 80 ? live.gsKt : 450) * 60;
+	const etaMin = remainingEtaMin(remainingNm, live, aware);
 	const heading = ourLanded
 		? initialBearing(path[Math.max(0, path.length - 2)] ?? start, end)
 		: live?.track ?? initialBearing(start, end);
@@ -2114,30 +2151,30 @@ async function buildStory(query) {
 		}, 0);
 		const frac = distNm / totalNm;
 		const remainingHere = Math.max(0, totalNm - distNm);
+		const sampleAlt = sampleAltFt(frac, remainingHere, live?.altFt ?? null);
 		let chop = "smooth";
 		let cloud = false;
 		let convective = false;
 		const notes = [];
-		const arriving = remainingNm < 50 || Boolean(live && !live.onGround && (live.altFt ?? 9e4) < 14000);
-		const skipHi = arriving || remainingHere < 55 || frac >= 0.86 || (live?.altFt != null && live.altFt < 18000);
 		for (const f of hazardsPack.gairmet) {
 			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
 			const hazard = String(f.properties?.hazard ?? "");
 			const due = String(f.properties?.dueTo ?? "");
-			const c = gairmetChop(hazard);
+			if (!gairmetApplies(hazard, f.properties, sampleAlt)) continue;
+			const c = gairmetChop(hazard, f.properties?.severity);
 			if (c) {
-				if (hazard === "TURB-HI" && skipHi) continue;
 				chop = worse(chop, c);
-				notes.push(hazard === "TURB-HI" ? "High-altitude turbulence airmet" : "Low-level turbulence airmet");
+				notes.push(hazard === "TURB-HI" ? "High-altitude turbulence airmet" : hazard === "LLWS" ? "Low-level wind shear" : "Low-level turbulence airmet");
 				hazards.push({
 					id: `g-${hazard}-${i}`,
 					kind: "turb",
 					chop: c,
-					label: hazard === "TURB-HI" ? "High turbulence airmet" : "Low turbulence airmet",
+					label: hazard === "TURB-HI" ? "High turbulence airmet" : hazard === "LLWS" ? "Low-level wind shear" : "Low turbulence airmet",
 					detail: due || hazard,
 					remaining: frac >= progress,
 					lat: p.lat,
-					lon: p.lon
+					lon: p.lon,
+					source: "advisory"
 				});
 			}
 			if (hazard === "IFR" || hazard === "MT_OBSC") {
@@ -2164,13 +2201,68 @@ async function buildStory(query) {
 					detail: String(f.properties?.rawAirSigmet ?? "Convective SIGMET").slice(0, 160),
 					remaining: frac >= progress,
 					lat: p.lat,
-					lon: p.lon
+					lon: p.lon,
+					source: "advisory"
 				});
 			} else if (hz.includes("TURB")) {
-				if (skipHi) continue;
+				if (!gairmetApplies("TURB-HI", f.properties, sampleAlt)) continue;
 				chop = worse(chop, "moderate");
 				notes.push("Turbulence SIGMET");
+				hazards.push({
+					id: `st-${i}`,
+					kind: "turb",
+					chop: "moderate",
+					label: "Turbulence SIGMET",
+					detail: String(f.properties?.rawAirSigmet ?? hz).slice(0, 140),
+					remaining: frac >= progress,
+					lat: p.lat,
+					lon: p.lon,
+					source: "advisory"
+				});
 			}
+		}
+		for (const f of hazardsPack.cwa ?? []) {
+			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
+			const txt = String(f.properties?.text ?? f.properties?.hazard ?? f.properties?.cwaText ?? "CWA").toUpperCase();
+			if (txt.includes("TS") || txt.includes("CONVECT")) {
+				convective = true;
+				chop = worse(chop, "moderate");
+				notes.push("Center weather advisory — storms");
+				hazards.push({
+					id: `cwa-${i}`,
+					kind: "convective",
+					chop: "moderate",
+					label: "Center weather advisory",
+					detail: String(f.properties?.text ?? txt).slice(0, 140),
+					remaining: frac >= progress,
+					lat: p.lat,
+					lon: p.lon,
+					source: "advisory"
+				});
+			} else if (txt.includes("TURB")) {
+				if (!gairmetApplies("TURB-HI", f.properties, sampleAlt)) continue;
+				chop = worse(chop, "light");
+				notes.push("Center weather advisory — turbulence");
+			}
+		}
+		for (const f of hazardsPack.tcf ?? []) {
+			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
+			const cov = String(f.properties?.coverage ?? "").toLowerCase();
+			const chopF = cov === "solid" || cov === "medium" ? "moderate" : "light";
+			convective = true;
+			chop = worse(chop, chopF);
+			notes.push("Forecast storms (TCF)");
+			hazards.push({
+				id: `tcf-${i}`,
+				kind: "convective",
+				chop: chopF,
+				label: "Forecast storms (TCF)",
+				detail: `TFM convective forecast · ${cov || "area"} coverage, tops ${f.properties?.tops ?? "—"}. Forecast, not a SIGMET.`,
+				remaining: frac >= progress,
+				lat: p.lat,
+				lon: p.lon,
+				source: "forecast"
+			});
 		}
 		const etaHere = frac <= progress ? 0 : (frac - progress) / Math.max(.01, 1 - progress) * etaMin;
 		return {
@@ -2192,19 +2284,20 @@ async function buildStory(query) {
 		if (!coords || coords.length < 2) continue;
 		const lon = coords[0];
 		const lat = coords[1];
-		const c = pirepChop(String(f.properties?.tbInt1 ?? f.properties?.turbulence ?? f.properties?.tb ?? f.properties?.rawOb ?? ""));
-		if (!c) continue;
-		let nearest = Infinity;
-		for (const s of samples) {
-			const d = haversineNm({
-				lat,
-				lon
-			}, s);
-			if (d < nearest) nearest = d;
-		}
-		if (nearest > 90) continue;
-		if (remainingNm < 50) continue;
 		const raw = String(f.properties?.rawOb ?? "PIREP");
+		const c = pirepChop(String(f.properties?.tbInt1 ?? f.properties?.turbulence ?? f.properties?.tb ?? raw));
+		if (!c) continue;
+		const pAlt = pirepAltFt(f.properties, raw);
+		if (remainingNm < 50 && (pAlt == null || pAlt > 14_000)) continue;
+		let hit = false;
+		for (const s of samples) {
+			const d = haversineNm({ lat, lon }, s);
+			const sAlt = sampleAltFt(s.frac, s.remainingNm, live?.altFt ?? null);
+			if (!pirepMatchesSample({ lat, lon, altFt: pAlt }, { lat: s.lat, lon: s.lon, altFt: sAlt }, d)) continue;
+			s.chop = worse(s.chop, c);
+			hit = true;
+		}
+		if (!hit) continue;
 		hazards.push({
 			id: `p-${lat.toFixed(2)}-${lon.toFixed(2)}`,
 			kind: "pirep",
@@ -2213,12 +2306,9 @@ async function buildStory(query) {
 			detail: raw.slice(0, 140),
 			remaining: true,
 			lat,
-			lon
+			lon,
+			source: "observed"
 		});
-		for (const s of samples) if (haversineNm({
-			lat,
-			lon
-		}, s) < 80) s.chop = worse(s.chop, c);
 	}
 	const seenH = /* @__PURE__ */ new Set();
 	const uniqHazards = hazards.filter((h) => {
@@ -2245,43 +2335,28 @@ async function buildStory(query) {
 		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
 	}
 	const offRamp = Boolean(live && live.onGround && atOrigLive && dOrigLive >= 0.65);
-	const nowSec = Date.now() / 1e3;
 	const parkedAtStand = Boolean(live && live.onGround && atOrigLive && (live.gsKt ?? 0) < 1.2 && dOrigLive < 0.38);
-	const awayFromOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) > 8);
-	const faPushUnix = times.pushUnix;
-	const faPushedClock = Boolean(
-		!ourLanded &&
-		!aware?.takeoff?.actual &&
-		!parkedAtStand &&
-		!awayFromOrigin &&
-		faPushUnix &&
-		nowSec > faPushUnix + 90
-	);
-	const faTaxiClock = Boolean(faPushedClock && nowSec > faPushUnix + 3 * 60);
 	const leftGate = Boolean(
 		!ourLanded &&
 		(
 			(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 1.2 || distPark >= 0.025 || live.phase === "taxi" || offRamp)) ||
 			motion.pushed ||
-			motion.taxiing ||
-			Boolean(aware?.gateOut?.actual) ||
-			faPushedClock
+			motion.taxiing
 		)
 	);
 	const taxiHint = Boolean(
 		motion.taxiing ||
 		offRamp ||
-		faTaxiClock ||
 		(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 2 || distPark >= 0.07 || live.phase === "taxi"))
 	);
 	if (ourAirborne && !times.airborne) {
 		times = { ...times, airborne: true };
 	}
+	if (parkedAtStand) pushLatch.delete(landKey);
 	if (leftGate && !times.pushed) {
 		const now = Date.now() / 1e3;
 		const otz = tzOf(origin);
-		const actual = aware?.gateOut?.actual;
-		const pushUnix = actual ?? (times.pushUnix != null && times.pushUnix <= now + 120 ? Math.min(times.pushUnix, now) : now);
+		const pushUnix = now;
 		const origPush = times.origPushUnix ?? pushUnix;
 		const delayMin = slipMin(pushUnix, origPush);
 		times = {
@@ -2293,33 +2368,43 @@ async function buildStory(query) {
 			pushWas: delayMin != null && delayMin >= 5 ? clockAt(origPush, otz) : times.pushWas
 		};
 	}
-	if (leftGate || times.airborne || (live && !live.onGround) || Boolean(aware?.gateOut?.actual)) {
-		const stamped = aware?.gateOut?.actual ?? (leftGate ? times.pushUnix : null) ?? pushLatch.get(landKey) ?? null;
-		if (stamped) pushLatch.set(landKey, stamped);
-	} else if (!live && !aware?.gateOut?.actual && !times.airborne) {
-		pushLatch.delete(landKey);
+	if (leftGate || times.airborne || (live && !live.onGround)) {
+		const unix = times.pushUnix ?? Date.now() / 1e3;
+		pushLatch.set(landKey, { unix, live: true, at: Date.now() / 1e3 });
+	} else if (!live && !times.airborne) {
+		const prev = pushLatch.get(landKey);
+		if (!prev || typeof prev !== "object" || !prev.live) pushLatch.delete(landKey);
 	}
-	const latchedPush = pushLatch.get(landKey);
-	if (latchedPush && !times.pushed) {
-		const otz = tzOf(origin);
-		const origPush = times.origPushUnix ?? latchedPush;
-		const delayMin = slipMin(latchedPush, origPush);
-		times = {
-			...times,
-			pushed: true,
-			pushUnix: latchedPush,
-			push: clockAt(latchedPush, otz),
-			delayMin,
-			pushWas: delayMin != null && delayMin >= 5 ? clockAt(origPush, otz) : times.pushWas
-		};
+	const latched = pushLatch.get(landKey);
+	const latchUnix = latched && typeof latched === "object" ? latched.unix : typeof latched === "number" ? null : null;
+	if (latchUnix && !times.pushed && !parkedAtStand) {
+		const age = Date.now() / 1e3 - (latched.at ?? latchUnix);
+		if (live || times.airborne || (latched.live && age < 180)) {
+			const otz = tzOf(origin);
+			const origPush = times.origPushUnix ?? latchUnix;
+			const delayMin = slipMin(latchUnix, origPush);
+			times = {
+				...times,
+				pushed: true,
+				pushUnix: latchUnix,
+				push: clockAt(latchUnix, otz),
+				delayMin,
+				pushWas: delayMin != null && delayMin >= 5 ? clockAt(origPush, otz) : times.pushWas
+			};
+		}
 	}
 	if (!ourLanded && (ourAirborne || (live && !live.onGround)) && etaMin > 2) {
-		const landUnix = Date.now() / 1e3 + etaMin * 60;
-		times = {
-			...times,
-			landUnix,
-			land: clockAt(landUnix, tzOf(dest))
-		};
+		const faLand = aware?.landing?.estimated ?? aware?.landing?.scheduled ?? null;
+		const landUnix = typeof faLand === "number" && faLand > Date.now() / 1e3 - 60
+			? faLand
+			: Date.now() / 1e3 + etaMin * 60;
+		if (!times.land || remainingNm < 80 || !faLand) {
+			times = {
+				...times,
+				landUnix,
+				land: clockAt(landUnix, tzOf(dest))
+			};
+		}
 	}
 	if (times.taxiOutKind !== "measured") {
 		const wheelsUp = Boolean(live && !live.onGround) || (Boolean(aware?.takeoff?.actual) && !(live && live.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 12));
@@ -2469,6 +2554,41 @@ async function buildStory(query) {
 			phase: "parked"
 		};
 	}
+	if (times.landUnix || times.pushUnix) {
+		origin.taf = decodeTafPassenger(origin.tafRaw, times.pushUnix ?? Date.now() / 1e3) ?? origin.taf;
+		dest.taf = decodeTafPassenger(dest.tafRaw, times.landUnix ?? Date.now() / 1e3) ?? dest.taf;
+	}
+	const corridorAps = corridorStations(path, origin.iata, dest.iata, Object.values(AIRPORT_BY_ICAO), haversineNm);
+	const corridor = [];
+	if (corridorAps.length) {
+		const mets = await Promise.all(corridorAps.map((ap) => safe(loadMetar(ap.icao), { metar: null })));
+		for (let i = 0; i < corridorAps.length; i++) {
+			const m = mets[i]?.metar;
+			if (!m) continue;
+			const dec = decodeMetar(m);
+			const wxBit = dec.wx && !/no significant/i.test(dec.wx) ? ` · ${dec.wx}` : "";
+			corridor.push({ iata: corridorAps[i].iata, summary: `${dec.category}${wxBit}` });
+		}
+	}
+	const liveWx = digestWx({
+		samples,
+		hazards: uniqHazards,
+		originCat: origin.category ?? "UNK",
+		destCat: dest.category ?? "UNK",
+		originTaf: origin.taf ?? null,
+		destTaf: dest.taf ?? null,
+		corridor,
+		progress
+	});
+	const filedKey = aware ? origKey(aware) : `${identKey}|${origin.iata}|${dest.iata}`;
+	const filedWx = rememberFiledWx(filedKey, liveWx);
+	const wx = {
+		filedAt: filedWx.at,
+		filed: filedWx,
+		live: liveWx,
+		deltas: wxDeltas(filedWx, liveWx),
+		hash: liveWx.hash
+	};
 	return {
 		fetchedAt: Date.now(),
 		query,
@@ -2492,6 +2612,7 @@ async function buildStory(query) {
 		},
 		hazards: uniqHazards.slice(0, 12),
 		comfort,
+		wx,
 		inbound,
 		times,
 		stages: buildStages({

@@ -1,0 +1,286 @@
+import type { Chop, Hazard, RouteSample } from "./types";
+import type { Taf } from "./metar";
+
+export type WxDigest = {
+  at: number;
+  hash: string;
+  worstChop: Chop;
+  ride: string;
+  convective: boolean;
+  pirepCount: number;
+  originCat: string;
+  destCat: string;
+  originTaf: string | null;
+  destTaf: string | null;
+  corridor: { iata: string; summary: string }[];
+  hazardLabels: string[];
+};
+
+export type WxBrief = {
+  filedAt: number;
+  filed: WxDigest;
+  live: WxDigest;
+  deltas: string[];
+  hash: string;
+};
+
+const filedWxByFlight = new Map<string, WxDigest>();
+
+export function resetFiledWx() {
+  filedWxByFlight.clear();
+}
+
+export function worseChop(a: Chop, b: Chop): Chop {
+  const rank: Record<Chop, number> = { smooth: 0, light: 1, moderate: 2, severe: 3 };
+  return rank[a] >= rank[b] ? a : b;
+}
+
+/** Estimate sample altitude along the remaining filed track. */
+export function sampleAltFt(frac: number, remainingNm: number, liveAlt: number | null | undefined): number {
+  const cruise = liveAlt != null && liveAlt > 18_000 ? liveAlt : 35_000;
+  if (remainingNm < 6) return Math.min(2_000, liveAlt ?? 2_000);
+  if (remainingNm < 25) return 6_000;
+  if (remainingNm < 55) return 12_000;
+  if (remainingNm < 90) return 18_000;
+  if (frac < 0.04) return 5_000;
+  if (frac < 0.1) return 16_000;
+  if (frac < 0.16) return 26_000;
+  return cruise;
+}
+
+/** G-AIRMET top/base are usually flight levels ("210") or "SFC". */
+export function bandFt(base: unknown, top: unknown): { lo: number; hi: number } {
+  const parse = (v: unknown): number | null => {
+    if (v == null || v === "") return null;
+    const s = String(v).toUpperCase().trim();
+    if (s === "SFC" || s === "GND" || s === "SURFACE") return 0;
+    const n = parseInt(s.replace(/[^0-9]/g, ""), 10);
+    if (!Number.isFinite(n)) return null;
+    if (n <= 600) return n * 100;
+    return n;
+  };
+  return { lo: parse(base) ?? 0, hi: parse(top) ?? 45_000 };
+}
+
+export function altOverlaps(sampleAlt: number, lo: number, hi: number, pad = 2_000): boolean {
+  return sampleAlt >= lo - pad && sampleAlt <= hi + pad;
+}
+
+export function gairmetChop(hazard: string, severity?: string | null): Chop | null {
+  const h = String(hazard || "").toUpperCase();
+  const sev = String(severity || "").toUpperCase();
+  let fromSev: Chop | null = null;
+  if (sev.includes("SEV") || sev.includes("EXT")) fromSev = "severe";
+  else if (sev.includes("MOD")) fromSev = "moderate";
+  else if (sev.includes("LGT") || sev.includes("ISOL") || sev.includes("LIGHT")) fromSev = "light";
+  if (h === "TURB-HI") return fromSev ?? "moderate";
+  if (h === "TURB-LO") return fromSev ?? "light";
+  if (h === "LLWS") return "light";
+  return null;
+}
+
+/** High-alt AIRMET/SIGMET should not paint the arrival at 3,000 ft. */
+export function gairmetApplies(hazard: string, props: { base?: unknown; top?: unknown } | null | undefined, sampleAlt: number): boolean {
+  const h = String(hazard || "").toUpperCase();
+  if (h === "LLWS") return sampleAlt <= 4_000;
+  if (h === "IFR" || h === "MT_OBSC") return sampleAlt <= 12_000;
+  const { lo, hi } = bandFt(props?.base, props?.top);
+  if (h === "TURB-HI" && (lo > 0 || hi < 45_000)) return altOverlaps(sampleAlt, lo || 18_000, hi);
+  if (h === "TURB-LO" && (lo > 0 || hi < 45_000 || String(props?.base || "").toUpperCase() === "SFC")) {
+    return altOverlaps(sampleAlt, lo, hi || 18_000);
+  }
+  if (h === "TURB-HI") return sampleAlt >= 16_000;
+  if (h === "TURB-LO") return sampleAlt <= 20_000;
+  return altOverlaps(sampleAlt, lo, hi);
+}
+
+export function pirepChop(tb: string): Chop | null {
+  const t = (tb ?? "").toUpperCase();
+  if (!t) return null;
+  if (t.includes("SEV") || t.includes("EXT")) return "severe";
+  if (t.includes("MOD")) return "moderate";
+  if (t.includes("LGT") || t.includes("LIGHT")) return "light";
+  return null;
+}
+
+export function pirepAltFt(props: Record<string, unknown> | null | undefined, raw = ""): number | null {
+  const p = props ?? {};
+  const candidates = [p.fltLvl, p.fltlvl, p.fltlvl1, p.altitude, p.alt, p.fl];
+  for (const c of candidates) {
+    if (c == null || c === "") continue;
+    const s = String(c).toUpperCase();
+    if (s === "SFC") return 0;
+    const n = parseInt(s.replace(/[^0-9]/g, ""), 10);
+    if (!Number.isFinite(n)) continue;
+    if (n <= 600) return n * 100;
+    return n;
+  }
+  const m = String(raw).toUpperCase().match(/\bFL?\s?(\d{2,3})\b/);
+  if (m) return parseInt(m[1], 10) * 100;
+  return null;
+}
+
+export function pirepMatchesSample(
+  pirep: { lat: number; lon: number; altFt: number | null },
+  sample: { lat: number; lon: number; altFt: number },
+  distNm: number,
+  maxNm = 42,
+  altPad = 8_000,
+): boolean {
+  if (distNm > maxNm) return false;
+  if (pirep.altFt == null) return distNm <= Math.min(28, maxNm);
+  return Math.abs(pirep.altFt - sample.altFt) <= altPad;
+}
+
+export function rideFromChop(chop: Chop, storms: boolean): string {
+  let ride = "Smooth ride";
+  if (chop === "severe") ride = "Severe chop";
+  else if (chop === "moderate") ride = "Moderate chop";
+  else if (chop === "light") ride = "Light chop";
+  if (storms) ride = `${ride}. Storms on the path`;
+  return ride;
+}
+
+export function wxHashOf(d: Omit<WxDigest, "at" | "hash">): string {
+  return [
+    d.worstChop,
+    d.convective ? "ts" : "clear",
+    `p${d.pirepCount}`,
+    d.originCat,
+    d.destCat,
+    d.originTaf ?? "",
+    d.destTaf ?? "",
+    d.hazardLabels.slice(0, 8).join(","),
+  ].join("|");
+}
+
+export function digestWx(args: {
+  samples: Pick<RouteSample, "chop" | "convective" | "frac">[];
+  hazards: Pick<Hazard, "kind" | "chop" | "label" | "remaining">[];
+  originCat: string;
+  destCat: string;
+  originTaf?: string | null;
+  destTaf?: string | null;
+  corridor?: { iata: string; summary: string }[];
+  progress?: number;
+  at?: number;
+}): WxDigest {
+  const progress = args.progress ?? 0;
+  const ahead = args.samples.filter((s) => s.frac >= progress);
+  const worst = ahead.reduce((acc, s) => worseChop(acc, s.chop), "smooth" as Chop);
+  const convective = ahead.some((s) => s.convective);
+  const remainingHaz = args.hazards.filter((h) => h.remaining);
+  const pirepCount = remainingHaz.filter((h) => h.kind === "pirep").length;
+  const hazardLabels = [...new Set(remainingHaz.map((h) => h.label))].slice(0, 8);
+  const body = {
+    worstChop: worst,
+    ride: rideFromChop(worst, convective),
+    convective,
+    pirepCount,
+    originCat: args.originCat,
+    destCat: args.destCat,
+    originTaf: args.originTaf ?? null,
+    destTaf: args.destTaf ?? null,
+    corridor: args.corridor ?? [],
+    hazardLabels,
+  };
+  return { at: args.at ?? Date.now(), hash: wxHashOf(body), ...body };
+}
+
+export function rememberFiledWx(key: string, live: WxDigest): WxDigest {
+  const prev = filedWxByFlight.get(key);
+  if (prev) return prev;
+  filedWxByFlight.set(key, live);
+  return live;
+}
+
+export function wxDeltas(filed: WxDigest, live: WxDigest): string[] {
+  const bits: string[] = [];
+  if (filed.worstChop !== live.worstChop) {
+    bits.push(`ride call moved from ${filed.ride.split(".")[0].toLowerCase()} to ${live.ride.split(".")[0].toLowerCase()}`);
+  }
+  if (!filed.convective && live.convective) bits.push("thunderstorms now clip the remaining path");
+  if (filed.convective && !live.convective) bits.push("the storm SIGMET dropped off the remaining path");
+  if (live.pirepCount > filed.pirepCount) bits.push("a new chop PIREP showed up on the remaining route");
+  if (filed.originCat !== live.originCat) bits.push(`departure weather is now ${live.originCat}`);
+  if (filed.destCat !== live.destCat) bits.push(`arrival weather is now ${live.destCat}`);
+  if ((filed.destTaf ?? "") !== (live.destTaf ?? "") && live.destTaf) bits.push("the arrival TAF changed");
+  const newHaz = live.hazardLabels.filter((l) => !filed.hazardLabels.includes(l));
+  if (newHaz.length) bits.push(newHaz[0].toLowerCase());
+  return bits.slice(0, 3);
+}
+
+export function decodeTafPassenger(taf: Taf | null | undefined, whenUnix?: number | null): string | null {
+  if (!taf) return null;
+  const fcsts = Array.isArray(taf.fcsts) ? taf.fcsts : [];
+  const when = whenUnix ?? Date.now() / 1e3;
+  const covering =
+    fcsts.find((f) => (f.timeFrom ?? 0) <= when && (f.timeTo ?? Infinity) > when) ??
+    fcsts.find((f) => (f.timeFrom ?? 0) > when) ??
+    fcsts[0] ??
+    null;
+  const bits: string[] = [];
+  const raw = String(taf.rawTAF ?? "").toUpperCase();
+  const wx = String(covering?.wxString ?? "").toUpperCase();
+  const blob = `${wx} ${raw}`;
+  if (/\bTS\b|VCTS|TEMPO[^\n]{0,40}TS|PROB\d{2}[^\n]{0,40}TS/.test(blob)) bits.push("thunderstorms in the forecast");
+  else if (/\bFG\b|\bBR\b/.test(wx) || /TEMPO[^\n]{0,30}(FG|BR)/.test(raw)) bits.push("fog or mist");
+  else if (/\bSN\b|BLSN/.test(blob)) bits.push("snow");
+  else if (/\bRA\b|\bSHRA\b/.test(wx)) bits.push("rain");
+  const vis = covering?.visib;
+  if (vis != null) {
+    const n = parseFloat(String(vis).replace("+", ""));
+    if (Number.isFinite(n) && n <= 3 && !String(vis).includes("+")) bits.push(`visibility about ${n} mile${n === 1 ? "" : "s"}`);
+  }
+  const clouds = covering?.clouds ?? [];
+  const ceil = clouds
+    .filter((c) => c.base && ["BKN", "OVC", "VV"].includes(c.cover))
+    .map((c) => c.base as number)
+    .sort((a, b) => a - b)[0];
+  if (ceil != null && ceil < 1000) bits.push(`ceiling ${ceil} ft`);
+  else if (ceil != null && ceil < 3000) bits.push(`ceiling around ${ceil} ft`);
+  const spd = covering?.wspd;
+  const gst = covering?.wgst;
+  if ((gst ?? 0) >= 25 || (spd ?? 0) >= 20) bits.push(gst ? `wind ${spd} gusting ${gst} kt` : `wind ${spd} kt`);
+  if (covering?.fcstChange === "TEMPO") bits.push("tempo period");
+  if (covering?.probability && covering.probability >= 30) bits.push(`PROB${covering.probability}`);
+  if (!bits.length) {
+    if (/SKC|CLR|NSC|SCT2/.test(raw) && !/BKN00|OVC00|FG|TS/.test(raw)) return "VFR, no significant weather in the TAF";
+    return null;
+  }
+  return bits.slice(0, 3).join(", ");
+}
+
+export function corridorStations<T extends { iata: string; lat: number; lon: number }>(
+  path: { lat: number; lon: number }[],
+  originIata: string,
+  destIata: string,
+  airports: T[],
+  distNm: (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => number,
+): T[] {
+  if (path.length < 3) return [];
+  const hits: { ap: T; d: number; idx: number }[] = [];
+  for (const ap of airports) {
+    if (ap.iata === originIata || ap.iata === destIata) continue;
+    let best = Infinity;
+    let idx = 0;
+    for (let i = 0; i < path.length; i++) {
+      const d = distNm(path[i], ap);
+      if (d < best) {
+        best = d;
+        idx = i;
+      }
+    }
+    if (best < 48) hits.push({ ap, d: best, idx });
+  }
+  hits.sort((a, b) => a.idx - b.idx);
+  const picked: T[] = [];
+  let lastIdx = -99;
+  for (const h of hits) {
+    if (h.idx - lastIdx < path.length / 6 && picked.length) continue;
+    picked.push(h.ap);
+    lastIdx = h.idx;
+    if (picked.length >= 3) break;
+  }
+  return picked;
+}

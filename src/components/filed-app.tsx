@@ -192,6 +192,13 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     originNas: story.origin.nas?.reason ?? "n/a",
     destWx: story.dest.decoded?.summary ?? "n/a",
     destNas: story.dest.nas?.reason ?? "n/a",
+    originTaf: story.origin.taf ?? null,
+    destTaf: story.dest.taf ?? null,
+    wxHash: story.wx?.hash ?? "",
+    wxDeltas: story.wx?.deltas ?? [],
+    filedAt: story.wx?.filedAt ?? null,
+    worstChop: story.wx?.live.worstChop ?? null,
+    corridorWx: story.wx?.live.corridor?.map((c) => `${c.iata} ${c.summary}`).join("; ") ?? null,
     inbound: `${story.inbound?.headline ?? ""}. ${story.inbound?.detail ?? ""}`.replace(/^\.\s*/, "").trim(),
     inboundHeadline: story.inbound?.headline ?? "",
     inboundDetail: story.inbound?.detail ?? "",
@@ -448,8 +455,14 @@ export function FiledApp() {
   }, [flightKey]);
 
   useEffect(() => {
+    if (!story || briefingFor === flightKey) return;
+    briefM.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- first compile when the story arrives
+  }, [story, flightKey]);
+
+  useEffect(() => {
     if (!story || !briefing || briefingFor !== flightKey) return;
-    const key = `${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}`;
+    const key = `${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}`;
     if (key === lastBriefKey.current) return;
     lastBriefKey.current = key;
     const next = composeBrief(rideFacts(story, query, active), briefing);
@@ -813,6 +826,15 @@ function BreakdownCard({
   pending: boolean;
   onCompile: () => void;
 }) {
+  const asOf = briefing?.filedAt
+    ? new Date(briefing.filedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : null;
+  const liveAt = briefing?.liveAt
+    ? new Date(briefing.liveAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : null;
+  const why = briefing?.why
+    ? briefing.why.replace(/^Updated because\s+/i, "").replace(/\.+$/, "")
+    : null;
   return (
     <div className="mt-4 rounded-xl border border-accent/35 bg-surface p-4">
       <p className="font-mono text-xs tracking-widest text-muted uppercase">Briefing</p>
@@ -826,8 +848,14 @@ function BreakdownCard({
       )}
       {briefing && (
         <div className="mt-3 space-y-3">
+          {asOf ? (
+            <p className="font-mono text-xs tracking-wide text-subtle uppercase">
+              Briefing as of {asOf}
+              {liveAt && liveAt !== asOf ? ` · live ${liveAt}` : ""}
+            </p>
+          ) : null}
           <p className="text-sm leading-relaxed text-fg whitespace-pre-wrap">{briefing.lead}</p>
-          {briefing.why ? <p className="text-sm leading-relaxed text-muted">{briefing.why}</p> : null}
+          {why ? <p className="text-sm leading-relaxed text-muted">Live update · {why}.</p> : null}
         </div>
       )}
       <Button type="button" className="mt-4 w-full" disabled={pending} onClick={onCompile}>
@@ -1054,7 +1082,13 @@ function extraFor(story: FlightStory, stage: StageId) {
         <dl className="mt-4 grid grid-cols-2 gap-2">
           <TimeChip
             label="Push"
-            value={times.push ?? "—"}
+            value={
+              times.push == null
+                ? "—"
+                : times.pushed
+                  ? times.push
+                  : `Est. ${times.push}`
+            }
             late={(times.delayMin ?? 0) >= 15}
           />
           <TimeChip

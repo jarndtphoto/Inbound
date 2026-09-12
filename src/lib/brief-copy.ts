@@ -40,6 +40,13 @@ export type RideFacts = {
   delayMin?: number | null;
   pushWas?: string | null;
   typicalDelayMin?: number | null;
+  originTaf?: string | null;
+  destTaf?: string | null;
+  wxHash?: string;
+  wxDeltas?: string[];
+  filedAt?: number | null;
+  worstChop?: string | null;
+  corridorWx?: string | null;
 };
 
 export type BriefSegment = {
@@ -58,6 +65,7 @@ export type BriefSnap = {
   destNas: string;
   inbound: string;
   land: string | null;
+  wx: string;
 };
 
 export type CompiledBrief = {
@@ -66,6 +74,8 @@ export type CompiledBrief = {
   why: string | null;
   snap: BriefSnap;
   segments: BriefSegment[];
+  filedAt?: number | null;
+  liveAt?: number | null;
 };
 
 function clean(s: string) {
@@ -94,10 +104,11 @@ function snapOf(d: RideFacts): BriefSnap {
     destNas: nasLine(d.destNas),
     inbound: d.inboundStatus ?? d.inboundHeadline,
     land: d.land,
+    wx: d.wxHash ?? "",
   };
 }
 
-function whyChanged(prev: BriefSnap | undefined, next: BriefSnap): string | null {
+function whyChanged(prev: BriefSnap | undefined, next: BriefSnap, d?: RideFacts): string | null {
   if (!prev) return null;
   const bits: string[] = [];
   if (prev.stage !== next.stage) {
@@ -128,6 +139,11 @@ function whyChanged(prev: BriefSnap | undefined, next: BriefSnap): string | null
   }
   if (prev.inbound !== next.inbound && (next.stage === "inbound" || next.stage === "push")) {
     bits.push("the inbound status changed");
+  }
+  if (prev.wx !== next.wx) {
+    const extra = (d?.wxDeltas ?? []).filter(Boolean);
+    if (extra.length) bits.push(extra.join(", and "));
+    else bits.push("the remaining-route weather changed");
   }
   if (!bits.length) return null;
   const text = bits.join(", and ");
@@ -171,8 +187,9 @@ function rideClause(d: RideFacts) {
 function destClause(d: RideFacts) {
   const delay = nasLine(d.destNas);
   const land = d.land ? `Landing around ${d.land}` : `Into ${d.toCity}`;
-  if (delay) return `${land}. ${d.toIata} delay: ${delay}.`;
-  return `${land}.`;
+  const taf = d.destTaf && !/n\/a/i.test(d.destTaf) ? ` Arrival forecast: ${d.destTaf}.` : "";
+  if (delay) return `${land}. ${d.toIata} delay: ${delay}.${taf}`;
+  return `${land}.${taf}`;
 }
 
 function taxiInClause(d: RideFacts) {
@@ -219,6 +236,7 @@ function composeLead(d: RideFacts) {
     taxiOutClause(d),
     originNas ? `${d.fromIata} delay: ${originNas}.` : "",
     originWx && /IFR|LIFR|thunder|snow|fog/i.test(originWx) ? `Departure weather: ${originWx}.` : "",
+    d.originTaf && /thunder|fog|snow|ceiling|wind/i.test(d.originTaf) ? `Departure forecast: ${d.originTaf}.` : "",
     rideClause(d),
     destClause(d),
     taxiInClause(d),
@@ -229,13 +247,15 @@ export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): Com
   const snap = snapOf(d);
   const ac = [d.typeName, d.registration].filter(Boolean).join(" · ") || null;
   const lead = composeLead(d);
-  const why = whyChanged(previous?.snap, snap);
+  const why = whyChanged(previous?.snap, snap, d);
   return {
     lead,
     aircraft: ac,
     why,
     snap,
     segments: [],
+    filedAt: d.filedAt ?? previous?.filedAt ?? null,
+    liveAt: Date.now(),
   };
 }
 

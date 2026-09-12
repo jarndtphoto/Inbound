@@ -32,6 +32,9 @@ export type Taf = {
     wxString?: string | null;
     timeFrom?: number;
     timeTo?: number;
+    fcstChange?: string | null;
+    probability?: number | null;
+    wgst?: number | null;
   }>;
 };
 

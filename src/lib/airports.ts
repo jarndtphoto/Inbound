@@ -393,6 +393,29 @@ export const AIRPORTS: Airport[] = [
     },
     heavies: "JL, NH 787/777/380, UA, DL, AA, SQ, CX, EK",
   },
+  {
+    icao: "PHNL",
+    iata: "HNL",
+    name: "Honolulu",
+    city: "Honolulu",
+    country: "US",
+    lat: 21.3187,
+    lon: -157.9225,
+    tz: "Pacific/Honolulu",
+    elevationFt: 13,
+    oneLiner: "United and Hawaiian’s Pacific gate. Trade winds, reef on arrival, and a long walk to everywhere.",
+    terminals: "Terminal 1 Hawaiian, Terminal 2 United and others, interisland.",
+    security: "TSA is the bottleneck more than the walk. Interisland is a different flow.",
+    connection: "Same terminal is fine. Interisland to mainland is a reclear and a shuttle — budget it.",
+    watch: "T2 widebodies on the mainland banks. Reef Runway arrivals are the postcard.",
+    skyline: "Waikiki and Diamond Head sit southeast. On a typical 8 arrival you get the shore off the right.",
+    layover: {
+      m45: "Stay airside. The walk is the layover.",
+      m90: "Eat. Don’t try the city.",
+      m180: "Waikiki is close if you’re already through. Bags and a taxi eat the clock.",
+    },
+    heavies: "UA 777/78X, HA A330/787, JL, NH, KE, QF, NZ",
+  },
 ];
 
 export const AIRPORT_BY_ICAO: Record<string, Airport> = Object.fromEntries(
