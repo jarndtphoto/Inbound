@@ -1,7 +1,7 @@
 import { formatDuration, formatNm, haversineNm } from "@/lib/geo";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
-import { ADMIN1_RINGS } from "@/lib/admin1-lines";
+import { latToTileY, pickRadarTiles, tileXToLon, tileYToLat } from "@/lib/radar-tiles";
 import { WORLD_COUNTRY_RINGS } from "@/lib/world-country-lines";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -57,22 +57,6 @@ function projectBox(minLon: number, maxLon: number, minLat: number, maxLat: numb
   };
 }
 
-function lonToTileX(lon: number, z: number) {
-  return ((lon + 180) / 360) * 2 ** z;
-}
-function latToTileY(lat: number, z: number) {
-  const s = Math.sin((lat * Math.PI) / 180);
-  const clamped = Math.min(0.9999, Math.max(-0.9999, s));
-  return (0.5 - Math.log((1 + clamped) / (1 - clamped)) / (4 * Math.PI)) * 2 ** z;
-}
-function tileXToLon(x: number, z: number) {
-  return (x / 2 ** z) * 360 - 180;
-}
-function tileYToLat(y: number, z: number) {
-  const n = Math.PI - (2 * Math.PI * y) / 2 ** z;
-  return (180 / Math.PI) * Math.atan(Math.sinh(n));
-}
-
 type RadarMaps = {
   host: string;
   radar: { past?: { time: number; path: string }[] };
@@ -107,33 +91,26 @@ function RadarLayer({
   const frame = q.data?.radar.past?.at(-1);
   if (!frame || !q.data) return null;
 
-  const lonSpan = Math.max(4, maxLon - minLon);
-  const z = lonSpan > 32 ? 4 : lonSpan > 16 ? 5 : 6;
-  const x0 = Math.floor(lonToTileX(minLon, z));
-  const x1 = Math.floor(lonToTileX(maxLon, z));
-  const y0 = Math.floor(latToTileY(maxLat, z));
-  const y1 = Math.floor(latToTileY(minLat, z));
-  const tiles: { key: string; href: string; x: number; y: number; w: number; h: number }[] = [];
-  const n = 2 ** z;
-  for (let x = x0; x <= x1; x++) {
-    for (let y = y0; y <= y1; y++) {
-      if (x < 0 || y < 0 || x >= n || y >= n) continue;
-      const west = tileXToLon(x, z);
-      const east = tileXToLon(x + 1, z);
-      const north = tileYToLat(y, z);
-      const south = tileYToLat(y + 1, z);
-      tiles.push({
-        key: `${z}-${x}-${y}`,
-        href: `${q.data.host}${frame.path}/256/${z}/${x}/${y}/2/1_1.png`,
+  const picked = pickRadarTiles(minLon, maxLon, minLat, maxLat);
+  const tiles = picked
+    .map((t) => {
+      const west = tileXToLon(t.x, t.z);
+      const east = tileXToLon(t.x + 1, t.z);
+      const north = tileYToLat(t.y, t.z);
+      const south = tileYToLat(t.y + 1, t.z);
+      const w = sx(east) - sx(west);
+      const h = sy(south) - sy(north);
+      if (w <= 1 || h <= 1) return null;
+      return {
+        key: `${t.z}-${t.x}-${t.y}`,
+        href: `${q.data!.host}${frame.path}/256/${t.z}/${t.x}/${t.y}/2/1_1.png`,
         x: sx(west),
         y: sy(north),
-        w: sx(east) - sx(west),
-        h: sy(south) - sy(north),
-      });
-      if (tiles.length >= 12) break;
-    }
-    if (tiles.length >= 12) break;
-  }
+        w,
+        h,
+      };
+    })
+    .filter((t): t is NonNullable<typeof t> => t != null);
 
   return (
     <g opacity="0.55">
