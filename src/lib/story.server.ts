@@ -365,7 +365,7 @@ function directSpine(origin, dest, live) {
 	if (haversineNm(spine[spine.length - 1], dest) > 2) spine.push(dest);
 	return densifyPath(downsampleNm(spine, 18), 55);
 }
-async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints) {
+async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, faTrack) {
 	const spine = makeSpine(origin, dest, waypoints);
 	let raw = [];
 	if (hex) try {
@@ -374,6 +374,7 @@ async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints) {
 	} catch {
 		raw = [];
 	}
+	if (!raw.length && Array.isArray(faTrack) && faTrack.length >= 4) raw = faTrack;
 	const flown = uniqueTrack(legsForThisSector(splitTraceLegs(raw), origin, dest, live, takeoffUnix ?? null));
 	if (live && haversineNm({ lat: live.lat, lon: live.lon }, dest) < 68) {
 		const arrival = stitchArrival(flown, live, dest);
@@ -488,6 +489,46 @@ function restoreKin(identKey, live, dest, aware) {
 		altFt: live.altFt ?? prev.altFt,
 		gsKt: live.gsKt ?? prev.gsKt,
 		track: live.track ?? prev.track
+	};
+}
+function liveFromAware(aware) {
+	if (!aware) return null;
+	const pts = aware.faTrack;
+	const last = Array.isArray(pts) && pts.length ? pts[pts.length - 1] : null;
+	if (!last || typeof last.lat !== "number" || typeof last.lon !== "number") return null;
+	const now = Date.now() / 1e3;
+	const age = last.t ? Math.max(0, now - last.t) : 0;
+	if (age > 20 * 60) return null;
+	let lat = last.lat;
+	let lon = last.lon;
+	const gs = last.gs ?? aware.gsKt ?? null;
+	const hdg = last.track ?? aware.heading ?? null;
+	if (age > 25 && (gs ?? 0) > 80 && hdg != null && Number.isFinite(hdg)) {
+		const moved = destPoint({ lat, lon }, hdg, (gs / 3600) * Math.min(age, 8 * 60));
+		lat = moved.lat;
+		lon = moved.lon;
+	}
+	const altFt = last.alt ?? null;
+	const onGround = Boolean(last.ground) || (altFt != null && altFt < 50);
+	const type = aware.type ?? null;
+	return {
+		hex: String(aware.hex || "").toLowerCase(),
+		callsign: String(aware.ident || "").replace(/\s/g, "").toUpperCase() || null,
+		registration: aware.tail ?? null,
+		type,
+		typeName: airframeOf(type)?.name ?? type,
+		year: null,
+		operator: null,
+		lat,
+		lon,
+		altFt,
+		gsKt: gs,
+		track: hdg,
+		vertFpm: null,
+		onGround,
+		phase: onGround ? ((gs ?? 0) >= 2 ? "taxi" : "parked") : "cruise",
+		extrapolated: age > 45,
+		seenSec: age
 	};
 }
 function toLive(raw) {
@@ -639,6 +680,10 @@ function flightIdentOk(fl, parsed, aware) {
 	const vars = new Set(callsignVariants(parsed.callsign));
 	const atc = String(aware?.atcIdent ?? "").replace(/\s/g, "").toUpperCase();
 	if (atc) vars.add(atc);
+	const faIdent = String(aware?.ident ?? "").replace(/\s/g, "").toUpperCase();
+	if (faIdent) vars.add(faIdent);
+	const faIata = String(aware?.iataIdent ?? "").replace(/\s/g, "").toUpperCase();
+	if (faIata) vars.add(faIata);
 	if (vars.has(u)) return true;
 	return isAtcCallsign(u, identPrefixes(parsed.callsign));
 }
@@ -656,6 +701,10 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex)
 	const vars = new Set(callsignVariants(parsed.callsign));
 	const atc = String(aware?.atcIdent ?? "").replace(/\s/g, "").toUpperCase();
 	if (atc) vars.add(atc);
+	const faIdent = String(aware?.ident ?? "").replace(/\s/g, "").toUpperCase();
+	if (faIdent) vars.add(faIdent);
+	const faIata = String(aware?.iataIdent ?? "").replace(/\s/g, "").toUpperCase();
+	if (faIata) vars.add(faIata);
 	const tail = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
 	const wantNum = String(parsed.callsign || "").replace(/\s/g, "").toUpperCase().match(/^[A-Z]{2,3}(\d+)/)?.[1]?.replace(/^0+/, "") || "";
 	const prefixes = identPrefixes(parsed.callsign);
@@ -952,6 +1001,50 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 		const c = coordPair(w);
 		if (c) wps.push(c);
 	}
+	const faTrack = [];
+	if (Array.isArray(f.track)) {
+		for (const p of f.track) {
+			const c = coordPair(p?.coord);
+			if (!c) continue;
+			const altRaw = p.alt;
+			const alt = typeof altRaw === "number" ? (altRaw > 1000 ? altRaw : altRaw * 100) : null;
+			faTrack.push({
+				t: typeof p.timestamp === "number" ? p.timestamp : 0,
+				lat: c.lat,
+				lon: c.lon,
+				alt,
+				gs: typeof p.gs === "number" ? p.gs : null,
+				track: typeof p.heading === "number" ? p.heading : null,
+				ground: alt != null && alt < 200
+			});
+		}
+	}
+	if (faTrack.length && typeof f.heading === "number") {
+		faTrack[faTrack.length - 1].track = f.heading;
+	}
+	if (faTrack.length && typeof f.groundspeed === "number") {
+		faTrack[faTrack.length - 1].gs = f.groundspeed;
+	}
+	const here = coordPair(f.coord);
+	if (here) {
+		const altRaw = f.altitude;
+		const alt = typeof altRaw === "number" ? (altRaw > 1000 ? altRaw : altRaw * 100) : null;
+		const last = faTrack[faTrack.length - 1];
+		const same = last && Math.abs(last.lat - here.lat) < 1e-4 && Math.abs(last.lon - here.lon) < 1e-4;
+		if (!same) {
+			faTrack.push({
+				t: typeof last?.t === "number" && last.t ? last.t : 0,
+				lat: here.lat,
+				lon: here.lon,
+				alt,
+				gs: typeof f.groundspeed === "number" ? f.groundspeed : last?.gs ?? null,
+				track: typeof f.heading === "number" ? f.heading : last?.track ?? null,
+				ground: alt != null && alt < 200
+			});
+		} else if (last) {
+			if (alt != null) last.alt = alt;
+		}
+	}
 	const ac = f.aircraft ?? {};
 	let inboundIdent = null;
 	let inboundFlightId = null;
@@ -1010,7 +1103,10 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 		typicalTaxiOutMin: hist.out,
 		typicalTaxiInMin: hist.inn,
 		filedTaxiOutMin: asTaxiMin(f.taxiOut),
-		filedTaxiInMin: asTaxiMin(f.taxiIn)
+		filedTaxiInMin: asTaxiMin(f.taxiIn),
+		gsKt: typeof f.groundspeed === "number" ? f.groundspeed : null,
+		heading: typeof f.heading === "number" ? f.heading : null,
+		faTrack
 	};
 }
 async function fetchAwarePage(url, fallbackIdent, withInbound, redirect = "follow") {
@@ -1020,7 +1116,7 @@ async function fetchAwarePage(url, fallbackIdent, withInbound, redirect = "follo
 			Accept: "text/html"
 		},
 		redirect,
-		signal: AbortSignal.timeout(5e3)
+		signal: AbortSignal.timeout(8e3)
 	});
 	if (res.status >= 300 && res.status < 400) {
 		const stub = stubAwareFromHistory(res.headers.get("location"), fallbackIdent);
@@ -2014,11 +2110,18 @@ async function buildStory(query) {
 		hexByIdent.delete(identKey);
 		hexRouteByIdent.delete(identKey);
 	}
+	if (!rawAc && aware?.ident) {
+		const faCs = String(aware.ident).replace(/\s/g, "").toUpperCase();
+		if (faCs && faCs !== identKey) {
+			const byFa = await safe(adsbByCallsign(faCs), null);
+			if (byFa) rawAc = byFa;
+		}
+	}
 	if (!rawAc && knownHex) rawAc = parsed.registration
 		? await safe(adsbByReg(parsed.registration), null)
 		: await safe(adsbByCallsign(parsed.callsign), null);
 	const liveCs = parsed.callsign;
-	let live = rawAc ? toLive(rawAc) : null;
+	let live = rawAc ? toLive(rawAc) : liveFromAware(aware);
 	let origin = fieldFromKnown(aware?.originIata ?? null, aware?.originIcao ?? null, aware?.originLat ?? null, aware?.originLon ?? null, aware?.originName ?? null, aware?.originCity ?? null, aware?.originTz ?? null) ?? fieldFromAdsbdb(route?.origin);
 	let dest = fieldFromKnown(aware?.destIata ?? null, aware?.destIcao ?? null, aware?.destLat ?? null, aware?.destLon ?? null, aware?.destName ?? null, aware?.destCity ?? null, aware?.destTz ?? null) ?? fieldFromAdsbdb(route?.destination);
 	if (!origin && live) origin = nearestKnown(live);
@@ -2070,6 +2173,7 @@ async function buildStory(query) {
 		hexByIdent.delete(identKey);
 		hexRouteByIdent.delete(identKey);
 	}
+	if (!live) live = liveFromAware(aware);
 	let fieldList = [];
 	const hexHint = (live?.hex || knownHex || aware?.hex || "").toLowerCase();
 	if (hexHint && /^[0-9a-f]{6}$/.test(hexHint) && live?.hex !== hexHint) {
@@ -2154,6 +2258,10 @@ async function buildStory(query) {
 		if (aware?.hex) extra.push(safe(adsbByHex(aware.hex), null));
 		if (aware?.tail) extra.push(safe(adsbByReg(aware.tail), null));
 		extra.push(safe(adsbByCallsign(parsed.callsign), null));
+		if (aware?.ident) {
+			const faCs = String(aware.ident).replace(/\s/g, "").toUpperCase();
+			if (faCs && faCs !== identKey) extra.push(safe(adsbByCallsign(faCs), null));
+		}
 		const extras = extra.length ? await Promise.all(extra) : [];
 		const airborneAway = [];
 		const originSide = [];
@@ -2175,6 +2283,7 @@ async function buildStory(query) {
 	}
 	if (!ourLanded && Boolean(aware?.takeoff?.actual) && !aware?.landing?.actual) {
 		live = restoreKin(identKey, live, dest, aware);
+		if (!live) live = liveFromAware(aware);
 		const needTrace = !live || live.altFt == null || live.gsKt == null;
 		const hexForTrace = String(live?.hex || hexByIdent.get(identKey) || aware?.hex || "").toLowerCase();
 		if (needTrace && /^[0-9a-f]{6}$/.test(hexForTrace)) {
@@ -2299,7 +2408,7 @@ async function buildStory(query) {
 		lon: dest.lon
 	};
 	const hex = live ? (live.hex || "").toLowerCase() : null;
-	const filed = await loadFiledPath(!ourLanded && ourAirborne ? hex : null, start, end, !ourLanded && ourAirborne ? live : null, aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? null, aware?.waypoints ?? []);
+	const filed = await loadFiledPath(!ourLanded && ourAirborne ? hex : null, start, end, !ourLanded && ourAirborne ? live : null, aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? null, aware?.waypoints ?? [], aware?.faTrack ?? []);
 	let path;
 	let pathSource;
 	if (filed.source === "track" && filed.points.length >= 8) {
@@ -2740,43 +2849,28 @@ async function buildStory(query) {
 			};
 		}
 	} else if (!aircraft && inboundLive && (inbound.status === "at_field" || inbound.status === "complete")) aircraft = inboundLive;
-	else if (!aircraft && aware?.takeoff?.actual) {
-		const p = pointAtFrac(path, progress) ?? start;
-		const type = aware?.type ?? null;
-		aircraft = {
-			hex: aware?.hex ?? "",
-			registration: aware?.tail ?? null,
-			type,
-			typeName: airframeOf(type)?.name ?? type,
-			year: null,
-			operator: null,
-			lat: p.lat,
-			lon: p.lon,
-			altFt: null,
-			gsKt: null,
-			track: heading,
-			vertFpm: null,
-			onGround: false,
-			phase: "cruise"
-		};
-	} else if (!aircraft && (aware?.type || aware?.tail)) {
-		const type = aware?.type ?? null;
-		aircraft = {
-			hex: aware?.hex ?? "",
-			registration: aware?.tail ?? null,
-			type,
-			typeName: airframeOf(type)?.name ?? type,
-			year: null,
-			operator: null,
-			lat: origin.lat,
-			lon: origin.lon,
-			altFt: 0,
-			gsKt: 0,
-			track: null,
-			vertFpm: null,
-			onGround: true,
-			phase: "parked"
-		};
+	else if (!aircraft) {
+		const fromFa = liveFromAware(aware);
+		if (fromFa) aircraft = fromFa;
+		else if (aware?.type || aware?.tail) {
+			const type = aware?.type ?? null;
+			aircraft = {
+				hex: aware?.hex ?? "",
+				registration: aware?.tail ?? null,
+				type,
+				typeName: airframeOf(type)?.name ?? type,
+				year: null,
+				operator: null,
+				lat: origin.lat,
+				lon: origin.lon,
+				altFt: 0,
+				gsKt: 0,
+				track: null,
+				vertFpm: null,
+				onGround: true,
+				phase: "parked"
+			};
+		}
 	}
 	let wx = null;
 	try {

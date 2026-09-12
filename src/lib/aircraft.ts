@@ -79,6 +79,7 @@ export const AIRLINES: Record<string, string> = {
   SCX: "Sun Country",
   RPA: "Republic",
   SKW: "SkyWest",
+  EDV: "Endeavor",
   ENY: "Envoy",
   PDT: "Piedmont",
   JIA: "PSA",

@@ -1,10 +1,16 @@
-import { AIRLINES } from "./aircraft";
+import { AIRLINES } from "./aircraft.ts";
 
 export const IATA_TO_ICAO: Record<string, string> = {
   UA: "UAL",
   AA: "AAL",
   DL: "DAL",
   WN: "SWA",
+  "9E": "EDV",
+  OO: "SKW",
+  YX: "RPA",
+  OH: "JIA",
+  MQ: "ENY",
+  G7: "GJS",
   B6: "JBU",
   AS: "ASA",
   F9: "FFT",
@@ -80,7 +86,7 @@ export function parseFlightQuery(raw: string): ParsedFlight | null {
     }
   }
 
-  const iataNum = s.match(/^([A-Z][A-Z0-9])(\d{1,4}[A-Z]?)$/);
+  const iataNum = s.match(/^([A-Z0-9]{2})(\d{1,4}[A-Z]?)$/);
   if (iataNum && IATA_TO_ICAO[iataNum[1]]) {
     const icao = IATA_TO_ICAO[iataNum[1]];
     return {
@@ -95,7 +101,7 @@ export function parseFlightQuery(raw: string): ParsedFlight | null {
 
 export function displayIata(callsign: string, iata: string | null): string {
   if (iata) {
-    const m = iata.match(/^([A-Z]{2})(\d.*)$/);
+    const m = iata.match(/^([A-Z0-9]{2})(\d.*)$/);
     if (m) return `${m[1]} ${m[2]}`;
     return iata;
   }

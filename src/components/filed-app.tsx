@@ -22,7 +22,7 @@ const STAGES: { id: StageId; label: string }[] = [
   { id: "gate", label: "At the gate" },
 ];
 
-const STORY_CACHE_KEY = "filed-story-cache-v7";
+const STORY_CACHE_KEY = "filed-story-cache-v8";
 const ORIG_MEM_KEY = "filed-orig-sched-v2";
 
 function normFlight(q: string) {

@@ -391,20 +391,21 @@ export function RouteMap({ story }: { story: FlightStory }) {
   const origin = { lat: story.origin.lat, lon: story.origin.lon };
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
   const ac = story.aircraft;
-  const onField = Boolean(ac?.onGround && haversineNm(ac, dest) < 8);
+  const hasFix = Boolean(ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
+  const onField = Boolean(hasFix && ac?.onGround && haversineNm(ac, dest) < 8);
   const atGate = story.currentStage === "gate";
   const landed = atGate || onField;
   const progress = landed ? 1 : story.route.progress;
   const ax = landed
     ? sx(dest.lon)
-    : ac
-      ? sx(ac.lon)
-      : sx(samples[Math.round(progress * (samples.length - 1))]!.lon);
+    : hasFix
+      ? sx(ac!.lon)
+      : sx(origin.lon);
   const ay = landed
     ? sy(dest.lat)
-    : ac
-      ? sy(ac.lat)
-      : sy(samples[Math.round(progress * (samples.length - 1))]!.lat);
+    : hasFix
+      ? sy(ac!.lat)
+      : sy(origin.lat);
   const rot = landed ? 0 : story.route.heading;
   const future = samples.filter((s) => s.frac > progress + 0.08);
   const firstBump = future.find((s) => s.chop !== "smooth");
