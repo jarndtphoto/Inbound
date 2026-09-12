@@ -744,8 +744,10 @@ function FlightHead({
 }) {
   const ac = story.aircraft;
   const airborne = flightAirborne(story);
+  const down = wheelsDown(story);
   const live = liveFix(story);
   const showAlt = Boolean(live && airborne && ac && !ac.onGround && (ac.altFt || ac.gsKt));
+  const showRemaining = !airborne && !down;
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -766,7 +768,7 @@ function FlightHead({
         </div>
       </div>
       <TimesStrip story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
-      <dl className={cn("mt-4 grid gap-3", showAlt || !airborne ? "grid-cols-2" : "grid-cols-1")}>
+      <dl className={cn("mt-4 grid gap-3", showAlt || showRemaining ? "grid-cols-2" : "grid-cols-1")}>
         <Stat
           icon={Plane}
           label="Aircraft"
@@ -780,14 +782,14 @@ function FlightHead({
             value={ac?.altFt ? feetPretty(ac.altFt) : "—"}
             sub={ac?.gsKt ? `${Math.round(ac.gsKt)} kt` : ""}
           />
-        ) : airborne ? null : (
+        ) : showRemaining ? (
           <Stat
             icon={Radio}
             label="Remaining"
             value={formatMiles(story.route.remainingNm)}
             sub={formatDuration(story.route.etaMin)}
           />
-        )}
+        ) : null}
       </dl>
     </div>
   );
@@ -875,17 +877,17 @@ function TimesStrip({
       <div className="flex flex-wrap items-end justify-between gap-3">
         {airborne ? (
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
-            <div className="min-w-0">
-              <p className="flex items-center gap-1.5 font-mono text-xs tracking-widest text-subtle uppercase">
-                <Clock className="size-3" /> Remaining
+            <div className="min-w-0 rounded-md border border-border bg-bg px-3 py-2">
+              <p className="flex items-center gap-1.5 font-mono text-xs tracking-wide text-subtle uppercase">
+                <Clock className="size-3 shrink-0" /> Remaining
               </p>
-              <p className="mt-1 font-display text-2xl font-semibold leading-none">{formatDuration(story.route.etaMin)}</p>
-              <p className="mt-1 text-xs text-muted">{formatMiles(story.route.remainingNm)}</p>
+              <p className="mt-1 break-words font-display text-2xl font-semibold leading-none">{formatDuration(story.route.etaMin)}</p>
+              <p className="mt-1 break-words text-xs text-muted">{formatMiles(story.route.remainingNm)}</p>
             </div>
-            <div className="min-w-0">
-              <p className="font-mono text-xs tracking-widest text-subtle uppercase">Flown</p>
-              <p className="mt-1 font-display text-2xl font-semibold leading-none">{elapsed ? formatDuration(elapsed.minutes) : "—"}</p>
-              <p className="mt-1 text-xs text-muted">
+            <div className="min-w-0 rounded-md border border-border bg-bg px-3 py-2">
+              <p className="font-mono text-xs tracking-wide text-subtle uppercase">Flown</p>
+              <p className="mt-1 break-words font-display text-2xl font-semibold leading-none">{elapsed ? formatDuration(elapsed.minutes) : "—"}</p>
+              <p className="mt-1 break-words text-xs text-muted">
                 {elapsed?.estimated || !liveFix(story) ? "Est. " : "Approx. "}
                 {formatMiles(story.route.flownNm)}
               </p>
@@ -1346,7 +1348,7 @@ function extraFor(story: FlightStory, stage: StageId) {
           <TimeChip
             label="Push"
             value={times.push ?? "—"}
-            sub={times.pushed ? "Actual" : "Estimated"}
+            sub={kindLabel(times.pushKind ?? (times.pushed ? "actual" : times.push ? "scheduled" : null))}
             late={(times.delayMin ?? 0) >= 15}
           />
           <TimeChip
@@ -1369,7 +1371,7 @@ function extraFor(story: FlightStory, stage: StageId) {
           <TimeChip
             label="Wheels up"
             value={times.takeoff ?? "—"}
-            sub={times.airborne ? "Actual" : "Estimated"}
+            sub={kindLabel(times.takeoffKind ?? (times.airborne ? "actual" : times.takeoff ? "scheduled" : null))}
           />
         </dl>
       </>
