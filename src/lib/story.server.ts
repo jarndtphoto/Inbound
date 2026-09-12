@@ -2554,41 +2554,46 @@ async function buildStory(query) {
 			phase: "parked"
 		};
 	}
-	if (times.landUnix || times.pushUnix) {
-		origin.taf = decodeTafPassenger(origin.tafRaw, times.pushUnix ?? Date.now() / 1e3) ?? origin.taf;
-		dest.taf = decodeTafPassenger(dest.tafRaw, times.landUnix ?? Date.now() / 1e3) ?? dest.taf;
-	}
-	const corridorAps = corridorStations(path, origin.iata, dest.iata, Object.values(AIRPORT_BY_ICAO), haversineNm);
-	const corridor = [];
-	if (corridorAps.length) {
-		const mets = await Promise.all(corridorAps.map((ap) => safe(loadMetar(ap.icao), { metar: null })));
-		for (let i = 0; i < corridorAps.length; i++) {
-			const m = mets[i]?.metar;
-			if (!m) continue;
-			const dec = decodeMetar(m);
-			const wxBit = dec.wx && !/no significant/i.test(dec.wx) ? ` · ${dec.wx}` : "";
-			corridor.push({ iata: corridorAps[i].iata, summary: `${dec.category}${wxBit}` });
+	let wx = null;
+	try {
+		if (times.landUnix || times.pushUnix) {
+			origin.taf = decodeTafPassenger(origin.tafRaw, times.pushUnix ?? Date.now() / 1e3) ?? origin.taf;
+			dest.taf = decodeTafPassenger(dest.tafRaw, times.landUnix ?? Date.now() / 1e3) ?? dest.taf;
 		}
+		const corridorAps = corridorStations(path, origin.iata, dest.iata, Object.values(AIRPORT_BY_ICAO), haversineNm);
+		const corridor = [];
+		if (corridorAps.length) {
+			const mets = await Promise.all(corridorAps.map((ap) => safe(loadMetar(ap.icao), { metar: null })));
+			for (let i = 0; i < corridorAps.length; i++) {
+				const m = mets[i]?.metar;
+				if (!m) continue;
+				const dec = decodeMetar(m);
+				const wxBit = dec.wx && !/no significant/i.test(dec.wx) ? ` · ${dec.wx}` : "";
+				corridor.push({ iata: corridorAps[i].iata, summary: `${dec.category}${wxBit}` });
+			}
+		}
+		const liveWx = digestWx({
+			samples,
+			hazards: uniqHazards,
+			originCat: origin.category ?? "UNK",
+			destCat: dest.category ?? "UNK",
+			originTaf: origin.taf ?? null,
+			destTaf: dest.taf ?? null,
+			corridor,
+			progress
+		});
+		const filedKey = aware ? origKey(aware) : `${identKey}|${origin.iata}|${dest.iata}`;
+		const filedWx = rememberFiledWx(filedKey, liveWx);
+		wx = {
+			filedAt: filedWx.at,
+			filed: filedWx,
+			live: liveWx,
+			deltas: wxDeltas(filedWx, liveWx),
+			hash: liveWx.hash
+		};
+	} catch {
+		wx = null;
 	}
-	const liveWx = digestWx({
-		samples,
-		hazards: uniqHazards,
-		originCat: origin.category ?? "UNK",
-		destCat: dest.category ?? "UNK",
-		originTaf: origin.taf ?? null,
-		destTaf: dest.taf ?? null,
-		corridor,
-		progress
-	});
-	const filedKey = aware ? origKey(aware) : `${identKey}|${origin.iata}|${dest.iata}`;
-	const filedWx = rememberFiledWx(filedKey, liveWx);
-	const wx = {
-		filedAt: filedWx.at,
-		filed: filedWx,
-		live: liveWx,
-		deltas: wxDeltas(filedWx, liveWx),
-		hash: liveWx.hash
-	};
 	return {
 		fetchedAt: Date.now(),
 		query,

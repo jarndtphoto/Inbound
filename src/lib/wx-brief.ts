@@ -211,44 +211,48 @@ export function wxDeltas(filed: WxDigest, live: WxDigest): string[] {
 }
 
 export function decodeTafPassenger(taf: Taf | null | undefined, whenUnix?: number | null): string | null {
-  if (!taf) return null;
-  const fcsts = Array.isArray(taf.fcsts) ? taf.fcsts : [];
-  const when = whenUnix ?? Date.now() / 1e3;
-  const covering =
-    fcsts.find((f) => (f.timeFrom ?? 0) <= when && (f.timeTo ?? Infinity) > when) ??
-    fcsts.find((f) => (f.timeFrom ?? 0) > when) ??
-    fcsts[0] ??
-    null;
-  const bits: string[] = [];
-  const raw = String(taf.rawTAF ?? "").toUpperCase();
-  const wx = String(covering?.wxString ?? "").toUpperCase();
-  const blob = `${wx} ${raw}`;
-  if (/\bTS\b|VCTS|TEMPO[^\n]{0,40}TS|PROB\d{2}[^\n]{0,40}TS/.test(blob)) bits.push("thunderstorms in the forecast");
-  else if (/\bFG\b|\bBR\b/.test(wx) || /TEMPO[^\n]{0,30}(FG|BR)/.test(raw)) bits.push("fog or mist");
-  else if (/\bSN\b|BLSN/.test(blob)) bits.push("snow");
-  else if (/\bRA\b|\bSHRA\b/.test(wx)) bits.push("rain");
-  const vis = covering?.visib;
-  if (vis != null) {
-    const n = parseFloat(String(vis).replace("+", ""));
-    if (Number.isFinite(n) && n <= 3 && !String(vis).includes("+")) bits.push(`visibility about ${n} mile${n === 1 ? "" : "s"}`);
-  }
-  const clouds = covering?.clouds ?? [];
-  const ceil = clouds
-    .filter((c) => c.base && ["BKN", "OVC", "VV"].includes(c.cover))
-    .map((c) => c.base as number)
-    .sort((a, b) => a - b)[0];
-  if (ceil != null && ceil < 1000) bits.push(`ceiling ${ceil} ft`);
-  else if (ceil != null && ceil < 3000) bits.push(`ceiling around ${ceil} ft`);
-  const spd = covering?.wspd;
-  const gst = covering?.wgst;
-  if ((gst ?? 0) >= 25 || (spd ?? 0) >= 20) bits.push(gst ? `wind ${spd} gusting ${gst} kt` : `wind ${spd} kt`);
-  if (covering?.fcstChange === "TEMPO") bits.push("tempo period");
-  if (covering?.probability && covering.probability >= 30) bits.push(`PROB${covering.probability}`);
-  if (!bits.length) {
-    if (/SKC|CLR|NSC|SCT2/.test(raw) && !/BKN00|OVC00|FG|TS/.test(raw)) return "VFR, no significant weather in the TAF";
+  try {
+    if (!taf) return null;
+    const fcsts = Array.isArray(taf.fcsts) ? taf.fcsts : [];
+    const when = whenUnix ?? Date.now() / 1e3;
+    const covering =
+      fcsts.find((f) => (f.timeFrom ?? 0) <= when && (f.timeTo ?? Infinity) > when) ??
+      fcsts.find((f) => (f.timeFrom ?? 0) > when) ??
+      fcsts[0] ??
+      null;
+    const bits: string[] = [];
+    const raw = String(taf.rawTAF ?? "").toUpperCase();
+    const wx = String(covering?.wxString ?? "").toUpperCase();
+    const blob = `${wx} ${raw}`;
+    if (/\bTS\b|VCTS|TEMPO[^\n]{0,40}TS|PROB\d{2}[^\n]{0,40}TS/.test(blob)) bits.push("thunderstorms in the forecast");
+    else if (/\bFG\b|\bBR\b/.test(wx) || /TEMPO[^\n]{0,30}(FG|BR)/.test(raw)) bits.push("fog or mist");
+    else if (/\bSN\b|BLSN/.test(blob)) bits.push("snow");
+    else if (/\bRA\b|\bSHRA\b/.test(wx)) bits.push("rain");
+    const vis = covering?.visib;
+    if (vis != null) {
+      const n = parseFloat(String(vis).replace("+", ""));
+      if (Number.isFinite(n) && n <= 3 && !String(vis).includes("+")) bits.push(`visibility about ${n} mile${n === 1 ? "" : "s"}`);
+    }
+    const clouds = Array.isArray(covering?.clouds) ? covering.clouds : [];
+    const ceil = clouds
+      .filter((c) => c.base && ["BKN", "OVC", "VV"].includes(c.cover))
+      .map((c) => c.base as number)
+      .sort((a, b) => a - b)[0];
+    if (ceil != null && ceil < 1000) bits.push(`ceiling ${ceil} ft`);
+    else if (ceil != null && ceil < 3000) bits.push(`ceiling around ${ceil} ft`);
+    const spd = covering?.wspd;
+    const gst = covering?.wgst;
+    if ((gst ?? 0) >= 25 || (spd ?? 0) >= 20) bits.push(gst ? `wind ${spd} gusting ${gst} kt` : `wind ${spd} kt`);
+    if (covering?.fcstChange === "TEMPO") bits.push("tempo period");
+    if (covering?.probability && covering.probability >= 30) bits.push(`PROB${covering.probability}`);
+    if (!bits.length) {
+      if (/SKC|CLR|NSC|SCT2/.test(raw) && !/BKN00|OVC00|FG|TS/.test(raw)) return "VFR, no significant weather in the TAF";
+      return null;
+    }
+    return bits.slice(0, 3).join(", ");
+  } catch {
     return null;
   }
-  return bits.slice(0, 3).join(", ");
 }
 
 export function corridorStations<T extends { iata: string; lat: number; lon: number }>(

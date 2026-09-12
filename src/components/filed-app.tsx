@@ -197,8 +197,8 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     wxHash: story.wx?.hash ?? "",
     wxDeltas: story.wx?.deltas ?? [],
     filedAt: story.wx?.filedAt ?? null,
-    worstChop: story.wx?.live.worstChop ?? null,
-    corridorWx: story.wx?.live.corridor?.map((c) => `${c.iata} ${c.summary}`).join("; ") ?? null,
+    worstChop: story.wx?.live?.worstChop ?? null,
+    corridorWx: story.wx?.live?.corridor?.map((c) => `${c.iata} ${c.summary}`).join("; ") ?? null,
     inbound: `${story.inbound?.headline ?? ""}. ${story.inbound?.detail ?? ""}`.replace(/^\.\s*/, "").trim(),
     inboundHeadline: story.inbound?.headline ?? "",
     inboundDetail: story.inbound?.detail ?? "",
@@ -282,14 +282,7 @@ export function FiledApp() {
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
   const [briefingFor, setBriefingFor] = useState("");
   const [cacheOk, setCacheOk] = useState(false);
-  const [showSplash, setShowSplash] = useState(() => {
-    if (typeof window === "undefined") return true;
-    try {
-      return sessionStorage.getItem("inbound-booted") !== "1";
-    } catch {
-      return true;
-    }
-  });
+  const [showSplash, setShowSplash] = useState(true);
   const splashAt = useRef(Date.now());
   const briefGen = useRef(0);
   const lastBriefKey = useRef("");
@@ -317,6 +310,13 @@ export function FiledApp() {
   }, [hydrate]);
 
   useEffect(() => {
+    let already = false;
+    try {
+      already = sessionStorage.getItem("inbound-booted") === "1";
+    } catch {
+      already = false;
+    }
+    const wait = already ? 200 : 1100;
     const t = window.setTimeout(() => {
       setShowSplash(false);
       try {
@@ -324,7 +324,7 @@ export function FiledApp() {
       } catch {
         /* private mode */
       }
-    }, 1400);
+    }, wait);
     return () => window.clearTimeout(t);
   }, []);
 
@@ -455,10 +455,10 @@ export function FiledApp() {
   }, [flightKey]);
 
   useEffect(() => {
-    if (!story || briefingFor === flightKey) return;
+    if (showSplash || !story || briefingFor === flightKey) return;
     briefM.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- first compile when the story arrives
-  }, [story, flightKey]);
+  }, [showSplash, story, flightKey]);
 
   useEffect(() => {
     if (!story || !briefing || briefingFor !== flightKey) return;
@@ -477,13 +477,10 @@ export function FiledApp() {
     if (draft.trim()) openFlight(draft);
   }
 
-  if (showSplash) {
-    return <SplashScreen />;
-  }
-
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg" style={shellStyle}>
       <ScreenErrorBoundary>
+      {showSplash ? <SplashScreen /> : null}
       <main
         ref={mainRef}
         className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-4 pt-2 lg:px-8 lg:pt-6"
