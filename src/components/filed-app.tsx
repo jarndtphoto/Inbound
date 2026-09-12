@@ -1,4 +1,3 @@
-import { airframeOf, isWidebody } from "@/lib/aircraft";
 import { briefRide } from "@/lib/brief";
 import { composeBrief, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
@@ -6,7 +5,7 @@ import { formatDuration, formatNm, feetPretty } from "@/lib/geo";
 import { storyMatchesQuery } from "@/lib/flight-parse";
 import { useFiled } from "@/lib/store";
 import { getFlightStory } from "@/lib/story";
-import type { Comfort, FlightStory, StageId, TaxiQueue } from "@/lib/types";
+import type { Comfort, FlightStory, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
 import { Button } from "@/components/ui/button";
@@ -1097,7 +1096,6 @@ function extraFor(story: FlightStory, stage: StageId) {
             }
           />
         </dl>
-        <TaxiQueueCard queue={story.taxiQueue} />
       </>
     );
   }
@@ -1190,89 +1188,6 @@ function extraFor(story: FlightStory, stage: StageId) {
     );
   }
   return null;
-}
-
-function TaxiQueueCard({ queue }: { queue?: TaxiQueue | null }) {
-  if (!queue) return null;
-  const items = Array.isArray(queue.items) ? queue.items : [];
-  const others = items.filter((it) => !it.you);
-  const you = items.find((it) => it.you);
-  if (!queue.depRunway && others.length === 0) {
-    return queue.note ? <p className="mt-3 text-sm text-muted">{queue.note}</p> : null;
-  }
-  const rwy = queue.depRunway
-    ? queue.depSource === "takeoffs"
-      ? `Rwy ${queue.depRunway}`
-      : `Likely ${queue.depRunway}`
-    : "Taxi";
-  const headline =
-    queue.place != null
-      ? queue.place === 1
-        ? "First in line"
-        : `#${queue.place}`
-      : others.length
-        ? `${others.length} nearby`
-        : "Taxiing";
-  const sub =
-    queue.place != null && queue.ahead === 0
-      ? rwy
-      : queue.ahead > 0
-        ? `${queue.ahead} ahead · ${rwy}`
-        : rwy;
-  return (
-    <div className="mt-4 rounded-md border border-border bg-bg px-3 py-3">
-      <p className="font-mono text-xs tracking-widest text-subtle uppercase">
-        Place in line
-      </p>
-      <div className="mt-1 flex items-baseline justify-between gap-3">
-        <p className="font-display text-2xl font-semibold leading-none">{headline}</p>
-        <p className="text-right font-mono text-xs text-muted">{sub}</p>
-      </div>
-      {items.length ? (
-        <ol className="mt-3 divide-y divide-border border-t border-border">
-          {items.map((it, i) => (
-            <TaxiQueueRow key={it.hex || `${it.iata}-${i}`} it={it} n={i + 1} />
-          ))}
-        </ol>
-      ) : (
-        <p className="mt-2 text-sm text-muted">Quiet on the taxiways right now.</p>
-      )}
-      <p className="mt-2 text-xs leading-snug text-subtle">
-        Live transponders on the field — not ATC’s official order.
-      </p>
-    </div>
-  );
-}
-
-function TaxiQueueRow({ it, n }: { it: TaxiQueue["items"][number]; n: number | null }) {
-  const type = it.type ?? "—";
-  const name = it.typeName ?? airframeOf(it.type)?.name ?? "";
-  const heavy = isWidebody(it.type);
-  const motion = it.you
-    ? it.holding
-      ? "You · hold"
-      : "You · taxi"
-    : it.holding
-      ? "Holding"
-      : it.gsKt != null
-        ? `${Math.round(it.gsKt)} kt`
-        : "";
-  return (
-    <li
-      className={cn("flex min-h-10 items-center gap-2 py-2", it.you ? "text-accent" : "text-fg")}
-      title={[it.iata, name || type, motion].filter(Boolean).join(" · ")}
-    >
-      <span className="w-4 shrink-0 font-mono text-xs tabular-nums text-subtle">{n ?? "·"}</span>
-      <span className="min-w-0 flex-1 truncate font-medium">{it.iata}</span>
-      <span className="w-[3.25rem] shrink-0 truncate text-right font-mono text-xs text-muted">
-        {type}
-        {heavy ? " H" : ""}
-      </span>
-      <span className="w-[4.75rem] shrink-0 truncate text-right font-mono text-xs whitespace-nowrap text-subtle">
-        {motion}
-      </span>
-    </li>
-  );
 }
 
 function TimeChip({

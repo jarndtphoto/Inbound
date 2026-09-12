@@ -628,282 +628,6 @@ function headingDelta(a, b) {
 	const d = Math.abs(wrap360(a) - wrap360(b));
 	return Math.min(d, 360 - d);
 }
-function circularMeanDeg(degs) {
-	if (!degs.length) return null;
-	let x = 0;
-	let y = 0;
-	for (const d of degs) {
-		x += Math.cos(d * Math.PI / 180);
-		y += Math.sin(d * Math.PI / 180);
-	}
-	return wrap360(Math.atan2(y, x) * 180 / Math.PI);
-}
-function rwyFromHeading(hdg) {
-	let n = Math.round(wrap360(hdg) / 10);
-	if (n === 0 || n === 37) n = 36;
-	return String(n).padStart(2, "0");
-}
-function alongToward(p, origin, bearingDeg) {
-	const dist = haversineNm(origin, p);
-	const brg = initialBearing(origin, p);
-	const rad = headingDelta(brg, bearingDeg) * Math.PI / 180;
-	const toward = headingDelta(brg, bearingDeg) <= 90;
-	return (toward ? 1 : -1) * dist * Math.cos(rad);
-}
-function crossFrom(p, origin, bearingDeg) {
-	const dist = haversineNm(origin, p);
-	const brg = initialBearing(origin, p);
-	const rad = headingDelta(brg, bearingDeg) * Math.PI / 180;
-	return dist * Math.sin(rad);
-}
-function isTailIdent(s) {
-	const u = String(s || "").replace(/[-\s]/g, "").toUpperCase();
-	return /^N[0-9][0-9A-Z]{0,4}$/.test(u);
-}
-function queueItemFromRaw(raw, you) {
-	const cs = String(raw.flight ?? "").replace(/\s/g, "").toUpperCase();
-	const type = raw.t?.trim() || null;
-	const gs = typeof raw.gs === "number" ? raw.gs : null;
-	const callsign = cs && !isTailIdent(cs) ? cs : "";
-	const iata = callsign ? displayIata(callsign, null) : (type || "—");
-	return {
-		hex: String(raw.hex ?? "").toLowerCase(),
-		callsign: callsign || "—",
-		iata,
-		type,
-		typeName: airframeOf(type)?.name ?? raw.desc ?? type,
-		gsKt: gs,
-		holding: (gs ?? 0) < 8,
-		you: Boolean(you)
-	};
-}
-function takeoffRunways(takeoffs) {
-	const byHdg = [];
-	for (const t of takeoffs) {
-		if (t.track == null) continue;
-		let placed = false;
-		for (const g of byHdg) {
-			const mean = circularMeanDeg(g.map((x) => x.track));
-			if (mean != null && headingDelta(t.track, mean) < 12) {
-				g.push(t);
-				placed = true;
-				break;
-			}
-		}
-		if (!placed) byHdg.push([t]);
-	}
-	const runways = [];
-	for (const g of byHdg) {
-		const hdg = circularMeanDeg(g.map((x) => x.track));
-		if (hdg == null) continue;
-		const clusters = [];
-		for (const t of g) {
-			let placed = false;
-			for (const cl of clusters) {
-				if (crossFrom({ lat: t.lat, lon: t.lon }, { lat: cl[0].lat, lon: cl[0].lon }, hdg) < 0.42) {
-					cl.push(t);
-					placed = true;
-					break;
-				}
-			}
-			if (!placed) clusters.push([t]);
-		}
-		for (const cl of clusters) {
-			const lat = cl.reduce((s, x) => s + x.lat, 0) / cl.length;
-			const lon = cl.reduce((s, x) => s + x.lon, 0) / cl.length;
-			const h = circularMeanDeg(cl.map((x) => x.track)) ?? hdg;
-			const rot = { lat, lon };
-			const thr = destPoint(rot, wrap360(h + 180), 1.5);
-			runways.push({
-				hdg: h,
-				rot,
-				thr,
-				n: cl.length,
-				rwy: rwyFromHeading(h)
-			});
-		}
-	}
-	runways.sort((a, b) => b.n - a.n);
-	return runways;
-}
-function pickRunway(runways, us, ourTrack) {
-	if (!runways.length) return null;
-	let best = null;
-	for (const rw of runways) {
-		const cross = crossFrom(us, rw.thr, rw.hdg);
-		const along = alongToward(us, rw.thr, rw.hdg);
-		let score = Math.abs(cross);
-		if (ourTrack != null && headingDelta(ourTrack, rw.hdg) < 28) score -= 0.4;
-		if (along > -0.5 && along < 4.2) score -= 0.12;
-		score -= Math.min(3, rw.n) * 0.06;
-		if (!best || score < best.score) best = { rw, score, cross, along };
-	}
-	if (!best) return null;
-	if (Math.abs(best.cross) > 2.4 && (best.along < -1.2 || best.along > 5.5)) return null;
-	return best;
-}
-function streamHeading(takeoffs, field, us) {
-	const fromTo = circularMeanDeg((takeoffs ?? []).map((t) => t.track).filter((t) => typeof t === "number"));
-	if (fromTo != null) return fromTo;
-	const tracks = (field ?? [])
-		.filter((ac) => ac.gs >= 5 && ac.track != null && haversineNm(ac.here, us) < 1.8)
-		.map((ac) => ac.track);
-	return circularMeanDeg(tracks);
-}
-function buildStreamLine(field, us, hdg, ourHex) {
-	if (hdg == null) return [];
-	const line = [];
-	for (const ac of field) {
-		if (ourHex && ac.hex === ourHex) continue;
-		if (haversineNm(ac.here, us) > 2.8) continue;
-		const along = alongToward(ac.here, us, hdg);
-		const cross = Math.abs(crossFrom(ac.here, us, hdg));
-		if (cross > 0.72) continue;
-		if (along < -0.1 || along > 3.2) continue;
-		if (ac.track != null && ac.gs > 16 && headingDelta(ac.track, hdg) > 110) continue;
-		if (ac.gs > 90) continue;
-		line.push({ ...ac, along, cross });
-	}
-	line.sort((a, b) => b.along - a.along);
-	return line;
-}
-async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed, fieldList, liveTrusted }) {
-	if (!live || !origin) return null;
-	if (!liveTrusted) return null;
-	if (ourAirborne) return null;
-	if (!live.onGround) return null;
-	const atOrigin = haversineNm({ lat: live.lat, lon: live.lon }, origin) < 8;
-	const atDest = dest ? haversineNm({ lat: live.lat, lon: live.lon }, dest) < 6 : false;
-	if (atDest && !atOrigin) return null;
-	if (!atOrigin) return null;
-	const gs = live.gsKt ?? 0;
-	if (!pushed && gs < 1) return null;
-	const rawList = fieldList ?? await safe(adsbAround(origin.lat, origin.lon, 12), []);
-	const field = [];
-	const takeoffs = [];
-	const elev = fieldElev(origin);
-	for (const raw of rawList) {
-		const hex = String(raw.hex ?? "").toLowerCase();
-		if (!hex || raw.lat == null || raw.lon == null) continue;
-		if (isVehicleType(raw.t, raw.category, raw.ownOp)) continue;
-		if (seenOf(raw) > 70) continue;
-		if (!String(raw.flight ?? "").trim() && !String(raw.r ?? "").trim()) continue;
-		const altRaw = raw.alt_baro;
-		const acGs = typeof raw.gs === "number" ? raw.gs : 0;
-		const altNum = typeof altRaw === "number" ? altRaw : 0;
-		const onGround = altRaw === "ground" || altRaw === 0 || altRaw === "0" || (typeof altRaw === "number" && acGs < 55 && altRaw - elev < 380);
-		const alt = onGround ? 0 : altNum;
-		const track = typeof raw.track === "number" ? raw.track : null;
-		const vert = typeof raw.baro_rate === "number" ? raw.baro_rate : 0;
-		const here = { lat: raw.lat, lon: raw.lon };
-		const dist = haversineNm(here, origin);
-		const justUp = !onGround && dist < 10 && alt > 80 && alt < 7000 && acGs > 100 && track != null && (vert > 40 || acGs > 130 && alt < 4500);
-		if (justUp) {
-			takeoffs.push({ lat: raw.lat, lon: raw.lon, track, gs: acGs });
-			continue;
-		}
-		if (!onGround) continue;
-		if (dist > 5.2) continue;
-		field.push({ raw, hex, here, dist, gs: acGs, track });
-	}
-	const us = { lat: live.lat, lon: live.lon };
-	const runways = takeoffRunways(takeoffs);
-	const picked = pickRunway(runways, us, live.track ?? null);
-	const hdg = picked?.rw.hdg ?? streamHeading(takeoffs, field, us);
-	const youItem = {
-		hex: live.hex,
-		callsign: "YOU",
-		iata: "You",
-		type: live.type ?? null,
-		typeName: live.typeName ?? null,
-		gsKt: live.gsKt ?? null,
-		holding: gs < 8,
-		you: true
-	};
-	let rwLine = [];
-	if (picked) {
-		const rw = picked.rw;
-		const ourAlong = alongToward(us, rw.thr, rw.hdg);
-		for (const ac of field) {
-			if (ourHex && ac.hex === ourHex) continue;
-			const along = alongToward(ac.here, rw.thr, rw.hdg);
-			const cross = Math.abs(crossFrom(ac.here, rw.thr, rw.hdg));
-			if (cross > 1.05) continue;
-			if (along < -0.45 || along > 4.6) continue;
-			if (ac.gs < 3 && cross > 0.7) continue;
-			if (ac.track != null && ac.gs > 18 && headingDelta(ac.track, rw.hdg) > 125) continue;
-			if (ac.gs > 95) continue;
-			rwLine.push({ ...ac, along: ourAlong - along, cross });
-		}
-		rwLine.sort((a, b) => b.along - a.along);
-	}
-	const compact = ["MDW", "LGA", "DCA", "SNA", "BUR", "HOU", "DAL", "BWI", "MKE", "OAK", "SJC"].includes(String(origin.iata || "").toUpperCase());
-	const packNm = compact ? 0.65 : 1.05;
-	let toEnd = [];
-	if (takeoffs.length) {
-		const aim = {
-			lat: takeoffs.reduce((s, t) => s + t.lat, 0) / takeoffs.length,
-			lon: takeoffs.reduce((s, t) => s + t.lon, 0) / takeoffs.length
-		};
-		const bearing = initialBearing(us, aim);
-		const dUs = haversineNm(us, aim);
-		for (const ac of field) {
-			if (ourHex && ac.hex === ourHex) continue;
-			if (haversineNm(ac.here, us) > (compact ? 0.75 : 1.5)) continue;
-			const cross = Math.abs(crossFrom(ac.here, us, bearing));
-			if (cross > (compact ? 0.4 : 0.72)) continue;
-			const along = alongToward(ac.here, us, bearing);
-			if (along < -0.22 || along > Math.max(dUs + 0.25, compact ? 0.95 : 2.6)) continue;
-			if (ac.gs > 90) continue;
-			toEnd.push({ ...ac, along, cross });
-		}
-		toEnd.sort((a, b) => b.along - a.along);
-	}
-	const streamAll = hdg != null ? buildStreamLine(field, us, hdg, ourHex) : [];
-	let pack = toEnd;
-	if (streamAll.length > pack.length) pack = streamAll;
-	if (rwLine.length > pack.length) pack = rwLine;
-	if (pack.length < (compact ? 2 : 3)) {
-		const extra = [];
-		for (const ac of field) {
-			if (ourHex && ac.hex === ourHex) continue;
-			if (haversineNm(ac.here, us) > packNm) continue;
-			if (ac.gs > 85) continue;
-			if (hdg != null && ac.track != null && ac.gs > 14 && headingDelta(ac.track, hdg) > 110) continue;
-			extra.push({
-				...ac,
-				along: hdg != null ? alongToward(ac.here, us, hdg) : -haversineNm(ac.here, us),
-				cross: hdg != null ? Math.abs(crossFrom(ac.here, us, hdg)) : 0
-			});
-		}
-		extra.sort((a, b) => b.along - a.along);
-		if (extra.length > pack.length) pack = extra;
-	}
-	const likelyRwy = hdg != null ? rwyFromHeading(hdg) : null;
-	const locked = Boolean(picked && pack === rwLine);
-	const ahead = pack.filter((ac) => ac.along > 0.03);
-	const behind = pack.filter((ac) => ac.along <= 0.03);
-	const items = [
-		...ahead.slice(0, 10).map((ac) => queueItemFromRaw(ac.raw, false)),
-		youItem,
-		...behind.slice(0, compact ? 5 : 2).map((ac) => queueItemFromRaw(ac.raw, false))
-	];
-	const place = ahead.length + 1;
-	const depRunway = locked ? picked.rw.rwy : likelyRwy;
-	const note = place === 1
-		? (depRunway ? `You’re first for runway ${depRunway}.` : "You’re first in this pack.")
-		: `${ahead.length} aircraft ahead${depRunway && locked ? ` for runway ${depRunway}` : ""}.`;
-	return {
-		place,
-		ahead: ahead.length,
-		moving: pack.filter((ac) => ac.gs >= 5).length,
-		items,
-		depRunway,
-		depSource: locked ? "takeoffs" : takeoffs.length >= 2 ? "stream" : "track",
-		status: "taxi",
-		note
-	};
-}
 async function loadRoute(callsign) {
 	return cached(`route:${callsign}`, 18e5, async () => {
 		return (await fetchJson(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(callsign)}`, 8e3)).response?.flightroute ?? null;
@@ -2006,7 +1730,7 @@ function rampWx(decoded) {
 	return null;
 }
 function buildStages(args) {
-	const { live, origin, dest, current, remainingNm, etaMin, comfort, inbound, samples, times, taxiQueue, taxiHint, parkedAtGate } = args;
+	const { live, origin, dest, current, remainingNm, etaMin, comfort, inbound, samples, times, taxiHint, parkedAtGate } = args;
 	const conv = samples.find((s) => s.convective);
 	const order = [
 		"inbound",
@@ -2041,7 +1765,7 @@ function buildStages(args) {
 	const ramp = rampWx(dest.decoded);
 	if (ramp) gateWatch.push(ramp);
 	const pushed = Boolean(times.pushed || times.airborne || current === "taxi" || current === "ride" || current === "arrival" || current === "gate");
-	const taxiingNow = Boolean(taxiQueue?.status === "taxi" || taxiHint || (live?.onGround && (live.gsKt ?? 0) >= 2));
+	const taxiingNow = Boolean(taxiHint || (live?.onGround && (live.gsKt ?? 0) >= 2));
 	const inboundTitle = inbound.status === "complete" ? "Inbound is at the gate" : inbound.status === "at_field" ? "Inbound is taxiing in" : inbound.status === "airborne" ? "Inbound to the field" : "The inbound aircraft";
 	const arrivalBody = dest.nas?.delayed ? `${times.land ? `Landing around ${times.land}. ` : ""}${nasCopy(dest.nas, "dest")}` : times.land ? (times.arriveDelayMin ?? 0) >= 15 && times.landWas ? `Landing around ${times.land}, about ${times.arriveDelayMin} minutes later than ${times.landWas}.` : `Landing around ${times.land}.` : `Into ${dest.city}.`;
 	const gateBody = "";
@@ -2055,13 +1779,13 @@ function buildStages(args) {
 		},
 		taxi: {
 			state: state("taxi"),
-			title: taxiQueue?.depRunway ? `Taxi · Rwy ${taxiQueue.depRunway}` : current === "ride" || current === "arrival" || current === "gate" ? "Taxied" : `Taxi at ${origin.iata}`,
+			title: current === "ride" || current === "arrival" || current === "gate" ? "Taxied" : `Taxi at ${origin.iata}`,
 			body: taxiingNow
-				? (taxiQueue?.place != null ? `Number ${taxiQueue.place} for the runway.` : "Taxiing.")
+				? "Taxiing."
 				: current === "ride" || current === "arrival" || current === "gate"
 					? (times.taxiOutKind === "measured" && times.taxiOutMin != null ? `${times.taxiOutMin} min taxi out.` : "")
 					: "",
-			watchouts: taxiQueue?.status === "taxi" && taxiQueue.ahead >= 6 ? ["A long line for the runway."] : []
+			watchouts: []
 		},
 		inbound: {
 			state: state("inbound"),
@@ -2691,23 +2415,6 @@ async function buildStory(query) {
 		taxiHint,
 		distPark
 	});
-	const taxiQueue = await loadTaxiQueue({
-		origin,
-		dest,
-		live,
-		ourHex: live?.hex ?? aware?.hex ?? null,
-		ourAirborne: Boolean(ourAirborne && !live?.onGround && !taxiHint),
-		pushed: Boolean(times.pushed || leftGate),
-		fieldList,
-		liveTrusted: Boolean(
-			live &&
-			(
-				flightIdentOk(live.callsign, parsed, aware) ||
-				(aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase()) ||
-				Boolean(live.hex && hexByIdent.get(identKey) === live.hex)
-			)
-		)
-	});
 	const airline = airlineOf(liveCs) ?? route?.airline?.name ?? null;
 	let aircraft = live;
 	if (ourLanded) {
@@ -2795,7 +2502,6 @@ async function buildStory(query) {
 		comfort,
 		inbound,
 		times,
-		taxiQueue,
 		stages: buildStages({
 			live,
 			origin,
@@ -2807,7 +2513,6 @@ async function buildStory(query) {
 			inbound,
 			samples,
 			times,
-			taxiQueue,
 			taxiHint,
 			parkedAtGate
 		})

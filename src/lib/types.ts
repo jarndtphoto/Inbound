@@ -186,29 +186,6 @@ export type FlightTimes = {
   origLandUnix?: number | null;
 };
 
-export type TaxiQueueItem = {
-  hex: string;
-  callsign: string;
-  iata: string;
-  type: string | null;
-  typeName: string | null;
-  gsKt: number | null;
-  holding: boolean;
-  you?: boolean;
-};
-
-export type TaxiQueue = {
-  /** 1 = first to the runway. Null if you haven’t joined the line yet. */
-  place: number | null;
-  ahead: number;
-  moving: number;
-  items: TaxiQueueItem[];
-  depRunway: string | null;
-  depSource: "takeoffs" | "wind" | "track" | "stream" | null;
-  status: "taxi" | "gate" | "empty";
-  note: string;
-};
-
 export type FlightStory = {
   fetchedAt: number;
   query: string;
@@ -239,7 +216,6 @@ export type FlightStory = {
     watch: InboundWatch[];
   };
   times: FlightTimes;
-  taxiQueue?: TaxiQueue | null;
   stages: Record<
     StageId,
     {
