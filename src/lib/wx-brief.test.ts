@@ -169,6 +169,20 @@ describe("TAF passenger line", () => {
     assert.match(line, /thunder/i);
     assert.match(line, /ceiling/i);
   });
+
+  it("does not report a later storm as weather at an earlier arrival time", () => {
+    const taf: Taf = {
+      icaoId: "KLAX",
+      rawTAF: "TAF KLAX 1218/1318 P6SM SCT030 TEMPO 1306/1308 TSRA BKN008",
+      fcsts: [
+        { timeFrom: 100, timeTo: 500, wxString: "", visib: "6+", clouds: [{ cover: "SCT", base: 3000 }] },
+        { timeFrom: 500, timeTo: 800, wxString: "TSRA", visib: "2", clouds: [{ cover: "BKN", base: 800 }], fcstChange: "TEMPO" },
+      ],
+    };
+    assert.doesNotMatch(decodeTafPassenger(taf, 200) ?? "", /thunder/i);
+    assert.match(decodeTafPassenger(taf, 600) ?? "", /thunder/i);
+    assert.equal(decodeTafPassenger(taf, 900), null, "expired TAF period is not current weather");
+  });
 });
 
 describe("corridor stations", () => {

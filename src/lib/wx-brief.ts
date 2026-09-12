@@ -256,17 +256,17 @@ export function decodeTafPassenger(taf: Taf | null | undefined, whenUnix?: numbe
     if (!taf) return null;
     const fcsts = Array.isArray(taf.fcsts) ? taf.fcsts : [];
     const when = whenUnix ?? Date.now() / 1e3;
-    const covering =
-      fcsts.find((f) => (f.timeFrom ?? 0) <= when && (f.timeTo ?? Infinity) > when) ??
-      fcsts.find((f) => (f.timeFrom ?? 0) > when) ??
-      fcsts[0] ??
-      null;
+    const active = fcsts.filter((f) => (f.timeFrom ?? 0) <= when && (f.timeTo ?? Infinity) > when);
+    const next = fcsts.find((f) => (f.timeFrom ?? 0) > when);
+    if (fcsts.length && !active.length && !next) return null;
+    const covering = active[0] ?? next ?? null;
+    const relevant = active.length ? active : covering ? [covering] : [];
     const bits: string[] = [];
     const raw = String(taf.rawTAF ?? "").toUpperCase();
-    const wx = String(covering?.wxString ?? "").toUpperCase();
-    const blob = `${wx} ${raw}`;
-    if (/\bTS\b|VCTS|TEMPO[^\n]{0,40}TS|PROB\d{2}[^\n]{0,40}TS/.test(blob)) bits.push("thunderstorms in the forecast");
-    else if (/\bFG\b|\bBR\b/.test(wx) || /TEMPO[^\n]{0,30}(FG|BR)/.test(raw)) bits.push("fog or mist");
+    const wx = relevant.map((f) => String(f.wxString ?? "")).join(" ").toUpperCase();
+    const blob = fcsts.length ? wx : raw;
+    if (/\b(?:VC)?TS[A-Z]*\b|TEMPO[^\n]{0,40}TS|PROB\d{2}[^\n]{0,40}TS/.test(blob)) bits.push("thunderstorms in the forecast");
+    else if (/\bFG\b|\bBR\b/.test(wx) || (!fcsts.length && /TEMPO[^\n]{0,30}(FG|BR)/.test(raw))) bits.push("fog or mist");
     else if (/\bSN\b|BLSN/.test(blob)) bits.push("snow");
     else if (/\bRA\b|\bSHRA\b/.test(wx)) bits.push("rain");
     const vis = covering?.visib;
@@ -284,7 +284,7 @@ export function decodeTafPassenger(taf: Taf | null | undefined, whenUnix?: numbe
     const spd = covering?.wspd;
     const gst = covering?.wgst;
     if ((gst ?? 0) >= 25 || (spd ?? 0) >= 20) bits.push(gst ? `wind ${spd} gusting ${gst} kt` : `wind ${spd} kt`);
-    if (covering?.fcstChange === "TEMPO") bits.push("tempo period");
+    if (relevant.some((f) => f.fcstChange === "TEMPO")) bits.push("tempo period");
     if (covering?.probability && covering.probability >= 30) bits.push(`PROB${covering.probability}`);
     if (!bits.length) {
       if (/SKC|CLR|NSC|SCT2/.test(raw) && !/BKN00|OVC00|FG|TS/.test(raw)) return "VFR, no significant weather in the TAF";
