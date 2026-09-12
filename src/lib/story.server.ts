@@ -450,8 +450,8 @@ function coastTracePt(pt) {
 	const age = Math.max(0, now - pt.t);
 	let lat = pt.lat;
 	let lon = pt.lon;
-	if (age > 25 && (pt.gs ?? 0) > 80 && pt.track != null && Number.isFinite(pt.track)) {
-		const moved = destPoint(pt, pt.track, (pt.gs / 3600) * Math.min(age, 8 * 60));
+	if (age > 0 && age <= 20 && (pt.gs ?? 0) > 80 && pt.track != null && Number.isFinite(pt.track)) {
+		const moved = destPoint(pt, pt.track, (pt.gs / 3600) * age);
 		lat = moved.lat;
 		lon = moved.lon;
 	}
@@ -492,8 +492,8 @@ function restoreKin(identKey, live, dest, aware) {
 		const age = (Date.now() - prev.at) / 1000;
 		let lat = prev.lat;
 		let lon = prev.lon;
-		if (age > 25 && (prev.gsKt ?? 0) > 80 && prev.track != null) {
-			const moved = destPoint(prev, prev.track, (prev.gsKt / 3600) * Math.min(age, 8 * 60));
+		if (age > 0 && age <= 20 && (prev.gsKt ?? 0) > 80 && prev.track != null && Number.isFinite(prev.track)) {
+			const moved = destPoint(prev, prev.track, (prev.gsKt / 3600) * age);
 			lat = moved.lat;
 			lon = moved.lon;
 		}
@@ -594,7 +594,7 @@ function motionFromTrace(points, origin) {
 	if (!points?.length || !origin) return { pushed: false, taxiing: false, flying: false };
 	const now = Date.now() / 1e3;
 	const recent = points.filter((p) => now - p.t < 18 * 60 && haversineNm(p, origin) < 8);
-	const last = (recent.length ? recent : points)[ (recent.length ? recent : points).length - 1 ];
+	const last = recent[recent.length - 1];
 	if (!last) return { pushed: false, taxiing: false, flying: false };
 	const lastGs = last.gs ?? 0;
 	const lastAlt = last.alt ?? 0;
@@ -3071,4 +3071,3 @@ export async function loadLiveBoard() {
 		return cards.slice(0, 8);
 	});
 }
-
