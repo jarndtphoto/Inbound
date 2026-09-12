@@ -89,6 +89,19 @@ describe('September 12 flight audit replay', () => {
     await assert.rejects(loadFlightStory('UA9087', {fresh: true}), /route unavailable/i);
   });
 
+  it('does not use an old flight-number route when the current schedule feed is unavailable', async (t) => {
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      if (String(url).startsWith('https://www.flightaware.com/live/flight/')) return new Response('unavailable', { status: 503 });
+      if (String(url).includes('api.adsbdb.com/v0/callsign/')) {
+        return new Response(JSON.stringify({ response: { flightroute: {
+          origin: { iata_code: 'SMF' }, destination: { iata_code: 'SAN' },
+        } } }));
+      }
+      return new Response(JSON.stringify({ ac: [], features: [] }));
+    });
+    await assert.rejects(loadFlightStory('WN2531', { fresh: true }), /current flight route unavailable/i);
+  });
+
   it('WN2512: ignores a different airborne tail and future actual push/takeoff', async (t) => {
     const record = JSON.parse(readFileSync(new URL('./fixtures/aal3008-2026-09-12.json', import.meta.url), 'utf8'));
     record.ident = 'SWA2512'; record.iataIdent = 'WN2512'; record.flightStatus = 'scheduled';

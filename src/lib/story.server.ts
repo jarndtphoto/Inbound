@@ -2084,6 +2084,11 @@ async function buildStory(query) {
 		safe(loadAware(parsed.callsign), null),
 		safe(loadRoute(parsed.callsign), null)
 	]);
+	// Flight-number route databases retain old assignments after a number moves
+	// to a different city pair. Require a current, leg-specific schedule feed.
+	if (!parsed.registration && (!(aware?.originIata || aware?.originIcao) || !(aware?.destIata || aware?.destIcao))) {
+		throw new Error("Current flight route unavailable. Try again when the flight feed responds.");
+	}
 	let rawAc = rawAc0;
 	if (rawAc && !rawMatchesQuery(rawAc, parsed, aware)) {
 		rawAc = null;
