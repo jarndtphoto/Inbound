@@ -3,12 +3,12 @@ import { loadFlightStory, loadLiveBoard } from "./story.server";
 
 /** Passenger flight story — live track, ride grade, delays. */
 export const getFlightStory = createServerFn({ method: "POST" })
-  .validator((input: { q: string }) => {
+  .validator((input: { q: string; fresh?: boolean }) => {
     const q = String(input?.q ?? "").trim();
     if (!q) throw new Error("Enter a flight number");
     if (q.length > 16) throw new Error("Flight number is too long");
-    return { q };
+    return { q, fresh: Boolean(input?.fresh) };
   })
-  .handler(async ({ data }) => loadFlightStory(data.q));
+  .handler(async ({ data }) => loadFlightStory(data.q, { fresh: data.fresh }));
 
 export const listLiveFlights = createServerFn({ method: "POST" }).handler(async () => loadLiveBoard());

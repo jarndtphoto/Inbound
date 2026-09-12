@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { composeBrief, diffBriefLog, type RideFacts } from "./brief-copy.ts";
+import { composeBrief, diffBriefLog, logManualRefresh, type RideFacts } from "./brief-copy.ts";
 
 function facts(over: Partial<RideFacts> = {}): RideFacts {
   return {
@@ -130,6 +130,17 @@ describe("briefing update log", () => {
     const n = b.log.length;
     b = composeBrief(facts({ now: "taxi" }), b);
     assert.equal(b.log.length, n);
+  });
+
+  it("logs a manual refresh without jargon", () => {
+    const b = composeBrief(facts({ now: "ride" }));
+    const next = logManualRefresh(b);
+    assert.ok(next);
+    assert.match(next.log[next.log.length - 1].text, /Manual refresh/);
+    assert.equal(JARGON.test(next.log.map((e) => e.text).join(" ")), false);
+    const again = logManualRefresh(next);
+    const manuals = again.log.filter((e) => e.text === "Manual refresh");
+    assert.ok(manuals.length <= 1);
   });
 
   it("caps the log", () => {

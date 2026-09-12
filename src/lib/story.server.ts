@@ -47,12 +47,16 @@ import {
 var UA = "Inbound/1.0 (passenger flight companion)";
 var cache = /* @__PURE__ */ new Map();
 var inflight = /* @__PURE__ */ new Map();
+var skipCache = 0;
 function cached(key, ttlMs, fn) {
-	const hit = cache.get(key);
-	const ttl = hit?.ttl ?? ttlMs;
-	if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.value);
-	const pending = inflight.get(key);
-	if (pending) return pending;
+	const skip = skipCache > 0 && ttlMs <= 60e3 && !String(key).startsWith("route:");
+	if (!skip) {
+		const hit = cache.get(key);
+		const ttl = hit?.ttl ?? ttlMs;
+		if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.value);
+		const pending = inflight.get(key);
+		if (pending) return pending;
+	}
 	const p = fn().then((value) => {
 		const empty = value == null || (Array.isArray(value) && value.length === 0);
 		cache.set(key, {
@@ -2669,10 +2673,15 @@ function nearestKnown(live) {
 	}
 	return best;
 }
-export async function loadFlightStory(query) {
+export async function loadFlightStory(query, opts) {
+	const fresh = Boolean(opts?.fresh);
 	try {
 		const key = `story42:${String(query || "").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
-		const work = cached(key, 2e3, () => buildStory(query));
+		if (fresh) {
+			cache.delete(key);
+			skipCache += 1;
+		}
+		const work = cached(key, fresh ? 0 : 2e3, () => buildStory(query));
 		let timer;
 		const timed = new Promise((_, rej) => {
 			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 12e3);
@@ -2681,6 +2690,7 @@ export async function loadFlightStory(query) {
 			return await Promise.race([work, timed]);
 		} finally {
 			clearTimeout(timer);
+			if (fresh) skipCache = Math.max(0, skipCache - 1);
 		}
 	} catch (err) {
 		const msg = err instanceof Error && err.message && err.name !== "AbortError" ? err.message : "Could not load that flight. Try again.";

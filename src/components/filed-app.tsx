@@ -1,5 +1,5 @@
 import { briefRide } from "@/lib/brief";
-import { composeBrief, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
+import { composeBrief, logManualRefresh, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
 import { formatDuration, formatMiles, feetPretty } from "@/lib/geo";
 import { storyMatchesQuery } from "@/lib/flight-parse";
@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Clock, Gauge, Plane, Radio, Search, ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from "lucide-react";
+import { Clock, Gauge, Plane, Radio, Search, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type FormEvent, type ReactNode } from "react";
 
 const STAGES: { id: StageId; label: string }[] = [
@@ -298,6 +298,11 @@ export function FiledApp() {
   const [cacheOk, setCacheOk] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const splashAt = useRef(Date.now());
+  const [refreshErr, setRefreshErr] = useState<string | null>(null);
+  const [pullPx, setPullPx] = useState(0);
+  const [manualBusy, setManualBusy] = useState(false);
+  const freshRef = useRef(false);
+  const refreshingRef = useRef(false);
   const briefGen = useRef(0);
   const lastBriefKey = useRef("");
   const briefingRef = useRef<CompiledBrief | null>(null);
@@ -359,17 +364,20 @@ export function FiledApp() {
   const storyQ = useQuery({
     queryKey: ["story", query],
     queryFn: async () => {
+      const fresh = freshRef.current;
+      freshRef.current = false;
       try {
-        const s = await getFlightStory({ data: { q: query } });
+        const s = await getFlightStory({ data: { q: query, fresh } });
         if (!storyMatchesQuery(s, query)) {
           const cached = readCachedStory(query);
-          if (cached && storyMatchesQuery(cached, query)) return rememberOrigOnClient(cached);
+          if (!fresh && cached && storyMatchesQuery(cached, query)) return rememberOrigOnClient(cached);
           throw new Error("Could not load that flight. Try another number.");
         }
         const merged = rememberOrigOnClient(s);
         writeCachedStory(query, merged);
         return merged;
       } catch (err) {
+        if (fresh) throw err;
         const cached = readCachedStory(query);
         if (cached && storyMatchesQuery(cached, query)) return rememberOrigOnClient(cached);
         throw err;
@@ -473,6 +481,8 @@ export function FiledApp() {
     briefingRef.current = null;
     briefM.reset();
     setStage("auto");
+    setRefreshErr(null);
+    setPullPx(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the flight changes
   }, [flightKey]);
 
@@ -494,6 +504,77 @@ export function FiledApp() {
     }
   }, [story, briefing, briefingFor, flightKey, query, active]);
 
+  async function refreshNow() {
+    if (!query || refreshingRef.current) return;
+    refreshingRef.current = true;
+    setManualBusy(true);
+    setRefreshErr(null);
+    freshRef.current = true;
+    try {
+      await storyQ.refetch({ throwOnError: true });
+      setBriefing((b) => {
+        if (!b) return b;
+        const next = logManualRefresh(b);
+        briefingRef.current = next;
+        return next;
+      });
+    } catch {
+      setRefreshErr("Couldn't update right now — try again.");
+    } finally {
+      refreshingRef.current = false;
+      setManualBusy(false);
+      setPullPx(0);
+    }
+  }
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    let startY = 0;
+    let startX = 0;
+    let pulling = false;
+    const onStart = (e: TouchEvent) => {
+      if (!story || refreshingRef.current) return;
+      if (el.scrollTop > 2) return;
+      const t = e.touches[0];
+      if (!t) return;
+      startY = t.clientY;
+      startX = t.clientX;
+      pulling = true;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!pulling) return;
+      const t = e.touches[0];
+      if (!t) return;
+      const dy = t.clientY - startY;
+      const dx = t.clientX - startX;
+      if (dy < 8 || Math.abs(dx) > 28 || el.scrollTop > 2) {
+        if (dy <= 0) setPullPx(0);
+        return;
+      }
+      e.preventDefault();
+      setPullPx(Math.min(88, dy * 0.42));
+    };
+    const onEnd = () => {
+      if (!pulling) return;
+      pulling = false;
+      setPullPx((px) => {
+        if (px >= 52) void refreshNow();
+        return px >= 52 ? 56 : 0;
+      });
+    };
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd);
+    el.addEventListener("touchcancel", onEnd);
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+      el.removeEventListener("touchcancel", onEnd);
+    };
+  }, [story, query]);
+
   function onSearch(e: FormEvent) {
     e.preventDefault();
     (document.activeElement as HTMLElement | null)?.blur();
@@ -511,6 +592,23 @@ export function FiledApp() {
         className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-4 pt-2 lg:px-8 lg:pt-6"
       >
         <div className="mx-auto min-w-0 max-w-6xl overflow-x-hidden pb-6">
+        {story ? (
+          <div
+            className="flex flex-col items-center justify-end overflow-hidden text-muted"
+            style={{ height: pullPx, transition: pullPx === 0 || manualBusy ? "height 160ms ease" : "none" }}
+            aria-hidden={pullPx < 8}
+          >
+            <span className="flex items-center gap-1.5 pb-1 font-mono text-[11px] tracking-wide">
+              <RefreshCw className={cn("size-3.5", (manualBusy || pullPx >= 52) && "animate-spin")} />
+              {manualBusy ? "Updating…" : pullPx >= 52 ? "Release to update" : "Pull to update"}
+            </span>
+          </div>
+        ) : null}
+        {refreshErr && story ? (
+          <div className="mb-3 rounded-md border border-ifr/40 bg-surface px-4 py-2">
+            <p className="text-sm text-ifr">{refreshErr}</p>
+          </div>
+        ) : null}
         {storyQ.isError && !story && cacheOk && (
           <div className="mb-4 rounded-md border border-ifr/40 bg-surface px-4 py-3">
             <p className="text-sm text-ifr">
@@ -527,7 +625,12 @@ export function FiledApp() {
         {cacheOk && story && (
           <div key={normFlight(query)} className="grid min-w-0 gap-5 lg:grid-cols-12">
             <section className="min-w-0 lg:col-span-7">
-              <FlightHead story={story} fetching={storyQ.isFetching} />
+              <FlightHead
+                story={story}
+                fetching={storyQ.isFetching}
+                refreshing={manualBusy}
+                onRefresh={() => void refreshNow()}
+              />
               <div className="mt-4">
                 <RouteMap story={story} />
               </div>
@@ -619,7 +722,17 @@ function headStatus(story: FlightStory) {
   return airline ?? "";
 }
 
-function FlightHead({ story, fetching }: { story: FlightStory; fetching: boolean }) {
+function FlightHead({
+  story,
+  fetching,
+  refreshing,
+  onRefresh,
+}: {
+  story: FlightStory;
+  fetching: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
   const ac = story.aircraft;
   const airborne = flightAirborne(story);
   const live = liveFix(story);
@@ -643,7 +756,7 @@ function FlightHead({ story, fetching }: { story: FlightStory; fetching: boolean
           </p>
         </div>
       </div>
-      <TimesStrip story={story} fetching={fetching} />
+      <TimesStrip story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       <dl className={cn("mt-4 grid gap-3", showAlt || !airborne ? "grid-cols-2" : "grid-cols-1")}>
         <Stat
           icon={Plane}
@@ -671,7 +784,17 @@ function FlightHead({ story, fetching }: { story: FlightStory; fetching: boolean
   );
 }
 
-function TimesStrip({ story, fetching }: { story: FlightStory; fetching: boolean }) {
+function TimesStrip({
+  story,
+  fetching,
+  refreshing,
+  onRefresh,
+}: {
+  story: FlightStory;
+  fetching: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
   const t = story.times;
   const airborne = flightAirborne(story);
   if (story.currentStage === "gate" && t?.airborne) {
@@ -688,7 +811,7 @@ function TimesStrip({ story, fetching }: { story: FlightStory; fetching: boolean
             {t?.taxiInMin != null ? ` · Taxi in ${t.taxiInKind === "measured" ? `${t.taxiInMin} min` : `est. ${t.taxiInMin} min`}` : ""}
           </p>
         </div>
-        <Freshness at={story.fetchedAt} fetching={fetching} />
+        <Freshness at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       </div>
     );
   }
@@ -708,7 +831,7 @@ function TimesStrip({ story, fetching }: { story: FlightStory; fetching: boolean
             {t?.land ? ` · Land ${t.land}` : ""}
           </p>
         </div>
-        <Freshness at={story.fetchedAt} fetching={fetching} />
+        <Freshness at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       </div>
     );
   }
@@ -738,21 +861,42 @@ function TimesStrip({ story, fetching }: { story: FlightStory; fetching: boolean
             : ""}
         </p>
       </div>
-      <Freshness at={story.fetchedAt} fetching={fetching} />
+      <Freshness at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
     </div>
   );
 }
 
-function Freshness({ at, fetching }: { at: number; fetching: boolean }) {
+function Freshness({
+  at,
+  fetching,
+  refreshing,
+  onRefresh,
+}: {
+  at: number;
+  fetching: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = window.setInterval(() => setTick((n) => n + 1), 4000);
     return () => window.clearInterval(id);
   }, []);
   return (
-    <p className="font-mono text-xs tracking-widest text-muted uppercase">
-      {agoLabel(at, fetching)}
-    </p>
+    <div className="flex flex-col items-end gap-1.5">
+      <button
+        type="button"
+        onClick={onRefresh}
+        disabled={refreshing}
+        className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface px-2.5 font-mono text-xs tracking-wide text-fg disabled:opacity-60"
+      >
+        <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+        {refreshing ? "Updating…" : "Refresh"}
+      </button>
+      <p className="font-mono text-xs tracking-widest text-muted uppercase">
+        {refreshing ? "Updating…" : agoLabel(at, fetching)}
+      </p>
+    </div>
   );
 }
 

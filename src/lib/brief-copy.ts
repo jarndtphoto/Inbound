@@ -485,6 +485,20 @@ export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): Com
   };
 }
 
+export function logManualRefresh(prev: CompiledBrief | null | undefined): CompiledBrief | null {
+  if (!prev) return prev ?? null;
+  const at = Date.now();
+  const last = prev.log[prev.log.length - 1];
+  if (last?.kind === "update" && last.text === "Manual refresh" && at - last.at < 20_000) {
+    return { ...prev, liveAt: at };
+  }
+  return {
+    ...prev,
+    liveAt: at,
+    log: appendLog(prev.log, [{ kind: "update", text: "Manual refresh" }], at),
+  };
+}
+
 export function briefAsText(b: CompiledBrief): string {
   return [b.lead, b.why].filter(Boolean).join(" ").trim();
 }
