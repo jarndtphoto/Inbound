@@ -24,7 +24,7 @@ const STAGES: { id: StageId; label: string }[] = [
 ];
 
 const STORY_CACHE_KEY = "filed-story-cache-v6";
-const ORIG_MEM_KEY = "filed-orig-sched-v1";
+const ORIG_MEM_KEY = "filed-orig-sched-v2";
 
 function normFlight(q: string) {
   return q.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -89,21 +89,28 @@ function rememberOrigOnClient(story: FlightStory): FlightStory {
   const k = origMemKey(story);
   const prev = all[k];
   const seedPush = t.origPushUnix ?? pushUnix;
-  const origPushUnix = prev?.pushUnix != null ? Math.min(prev.pushUnix, seedPush) : seedPush;
+  let origPushUnix = prev?.pushUnix != null ? Math.min(prev.pushUnix, seedPush) : seedPush;
+  if (Math.abs(pushUnix - origPushUnix) > 8 * 3600) origPushUnix = seedPush;
   const origPushClock =
     prev && prev.pushUnix <= origPushUnix ? prev.pushClock : t.pushWas || t.push;
   const seedTakeoff = t.origTakeoffUnix ?? t.takeoffUnix ?? null;
-  const origTakeoffUnix =
+  let origTakeoffUnix =
     prev?.takeoffUnix != null && seedTakeoff != null
       ? Math.min(prev.takeoffUnix, seedTakeoff)
       : (prev?.takeoffUnix ?? seedTakeoff);
+  if (origTakeoffUnix != null && t.takeoffUnix != null && Math.abs(t.takeoffUnix - origTakeoffUnix) > 8 * 3600) {
+    origTakeoffUnix = seedTakeoff;
+  }
   const origTakeoffClock =
     prev && origTakeoffUnix != null && prev.takeoffUnix === origTakeoffUnix
       ? prev.takeoffClock
       : t.takeoffWas || t.takeoff || null;
   const seedLand = t.origLandUnix ?? t.landUnix ?? null;
-  const origLandUnix =
+  let origLandUnix =
     prev?.landUnix != null && seedLand != null ? Math.min(prev.landUnix, seedLand) : (prev?.landUnix ?? seedLand);
+  if (origLandUnix != null && t.landUnix != null && Math.abs(t.landUnix - origLandUnix) > 8 * 3600) {
+    origLandUnix = seedLand;
+  }
   const origLandClock =
     prev && origLandUnix != null && prev.landUnix === origLandUnix ? prev.landClock : t.landWas || t.land || null;
   all[k] = {
@@ -119,9 +126,11 @@ function rememberOrigOnClient(story: FlightStory): FlightStory {
   } catch {
     /* quota */
   }
-  const delayMin = Math.round((pushUnix - origPushUnix) / 60);
-  const arriveDelayMin =
+  let delayMin = Math.round((pushUnix - origPushUnix) / 60);
+  if (delayMin > 8 * 60 || delayMin < -90) delayMin = 0;
+  let arriveDelayMin =
     t.landUnix != null && origLandUnix != null ? Math.round((t.landUnix - origLandUnix) / 60) : (t.arriveDelayMin ?? null);
+  if (arriveDelayMin != null && (arriveDelayMin > 8 * 60 || arriveDelayMin < -90)) arriveDelayMin = 0;
   const late = delayMin >= 5;
   const arriveLate = arriveDelayMin != null && arriveDelayMin >= 5;
   return {
@@ -307,8 +316,13 @@ export function FiledApp() {
       }
     },
     enabled: cacheOk && query.length > 0,
-    refetchInterval: 12_000,
-    staleTime: 5_000,
+    refetchInterval: (q) => {
+      const st = q.state.data?.currentStage;
+      if (st === "inbound" || st === "push" || st === "taxi") return 4_000;
+      if (st === "arrival") return 7_000;
+      return 10_000;
+    },
+    staleTime: 2_000,
     gcTime: 10 * 60_000,
     retry: 2,
     refetchOnWindowFocus: true,
@@ -1125,24 +1139,28 @@ function extraFor(story: FlightStory, stage: StageId) {
 
 function TaxiQueueCard({ queue }: { queue?: TaxiQueue | null }) {
   if (!queue) return null;
-  if (!queue.depRunway) {
-    return queue.note ? <p className="mt-3 text-sm text-muted">{queue.note}</p> : null;
-  }
   const others = queue.items.filter((it) => !it.you);
   const you = queue.items.find((it) => it.you);
-  const rwy = queue.depRunway ? `Rwy ${queue.depRunway}` : "Runway";
+  if (!queue.depRunway && others.length === 0) {
+    return queue.note ? <p className="mt-3 text-sm text-muted">{queue.note}</p> : null;
+  }
+  const rwy = queue.depRunway ? `Rwy ${queue.depRunway}` : "Taxi";
   const headline =
     queue.place != null
       ? queue.place === 1
         ? "First in line"
         : `#${queue.place}`
-      : "—";
+      : others.length
+        ? `${others.length} nearby`
+        : "Taxiing";
   const sub =
     queue.place != null && queue.ahead === 0
       ? rwy
-      : queue.ahead > 0
+      : queue.ahead > 0 && queue.depRunway
         ? `${queue.ahead} ahead · ${rwy}`
-        : rwy;
+        : queue.depRunway
+          ? rwy
+          : "Runway not locked in";
   return (
     <div className="mt-4 rounded-md border border-border bg-bg px-3 py-3">
       <p className="font-mono text-xs tracking-widest text-subtle uppercase">

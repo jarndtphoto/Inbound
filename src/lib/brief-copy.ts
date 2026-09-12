@@ -1,3 +1,5 @@
+import { formatHoursMinutes } from "./geo";
+
 export type RideFacts = {
   q: string;
   iata: string;
@@ -205,7 +207,7 @@ function composeLead(d: RideFacts) {
   if (stage === "ride") {
     const left =
       d.remainingNm > 0
-        ? `About ${Math.round(d.remainingNm)} miles left, roughly ${Math.max(1, Math.round(d.etaMin))} minutes.`
+        ? `About ${Math.round(d.remainingNm)} miles left, roughly ${formatHoursMinutes(Math.max(1, d.etaMin))}.`
         : "";
     return joinSentences([open, "You're airborne.", left, rideClause(d), destClause(d), taxiInClause(d)]);
   }

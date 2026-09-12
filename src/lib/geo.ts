@@ -202,6 +202,18 @@ export function formatDuration(min: number) {
   return r ? `${h}h ${r}m` : `${h}h`;
 }
 
+/** Prose duration for briefing copy: "7 hours 42 minutes". */
+export function formatHoursMinutes(min: number) {
+  const m = Math.max(0, Math.round(min));
+  if (m < 60) return m === 1 ? "1 minute" : `${m} minutes`;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  const hours = h === 1 ? "1 hour" : `${h} hours`;
+  if (!r) return hours;
+  const mins = r === 1 ? "1 minute" : `${r} minutes`;
+  return `${hours} ${mins}`;
+}
+
 export function feetPretty(ft: number) {
   if (!Number.isFinite(ft) || ft <= 0) return "—";
   return `${Math.round(ft).toLocaleString("en-US")} ft`;

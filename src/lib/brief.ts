@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { composeBrief, type RideFacts } from "./brief-copy";
+import { formatHoursMinutes } from "./geo";
 
 export type { RideFacts };
 export { composeBrief };
@@ -65,7 +66,7 @@ export const briefRide = createServerFn({ method: "POST" })
                 `Only use the facts below. Do not invent minutes, gates, or weather. If a taxi time is estimated, say estimated. If measured, do not say estimated.`,
                 `Current stage: ${data.now}. Live: ${data.live}. Aircraft: ${data.typeName ?? "unknown"} ${data.registration ?? ""}.`,
                 `Ride call: ${data.rideLabel ?? "n/a"}.`,
-                `Remaining ${Math.round(data.remainingNm)} nm, about ${Math.round(data.etaMin)} min.`,
+                `Remaining ${Math.round(data.remainingNm)} nm, about ${formatHoursMinutes(data.etaMin)}.`,
                 `Push ${data.push ?? "n/a"}; taxi out ${data.taxiOutMin ?? "n/a"} min (${data.taxiOutKind ?? "n/a"}); wheels up ${data.takeoff ?? "n/a"}; land ${data.land ?? "n/a"}; taxi in ${data.taxiInMin ?? "n/a"} min (${data.taxiInKind ?? "n/a"}); dest gate ${data.destGate ?? "n/a"}.`,
                 `Departure delay vs original: ${data.delayMin ?? "n/a"} min. Typical slip: ${data.typicalDelayMin ?? "n/a"} min.`,
                 `Origin weather: ${data.originWx}. Origin NAS: ${data.originNas}.`,
