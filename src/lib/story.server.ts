@@ -2977,7 +2977,9 @@ export async function loadFlightStory(query, opts) {
 		const work = cached(key, fresh ? 0 : 4e3, () => buildStory(query));
 		let timer;
 		const timed = new Promise((_, rej) => {
-			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 12e3);
+			// The first load also fetches field and route weather after flight lookup.
+			// Avoid failing a valid cold request just before those requests complete.
+			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 20e3);
 		});
 		try {
 			return await Promise.race([work, timed]);
