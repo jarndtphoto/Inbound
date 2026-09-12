@@ -19,6 +19,17 @@ import {
   wrap360,
 } from "./geo";
 import { decodeMetar } from "./metar";
+import {
+	fetchAround,
+	fetchByCallsign,
+	fetchByHex,
+	fetchByReg,
+	fuseProviderLists,
+	lastGoodAround,
+	rememberAround,
+	seenOf as fusionSeen,
+	stickyPick
+} from "./adsb-fusion";
 var UA = "Inbound/1.0 (passenger flight companion)";
 var cache = /* @__PURE__ */ new Map();
 var inflight = /* @__PURE__ */ new Map();
@@ -391,6 +402,8 @@ function toLive(raw) {
 		track: typeof raw.track === "number" ? raw.track : null,
 		vertFpm,
 		onGround,
+		extrapolated: Boolean(raw.extrapolated ?? raw._fusion?.extrapolated),
+		seenSec: raw._fusion?.ageSec ?? (fusionSeen(raw) === 999 ? null : fusionSeen(raw)),
 		phase: phaseOf({
 			onGround,
 			gsKt,
@@ -517,7 +530,7 @@ function rawMatchesQuery(raw, parsed, aware) {
 	if (tail && r === tail) return true;
 	return false;
 }
-function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm) {
+function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex) {
 	if (!near?.length || !origin) return null;
 	const vars = new Set(callsignVariants(parsed.callsign));
 	const atc = String(aware?.atcIdent ?? "").replace(/\s/g, "").toUpperCase();
@@ -526,9 +539,10 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm) {
 	const type = String(aware?.type ?? "").toUpperCase();
 	const prefixes = identPrefixes(parsed.callsign);
 	const atcCands = [];
+	let locked = null;
 	for (const a of near) {
 		if (typeof a.lat !== "number" || typeof a.lon !== "number") continue;
-		if (seenOf(a) > 40) continue;
+		if (fusionSeen(a) > 40) continue;
 		const here = { lat: a.lat, lon: a.lon };
 		const dOrig = haversineNm(here, origin);
 		const dDest = dest ? haversineNm(here, dest) : 999;
@@ -536,7 +550,15 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm) {
 		const fl = String(a.flight ?? "").replace(/\s/g, "").toUpperCase();
 		const r = String(a.r ?? "").replace(/[-\s]/g, "").toUpperCase();
 		const t = String(a.t ?? "").toUpperCase();
-		if (vars.has(fl)) return a;
+		const hex = String(a.hex ?? "").toLowerCase();
+		if (lockedHex && hex === String(lockedHex).toLowerCase()) locked = a;
+		if (vars.has(fl)) {
+			const exact = stickyPick(lockedHex, [a, locked].filter(Boolean), {
+				isExact: (raw) => vars.has(String(raw.flight ?? "").replace(/\s/g, "").toUpperCase())
+			});
+			if (exact) return exact;
+			return a;
+		}
 		if (tail && r === tail) return a;
 		if (!isAtcCallsign(fl, prefixes)) continue;
 		atcCands.push({
@@ -545,83 +567,47 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm) {
 			gs: typeof a.gs === "number" ? a.gs : 0
 		});
 	}
+	if (locked && fusionSeen(locked) <= 32) return locked;
 	if (atcCands.length === 1) return atcCands[0].a;
 	const exactType = atcCands.filter((c) => c.typeExact);
 	if (exactType.length === 1) return exactType[0].a;
 	const movingExact = exactType.filter((c) => c.gs >= 2);
 	if (movingExact.length === 1) return movingExact[0].a;
-	return null;
+	return locked;
 }
 function seenOf(a) {
-	if (!a) return 999;
-	const s = typeof a.seen_pos === "number" ? a.seen_pos : typeof a.seen === "number" ? a.seen : null;
-	return s != null && Number.isFinite(s) ? s : 999;
+	return fusionSeen(a);
 }
-function acScore(a) {
-	if (!a) return -1;
-	let s = 0;
-	if (String(a.flight ?? "").trim()) s += 4;
-	if (a.alt_baro === "ground" || a.alt_baro === 0) s += 2;
-	if (typeof a.gs === "number") s += 1;
-	if (a.r) s += 1;
-	if (typeof a.lat === "number") s += 2;
-	const seen = seenOf(a);
-	if (seen < 2) s += 5;
-	else if (seen < 8) s += 3;
-	else if (seen < 20) s += 1;
-	return s;
-}
-function preferAc(a, b) {
-	if (!a) return b;
-	if (!b) return a;
-	const sa = seenOf(a);
-	const sb = seenOf(b);
-	if (sa + 0.7 < sb) return a;
-	if (sb + 0.7 < sa) return b;
-	return acScore(b) > acScore(a) ? b : a;
-}
-function mergeAc(lists) {
-	const by = new Map();
-	for (const list of lists) {
-		for (const a of list ?? []) {
-			const hex = String(a.hex ?? "").toLowerCase();
-			if (!hex) continue;
-			by.set(hex, preferAc(by.get(hex), a));
-		}
-	}
-	return [...by.values()];
+function fusePacks(packs, airside) {
+	const fused = fuseProviderLists(packs, { airside: Boolean(airside) });
+	return fused;
 }
 async function adsbByCallsign(callsign) {
 	const u = String(callsign || "").replace(/\s/g, "").toUpperCase();
 	if (!u) return null;
-	return cached(`cs3:${u}`, 2500, async () => {
+	return cached(`cs4:${u}`, 2000, async () => {
 		const iata = displayIata(u, null).replace(/\s/g, "");
 		const idents = [...new Set([u, iata])].filter(Boolean).slice(0, 2);
-		const chunks = await Promise.all(idents.flatMap((v) => [
-			safe(fetchJson(`https://opendata.adsb.fi/api/v2/callsign/${encodeURIComponent(v)}`, 5e3).then(acList), []),
-			safe(fetchJson(`https://api.adsb.lol/v2/callsign/${encodeURIComponent(v)}`, 5e3).then(acList), []),
-			safe(fetchJson(`https://api.airplanes.live/v2/callsign/${encodeURIComponent(v)}`, 5e3).then(acList), [])
-		]));
-		return mergeAc(chunks)[0] ?? null;
+		const packs = (await Promise.all(idents.map((v) => fetchByCallsign(v)))).flat();
+		return fusePacks(packs, false)[0] ?? null;
 	});
 }
 async function adsbByReg(reg) {
-	return cached(`reg3:${reg}`, 2500, async () => {
-		const [fi, lol, al] = await Promise.all([
-			safe(fetchJson(`https://opendata.adsb.fi/api/v2/registration/${encodeURIComponent(reg)}`, 5e3).then(acList), []),
-			safe(fetchJson(`https://api.adsb.lol/v2/registration/${encodeURIComponent(reg)}`, 5e3).then(acList), []),
-			safe(fetchJson(`https://api.airplanes.live/v2/reg/${encodeURIComponent(reg)}`, 5e3).then(acList), [])
-		]);
-		return mergeAc([fi, lol, al])[0] ?? null;
+	const u = String(reg || "").replace(/[-\s]/g, "").toUpperCase();
+	if (!u) return null;
+	return cached(`reg4:${u}`, 2000, async () => {
+		const packs = await fetchByReg(u);
+		return fusePacks(packs, false)[0] ?? null;
 	});
 }
 async function adsbAround(lat, lon, dist) {
-	return cached(`around6:${lat.toFixed(2)}:${lon.toFixed(2)}:${dist}`, 2500, async () => {
-		const [fi, lol] = await Promise.all([
-			safe(fetchJson(`https://opendata.adsb.fi/api/v2/lat/${lat}/lon/${lon}/dist/${dist}`, 4e3).then(acList), []),
-			safe(fetchJson(`https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${dist}`, 4e3).then(acList), [])
-		]);
-		return mergeAc([fi, lol]);
+	const key = `around:${lat.toFixed(2)}:${lon.toFixed(2)}:${dist}`;
+	return cached(`around7:${key}`, 2000, async () => {
+		const packs = await fetchAround(lat, lon, dist);
+		let fused = fusePacks(packs, dist <= 24);
+		if (!fused.length) fused = lastGoodAround(key) ?? [];
+		else rememberAround(key, fused);
+		return fused;
 	});
 }
 function headingDelta(a, b) {
@@ -1560,13 +1546,9 @@ function snapFromAware(inb, originTz) {
 async function adsbByHex(hex) {
 	const id = String(hex || "").toLowerCase();
 	if (!/^[0-9a-f]{6}$/.test(id)) return null;
-	return cached(`hex3:${id}`, 2500, async () => {
-		const [fi, lol, al] = await Promise.all([
-			safe(fetchJson(`https://opendata.adsb.fi/api/v2/hex/${encodeURIComponent(id)}`, 5e3).then((j) => acList(j)[0] ?? null), null),
-			safe(fetchJson(`https://api.adsb.lol/v2/hex/${encodeURIComponent(id)}`, 5e3).then((j) => acList(j)[0] ?? null), null),
-			safe(fetchJson(`https://api.airplanes.live/v2/hex/${encodeURIComponent(id)}`, 5e3).then((j) => acList(j)[0] ?? null), null)
-		]);
-		return preferAc(preferAc(fi, lol), al);
+	return cached(`hex4:${id}`, 2000, async () => {
+		const packs = await fetchByHex(id);
+		return fusePacks(packs, false)[0] ?? null;
 	});
 }
 function buildInbound(args) {
@@ -1908,20 +1890,30 @@ async function buildStory(query) {
 		const alreadyAtDest = Boolean(live && dest && haversineNm({ lat: live.lat, lon: live.lon }, dest) < 12);
 		if (!alreadyAtDest) {
 			fieldList = await safe(adsbAround(origin.lat, origin.lon, 12), []);
-			const match = pickAroundAircraft(fieldList, parsed, aware, origin, dest, 12);
+			const match = pickAroundAircraft(fieldList, parsed, aware, origin, dest, 12, knownHex || live?.hex);
 			if (match) {
-				const cand = asOnGround(toLive(match), origin);
-				if (cand && stillOnField(cand, origin)) live = cand;
+				const swap = String(match.hex ?? "").toLowerCase();
+				const keepHex = String(knownHex || live?.hex || "").toLowerCase();
+				if (keepHex && swap !== keepHex && live?.hex === keepHex && !rawMatchesQuery(match, parsed, aware)) {
+					/* stick to locked hex */
+				} else {
+					const cand = asOnGround(toLive(match), origin);
+					if (cand && stillOnField(cand, origin)) live = cand;
+				}
 			}
 		}
 	} else if (live && dest && !live.onGround) {
 		const dDest = haversineNm({ lat: live.lat, lon: live.lon }, dest);
 		if (dDest < 50) {
 			const nearDest = await safe(adsbAround(dest.lat, dest.lon, 20), []);
-			const match = pickAroundAircraft(nearDest, parsed, aware, dest, origin, 20);
+			const match = pickAroundAircraft(nearDest, parsed, aware, dest, origin, 20, knownHex || live?.hex);
 			if (match) {
-				const cand = toLive(match);
-				if (cand) live = asOnGround(cand, dest);
+				const swap = String(match.hex ?? "").toLowerCase();
+				const keepHex = String(knownHex || live?.hex || "").toLowerCase();
+				if (!(keepHex && swap !== keepHex && live?.hex === keepHex && !rawMatchesQuery(match, parsed, aware))) {
+					const cand = toLive(match);
+					if (cand) live = asOnGround(cand, dest);
+				}
 			}
 		}
 	}
@@ -1952,7 +1944,7 @@ async function buildStory(query) {
 	}
 	if (!live && origin && !ourLanded) {
 		const near = await safe(adsbAround(origin.lat, origin.lon, 48), []);
-		const match = pickAroundAircraft(near, parsed, aware, origin, dest, 48);
+		const match = pickAroundAircraft(near, parsed, aware, origin, dest, 48, knownHex);
 		if (match) live = asOnGround(toLive(match), origin);
 	}
 	if (!live && origin && dest) {

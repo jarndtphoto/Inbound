@@ -4,8 +4,8 @@ import { airframeOf, airlineOf, isVehicleType, isWidebody } from "./aircraft";
 import { haversineNm, initialBearing } from "./geo";
 import { decodeMetar, passengerDelayHint, type Metar, type Taf } from "./metar";
 import type { FieldSnapshot, Traffic } from "./types";
+import { fetchAround, fuseProviderLists, lastGoodAround, rememberAround, type AdsbRaw } from "./adsb-fusion";
 
-const UA = "Airside/1.0 (passenger aviation companion)";
 const RANGE_NM = 38;
 
 type CacheEntry<T> = { at: number; value: T };
@@ -22,31 +22,12 @@ function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T>
 
 async function fetchJson<T>(url: string, ms = 8000): Promise<T> {
   const res = await fetch(url, {
-    headers: { "User-Agent": UA, Accept: "application/json" },
+    headers: { "User-Agent": "Airside/1.0 (passenger aviation companion)", Accept: "application/json" },
     signal: AbortSignal.timeout(ms),
   });
   if (!res.ok) throw new Error(`upstream ${res.status}`);
   return (await res.json()) as T;
 }
-
-type AdsbAc = {
-  hex?: string;
-  flight?: string;
-  r?: string;
-  t?: string;
-  desc?: string;
-  ownOp?: string;
-  year?: string;
-  lat?: number;
-  lon?: number;
-  alt_baro?: number | "ground";
-  gs?: number;
-  track?: number;
-  baro_rate?: number;
-  dst?: number;
-  dir?: number;
-  category?: string;
-};
 
 function phaseOf(ac: {
   onGround: boolean;
@@ -63,7 +44,7 @@ function phaseOf(ac: {
   return "cruise";
 }
 
-function toTraffic(raw: AdsbAc, airport: { lat: number; lon: number }): Traffic | null {
+function toTraffic(raw: AdsbRaw, airport: { lat: number; lon: number }): Traffic | null {
   const hex = (raw.hex ?? "").toLowerCase();
   if (!hex) return null;
   if (isVehicleType(raw.t, raw.category, raw.ownOp)) return null;
@@ -128,17 +109,22 @@ function toTraffic(raw: AdsbAc, airport: { lat: number; lon: number }): Traffic 
     widebody,
     interesting,
     phase: phaseOf({ onGround, gsKt, altFt, vertFpm }),
+    extrapolated: Boolean(raw.extrapolated ?? raw._fusion?.extrapolated),
+    seenSec: raw._fusion?.ageSec ?? (typeof raw.seen_pos === "number" ? raw.seen_pos : typeof raw.seen === "number" ? raw.seen : null),
   };
 }
 
 async function loadTraffic(icao: string): Promise<Traffic[]> {
   const ap = airportByIcao(icao);
   if (!ap) return [];
-  const url = `https://opendata.adsb.fi/api/v2/lat/${ap.lat}/lon/${ap.lon}/dist/${RANGE_NM}`;
-  const data = await fetchJson<{ aircraft?: AdsbAc[] }>(url, 9000);
+  const key = `around:${ap.lat.toFixed(2)}:${ap.lon.toFixed(2)}:${RANGE_NM}`;
+  const packs = await fetchAround(ap.lat, ap.lon, RANGE_NM);
+  let fused = fuseProviderLists(packs, { airside: true });
+  if (!fused.length) fused = lastGoodAround(key) ?? [];
+  else rememberAround(key, fused);
   const seen = new Set<string>();
   const list: Traffic[] = [];
-  for (const raw of data.aircraft ?? []) {
+  for (const raw of fused) {
     const t = toTraffic(raw, ap);
     if (!t || seen.has(t.hex)) continue;
     seen.add(t.hex);
@@ -187,7 +173,7 @@ async function loadWeather(icao: string): Promise<FieldSnapshot["weather"]> {
 }
 
 export async function loadFieldSnapshot(icao: string): Promise<FieldSnapshot> {
-  return cached(`field:${icao}`, 12_000, async (): Promise<FieldSnapshot> => {
+  return cached(`field:${icao}`, 9_000, async (): Promise<FieldSnapshot> => {
     let traffic: Traffic[] = [];
     let error: string | null = null;
     try {

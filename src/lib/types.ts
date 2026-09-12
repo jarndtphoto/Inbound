@@ -22,6 +22,8 @@ export type Traffic = {
   widebody: boolean;
   interesting: boolean;
   phase: "taxi" | "climb" | "cruise" | "descent" | "approach" | "parked";
+  extrapolated?: boolean;
+  seenSec?: number | null;
 };
 
 export type FieldSnapshot = {
@@ -127,6 +129,9 @@ export type LiveAircraft = {
   vertFpm: number | null;
   onGround: boolean;
   phase: Traffic["phase"];
+  callsign?: string | null;
+  extrapolated?: boolean;
+  seenSec?: number | null;
 };
 
 export type InboundWatch = {
