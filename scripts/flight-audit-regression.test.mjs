@@ -56,8 +56,10 @@ describe('September 12 flight audit replay', () => {
     let lat = 41.9786;
     let lon = -87.9048;
     let gs = 0;
+    let traceRequests = 0;
     t.mock.method(Date, 'now', () => now);
     t.mock.method(globalThis, 'fetch', async (url) => {
+      if (String(url).includes('/data/traces/')) traceRequests += 1;
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
         return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
       }
@@ -68,9 +70,11 @@ describe('September 12 flight audit replay', () => {
     });
     const load = () => loadFlightStory('UA1533', {fresh: true});
     assert.equal((await load()).times.pushed, false, 'stationary aircraft has not left its stand');
+    const beforeMovement = traceRequests;
     now += 5000;
     gs = 3;
     assert.equal((await load()).times.pushed, true, 'movement registers pushback');
+    assert.equal(traceRequests, beforeMovement, 'fresh ground movement should not wait for a trace fetch');
     now += 5000;
     gs = 0;
     lon += 0.0002;

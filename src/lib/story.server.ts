@@ -2607,7 +2607,8 @@ async function buildStory(query) {
 	const distPark = live && park ? haversineNm({ lat: live.lat, lon: live.lon }, park) : 0;
 	let motion = { pushed: false, taxiing: false, flying: false };
 	const hexNow = String(live?.hex || hexByIdent.get(identKey) || aware?.hex || "").toLowerCase();
-	if (hexNow && origin && !ourLanded && (!live || (live.onGround && (live.gsKt ?? 0) < 4 && distPark < 0.12))) {
+	const needsGroundTrace = !live || (live.onGround && (live.gsKt ?? 0) < 1.2 && distPark < 0.025 && !times.pushed && !pushLatch.has(landKey));
+	if (hexNow && origin && !ourLanded && needsGroundTrace) {
 		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
 	}
 	const offRamp = Boolean(live && live.onGround && atOrigLive && dOrigLive >= 0.65);
