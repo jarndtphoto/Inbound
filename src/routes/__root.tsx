@@ -3,8 +3,16 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { AppProviders } from "@/components/providers";
 import appCss from "../styles.css?url";
+import appCssInline from "../styles.css?inline";
 
 const APP_NAME = "Inbound";
+
+function stylesheetHref(href: string) {
+  if (!href) return href;
+  if (href.includes("/assets/")) return href;
+  const base = href.split("?")[0] || href;
+  return `${base}?direct`;
+}
 
 export const Route = createRootRoute({
   head: () => ({
@@ -19,7 +27,7 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
-      { rel: "stylesheet", href: appCss },
+      { rel: "stylesheet", href: stylesheetHref(appCss) },
       {
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap",
@@ -52,6 +60,9 @@ export const Route = createRootRoute({
     >
       <head>
         <HeadContent />
+        {typeof appCssInline === "string" && appCssInline.length > 0 ? (
+          <style id="inbound-css" dangerouslySetInnerHTML={{ __html: appCssInline }} />
+        ) : null}
       </head>
       <body className="h-full bg-bg text-fg" style={{ background: "#08090c", color: "#e7eaee", margin: 0, height: "100%" }} suppressHydrationWarning>
         <PreviewHostBridge />
