@@ -244,32 +244,6 @@ function pinDocument() {
   document.body.scrollTop = 0;
 }
 
-function SplashScreen() {
-  return (
-    <div
-      className="flex flex-col items-center justify-center overflow-hidden px-8"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "#08090c",
-        color: "#e7eaee",
-        zIndex: 50,
-      }}
-    >
-      <div className="max-w-[16rem] text-center">
-        <svg viewBox="0 0 32 32" className="mx-auto size-8" aria-hidden>
-          <path d="M4 16h12" fill="none" stroke="currentColor" className="text-accent" strokeWidth="1.8" strokeLinecap="round" />
-          <path d="M14 9.5 26 16 14 22.5" fill="none" stroke="currentColor" className="text-fg" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <h1 className="font-display mt-4 text-4xl font-semibold tracking-tight">Inbound</h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
-          Your all-in-one flight information app.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 class ScreenErrorBoundary extends Component<{ children: ReactNode }, { err: Error | null }> {
   state = { err: null as Error | null };
   static getDerivedStateFromError(err: Error) {
@@ -308,8 +282,6 @@ export function FiledApp() {
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
   const [briefingFor, setBriefingFor] = useState("");
   const [cacheOk, setCacheOk] = useState(false);
-  const [showSplash, setShowSplash] = useState(true);
-  const splashAt = useRef(Date.now());
   const [refreshErr, setRefreshErr] = useState<string | null>(null);
   const [pullPx, setPullPx] = useState(0);
   const [manualBusy, setManualBusy] = useState(false);
@@ -341,25 +313,6 @@ export function FiledApp() {
     hydrate();
     setCacheOk(true);
   }, [hydrate]);
-
-  useEffect(() => {
-    let already = false;
-    try {
-      already = sessionStorage.getItem("inbound-booted") === "1";
-    } catch {
-      already = false;
-    }
-    const wait = already ? 200 : 1100;
-    const t = window.setTimeout(() => {
-      setShowSplash(false);
-      try {
-        sessionStorage.setItem("inbound-booted", "1");
-      } catch {
-        /* private mode */
-      }
-    }, wait);
-    return () => window.clearTimeout(t);
-  }, []);
 
   useEffect(() => {
     const meta = document.querySelector('meta[name="viewport"]');
@@ -419,13 +372,6 @@ export function FiledApp() {
   });
 
   const story = storyForQuery(storyQ.data, query);
-  const bootReady = cacheOk && (query.length === 0 || Boolean(story) || storyQ.isError || storyQ.isFetched);
-  useEffect(() => {
-    if (!bootReady || !showSplash) return;
-    const wait = Math.max(400, 1400 - (Date.now() - splashAt.current));
-    const t = window.setTimeout(() => setShowSplash(false), wait);
-    return () => window.clearTimeout(t);
-  }, [bootReady, showSplash]);
   const rawStage = String(stagePref === "auto" ? (story?.currentStage ?? "inbound") : stagePref);
   const active: StageId = rawStage === "ground"
     ? "push"
@@ -500,10 +446,10 @@ export function FiledApp() {
   }, [flightKey]);
 
   useEffect(() => {
-    if (showSplash || !story || briefingFor === flightKey) return;
+    if (!story || briefingFor === flightKey) return;
     briefM.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- first compile when the story arrives
-  }, [showSplash, story, flightKey]);
+  }, [story, flightKey]);
 
   useEffect(() => {
     if (!story || !briefing || briefingFor !== flightKey) return;
@@ -621,7 +567,6 @@ export function FiledApp() {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg" style={shellStyle}>
       <ScreenErrorBoundary>
-      {showSplash ? <SplashScreen /> : null}
       <main
         ref={mainRef}
         className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-4 pt-2 lg:px-8 lg:pt-6"

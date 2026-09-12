@@ -14,6 +14,8 @@ export const Route = createRootRoute({
       { title: APP_NAME },
       { name: "description", content: "Your flight, stage by stage — inbound aircraft, route weather, turbulence, delays, and the gate." },
       { name: "theme-color", content: "#08090c" },
+      { name: "color-scheme", content: "dark" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
@@ -24,6 +26,21 @@ export const Route = createRootRoute({
       },
       { rel: "manifest", href: "/__grok/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
+      {
+        rel: "apple-touch-startup-image",
+        href: "/startup-1170x2532.png",
+        media: "(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)",
+      },
+      {
+        rel: "apple-touch-startup-image",
+        href: "/startup-1125x2436.png",
+        media: "(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)",
+      },
+      {
+        rel: "apple-touch-startup-image",
+        href: "/startup-1290x2796.png",
+        media: "(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)",
+      },
     ],
   }),
   component: () => (
