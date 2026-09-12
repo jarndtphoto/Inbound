@@ -267,10 +267,17 @@ class ScreenErrorBoundary extends Component<{ children: ReactNode }, { err: Erro
     if (this.state.err) {
       return (
         <div
-          className="flex flex-1 items-center justify-center px-6 py-16"
+          className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16"
           style={{ background: "#08090c", color: "#e7eaee", minHeight: "100%" }}
         >
           <p className="max-w-sm text-center text-sm text-muted">Could not load this screen. Try another flight.</p>
+          <button
+            type="button"
+            className="rounded-sm border border-border bg-surface px-3 py-2 text-sm text-fg"
+            onClick={() => this.setState({ err: null })}
+          >
+            Try again
+          </button>
         </div>
       );
     }

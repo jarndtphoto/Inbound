@@ -1,6 +1,7 @@
 import { formatDuration, formatNm, haversineNm } from "@/lib/geo";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
+import { ADMIN1_RINGS } from "@/lib/admin1-lines";
 import { latToTileY, pickRadarTiles, tileXToLon, tileYToLat } from "@/lib/radar-tiles";
 import { WORLD_COUNTRY_RINGS } from "@/lib/world-country-lines";
 import { cn } from "@/lib/utils";
@@ -411,6 +412,9 @@ export function RouteMap({ story }: { story: FlightStory }) {
   const runs = pathRuns(samples, progress).build(sx, sy);
   const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
   const admin1 = ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const hazards = (story.hazards ?? []).filter(
+    (h) => h.lat != null && h.lon != null && (h.kind === "convective" || h.kind === "pirep"),
+  ).slice(0, 6);
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -496,10 +500,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
         <circle cx={sx(origin.lon)} cy={sy(origin.lat)} r="5.5" className="fill-accent stroke-bg" strokeWidth="2" />
         <circle cx={sx(dest.lon)} cy={sy(dest.lat)} r="5.5" className="fill-fg stroke-bg" strokeWidth="2" />
 
-        {story.hazards
-          .filter((h) => h.lat != null && h.lon != null && (h.kind === "convective" || h.kind === "pirep"))
-          .slice(0, 6)
-          .map((h) => {
+        {hazards.map((h) => {
             const storm = h.kind === "convective";
             const cx = sx(h.lon!);
             const cy = sy(h.lat!);
