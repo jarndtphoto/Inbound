@@ -204,7 +204,7 @@ export type TaxiQueue = {
   moving: number;
   items: TaxiQueueItem[];
   depRunway: string | null;
-  depSource: "takeoffs" | "wind" | "track" | null;
+  depSource: "takeoffs" | "wind" | "track" | "stream" | null;
   status: "taxi" | "gate" | "empty";
   note: string;
 };

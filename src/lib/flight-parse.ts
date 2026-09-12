@@ -100,9 +100,13 @@ export function displayIata(callsign: string, iata: string | null): string {
     return iata;
   }
   const m = callsign.match(/^([A-Z]{3})(\d.*)$/);
-  if (!m) return callsign;
-  const letter = Object.entries(IATA_TO_ICAO).find(([, v]) => v === m[1])?.[0];
-  return letter ? `${letter} ${m[2]}` : `${m[1]} ${m[2]}`;
+  if (m) {
+    const letter = Object.entries(IATA_TO_ICAO).find(([, v]) => v === m[1])?.[0];
+    return letter ? `${letter} ${m[2]}` : `${m[1]} ${m[2]}`;
+  }
+  const m2 = callsign.match(/^([A-Z]{2})(\d.*)$/);
+  if (m2) return `${m2[1]} ${m2[2]}`;
+  return callsign;
 }
 
 function compactIdent(s: string) {

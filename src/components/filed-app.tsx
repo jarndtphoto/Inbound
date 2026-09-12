@@ -12,7 +12,7 @@ import { RouteMap } from "@/components/route-map";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Clock, Gauge, Plane, Radio, Search, ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type FormEvent, type ReactNode } from "react";
 
 const STAGES: { id: StageId; label: string }[] = [
   { id: "inbound", label: "Inbound" },
@@ -245,6 +245,26 @@ function SplashScreen() {
   );
 }
 
+class ScreenErrorBoundary extends Component<{ children: ReactNode }, { err: Error | null }> {
+  state = { err: null as Error | null };
+  static getDerivedStateFromError(err: Error) {
+    return { err };
+  }
+  render() {
+    if (this.state.err) {
+      return (
+        <div
+          className="flex flex-1 items-center justify-center px-6 py-16"
+          style={{ background: "#08090c", color: "#e7eaee", minHeight: "100%" }}
+        >
+          <p className="max-w-sm text-center text-sm text-muted">Could not load this screen. Try another flight.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function FiledApp() {
   const query = useFiled((s) => s.query);
   const recents = useFiled((s) => s.recents);
@@ -256,7 +276,14 @@ export function FiledApp() {
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
   const [briefingFor, setBriefingFor] = useState("");
   const [cacheOk, setCacheOk] = useState(false);
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return sessionStorage.getItem("inbound-booted") !== "1";
+    } catch {
+      return true;
+    }
+  });
   const splashAt = useRef(Date.now());
   const briefGen = useRef(0);
   const lastBriefKey = useRef("");
@@ -282,6 +309,18 @@ export function FiledApp() {
     hydrate();
     setCacheOk(true);
   }, [hydrate]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setShowSplash(false);
+      try {
+        sessionStorage.setItem("inbound-booted", "1");
+      } catch {
+        /* private mode */
+      }
+    }, 1400);
+    return () => window.clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     const meta = document.querySelector('meta[name="viewport"]');
@@ -317,9 +356,11 @@ export function FiledApp() {
     },
     enabled: cacheOk && query.length > 0,
     refetchInterval: (q) => {
+      if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
       if (!s) return 5_000;
-      if (s.live || s.currentStage === "push" || s.currentStage === "taxi" || s.currentStage === "ride" || s.currentStage === "arrival") return 4_000;
+      if (s.live || s.currentStage === "push" || s.currentStage === "taxi") return 3_000;
+      if (s.currentStage === "ride" || s.currentStage === "arrival") return 4_000;
       if (s.currentStage === "inbound") return 5_000;
       return 8_000;
     },
@@ -336,10 +377,10 @@ export function FiledApp() {
   });
 
   const story = storyForQuery(storyQ.data, query);
-  const bootReady = cacheOk && (Boolean(story) || storyQ.isError || storyQ.isFetched);
+  const bootReady = cacheOk && (query.length === 0 || Boolean(story) || storyQ.isError || storyQ.isFetched);
   useEffect(() => {
     if (!bootReady || !showSplash) return;
-    const wait = Math.max(600, 1600 - (Date.now() - splashAt.current));
+    const wait = Math.max(400, 1400 - (Date.now() - splashAt.current));
     const t = window.setTimeout(() => setShowSplash(false), wait);
     return () => window.clearTimeout(t);
   }, [bootReady, showSplash]);
@@ -430,6 +471,7 @@ export function FiledApp() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg" style={shellStyle}>
+      <ScreenErrorBoundary>
       <main
         ref={mainRef}
         className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-4 pt-2 lg:px-8 lg:pt-6"
@@ -508,6 +550,7 @@ export function FiledApp() {
           </Button>
         </form>
       </footer>
+      </ScreenErrorBoundary>
     </div>
   );
 }
@@ -729,6 +772,9 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
   if (story.dest.nas?.delayed) {
     rows.push({ label: "Arrival delay", value: story.dest.nas.reason });
   }
+  if (story.dest.category === "IFR" || story.dest.category === "LIFR") {
+    rows.push({ label: "Arrival", value: `Low weather into ${story.dest.iata}` });
+  }
   if (t?.taxiInMin != null) {
     rows.push({
       label: "Taxi in",
@@ -737,9 +783,6 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
   }
   if (story.origin.category === "IFR" || story.origin.category === "LIFR") {
     rows.push({ label: "Origin", value: `Low weather at ${story.origin.iata}` });
-  }
-  if (story.dest.category === "IFR" || story.dest.category === "LIFR") {
-    rows.push({ label: "Arrival", value: `Low weather into ${story.dest.iata}` });
   }
   if (!rows.length) rows.push({ label: "Notes", value: "No delay or chop flagged." });
   return rows;
@@ -1151,12 +1194,17 @@ function extraFor(story: FlightStory, stage: StageId) {
 
 function TaxiQueueCard({ queue }: { queue?: TaxiQueue | null }) {
   if (!queue) return null;
-  const others = queue.items.filter((it) => !it.you);
-  const you = queue.items.find((it) => it.you);
+  const items = Array.isArray(queue.items) ? queue.items : [];
+  const others = items.filter((it) => !it.you);
+  const you = items.find((it) => it.you);
   if (!queue.depRunway && others.length === 0) {
     return queue.note ? <p className="mt-3 text-sm text-muted">{queue.note}</p> : null;
   }
-  const rwy = queue.depRunway ? `Rwy ${queue.depRunway}` : "Taxi";
+  const rwy = queue.depRunway
+    ? queue.depSource === "takeoffs"
+      ? `Rwy ${queue.depRunway}`
+      : `Likely ${queue.depRunway}`
+    : "Taxi";
   const headline =
     queue.place != null
       ? queue.place === 1
@@ -1168,11 +1216,9 @@ function TaxiQueueCard({ queue }: { queue?: TaxiQueue | null }) {
   const sub =
     queue.place != null && queue.ahead === 0
       ? rwy
-      : queue.ahead > 0 && queue.depRunway
+      : queue.ahead > 0
         ? `${queue.ahead} ahead · ${rwy}`
-        : queue.depRunway
-          ? rwy
-          : "Runway not locked in";
+        : rwy;
   return (
     <div className="mt-4 rounded-md border border-border bg-bg px-3 py-3">
       <p className="font-mono text-xs tracking-widest text-subtle uppercase">
@@ -1182,12 +1228,11 @@ function TaxiQueueCard({ queue }: { queue?: TaxiQueue | null }) {
         <p className="font-display text-2xl font-semibold leading-none">{headline}</p>
         <p className="text-right font-mono text-xs text-muted">{sub}</p>
       </div>
-      {others.length || you ? (
+      {items.length ? (
         <ol className="mt-3 divide-y divide-border border-t border-border">
-          {others.map((it, i) => (
+          {items.map((it, i) => (
             <TaxiQueueRow key={it.hex || `${it.iata}-${i}`} it={it} n={i + 1} />
           ))}
-          {you ? <TaxiQueueRow it={you} n={null} /> : null}
         </ol>
       ) : (
         <p className="mt-2 text-sm text-muted">Quiet on the taxiways right now.</p>
@@ -1217,7 +1262,7 @@ function TaxiQueueRow({ it, n }: { it: TaxiQueue["items"][number]; n: number | n
       className={cn("flex min-h-10 items-center gap-2 py-2", it.you ? "text-accent" : "text-fg")}
       title={[it.iata, name || type, motion].filter(Boolean).join(" · ")}
     >
-      <span className="w-4 shrink-0 font-mono text-xs tabular-nums text-subtle">{it.you ? "·" : n}</span>
+      <span className="w-4 shrink-0 font-mono text-xs tabular-nums text-subtle">{n ?? "·"}</span>
       <span className="min-w-0 flex-1 truncate font-medium">{it.iata}</span>
       <span className="w-[3.25rem] shrink-0 truncate text-right font-mono text-xs text-muted">
         {type}

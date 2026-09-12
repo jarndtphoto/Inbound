@@ -407,7 +407,7 @@ function asOnGround(live, origin) {
 	if (!live) return live;
 	if (live.onGround) {
 		if (live.phase !== "taxi" && live.phase !== "parked") {
-			return { ...live, phase: (live.gsKt ?? 0) >= 4 ? "taxi" : "parked" };
+			return { ...live, phase: (live.gsKt ?? 0) >= 2 ? "taxi" : "parked" };
 		}
 		return live;
 	}
@@ -416,7 +416,7 @@ function asOnGround(live, origin) {
 	const agl = (live.altFt ?? 0) - fieldElev(origin);
 	const gs = live.gsKt ?? 0;
 	if (gs < 55 && agl < 380) {
-		return { ...live, onGround: true, altFt: 0, phase: gs >= 4 ? "taxi" : "parked" };
+		return { ...live, onGround: true, altFt: 0, phase: gs >= 2 ? "taxi" : "parked" };
 	}
 	return live;
 }
@@ -434,11 +434,11 @@ function stillOnField(live, origin) {
 function flightBegun(live, origin) {
 	if (!live) return false;
 	const gs = live.gsKt ?? 0;
-	if (gs < 70 && stillOnField(live, origin)) return false;
-	if (gs >= 70) return true;
+	if (gs >= 60) return true;
+	if (gs < 60 && stillOnField(live, origin)) return false;
 	if (live.onGround) return false;
 	const agl = (live.altFt ?? 0) - fieldElev(origin);
-	return gs >= 70 || agl > 500;
+	return agl > 400;
 }
 function motionFromTrace(points, origin) {
 	if (!points?.length || !origin) return { pushed: false, taxiing: false, flying: false };
@@ -617,12 +617,11 @@ async function adsbByReg(reg) {
 }
 async function adsbAround(lat, lon, dist) {
 	return cached(`around6:${lat.toFixed(2)}:${lon.toFixed(2)}:${dist}`, 2500, async () => {
-		const [fi, lol, al] = await Promise.all([
-			safe(fetchJson(`https://opendata.adsb.fi/api/v2/lat/${lat}/lon/${lon}/dist/${dist}`, 6e3).then(acList), []),
-			safe(fetchJson(`https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${dist}`, 6e3).then(acList), []),
-			safe(fetchJson(`https://api.airplanes.live/v2/point/${lat}/${lon}/${dist}`, 6e3).then(acList), [])
+		const [fi, lol] = await Promise.all([
+			safe(fetchJson(`https://opendata.adsb.fi/api/v2/lat/${lat}/lon/${lon}/dist/${dist}`, 4e3).then(acList), []),
+			safe(fetchJson(`https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${dist}`, 4e3).then(acList), [])
 		]);
-		return mergeAc([fi, lol, al]);
+		return mergeAc([fi, lol]);
 	});
 }
 function headingDelta(a, b) {
@@ -657,14 +656,20 @@ function crossFrom(p, origin, bearingDeg) {
 	const rad = headingDelta(brg, bearingDeg) * Math.PI / 180;
 	return dist * Math.sin(rad);
 }
+function isTailIdent(s) {
+	const u = String(s || "").replace(/[-\s]/g, "").toUpperCase();
+	return /^N[0-9][0-9A-Z]{0,4}$/.test(u);
+}
 function queueItemFromRaw(raw, you) {
-	const cs = String(raw.flight ?? "").trim().toUpperCase();
+	const cs = String(raw.flight ?? "").replace(/\s/g, "").toUpperCase();
 	const type = raw.t?.trim() || null;
 	const gs = typeof raw.gs === "number" ? raw.gs : null;
+	const callsign = cs && !isTailIdent(cs) ? cs : "";
+	const iata = callsign ? displayIata(callsign, null) : (type || "—");
 	return {
 		hex: String(raw.hex ?? "").toLowerCase(),
-		callsign: cs || raw.r?.trim() || "—",
-		iata: cs ? displayIata(cs, null) : raw.r?.trim() || "—",
+		callsign: callsign || "—",
+		iata,
 		type,
 		typeName: airframeOf(type)?.name ?? raw.desc ?? type,
 		gsKt: gs,
@@ -734,8 +739,33 @@ function pickRunway(runways, us, ourTrack) {
 		if (!best || score < best.score) best = { rw, score, cross, along };
 	}
 	if (!best) return null;
-	if (Math.abs(best.cross) > 1.6 && (best.along < -0.6 || best.along > 4)) return null;
+	if (Math.abs(best.cross) > 2.4 && (best.along < -1.2 || best.along > 5.5)) return null;
 	return best;
+}
+function streamHeading(takeoffs, field, us) {
+	const fromTo = circularMeanDeg((takeoffs ?? []).map((t) => t.track).filter((t) => typeof t === "number"));
+	if (fromTo != null) return fromTo;
+	const tracks = (field ?? [])
+		.filter((ac) => ac.gs >= 5 && ac.track != null && haversineNm(ac.here, us) < 1.8)
+		.map((ac) => ac.track);
+	return circularMeanDeg(tracks);
+}
+function buildStreamLine(field, us, hdg, ourHex) {
+	if (hdg == null) return [];
+	const line = [];
+	for (const ac of field) {
+		if (ourHex && ac.hex === ourHex) continue;
+		if (haversineNm(ac.here, us) > 2.8) continue;
+		const along = alongToward(ac.here, us, hdg);
+		const cross = Math.abs(crossFrom(ac.here, us, hdg));
+		if (cross > 0.72) continue;
+		if (along < -0.1 || along > 3.2) continue;
+		if (ac.track != null && ac.gs > 16 && headingDelta(ac.track, hdg) > 110) continue;
+		if (ac.gs > 90) continue;
+		line.push({ ...ac, along, cross });
+	}
+	line.sort((a, b) => b.along - a.along);
+	return line;
 }
 async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed, fieldList, liveTrusted }) {
 	if (!live || !origin) return null;
@@ -747,7 +777,7 @@ async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed, 
 	if (atDest && !atOrigin) return null;
 	if (!atOrigin) return null;
 	const gs = live.gsKt ?? 0;
-	if (!pushed && gs < 2) return null;
+	if (!pushed && gs < 1) return null;
 	const rawList = fieldList ?? await safe(adsbAround(origin.lat, origin.lon, 12), []);
 	const field = [];
 	const takeoffs = [];
@@ -756,7 +786,7 @@ async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed, 
 		const hex = String(raw.hex ?? "").toLowerCase();
 		if (!hex || raw.lat == null || raw.lon == null) continue;
 		if (isVehicleType(raw.t, raw.category, raw.ownOp)) continue;
-		if (seenOf(raw) > 40) continue;
+		if (seenOf(raw) > 70) continue;
 		if (!String(raw.flight ?? "").trim() && !String(raw.r ?? "").trim()) continue;
 		const altRaw = raw.alt_baro;
 		const acGs = typeof raw.gs === "number" ? raw.gs : 0;
@@ -779,6 +809,7 @@ async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed, 
 	const us = { lat: live.lat, lon: live.lon };
 	const runways = takeoffRunways(takeoffs);
 	const picked = pickRunway(runways, us, live.track ?? null);
+	const hdg = picked?.rw.hdg ?? streamHeading(takeoffs, field, us);
 	const youItem = {
 		hex: live.hex,
 		callsign: "YOU",
@@ -789,56 +820,86 @@ async function loadTaxiQueue({ origin, dest, live, ourHex, ourAirborne, pushed, 
 		holding: gs < 8,
 		you: true
 	};
-	if (!picked) {
-		const nearby = field
-			.filter((ac) => (!ourHex || ac.hex !== ourHex) && (ac.gs >= 2 || haversineNm(ac.here, us) < 1.2))
-			.sort((a, b) => haversineNm(a.here, us) - haversineNm(b.here, us))
-			.slice(0, 12)
-			.map((ac) => queueItemFromRaw(ac.raw, false));
-		return {
-			place: null,
-			ahead: nearby.length,
-			moving: nearby.length + 1,
-			items: [...nearby, youItem],
-			depRunway: null,
-			depSource: null,
-			status: "taxi",
-			note: nearby.length
-				? "Taxiing. Runway not locked in yet — aircraft moving on the field."
-				: "Taxiing. Runway not verified yet."
+	let rwLine = [];
+	if (picked) {
+		const rw = picked.rw;
+		const ourAlong = alongToward(us, rw.thr, rw.hdg);
+		for (const ac of field) {
+			if (ourHex && ac.hex === ourHex) continue;
+			const along = alongToward(ac.here, rw.thr, rw.hdg);
+			const cross = Math.abs(crossFrom(ac.here, rw.thr, rw.hdg));
+			if (cross > 1.05) continue;
+			if (along < -0.45 || along > 4.6) continue;
+			if (ac.gs < 3 && cross > 0.7) continue;
+			if (ac.track != null && ac.gs > 18 && headingDelta(ac.track, rw.hdg) > 125) continue;
+			if (ac.gs > 95) continue;
+			rwLine.push({ ...ac, along: ourAlong - along, cross });
+		}
+		rwLine.sort((a, b) => b.along - a.along);
+	}
+	const compact = ["MDW", "LGA", "DCA", "SNA", "BUR", "HOU", "DAL", "BWI", "MKE", "OAK", "SJC"].includes(String(origin.iata || "").toUpperCase());
+	const packNm = compact ? 0.65 : 1.05;
+	let toEnd = [];
+	if (takeoffs.length) {
+		const aim = {
+			lat: takeoffs.reduce((s, t) => s + t.lat, 0) / takeoffs.length,
+			lon: takeoffs.reduce((s, t) => s + t.lon, 0) / takeoffs.length
 		};
+		const bearing = initialBearing(us, aim);
+		const dUs = haversineNm(us, aim);
+		for (const ac of field) {
+			if (ourHex && ac.hex === ourHex) continue;
+			if (haversineNm(ac.here, us) > (compact ? 0.75 : 1.5)) continue;
+			const cross = Math.abs(crossFrom(ac.here, us, bearing));
+			if (cross > (compact ? 0.4 : 0.72)) continue;
+			const along = alongToward(ac.here, us, bearing);
+			if (along < -0.22 || along > Math.max(dUs + 0.25, compact ? 0.95 : 2.6)) continue;
+			if (ac.gs > 90) continue;
+			toEnd.push({ ...ac, along, cross });
+		}
+		toEnd.sort((a, b) => b.along - a.along);
 	}
-	const rw = picked.rw;
-	const ourAlong = alongToward(us, rw.thr, rw.hdg);
-	const line = [];
-	for (const ac of field) {
-		if (ourHex && ac.hex === ourHex) continue;
-		const along = alongToward(ac.here, rw.thr, rw.hdg);
-		const cross = crossFrom(ac.here, rw.thr, rw.hdg);
-		if (cross > 0.8) continue;
-		if (along < -0.45 || along > 4.2) continue;
-		if (ac.gs < 3 && cross > 0.5) continue;
-		if (ac.track != null && ac.gs > 18 && headingDelta(ac.track, rw.hdg) > 125) continue;
-		if (ac.gs > 95) continue;
-		line.push({ ...ac, along, cross });
+	const streamAll = hdg != null ? buildStreamLine(field, us, hdg, ourHex) : [];
+	let pack = toEnd;
+	if (streamAll.length > pack.length) pack = streamAll;
+	if (rwLine.length > pack.length) pack = rwLine;
+	if (pack.length < (compact ? 2 : 3)) {
+		const extra = [];
+		for (const ac of field) {
+			if (ourHex && ac.hex === ourHex) continue;
+			if (haversineNm(ac.here, us) > packNm) continue;
+			if (ac.gs > 85) continue;
+			if (hdg != null && ac.track != null && ac.gs > 14 && headingDelta(ac.track, hdg) > 110) continue;
+			extra.push({
+				...ac,
+				along: hdg != null ? alongToward(ac.here, us, hdg) : -haversineNm(ac.here, us),
+				cross: hdg != null ? Math.abs(crossFrom(ac.here, us, hdg)) : 0
+			});
+		}
+		extra.sort((a, b) => b.along - a.along);
+		if (extra.length > pack.length) pack = extra;
 	}
-	line.sort((a, b) => a.along - b.along);
-	const aheadList = line.filter((ac) => ac.along < ourAlong - 0.06);
-	const items = aheadList.slice(0, 12).map((ac) => queueItemFromRaw(ac.raw, false));
-	items.push(youItem);
-	const ahead = aheadList.length;
-	const place = ahead + 1;
-	const depRunway = rw.rwy;
+	const likelyRwy = hdg != null ? rwyFromHeading(hdg) : null;
+	const locked = Boolean(picked && pack === rwLine);
+	const ahead = pack.filter((ac) => ac.along > 0.03);
+	const behind = pack.filter((ac) => ac.along <= 0.03);
+	const items = [
+		...ahead.slice(0, 10).map((ac) => queueItemFromRaw(ac.raw, false)),
+		youItem,
+		...behind.slice(0, compact ? 5 : 2).map((ac) => queueItemFromRaw(ac.raw, false))
+	];
+	const place = ahead.length + 1;
+	const depRunway = locked ? picked.rw.rwy : likelyRwy;
 	const note = place === 1
-		? `You’re first for runway ${depRunway}.`
-		: `You’re number ${place} for runway ${depRunway} — ${ahead} aircraft ahead.`;
+		? (depRunway ? `You’re first for runway ${depRunway}.` : "You’re first in this pack.")
+		: `${ahead.length} aircraft ahead${depRunway && locked ? ` for runway ${depRunway}` : ""}.`;
 	return {
 		place,
-		ahead,
-		moving: line.filter((ac) => ac.gs >= 5).length,
+		ahead: ahead.length,
+		moving: pack.filter((ac) => ac.gs >= 5).length,
 		items,
 		depRunway,
-		depSource: "takeoffs",
+		depSource: locked ? "takeoffs" : takeoffs.length >= 2 ? "stream" : "track",
 		status: "taxi",
 		note
 	};
@@ -1900,7 +1961,7 @@ function currentStageOf(args) {
 	const begun = flightBegun(live, origin);
 	const taxiing = Boolean(
 		taxiHint ||
-		(live && atOrigin && ((live.gsKt ?? 0) >= 4 || live.phase === "taxi" || (distPark ?? 0) >= 0.12))
+		(live && atOrigin && ((live.gsKt ?? 0) >= 2 || live.phase === "taxi" || (distPark ?? 0) >= 0.08))
 	);
 	if (live && atOrigin && !begun) {
 		if (taxiing) return "taxi";
@@ -1945,7 +2006,7 @@ function rampWx(decoded) {
 	return null;
 }
 function buildStages(args) {
-	const { live, origin, dest, current, remainingNm, etaMin, comfort, inbound, samples, times, taxiQueue, taxiHint } = args;
+	const { live, origin, dest, current, remainingNm, etaMin, comfort, inbound, samples, times, taxiQueue, taxiHint, parkedAtGate } = args;
 	const conv = samples.find((s) => s.convective);
 	const order = [
 		"inbound",
@@ -1980,7 +2041,7 @@ function buildStages(args) {
 	const ramp = rampWx(dest.decoded);
 	if (ramp) gateWatch.push(ramp);
 	const pushed = Boolean(times.pushed || times.airborne || current === "taxi" || current === "ride" || current === "arrival" || current === "gate");
-	const taxiingNow = Boolean(taxiQueue?.status === "taxi" || taxiHint || (live?.onGround && (live.gsKt ?? 0) >= 4));
+	const taxiingNow = Boolean(taxiQueue?.status === "taxi" || taxiHint || (live?.onGround && (live.gsKt ?? 0) >= 2));
 	const inboundTitle = inbound.status === "complete" ? "Inbound is at the gate" : inbound.status === "at_field" ? "Inbound is taxiing in" : inbound.status === "airborne" ? "Inbound to the field" : "The inbound aircraft";
 	const arrivalBody = dest.nas?.delayed ? `${times.land ? `Landing around ${times.land}. ` : ""}${nasCopy(dest.nas, "dest")}` : times.land ? (times.arriveDelayMin ?? 0) >= 15 && times.landWas ? `Landing around ${times.land}, about ${times.arriveDelayMin} minutes later than ${times.landWas}.` : `Landing around ${times.land}.` : `Into ${dest.city}.`;
 	const gateBody = "";
@@ -2022,8 +2083,12 @@ function buildStages(args) {
 		},
 		gate: {
 			state: state("gate"),
-			title: times.destGate ? `Gate ${times.destGate}` : "At the gate",
-			body: gateBody,
+			title: parkedAtGate
+				? (times.destGate ? `Gate ${times.destGate}` : "Parked at gate")
+				: current === "gate"
+					? "Taxiing in"
+					: (times.destGate ? `Gate ${times.destGate}` : "At the gate"),
+			body: parkedAtGate || current !== "gate" ? "" : (times.destGate ? `To gate ${times.destGate}.` : ""),
 			watchouts: gateWatch.slice(0, 3)
 		}
 	};
@@ -2115,12 +2180,15 @@ async function buildStory(query) {
 			hexByIdent.delete(identKey);
 		}
 	}
-	if (origin && !Boolean(aware?.takeoff?.actual) && !Boolean(aware?.landing?.actual)) {
-		fieldList = await safe(adsbAround(origin.lat, origin.lon, 12), []);
-		const match = pickAroundAircraft(fieldList, parsed, aware, origin, dest, 12);
-		if (match) {
-			const cand = asOnGround(toLive(match), origin);
-			if (cand && stillOnField(cand, origin)) live = cand;
+	if (origin && !Boolean(aware?.landing?.actual) && !flightBegun(live, origin)) {
+		const alreadyAtDest = Boolean(live && dest && haversineNm({ lat: live.lat, lon: live.lon }, dest) < 12);
+		if (!alreadyAtDest) {
+			fieldList = await safe(adsbAround(origin.lat, origin.lon, 12), []);
+			const match = pickAroundAircraft(fieldList, parsed, aware, origin, dest, 12);
+			if (match) {
+				const cand = asOnGround(toLive(match), origin);
+				if (cand && stillOnField(cand, origin)) live = cand;
+			}
 		}
 	} else if (live && dest && !live.onGround) {
 		const dDest = haversineNm({ lat: live.lat, lon: live.lon }, dest);
@@ -2153,8 +2221,10 @@ async function buildStory(query) {
 	if (live && origin && dest) {
 		const dOrig = haversineNm({ lat: live.lat, lon: live.lon }, origin);
 		const dDest = haversineNm({ lat: live.lat, lon: live.lon }, dest);
-		if (ourLanded && dDest > 20) live = null;
-		else if (!ourLanded && !aware?.takeoff?.actual && dDest < 12 && dOrig > 20) live = null;
+		const identOk = flightIdentOk(live.callsign, parsed, aware) ||
+			(aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase());
+		if (ourLanded && dDest > 20 && !identOk) live = null;
+		else if (!ourLanded && !identOk && !aware?.takeoff?.actual && dDest < 12 && dOrig > 20) live = null;
 	}
 	if (!live && origin && !ourLanded) {
 		const near = await safe(adsbAround(origin.lat, origin.lon, 48), []);
@@ -2444,7 +2514,7 @@ async function buildStory(query) {
 	let times = timesOf(aware, origin, dest);
 	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
-	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.8 && dOrigLive < 0.5 && !pushLatch.get(landKey) && !times.pushed) {
+	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && dOrigLive < 0.4 && !pushLatch.get(landKey) && !times.pushed) {
 		const prev = parkByFlight.get(landKey);
 		if (!prev) parkByFlight.set(landKey, { lat: live.lat, lon: live.lon, at: Date.now() });
 		else if (haversineNm({ lat: live.lat, lon: live.lon }, prev) < 0.03) {
@@ -2458,20 +2528,35 @@ async function buildStory(query) {
 	if (hexNow && origin && !ourLanded && (!live || (live.onGround && (live.gsKt ?? 0) < 4 && distPark < 0.12))) {
 		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
 	}
-	const offRamp = Boolean(live && live.onGround && atOrigLive && dOrigLive >= 0.8);
+	const offRamp = Boolean(live && live.onGround && atOrigLive && dOrigLive >= 0.65);
+	const nowSec = Date.now() / 1e3;
+	const parkedAtStand = Boolean(live && live.onGround && atOrigLive && (live.gsKt ?? 0) < 1.2 && dOrigLive < 0.38);
+	const awayFromOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) > 8);
+	const faPushUnix = times.pushUnix;
+	const faPushedClock = Boolean(
+		!ourLanded &&
+		!aware?.takeoff?.actual &&
+		!parkedAtStand &&
+		!awayFromOrigin &&
+		faPushUnix &&
+		nowSec > faPushUnix + 90
+	);
+	const faTaxiClock = Boolean(faPushedClock && nowSec > faPushUnix + 3 * 60);
 	const leftGate = Boolean(
 		!ourLanded &&
 		(
-			(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 2 || distPark >= 0.035 || live.phase === "taxi" || offRamp)) ||
+			(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 1.2 || distPark >= 0.025 || live.phase === "taxi" || offRamp)) ||
 			motion.pushed ||
 			motion.taxiing ||
-			Boolean(aware?.gateOut?.actual)
+			Boolean(aware?.gateOut?.actual) ||
+			faPushedClock
 		)
 	);
 	const taxiHint = Boolean(
 		motion.taxiing ||
 		offRamp ||
-		(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 3 || distPark >= 0.10 || live.phase === "taxi"))
+		faTaxiClock ||
+		(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 2 || distPark >= 0.07 || live.phase === "taxi"))
 	);
 	if (ourAirborne && !times.airborne) {
 		times = { ...times, airborne: true };
@@ -2537,8 +2622,8 @@ async function buildStory(query) {
 	const dGate = live && dest ? haversineNm({ lat: live.lat, lon: live.lon }, dest) : 999;
 	const parkedAtGate = Boolean(
 		ourLanded && (
-			aware?.gateIn?.actual ||
-			(live && live.onGround && (live.gsKt ?? 0) < 8 && dGate < 6)
+			Boolean(aware?.gateIn?.actual) ||
+			(live && live.onGround && (live.gsKt ?? 0) < 1.2 && dGate < 0.55)
 		)
 	);
 	if (parkedAtGate) {
@@ -2618,7 +2703,8 @@ async function buildStory(query) {
 			live &&
 			(
 				flightIdentOk(live.callsign, parsed, aware) ||
-				(aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase())
+				(aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase()) ||
+				Boolean(live.hex && hexByIdent.get(identKey) === live.hex)
 			)
 		)
 	});
@@ -2722,7 +2808,8 @@ async function buildStory(query) {
 			samples,
 			times,
 			taxiQueue,
-			taxiHint
+			taxiHint,
+			parkedAtGate
 		})
 	};
 }
@@ -2755,7 +2842,17 @@ function nearestKnown(live) {
 }
 export async function loadFlightStory(query) {
 	try {
-		return await cached(`story42:${query.toUpperCase().replace(/[^A-Z0-9]/g, "")}`, 2e3, () => buildStory(query));
+		const key = `story42:${String(query || "").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
+		const work = cached(key, 2e3, () => buildStory(query));
+		let timer;
+		const timed = new Promise((_, rej) => {
+			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 12e3);
+		});
+		try {
+			return await Promise.race([work, timed]);
+		} finally {
+			clearTimeout(timer);
+		}
 	} catch (err) {
 		const msg = err instanceof Error && err.message && err.name !== "AbortError" ? err.message : "Could not load that flight. Try again.";
 		throw new Error(msg);
