@@ -177,6 +177,7 @@ describe("briefing update log", () => {
     assert.match(next.log[next.log.length - 1].text, /Manual refresh/);
     assert.equal(JARGON.test(next.log.map((e) => e.text).join(" ")), false);
     const again = logManualRefresh(next);
+    assert.ok(again);
     const manuals = again.log.filter((e) => e.text === "Manual refresh");
     assert.ok(manuals.length <= 1);
   });

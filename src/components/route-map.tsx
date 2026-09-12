@@ -15,8 +15,7 @@ const PAD = 40;
 
 function chopClass(c: Chop, past: boolean) {
   if (past) return "stroke-muted/40";
-  if (c === "severe" || c === "moderate") return "stroke-ifr";
-  if (c === "light") return "stroke-mvfr";
+  if (c === "severe" || c === "moderate" || c === "light") return "stroke-ifr";
   return "stroke-accent";
 }
 
@@ -622,8 +621,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
         <Legend swatch="bg-accent" label="Smooth" />
-        <Legend swatch="bg-mvfr" label="Light turbulence" />
-        <Legend swatch="bg-ifr" label="Moderate turbulence" />
+        <Legend swatch="bg-ifr" label="Light / moderate turbulence" />
         <span className="inline-flex items-center gap-1.5">
           <span className="size-2.5 rounded-full border border-ifr/70 bg-ifr/40" />
           Thunderstorms

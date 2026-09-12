@@ -144,8 +144,29 @@ describe("extrapolated flag", () => {
       extrapolated: false,
       raw: ac({ lat: 41.9786, lon: -87.9048 }),
     };
-    assert.equal(maybeExtrapolate(prev, T0 + 16_000), null);
-    const later = chooseBest(HEX, T0 + 50_000, false);
+    assert.equal(maybeExtrapolate(prev, T0 + 16_000, true), null);
+    const later = chooseBest(HEX, T0 + 20 * 60_000, false);
     assert.equal(later, null);
+  });
+
+  it("keeps a few-minute-old oceanic cruise ping", () => {
+    const fused = fuseProviderLists(
+      [{ provider: "fi", ac: [ac({ lat: 30.2, lon: -140.4, gs: 478, alt_baro: 36000, seen: 240, seen_pos: 240 })] }],
+      { now: T0, airside: false },
+    );
+    assert.equal(fused.length, 1);
+    assert.equal(fused[0]?.alt_baro, 36000);
+    assert.equal(fused[0]?.gs, 478);
+  });
+
+  it("coasts an enroute track for a few minutes", () => {
+    fuseProviderLists(
+      [{ provider: "fi", ac: [ac({ lat: 30.2, lon: -140.4, gs: 480, track: 70, alt_baro: 35000, seen: 0 })] }],
+      { now: T0, airside: false },
+    );
+    const coast = fuseProviderLists([], { now: T0 + 90_000, airside: false });
+    assert.equal(coast.length, 1);
+    assert.equal(coast[0]?.extrapolated, true);
+    assert.equal(coast[0]?.alt_baro, 35000);
   });
 });

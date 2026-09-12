@@ -9,7 +9,6 @@ import {
   downsampleNm,
   formatDuration,
   formatMiles,
-  formatNm,
   greatCirclePoints,
   haversineNm,
   initialBearing,
@@ -88,42 +87,61 @@ async function safe(p, fallback) {
 		return fallback;
 	}
 }
+const TRACE_HOSTS = [
+	"https://globe.theairtraffic.com",
+	"https://globe.adsb.fi",
+	"https://globe.airplanes.live",
+];
+function parseTraceJson(data) {
+	const base = data?.timestamp ?? 0;
+	const out = [];
+	for (const row of data?.trace ?? []) {
+		const lat = row[1];
+		const lon = row[2];
+		const sec = row[0];
+		if (typeof lat !== "number" || typeof lon !== "number") continue;
+		if (Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
+		const altRaw = row[3];
+		const gsRaw = row[4];
+		const trackRaw = row[5];
+		const ground = altRaw === "ground" || altRaw === 0 || altRaw === "0";
+		const alt = typeof altRaw === "number" && altRaw > 0 ? altRaw : ground ? 0 : null;
+		const gs = typeof gsRaw === "number" ? gsRaw : null;
+		const track = typeof trackRaw === "number" && trackRaw >= 0 && trackRaw <= 360 ? trackRaw : null;
+		out.push({
+			t: base + (typeof sec === "number" ? sec : 0),
+			lat,
+			lon,
+			alt,
+			ground,
+			gs,
+			track
+		});
+	}
+	return out;
+}
 async function fetchTrace(hex, kind) {
 	const id = hex.toLowerCase();
 	return cached(`trace3:${kind}:${id}`, kind === "trace_recent" ? 8e3 : 25e3, async () => {
-		const url = `https://globe.theairtraffic.com/data/traces/${id.slice(-2)}/${kind}_${id}.json`;
-		const res = await fetch(url, {
-			headers: {
-				"User-Agent": UA,
-				Accept: "application/json"
-			},
-			signal: AbortSignal.timeout(7e3)
-		});
-		if (!res.ok) return [];
-		const data = await res.json();
-		const base = data.timestamp ?? 0;
-		const out = [];
-		for (const row of data.trace ?? []) {
-			const lat = row[1];
-			const lon = row[2];
-			const sec = row[0];
-			if (typeof lat !== "number" || typeof lon !== "number") continue;
-			if (Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
-			const altRaw = row[3];
-			const gsRaw = row[4];
-			const ground = altRaw === "ground" || altRaw === 0 || altRaw === "0";
-			const alt = typeof altRaw === "number" && altRaw > 0 ? altRaw : ground ? 0 : null;
-			const gs = typeof gsRaw === "number" ? gsRaw : null;
-			out.push({
-				t: base + (typeof sec === "number" ? sec : 0),
-				lat,
-				lon,
-				alt,
-				ground,
-				gs
-			});
+		for (const host of TRACE_HOSTS) {
+			try {
+				const url = `${host}/data/traces/${id.slice(-2)}/${kind}_${id}.json`;
+				const res = await fetch(url, {
+					headers: {
+						"User-Agent": UA,
+						Accept: "application/json"
+					},
+					signal: AbortSignal.timeout(7e3)
+				});
+				if (!res.ok) continue;
+				const data = await res.json();
+				const parsed = parseTraceJson(data);
+				if (parsed.length) return parsed;
+			} catch {
+				/* next host */
+			}
 		}
-		return out;
+		return [];
 	});
 }
 function uniqueTrack(points) {
@@ -399,6 +417,82 @@ function destParkedLeftover(cand, dest, aware) {
 	if (ld && now >= ld - 45 * 60) return false;
 	if (!ld && airborneSec > 4 * 3600) return false;
 	return true;
+}
+function lastAirborneTracePt(points, takeoffUnix) {
+	if (!points?.length) return null;
+	const now = Date.now() / 1e3;
+	const t0 = takeoffUnix != null ? takeoffUnix - 8 * 60 : now - 10 * 3600;
+	let last = null;
+	for (const p of points) {
+		if (p.t < t0 || p.t > now + 120) continue;
+		if (isGroundPt(p)) continue;
+		if ((p.alt ?? 0) < 400 && (p.gs ?? 0) < 80) continue;
+		last = p;
+	}
+	if (!last) return null;
+	if (now - last.t > 25 * 60) return null;
+	return last;
+}
+function coastTracePt(pt) {
+	const now = Date.now() / 1e3;
+	const age = Math.max(0, now - pt.t);
+	let lat = pt.lat;
+	let lon = pt.lon;
+	if (age > 25 && (pt.gs ?? 0) > 80 && pt.track != null && Number.isFinite(pt.track)) {
+		const moved = destPoint(pt, pt.track, (pt.gs / 3600) * Math.min(age, 8 * 60));
+		lat = moved.lat;
+		lon = moved.lon;
+	}
+	return { lat, lon, age, alt: pt.alt ?? null, gs: pt.gs ?? null, track: pt.track ?? null };
+}
+function liveFromTracePt(pt, hex, seed) {
+	const c = coastTracePt(pt);
+	return {
+		hex: hex || seed?.hex || "",
+		callsign: seed?.callsign ?? null,
+		registration: seed?.registration ?? null,
+		type: seed?.type ?? null,
+		typeName: seed?.typeName ?? seed?.type ?? null,
+		year: seed?.year ?? null,
+		operator: seed?.operator ?? null,
+		lat: c.lat,
+		lon: c.lon,
+		altFt: c.alt,
+		gsKt: c.gs,
+		track: c.track ?? seed?.track ?? null,
+		vertFpm: seed?.vertFpm ?? null,
+		onGround: false,
+		phase: "cruise",
+		extrapolated: c.age > 45,
+		seenSec: c.age
+	};
+}
+function rememberKin(identKey, live) {
+	if (!live || live.onGround) return;
+	if (live.altFt == null && live.gsKt == null) return;
+	lastKinByIdent.set(identKey, { ...live, at: Date.now() });
+}
+function restoreKin(identKey, live, dest, aware) {
+	const prev = lastKinByIdent.get(identKey);
+	if (!prev || Date.now() - prev.at > 20 * 60_000) return live;
+	if (destParkedLeftover(prev, dest, aware)) return live;
+	if (!live) {
+		const age = (Date.now() - prev.at) / 1000;
+		let lat = prev.lat;
+		let lon = prev.lon;
+		if (age > 25 && (prev.gsKt ?? 0) > 80 && prev.track != null) {
+			const moved = destPoint(prev, prev.track, (prev.gsKt / 3600) * Math.min(age, 8 * 60));
+			lat = moved.lat;
+			lon = moved.lon;
+		}
+		return { ...prev, lat, lon, extrapolated: true, seenSec: age };
+	}
+	return {
+		...live,
+		altFt: live.altFt ?? prev.altFt,
+		gsKt: live.gsKt ?? prev.gsKt,
+		track: live.track ?? prev.track
+	};
 }
 function toLive(raw) {
 	const hex = (raw.hex ?? "").toLowerCase();
@@ -1531,6 +1625,7 @@ const pushLatch = /* @__PURE__ */ new Map();
 const parkByFlight = /* @__PURE__ */ new Map();
 const hexByIdent = /* @__PURE__ */ new Map();
 const hexRouteByIdent = /* @__PURE__ */ new Map();
+const lastKinByIdent = /* @__PURE__ */ new Map();
 function inboundSnapKey(aware, origin, dest, query) {
 	if (aware) return origKey(aware);
 	const day = new Date().toISOString().slice(0, 10);
@@ -1686,7 +1781,7 @@ function buildInbound(args) {
 	if (status === "airborne") return {
 		status,
 		headline: `${iata} is inbound to ${origin.iata}`,
-		detail: `${fromCity ? `From ${fromCity}. ` : ""}${type ? `${type}. ` : ""}${formatNm(distNm)} out, about ${formatDuration(Math.max(1, etaMin - taxiPosted))} to the field${gate ? `, then taxi to posted gate ${gate}` : ""}${gateEtaClock ? ` — at the gate around ${gateEtaClock}` : ""}.`,
+		detail: `${fromCity ? `From ${fromCity}. ` : ""}${type ? `${type}. ` : ""}${formatMiles(distNm)} out, about ${formatDuration(Math.max(1, etaMin - taxiPosted))} to the field${gate ? `, then taxi to posted gate ${gate}` : ""}${gateEtaClock ? ` — at the gate around ${gateEtaClock}` : ""}.`,
 		watch
 	};
 	if (status === "at_field") return {
@@ -1803,14 +1898,16 @@ function buildStages(args) {
 	const taxiingNow = Boolean(taxiHint || (live?.onGround && (live.gsKt ?? 0) >= 2));
 	const inboundTitle = inbound.status === "complete" ? "Inbound is at the gate" : inbound.status === "at_field" ? "Inbound is taxiing in" : inbound.status === "airborne" ? "Inbound to the field" : "The inbound aircraft";
 	const arrivalBody = (() => {
-		if (current === "arrival" && times.landKind === "actual") {
+		if (times.landKind === "actual") {
 			const gateBit = times.gate
 				? times.gateKind === "actual"
 					? `At the gate ${times.gate}.`
 					: `At the gate around ${times.gate}.`
 				: times.destGate
 					? `Taxiing in to ${times.destGate}.`
-					: "Taxiing in to the gate.";
+					: parkedAtGate
+						? "Parked at the gate."
+						: "Taxiing in to the gate.";
 			return `Landed${times.land ? ` at ${times.land}` : ""}. ${gateBit}`;
 		}
 		if (dest.nas?.delayed) return `${times.land ? `Landing around ${times.land}. ` : ""}${nasCopy(dest.nas, "dest")}`;
@@ -1826,7 +1923,9 @@ function buildStages(args) {
 		? `${formatMiles(remainingNm)} still to run, about ${formatDuration(etaMin)}.`
 		: inAir
 			? `${formatMiles(remainingNm)} still to run, about ${formatDuration(etaMin)}. Live position unavailable right now.`
-			: `Once you’re up, ${formatMiles(remainingNm)} on the filed path.`;
+			: current === "gate" || current === "arrival"
+				? ""
+				: `Once you’re up, ${formatMiles(remainingNm)} on the filed path.`;
 	return {
 		push: {
 			state: state("push"),
@@ -2074,6 +2173,33 @@ async function buildStory(query) {
 		if (ourLanded && destSide[0]) live = destSide[0];
 		else if (airborneAway[0]) live = airborneAway[0];
 		else if (!ourLanded && originSide[0]) live = originSide[0];
+	}
+	if (!ourLanded && Boolean(aware?.takeoff?.actual) && !aware?.landing?.actual) {
+		live = restoreKin(identKey, live, dest, aware);
+		const needTrace = !live || live.altFt == null || live.gsKt == null;
+		const hexForTrace = String(live?.hex || hexByIdent.get(identKey) || aware?.hex || "").toLowerCase();
+		if (needTrace && /^[0-9a-f]{6}$/.test(hexForTrace)) {
+			const [full, recent] = await Promise.all([
+				safe(fetchTrace(hexForTrace, "trace_full"), []),
+				safe(fetchTrace(hexForTrace, "trace_recent"), [])
+			]);
+			const pt = lastAirborneTracePt(mergeTraces(full, recent), aware?.takeoff?.actual ?? null);
+			if (pt) {
+				if (!live) {
+					const cand = liveFromTracePt(pt, hexForTrace, { hex: hexForTrace, callsign: parsed.callsign, registration: aware?.tail ?? null, type: aware?.type ?? null, typeName: airframeOf(aware?.type)?.name ?? aware?.type ?? null });
+					if (cand && !destParkedLeftover(cand, dest, aware)) live = cand;
+				} else {
+					live = {
+						...live,
+						altFt: live.altFt ?? pt.alt,
+						gsKt: live.gsKt ?? pt.gs,
+						track: live.track ?? pt.track
+					};
+				}
+			}
+		}
+		live = restoreKin(identKey, live, dest, aware);
+		rememberKin(identKey, live);
 	}
 	if (live?.hex && (flightIdentOk(live.callsign, parsed, aware) || (aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase()))) {
 		hexByIdent.set(identKey, live.hex);
@@ -2771,7 +2897,12 @@ export async function loadFlightStory(query, opts) {
 	const fresh = Boolean(opts?.fresh);
 	try {
 		const key = `story42:${String(query || "").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
-		if (fresh) cache.delete(key);
+		if (fresh) {
+			cache.delete(key);
+			for (const k of [...cache.keys()]) {
+				if (/^(hex4:|cs4:|reg4:|trace3:)/.test(k)) cache.delete(k);
+			}
+		}
 		const work = cached(key, fresh ? 0 : 2e3, () => buildStory(query));
 		let timer;
 		const timed = new Promise((_, rej) => {

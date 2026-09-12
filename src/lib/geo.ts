@@ -188,6 +188,12 @@ export function distanceToSegmentNm(p: Coord, a: Coord, b: Coord): number {
   return haversineNm(destPoint(a, bearing, proj), p);
 }
 
+export function formatNm(nm: number) {
+  if (!Number.isFinite(nm)) return "—";
+  if (nm < 10) return `${nm.toFixed(1)} nm`;
+  return `${Math.round(nm)} nm`;
+}
+
 const NM_TO_MI = 1.150779448;
 
 /** Convert nautical miles to statute miles for passenger copy. */

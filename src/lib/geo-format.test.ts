@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { densifyPath, formatMiles, greatCirclePoints, haversineNm, nmToMiles, polylineLengthNm } from "./geo.ts";
+import { densifyPath, formatMiles, formatNm, greatCirclePoints, haversineNm, nmToMiles, polylineLengthNm } from "./geo.ts";
 
 describe("passenger miles", () => {
   it("rounds the same way for a long remaining distance", () => {
@@ -12,6 +12,11 @@ describe("passenger miles", () => {
 
   it("handles short remaining distance", () => {
     assert.match(formatMiles(4), /miles?$/);
+  });
+
+  it("still exports formatNm for airside distances", () => {
+    assert.equal(formatNm(12.4), "12 nm");
+    assert.match(formatNm(3.2), /3\.2 nm/);
   });
 });
 

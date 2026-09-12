@@ -54,12 +54,14 @@ export type TrackState = {
 };
 
 export const STALE_AIR_SEC = 32;
-export const STALE_ENROUTE_SEC = 40;
+export const STALE_ENROUTE_SEC = 12 * 60;
 export const STALE_GROUND_SEC = 45;
 export const TELEPORT_NM = 5;
 export const TELEPORT_NM_FAST = 3;
 export const GAP_EXTRAPOLATE_SEC = 10;
+export const GAP_EXTRAPOLATE_ENROUTE_SEC = 8 * 60;
 export const STALE_KEEP_SEC = 45;
+export const STALE_KEEP_ENROUTE_SEC = 15 * 60;
 
 const UA = "Inbound/1.0 (passenger flight companion)";
 
@@ -169,8 +171,11 @@ export function isStaleObs(obs: Observation, now: number, airside = false): bool
   const age = ageOf(obs, now);
   if (onGroundOf(obs.altBaro)) return age > STALE_GROUND_SEC;
   if (airside) return age > STALE_AIR_SEC;
-  const fast = (obs.gs ?? 0) >= 250;
-  return age > (fast ? STALE_ENROUTE_SEC : STALE_AIR_SEC);
+  const cruise =
+    (obs.gs ?? 0) >= 180 ||
+    (typeof obs.altBaro === "number" && obs.altBaro > 15_000) ||
+    (typeof obs.raw.alt_geom === "number" && obs.raw.alt_geom > 15_000);
+  return age > (cruise ? STALE_ENROUTE_SEC : STALE_AIR_SEC);
 }
 
 export function isTeleport(
@@ -194,6 +199,7 @@ function completeness(obs: Observation): number {
   let s = 0;
   if (String(obs.raw.flight ?? "").trim()) s += 4;
   if (obs.altBaro != null) s += 2;
+  else if (typeof obs.raw.alt_geom === "number" && obs.raw.alt_geom > 0) s += 2;
   if (obs.gs != null) s += 1;
   if (obs.track != null) s += 1;
   if (obs.raw.r) s += 1;
@@ -223,13 +229,16 @@ export function scoreObservation(
 
 export function rawToObservation(raw: AdsbRaw, provider: ProviderId, receivedAt: number): Observation | null {
   const hex = String(raw.hex ?? "").toLowerCase();
-  if (!hex || !coordsOk(raw.lat, raw.lon)) return null;
+  const lat = raw.lat;
+  const lon = raw.lon;
+  if (!hex || !coordsOk(lat, lon)) return null;
+  if (typeof lat !== "number" || typeof lon !== "number") return null;
   const alt = raw.alt_baro === "ground" || typeof raw.alt_baro === "number" ? raw.alt_baro : null;
   return {
     hex,
     provider,
-    lat: raw.lat,
-    lon: raw.lon,
+    lat,
+    lon,
     altBaro: alt,
     gs: typeof raw.gs === "number" ? raw.gs : typeof raw.spd === "number" ? raw.spd : null,
     track: typeof raw.track === "number" ? raw.track : null,
@@ -275,12 +284,14 @@ function commitTrack(hex: string, raw: AdsbRaw, provider: ProviderId, now: numbe
   return raw;
 }
 
-export function maybeExtrapolate(prev: TrackState, now: number): AdsbRaw | null {
+export function maybeExtrapolate(prev: TrackState, now: number, airside = false): AdsbRaw | null {
   const dt = (now - prev.at) / 1000;
   if (dt <= 0.15) {
     return { ...prev.raw, extrapolated: false, _fusion: { provider: prev.provider, extrapolated: false, ageSec: 0 } };
   }
-  if (dt > GAP_EXTRAPOLATE_SEC) return null;
+  const cruise = !onGroundOf(prev.altBaro) && ((prev.gs ?? 0) >= 180 || (typeof prev.altBaro === "number" && prev.altBaro > 15_000));
+  const maxGap = airside || !cruise ? GAP_EXTRAPOLATE_SEC : GAP_EXTRAPOLATE_ENROUTE_SEC;
+  if (dt > maxGap) return null;
   if (prev.gs == null || prev.gs < 40 || prev.track == null) return null;
   if (onGroundOf(prev.altBaro)) return null;
   const moved = destPoint({ lat: prev.lat, lon: prev.lon }, prev.track, (prev.gs / 3600) * dt);
@@ -316,7 +327,7 @@ export function chooseBest(
     return commitTrack(hex, raw, best.obs.provider, now, false);
   }
   if (prev) {
-    const extra = maybeExtrapolate(prev, now);
+    const extra = maybeExtrapolate(prev, now, airside);
     if (extra) return extra;
   }
   if (bestAny) {
@@ -329,7 +340,8 @@ export function chooseBest(
   }
   if (prev) {
     const age = (now - prev.at) / 1000;
-    if (age <= STALE_KEEP_SEC) {
+    const keep = airside || onGroundOf(prev.altBaro) ? STALE_KEEP_SEC : STALE_KEEP_ENROUTE_SEC;
+    if (age <= keep) {
       return {
         ...prev.raw,
         extrapolated: false,
@@ -356,7 +368,8 @@ export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; 
   }
   if (hexes.size === 0) {
     for (const [hex, prev] of tracks) {
-      if ((now - prev.at) / 1000 <= STALE_KEEP_SEC) hexes.add(hex);
+      const keep = airside || onGroundOf(prev.altBaro) ? STALE_KEEP_SEC : STALE_KEEP_ENROUTE_SEC;
+      if ((now - prev.at) / 1000 <= keep) hexes.add(hex);
     }
   }
   const out: AdsbRaw[] = [];
