@@ -1,4 +1,4 @@
-import { formatHoursMinutes } from "./geo.ts";
+import { formatHoursMinutes, formatMiles } from "./geo.ts";
 
 export type BriefLogKind = "weather" | "schedule" | "stage" | "delay" | "update";
 
@@ -427,9 +427,12 @@ function composeLead(d: RideFacts) {
   if (stage === "ride") {
     const left =
       d.remainingNm > 0
-        ? `About ${Math.round(d.remainingNm)} miles left, roughly ${formatHoursMinutes(Math.max(1, d.etaMin))}.`
+        ? `About ${formatMiles(d.remainingNm)} left, roughly ${formatHoursMinutes(Math.max(1, d.etaMin))}.`
         : "";
-    return joinSentences([open, "You're airborne.", left, rideClause(d), destClause(d), taxiInClause(d)]);
+    const air = d.live
+      ? "You're in the air."
+      : "In the air — live position unavailable right now.";
+    return joinSentences([open, air, left, rideClause(d), destClause(d), taxiInClause(d)]);
   }
 
   return joinSentences([

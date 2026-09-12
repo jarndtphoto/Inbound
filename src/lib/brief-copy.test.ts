@@ -113,6 +113,17 @@ describe("briefing update log", () => {
     assert.equal(wx.some((t) => JARGON.test(t)), false);
   });
 
+  it("ride briefing uses miles and does not mix airborne with no-signal", () => {
+    const live = composeBrief(facts({ now: "ride", live: true, remainingNm: 3070 }));
+    assert.match(live.lead, /3,533 miles/);
+    assert.match(live.lead, /in the air/i);
+    assert.equal(/not broadcasting|no ads-b|you're airborne/i.test(live.lead), false);
+    const dark = composeBrief(facts({ now: "ride", live: false, remainingNm: 3070 }));
+    assert.match(dark.lead, /3,533 miles/);
+    assert.match(dark.lead, /live position unavailable/i);
+    assert.equal(/you're airborne/i.test(dark.lead), false);
+  });
+
   it("does not repeat the same line", () => {
     let b = composeBrief(facts({ now: "push" }));
     b = composeBrief(facts({ now: "taxi" }), b);

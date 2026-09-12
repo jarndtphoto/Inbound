@@ -188,10 +188,22 @@ export function distanceToSegmentNm(p: Coord, a: Coord, b: Coord): number {
   return haversineNm(destPoint(a, bearing, proj), p);
 }
 
-export function formatNm(nm: number) {
+const NM_TO_MI = 1.150779448;
+
+/** Convert nautical miles to statute miles for passenger copy. */
+export function nmToMiles(nm: number) {
+  return nm * NM_TO_MI;
+}
+
+/** One passenger distance: statute miles, same rounding everywhere. */
+export function formatMiles(nm: number) {
   if (!Number.isFinite(nm)) return "—";
-  if (nm < 10) return `${nm.toFixed(1)} nm`;
-  return `${Math.round(nm)} nm`;
+  const mi = nmToMiles(nm);
+  if (mi < 10) {
+    const n = mi < 1 ? Number(mi.toFixed(1)) : Math.round(mi);
+    return `${n} ${n === 1 ? "mile" : "miles"}`;
+  }
+  return `${Math.round(mi).toLocaleString("en-US")} miles`;
 }
 
 export function formatDuration(min: number) {

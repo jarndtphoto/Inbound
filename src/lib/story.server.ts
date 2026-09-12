@@ -8,6 +8,7 @@ import {
   distanceToSegmentNm,
   downsampleNm,
   formatDuration,
+  formatMiles,
   formatNm,
   greatCirclePoints,
   haversineNm,
@@ -1753,7 +1754,7 @@ function buildStages(args) {
 			? []
 			: inbound.watch.length > 0
 				? []
-				: ["Aircraft isn’t broadcasting yet. Most light up 20–40 minutes before they get to the gate."];
+				: ["Live position isn’t available yet."];
 	const rideWatch = [];
 	const arrivalWatch = [];
 	if (dest.decoded?.category === "IFR" || dest.decoded?.category === "LIFR") arrivalWatch.push("Low ceilings on arrival = holding, a long final, and a tired taxi. Budget extra.");
@@ -1765,7 +1766,12 @@ function buildStages(args) {
 	const inboundTitle = inbound.status === "complete" ? "Inbound is at the gate" : inbound.status === "at_field" ? "Inbound is taxiing in" : inbound.status === "airborne" ? "Inbound to the field" : "The inbound aircraft";
 	const arrivalBody = dest.nas?.delayed ? `${times.land ? `Landing around ${times.land}. ` : ""}${nasCopy(dest.nas, "dest")}` : times.land ? (times.arriveDelayMin ?? 0) >= 15 && times.landWas ? `Landing around ${times.land}, about ${times.arriveDelayMin} minutes later than ${times.landWas}.` : `Landing around ${times.land}.` : `Into ${dest.city}.`;
 	const gateBody = "";
-	const rideBody = live ? `${formatNm(remainingNm)} still to run, about ${formatDuration(etaMin)}.` : `Once you’re up, ${formatNm(remainingNm)} on the filed path.`;
+	const inAir = current === "ride" || current === "arrival";
+	const rideBody = live
+		? `${formatMiles(remainingNm)} still to run, about ${formatDuration(etaMin)}.`
+		: inAir
+			? `${formatMiles(remainingNm)} still to run, about ${formatDuration(etaMin)}. Live position unavailable right now.`
+			: `Once you’re up, ${formatMiles(remainingNm)} on the filed path.`;
 	return {
 		push: {
 			state: state("push"),
@@ -1791,7 +1797,7 @@ function buildStages(args) {
 		},
 		ride: {
 			state: state("ride"),
-			title: live ? `${formatNm(remainingNm)} remaining` : `To ${dest.iata}`,
+			title: live || inAir ? `${formatMiles(remainingNm)} remaining` : `To ${dest.iata}`,
 			body: rideBody,
 			watchouts: rideWatch.slice(0, 3)
 		},

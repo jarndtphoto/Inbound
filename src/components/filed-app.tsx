@@ -1,7 +1,7 @@
 import { briefRide } from "@/lib/brief";
 import { composeBrief, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
-import { formatDuration, formatNm, feetPretty } from "@/lib/geo";
+import { formatDuration, formatMiles, feetPretty } from "@/lib/geo";
 import { storyMatchesQuery } from "@/lib/flight-parse";
 import { useFiled } from "@/lib/store";
 import { getFlightStory } from "@/lib/story";
@@ -179,7 +179,7 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     toIata: story.dest.iata,
     stage: active,
     now: story.currentStage,
-    live: story.live,
+    live: liveFix(story),
     typeName: story.aircraft?.typeName ?? null,
     registration: story.aircraft?.registration ?? null,
     grade: story.comfort.grade,
@@ -589,19 +589,46 @@ export function FiledApp() {
   );
 }
 
+function liveFix(story: FlightStory) {
+  const ac = story.aircraft;
+  return Boolean(story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
+}
+
+function flightAirborne(story: FlightStory) {
+  if (story.currentStage === "ride" || story.currentStage === "arrival") return true;
+  if (
+    story.currentStage === "push" ||
+    story.currentStage === "taxi" ||
+    story.currentStage === "inbound" ||
+    story.currentStage === "gate"
+  ) {
+    return false;
+  }
+  return Boolean(story.times?.airborne);
+}
+
+function headStatus(story: FlightStory) {
+  const airline = story.airline;
+  const air = flightAirborne(story);
+  const live = liveFix(story);
+  const inAirLive = Boolean(live && story.aircraft && !story.aircraft.onGround);
+  if (story.currentStage === "gate") return airline ?? "Parked";
+  if (air && inAirLive) return airline ? `In the air · ${airline}` : "In the air";
+  if (air) return "In the air — live position unavailable right now";
+  if (live) return airline ? `On the ground · ${airline}` : "On the ground";
+  return airline ?? "";
+}
+
 function FlightHead({ story, fetching }: { story: FlightStory; fetching: boolean }) {
   const ac = story.aircraft;
-  const airborne =
-    story.currentStage === "ride" ||
-    story.currentStage === "arrival" ||
-    Boolean(story.times?.airborne && story.currentStage !== "push" && story.currentStage !== "taxi" && story.currentStage !== "inbound");
+  const airborne = flightAirborne(story);
+  const live = liveFix(story);
+  const showAlt = Boolean(live && airborne && ac && !ac.onGround && (ac.altFt || ac.gsKt));
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="font-mono text-xs tracking-widest text-muted uppercase">
-            {story.live ? "Live" : "Not broadcasting"} · {story.airline ?? "Airline"}
-          </p>
+          <p className="font-mono text-xs tracking-wide text-muted">{headStatus(story)}</p>
           <h2 className="font-display text-display font-semibold leading-none">{story.iata}</h2>
           <p className="mt-2 text-lg text-fg">
             {story.origin.city} <span className="text-muted">{story.origin.iata}</span>
@@ -617,27 +644,28 @@ function FlightHead({ story, fetching }: { story: FlightStory; fetching: boolean
         </div>
       </div>
       <TimesStrip story={story} fetching={fetching} />
-      <dl className={cn("mt-4 grid gap-3", airborne ? "grid-cols-2" : "grid-cols-3")}>
+      <dl className={cn("mt-4 grid gap-3", showAlt || !airborne ? "grid-cols-2" : "grid-cols-1")}>
         <Stat
           icon={Plane}
           label="Aircraft"
           value={ac ? `${ac.typeName ?? ac.type ?? "—"}` : "Unknown"}
-          sub={ac?.registration ?? "No ADS-B yet"}
+          sub={ac?.registration ?? ""}
         />
-        <Stat
-          icon={Gauge}
-          label="Altitude"
-          value={ac?.altFt ? feetPretty(ac.altFt) : "—"}
-          sub={ac?.gsKt ? `${Math.round(ac.gsKt)} kt` : "—"}
-        />
-        {!airborne ? (
+        {showAlt ? (
+          <Stat
+            icon={Gauge}
+            label="Altitude"
+            value={ac?.altFt ? feetPretty(ac.altFt) : "—"}
+            sub={ac?.gsKt ? `${Math.round(ac.gsKt)} kt` : ""}
+          />
+        ) : airborne ? null : (
           <Stat
             icon={Radio}
             label="Remaining"
-            value={formatNm(story.route.remainingNm)}
+            value={formatMiles(story.route.remainingNm)}
             sub={formatDuration(story.route.etaMin)}
           />
-        ) : null}
+        )}
       </dl>
     </div>
   );
@@ -645,10 +673,7 @@ function FlightHead({ story, fetching }: { story: FlightStory; fetching: boolean
 
 function TimesStrip({ story, fetching }: { story: FlightStory; fetching: boolean }) {
   const t = story.times;
-  const airborne =
-    story.currentStage === "ride" ||
-    story.currentStage === "arrival" ||
-    Boolean(t?.airborne && story.currentStage !== "push" && story.currentStage !== "taxi" && story.currentStage !== "inbound");
+  const airborne = flightAirborne(story);
   if (story.currentStage === "gate" && t?.airborne) {
     return (
       <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
@@ -669,7 +694,7 @@ function TimesStrip({ story, fetching }: { story: FlightStory; fetching: boolean
   }
   if (airborne) {
     const remaining = formatDuration(story.route.etaMin);
-    const dist = formatNm(story.route.remainingNm);
+    const dist = formatMiles(story.route.remainingNm);
     return (
       <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
         <div>
@@ -751,7 +776,7 @@ function Stat({
   icon: typeof Plane;
   label: string;
   value: string;
-  sub: string;
+  sub?: string;
   trend?: Comfort["trend"];
 }) {
   return (

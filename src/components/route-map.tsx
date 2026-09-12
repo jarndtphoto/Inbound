@@ -1,4 +1,4 @@
-import { formatDuration, formatNm, haversineNm } from "@/lib/geo";
+import { formatDuration, formatMiles, haversineNm } from "@/lib/geo";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
@@ -583,7 +583,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
           {story.route.source === "track" ? "ACTUAL TRACK · FIXES" : "PLANNED PATH"}
         </p>
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {landed ? "Landed" : `${formatNm(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
+          {landed ? "Landed" : `${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
         </p>
       </div>
         {zoom.s > 1.02 ? (
@@ -640,6 +640,9 @@ export function RouteMap({ story }: { story: FlightStory }) {
           <CloudRain className="size-3.5" />
           {weatherOn ? "Radar on" : "Live weather"}
         </button>
+        {weatherOn ? (
+          <p className="w-full text-[11px] leading-snug text-subtle">Radar coverage is mostly over land.</p>
+        ) : null}
       </div>
     </div>
   );
