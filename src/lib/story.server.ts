@@ -1125,7 +1125,10 @@ function stubAwareFromHistory(loc, fallbackIdent) {
 	return {
 		ident: ident || fallbackIdent,
 		iataIdent: parsed?.iata ?? null,
-		status: "arrived",
+		// A canonical history URL identifies a flight instance; it does not prove
+		// that the aircraft has arrived. Live ADS-B or actual arrival timestamps
+		// must establish landing and gate state.
+		status: "",
 		originIata: origin?.iata ?? m[4].slice(1),
 		originIcao: origin?.icao ?? m[4].toUpperCase(),
 		originName: origin?.name ?? null,

@@ -132,6 +132,47 @@ describe('September 12 flight audit replay', () => {
     assert.equal(story.aircraft?.registration, 'N8961K');
     assert.equal(story.times.pushKind, 'estimated');
   });
+
+  it('UA218: a canonical inbound history redirect does not put airborne UA219 at the gate', async (t) => {
+    const record = structuredClone(JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8')));
+    record.ident = 'UAL218';
+    record.iataIdent = 'UA218';
+    record.flightStatus = 'scheduled';
+    record.origin = { ...record.origin, iata: 'HNL', icao: 'PHNL', coord: [-157.9224, 21.3187], gate: 'G3' };
+    record.destination = { ...record.destination, iata: 'ORD', icao: 'KORD', coord: [-87.9048, 41.9786], gate: 'C18' };
+    record.aircraft = { type: 'B789', tail: null };
+    record.track = null;
+    record.coord = null;
+    record.gateDepartureTimes = { scheduled: 1789264800, estimated: 1789264800, actual: null };
+    record.takeoffTimes = { scheduled: 1789266000, estimated: 1789266000, actual: null };
+    record.landingTimes = { scheduled: 1789305600, estimated: 1789305600, actual: null };
+    record.gateArrivalTimes = { scheduled: 1789306200, estimated: 1789306200, actual: null };
+    record.inboundFlight = { flightId: 'UAL219-1789190000-airline-0001' };
+    t.mock.method(Date, 'now', () => 1789257600000);
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      const u = String(url);
+      if (u.includes('/live/flight/id/UAL219-')) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: '/live/flight/UAL219/history/20260912/1430Z/KORD/PHNL' },
+        });
+      }
+      if (u.startsWith('https://www.flightaware.com/live/flight/')) {
+        return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
+      }
+      return new Response(JSON.stringify({
+        ac: [{
+          hex: 'a21900', flight: 'UAL219', r: 'N219UA', t: 'B78X',
+          lat: 21.62, lon: -157.65, gs: 430, alt_baro: 18000, seen_pos: 0,
+        }],
+        features: [],
+      }), { headers: { 'content-type': 'application/json' } });
+    });
+    const story = await loadFlightStory('UA218', { fresh: true });
+    assert.equal(story.inbound.status, 'airborne');
+    assert.equal(story.inbound.watch[0]?.iata, 'UA 219');
+    assert.equal(story.currentStage, 'inbound');
+  });
 });
 
 describe('MDW departure surface-stage replays', () => {
