@@ -585,12 +585,14 @@ function stillOnField(live, origin) {
 }
 function flightBegun(live, origin) {
 	if (!live) return false;
-	const gs = live.gsKt ?? 0;
-	if (gs >= 60) return true;
-	if (gs < 60 && stillOnField(live, origin)) return false;
+	// Ground speed alone cannot establish takeoff: surface receivers regularly
+	// report a fast roll (or a noisy speed) before the wheels leave the runway.
 	if (live.onGround) return false;
+	const gs = live.gsKt ?? 0;
 	const agl = (live.altFt ?? 0) - fieldElev(origin);
-	return agl > 400;
+	if (agl > 400) return true;
+	if (stillOnField(live, origin)) return false;
+	return gs >= 90 && Boolean(origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) > 3);
 }
 function motionFromTrace(points, origin) {
 	if (!points?.length || !origin) return { pushed: false, taxiing: false, flying: false };
@@ -609,8 +611,8 @@ function motionFromTrace(points, origin) {
 		const d = haversineNm(first, p);
 		if (d > maxDist) maxDist = d;
 	}
-	const taxiing = lastGround && (maxDist > 0.10 || lastGs >= 4);
-	const pushed = lastGround && (maxDist > 0.03 || lastGs >= 1.5 || taxiing);
+	const taxiing = lastGround && (maxDist > 0.10 || (lastGs >= 8 && maxDist > 0.05));
+	const pushed = lastGround && (maxDist > 0.05 || (lastGs >= 4 && maxDist > 0.03));
 	return { pushed, taxiing, flying };
 }
 function callsignVariants(callsign) {
@@ -1621,6 +1623,9 @@ function timesOf(aware, origin, dest) {
 	const arriveLate = (arriveDelayMin ?? 0) >= 5;
 	const taxiOut = pickTaxi(aware.gateOut, aware.takeoff, aware.filedTaxiOutMin, aware.typicalTaxiOutMin);
 	const taxiIn = pickTaxi(aware.landing, aware.gateIn, aware.filedTaxiInMin, aware.typicalTaxiInMin);
+	const gateEta = !aware.gateIn.actual && ld && gi != null && gi <= ld
+		? ld + Math.max(1, taxiIn.min ?? 10) * 60
+		: gi;
 	return {
 		push: clockAt(go, otz),
 		takeoff: clockAt(to, otz),
@@ -1648,9 +1653,9 @@ function timesOf(aware, origin, dest) {
 		pushKind: stampKind(aware.gateOut) ?? (go ? "scheduled" : null),
 		takeoffKind: stampKind(aware.takeoff) ?? (to ? "scheduled" : null),
 		landKind: stampKind(aware.landing) ?? (ld ? "scheduled" : null),
-		gateKind: stampKind(aware.gateIn) ?? (gi ? "scheduled" : null),
-		gate: clockAt(gi, dtz),
-		gateUnix: gi
+		gateKind: gateEta !== gi ? "estimated" : stampKind(aware.gateIn) ?? (gi ? "scheduled" : null),
+		gate: clockAt(gateEta, dtz),
+		gateUnix: gateEta
 	};
 }
 function inboundLanded(inb) {
@@ -2122,7 +2127,10 @@ async function buildStory(query) {
 			live = null;
 		}
 	}
-	if (aware?.takeoff?.actual && live?.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 15 && Date.now() / 1e3 - aware.takeoff.actual > 4 * 60) {
+	const takeoffAge = aware?.takeoff?.actual ? Date.now() / 1e3 - aware.takeoff.actual : 0;
+	const confirmedSurface = Boolean(live && (live.seenSec ?? 999) <= 30 && liveFitsLeg(live, aware, origin)
+		&& flightIdentOk(live.callsign, parsed, aware) && takeoffAge < 30 * 60);
+	if (aware?.takeoff?.actual && live?.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 15 && takeoffAge > 4 * 60 && !confirmedSurface) {
 		live = null;
 		hexByIdent.delete(identKey);
 		hexRouteByIdent.delete(identKey);
@@ -2312,8 +2320,9 @@ async function buildStory(query) {
 	const atGateFa = inboundAtGate(inboundAware);
 	const onField = Boolean(live && stillOnField(live, origin));
 	const faSaysAir = hasAirborneEvidence(aware);
+	const surfaceFixAtOrigin = Boolean(live && live.onGround && stillOnField(live, origin));
 	const ourAirborne = Boolean(flightBegun(live, origin))
-		|| (Boolean(faSaysAir) && !(aware?.landing?.actual) && !(live && live.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 8));
+		|| (Boolean(faSaysAir) && !(aware?.landing?.actual) && !surfaceFixAtOrigin);
 	let inboundRaw = null;
 	if (!inboundLocked && !atGateFa && !inboundAlreadyDone) {
 		const tail = inboundAware?.tail ?? existingSnap?.tail ?? null;
@@ -2640,16 +2649,29 @@ async function buildStory(query) {
 	const leftGate = Boolean(
 		!ourLanded &&
 		(
-			(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 1.2 || distPark >= 0.025 || live.phase === "taxi" || offRamp)) ||
+			(live && live.onGround && atOrigLive && (distPark >= 0.05 || offRamp || ((live.gsKt ?? 0) >= 4 && dOrigLive >= 0.38))) ||
 			motion.pushed ||
 			motion.taxiing
 		)
 	);
 	const taxiHint = Boolean(
-		motion.taxiing ||
+		(leftGate && motion.taxiing) ||
 		offRamp ||
-		(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 2 || distPark >= 0.07 || live.phase === "taxi"))
+		(live && live.onGround && atOrigLive && (distPark >= 0.10 || ((live.gsKt ?? 0) >= 4 && (distPark >= 0.05 || dOrigLive >= 0.38))))
 	);
+	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && (live.gsKt ?? 0) < 1.2 && dOrigLive < 0.38 && !pushLatch.has(landKey));
+	// A recent stationary surface fix is stronger evidence than a provider's
+	// prematurely stamped gate-out or takeoff time.
+	if (stationaryAtStand && !motion.pushed && !motion.taxiing && !leftGate) {
+		const nextPush = aware?.gateOut?.estimated ?? aware?.gateOut?.scheduled ?? null;
+		times = { ...times, pushed: false, airborne: false,
+			pushUnix: nextPush, push: clockAt(nextPush, tzOf(origin)), pushKind: nextPush ? "estimated" : null };
+	}
+	if (surfaceFixAtOrigin) {
+		const nextTakeoff = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? null;
+		times = { ...times, airborne: false, takeoffUnix: nextTakeoff,
+			takeoff: clockAt(nextTakeoff, tzOf(origin)), takeoffKind: nextTakeoff ? "estimated" : null };
+	}
 	if (ourAirborne && !times.airborne) {
 		times = { ...times, airborne: true };
 	}
@@ -2809,7 +2831,7 @@ async function buildStory(query) {
 		ourLanded,
 		inboundStatus: inbound.status,
 		pushed: Boolean(times.pushed || leftGate),
-		faAirborne: Boolean(ourAirborne || motion.flying) && !taxiHint,
+		faAirborne: Boolean(ourAirborne || motion.flying) && !surfaceFixAtOrigin && !taxiHint,
 		taxiHint,
 		distPark,
 		parkedAtGate

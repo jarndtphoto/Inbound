@@ -686,6 +686,7 @@ function wheelsDown(story: FlightStory) {
 function stageHeadline(story: FlightStory) {
   if (story.currentStage === "gate") return "At the gate";
   if (story.currentStage === "arrival" && wheelsDown(story)) return "Landed";
+  if (story.currentStage === "push") return story.times?.pushed ? "Pushback" : "Gate";
   return STAGES.find((s) => s.id === story.currentStage)?.label ?? story.currentStage;
 }
 
@@ -705,6 +706,16 @@ function flightAirborne(story: FlightStory) {
     return false;
   }
   return Boolean(story.times?.airborne);
+}
+
+function elapsedFlight(story: FlightStory) {
+  const takeoff = story.times?.takeoffUnix;
+  const now = story.fetchedAt / 1000;
+  if (!flightAirborne(story) || takeoff == null || !Number.isFinite(takeoff) || takeoff > now) return null;
+  return {
+    minutes: (now - takeoff) / 60,
+    estimated: story.times?.takeoffKind !== "actual",
+  };
 }
 
 function headStatus(story: FlightStory) {
@@ -824,6 +835,7 @@ function TimesStrip({
   const t = story.times;
   const down = wheelsDown(story);
   const airborne = flightAirborne(story) && !down;
+  const elapsed = airborne ? elapsedFlight(story) : null;
   const parked = story.currentStage === "gate";
   const delay = t?.delayMin ?? null;
   const late = (delay ?? 0) >= 5;
@@ -852,7 +864,7 @@ function TimesStrip({
   );
   const gateClock = (
     <ClockCell
-      title={parked ? "At the gate" : "Gate arrival"}
+      title={parked ? "At the gate" : "Gate ETA"}
       time={t?.gate}
       kind={t?.gateKind ?? (t?.gate ? "scheduled" : null)}
       hint={gateHint}
@@ -862,15 +874,22 @@ function TimesStrip({
     <div className="mt-4 border-t border-border pt-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
         {airborne ? (
-          <div>
-            <p className="flex items-center gap-1.5 font-mono text-xs tracking-widest text-subtle uppercase">
-              <Clock className="size-3" />
-              Remaining
-            </p>
-            <p className="mt-1 font-display text-2xl font-semibold leading-none">
-              {formatDuration(story.route.etaMin)}
-            </p>
-            <p className="mt-1 text-xs text-muted">{formatMiles(story.route.remainingNm)}</p>
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 font-mono text-xs tracking-widest text-subtle uppercase">
+                <Clock className="size-3" /> Remaining
+              </p>
+              <p className="mt-1 font-display text-2xl font-semibold leading-none">{formatDuration(story.route.etaMin)}</p>
+              <p className="mt-1 text-xs text-muted">{formatMiles(story.route.remainingNm)}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="font-mono text-xs tracking-widest text-subtle uppercase">Flown</p>
+              <p className="mt-1 font-display text-2xl font-semibold leading-none">{elapsed ? formatDuration(elapsed.minutes) : "—"}</p>
+              <p className="mt-1 text-xs text-muted">
+                {elapsed?.estimated || !liveFix(story) ? "Est. " : "Approx. "}
+                {formatMiles(story.route.flownNm)}
+              </p>
+            </div>
           </div>
         ) : down ? (
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
@@ -1323,16 +1342,11 @@ function extraFor(story: FlightStory, stage: StageId) {
   if (stage === "push") {
     return (
       <>
-        <dl className="mt-4 grid grid-cols-2 gap-2">
+        <dl className="mt-4 grid grid-cols-1 gap-2">
           <TimeChip
             label="Push"
-            value={
-              times.push == null
-                ? "—"
-                : times.pushed
-                  ? times.push
-                  : `Est. ${times.push}`
-            }
+            value={times.push ?? "—"}
+            sub={times.pushed ? "Actual" : "Estimated"}
             late={(times.delayMin ?? 0) >= 15}
           />
           <TimeChip
@@ -1346,32 +1360,16 @@ function extraFor(story: FlightStory, stage: StageId) {
   if (stage === "taxi") {
     return (
       <>
-        <dl className="mt-4 grid grid-cols-2 gap-2">
+        <dl className="mt-4 grid grid-cols-1 gap-2">
           <TimeChip
             label="Taxi out"
-            value={
-              times.taxiOutMin == null
-                ? "—"
-                : times.taxiOutKind === "measured" &&
-                    (story.currentStage === "ride" ||
-                      story.currentStage === "arrival" ||
-                      story.currentStage === "gate")
-                  ? `${times.taxiOutMin} min`
-                  : `Est. ${times.taxiOutMin} min`
-            }
+            value={times.taxiOutMin == null ? "—" : `${times.taxiOutMin} min`}
+            sub={times.taxiOutKind === "measured" ? "Measured" : "Estimated"}
           />
           <TimeChip
             label="Wheels up"
-            value={
-              times.takeoff == null
-                ? "—"
-                : times.airborne ||
-                    story.currentStage === "ride" ||
-                    story.currentStage === "arrival" ||
-                    story.currentStage === "gate"
-                  ? times.takeoff
-                  : `Est. ${times.takeoff}`
-            }
+            value={times.takeoff ?? "—"}
+            sub={times.airborne ? "Actual" : "Estimated"}
           />
         </dl>
       </>
@@ -1480,9 +1478,9 @@ function TimeChip({
   late?: boolean;
 }) {
   return (
-    <div className="rounded-md border border-border bg-bg px-3 py-2">
+    <div className="min-w-0 rounded-md border border-border bg-bg px-3 py-2">
       <p className="font-mono text-xs tracking-widest text-subtle uppercase">{label}</p>
-      <p className={cn("mt-1 font-display text-lg font-semibold leading-tight", late ? "text-mvfr" : "text-fg")}>
+      <p className={cn("mt-1 break-words font-display text-lg font-semibold leading-tight", late ? "text-mvfr" : "text-fg")}>
         {value}
       </p>
       {sub ? <p className="text-xs leading-snug text-muted">{sub}</p> : null}

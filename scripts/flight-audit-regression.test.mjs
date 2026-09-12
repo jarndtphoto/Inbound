@@ -71,8 +71,9 @@ describe('September 12 flight audit replay', () => {
     const load = () => loadFlightStory('UA1533', {fresh: true});
     assert.equal((await load()).times.pushed, false, 'stationary aircraft has not left its stand');
     const beforeMovement = traceRequests;
-    now += 5000;
+    now += 65000;
     gs = 3;
+    lon += 0.0013;
     assert.equal((await load()).times.pushed, true, 'movement registers pushback');
     assert.equal(traceRequests, beforeMovement, 'fresh ground movement should not wait for a trace fetch');
     now += 5000;
@@ -131,4 +132,47 @@ describe('September 12 flight audit replay', () => {
     assert.equal(story.aircraft?.registration, 'N8961K');
     assert.equal(story.times.pushKind, 'estimated');
   });
+});
+
+describe('MDW departure surface-stage replays', () => {
+  const now = 1789231976;
+  for (const [flight, speed, status, gateActual, takeoffActual, expectedStage, expectedPush] of [
+    ['WN363', 0, 'scheduled', now - 90, null, 'push', false],
+    ['WN1035', 14, 'airborne', now - 180, now - 30, 'taxi', true],
+    ['WN102', 65, 'airborne', now - 580, now - 480, 'taxi', true],
+  ]) {
+    it(`${flight}: a fresh ground fix controls the stage`, async (t) => {
+      const record = structuredClone(JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8')));
+      record.ident = flight;
+      record.iataIdent = flight;
+      record.flightStatus = status;
+      record.origin.iata = 'MDW';
+      record.origin.icao = 'KMDW';
+      record.origin.coord = [-87.7524, 41.7868];
+      record.destination.iata = 'LGB';
+      record.destination.icao = 'KLGB';
+      record.destination.coord = [-118.1516, 33.8177];
+      record.gateDepartureTimes.actual = gateActual;
+      record.takeoffTimes.actual = takeoffActual;
+      record.inboundFlight = null;
+      const raw = {
+        hex: flight === 'WN363' ? 'a12363' : flight === 'WN1035' ? 'a11035' : 'a10102',
+        flight: flight.replace('WN', 'SWA'),
+        lat: 41.7868, lon: -87.7524, alt_baro: 'ground', gs: speed,
+        seen: 1, seen_pos: 1,
+      };
+      t.mock.method(Date, 'now', () => now * 1000);
+      t.mock.method(globalThis, 'fetch', async (url) => {
+        if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
+          return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
+        }
+        return new Response(JSON.stringify({ ac: [raw], features: [] }), { headers: { 'content-type': 'application/json' } });
+      });
+      const story = await loadFlightStory(flight, { fresh: true });
+      assert.equal(story.currentStage, expectedStage);
+      assert.equal(story.times.airborne, false);
+      assert.equal(story.times.pushed, expectedPush);
+      assert.equal(story.aircraft.onGround, true);
+    });
+  }
 });
