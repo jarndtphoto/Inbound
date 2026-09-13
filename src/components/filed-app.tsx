@@ -197,6 +197,13 @@ function rideLabelOf(story: FlightStory) {
   return "Smooth";
 }
 
+function takeoffEstimateExpired(story: FlightStory) {
+  return ["inbound", "push", "taxi"].includes(story.currentStage)
+    && story.times.takeoffKind !== "actual"
+    && story.times.takeoffUnix != null
+    && story.times.takeoffUnix <= story.fetchedAt / 1000;
+}
+
 function rideFacts(story: FlightStory, query: string, active: StageId): RideFacts {
   return {
     q: query,
@@ -237,7 +244,8 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     pushKind: story.times?.pushKind ?? null,
     taxiOutMin: story.times?.taxiOutMin ?? null,
     taxiOutKind: story.times?.taxiOutKind ?? null,
-    takeoff: story.times?.takeoff ?? null,
+    takeoff: takeoffEstimateExpired(story) ? null : story.times?.takeoff ?? null,
+    takeoffEstimateExpired: takeoffEstimateExpired(story),
     land: story.times?.land ?? null,
     taxiInMin: story.times?.taxiInMin ?? null,
     taxiInKind: story.times?.taxiInKind ?? null,
@@ -541,7 +549,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
   useEffect(() => {
     if (!story || !briefing || briefingFor !== flightKey) return;
-    const key = `${story.weatherCoverage?.failedSources.join(",") ?? "unknown"}|${story.aircraft?.registration ?? ""}|${story.live}|${Math.round(story.route.etaMin)}|${Math.round(story.route.remainingNm / 10)}|${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}`;
+    const key = `${takeoffEstimateExpired(story)}|${story.weatherCoverage?.failedSources.join(",") ?? "unknown"}|${story.aircraft?.registration ?? ""}|${story.live}|${Math.round(story.route.etaMin)}|${Math.round(story.route.remainingNm / 10)}|${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}`;
     if (key === lastBriefKey.current) return;
     lastBriefKey.current = key;
     const next = composeBrief(rideFacts(story, query, active), briefing);
@@ -1025,9 +1033,9 @@ function TimesStrip({
             />
             <ClockCell
               title="Takeoff"
-              time={t?.takeoff}
-              kind={t?.takeoffKind ?? (t?.takeoff ? "scheduled" : null)}
-              hint={t?.takeoffWas && t.takeoffWas !== t.takeoff ? `Was ${t.takeoffWas}` : null}
+              time={takeoffEstimateExpired(story) ? "Awaiting updated takeoff time" : t?.takeoff}
+              kind={takeoffEstimateExpired(story) ? null : t?.takeoffKind ?? (t?.takeoff ? "scheduled" : null)}
+              hint={takeoffEstimateExpired(story) ? null : t?.takeoffWas && t.takeoffWas !== t.takeoff ? `Was ${t.takeoffWas}` : null}
             />
           </div>
         )}

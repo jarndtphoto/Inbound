@@ -25,6 +25,7 @@ const JARGON =
   /\b(SIGMET|AIRMET|PIREP|G-?AIRMET|METAR|TAF|NAS|OOOI|GDP|AFP|FL\d{2,3}|OUT\/OFF|IFR|LIFR|MVFR|VFR)\b/i;
 
 export type RideFacts = {
+  takeoffEstimateExpired?: boolean;
   q: string;
   iata: string;
   airline: string | null;
@@ -493,7 +494,7 @@ function composeLead(d: RideFacts) {
         : d.push && d.pushKind === "estimated" ? `Movement first observed around ${d.push}; this time is approximate.`
         : "Departure time is not yet confirmed.",
       d.pushKind === "actual" && d.delayMin != null && d.delayMin >= 5 ? `Departure was ${d.delayMin} minutes later than scheduled.` : "",
-      d.takeoff ? `Estimated takeoff around ${d.takeoff}.` : "",
+      d.takeoffEstimateExpired ? "Awaiting updated takeoff time." : d.takeoff ? `Estimated takeoff around ${d.takeoff}.` : "",
       taxiOutClause(d),
       originNas ? `${d.fromIata} delay: ${originNas}.` : "",
       rideClause(d),
