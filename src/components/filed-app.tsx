@@ -1068,7 +1068,6 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
   }
   if (t.originGate) rows.push({ label: "Departure gate", value: t.originGate });
   if (t.pushed && t.push) rows.push({ label: "Departure", value: `${t.push} · ${t.pushKind === "actual" ? "Reported" : "First observed; approximate"}` });
-  if (t.destGate) rows.push({ label: "Arrival gate", value: t.destGate });
 
   if ((t?.delayMin ?? 0) >= 5) {
     rows.push({
@@ -1103,6 +1102,7 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
   if (story.dest.category === "IFR" || story.dest.category === "LIFR") {
     rows.push({ label: "Arrival", value: `Low weather into ${story.dest.iata}` });
   }
+  if (t.land) rows.push({ label: "Landing", value: `${t.land} · ${t.landKind === "actual" ? "Actual" : t.landKind === "scheduled" ? "Scheduled" : "Estimated"}` });
   if (t?.taxiInMin != null) {
     rows.push({
       label: "Taxi in",
@@ -1112,6 +1112,7 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
   if (story.origin.category === "IFR" || story.origin.category === "LIFR") {
     rows.push({ label: "Origin", value: `Low weather at ${story.origin.iata}` });
   }
+  if (t.destGate) rows.push({ label: "Arrival gate", value: t.destGate });
   if (!rows.length) rows.push({ label: "Notes", value: "No delay or turbulence flagged." });
   return rows;
 }
@@ -1653,10 +1654,10 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
         <p className="flex items-center gap-2 text-sm text-muted"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
         <p className="mt-2 font-semibold">{g.label}</p>
         {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
-          <div className="pointer-events-none h-64 overflow-hidden rounded-xl" aria-label={`Route preview: ${g.label}`}>
+          <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={`Route preview: ${g.label}`}>
             <RouteMap story={story} fixedViewport weatherPreview={{ from: g.start.frac, to: g.end.frac }} />
           </div>
-          <figcaption className="mt-2 text-xs text-muted">Highlighted: the stretch this forecast refers to. Updates with your flight; not a radar image. {story.live ? "Aircraft position available." : "Live aircraft position unavailable; route shown for context."}</figcaption>
+          <figcaption className="mt-2 text-xs text-muted">Highlighted: the forecast area along your route. Radar colors show recent precipitation, not turbulence or the weather guaranteed at your arrival time. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
         </figure>}
         {g.note && <details className="mt-2 text-sm text-muted"><summary className="cursor-pointer py-2">More details</summary><p>{g.note}</p></details>}
       </li>)}

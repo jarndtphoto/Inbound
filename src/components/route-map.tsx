@@ -96,7 +96,7 @@ function RadarStatus() {
   }) : null;
   return (
     <p role="status" className="w-full text-xs leading-snug text-subtle">
-      RainViewer radar · {time ? `Frame ${time} UTC` : q.isPending ? "Loading…" : "Frame unavailable"}.
+      RainViewer precipitation · {time ? `Frame ${time} UTC` : q.isPending ? "Loading…" : "Frame unavailable"}.
       {q.isError ? " Update failed; any displayed frame is the last available." : ""}
       {validStamp && Date.now() / 1000 - stamp > 20 * 60 ? " Frame is over 20 minutes old." : ""}
       {" "}Coverage is mostly over land. Frame time applies to radar, not route forecasts.
@@ -136,7 +136,7 @@ function RadarLayer({
       if (w <= 1 || h <= 1) return null;
       return {
         key: `${t.z}-${t.x}-${t.y}`,
-        href: `${q.data!.host}${frame.path}/256/${t.z}/${t.x}/${t.y}/2/1_1.png`,
+        href: `${q.data!.host}${frame.path}/512/${t.z}/${t.x}/${t.y}/2/0_1.png`,
         x: sx(west),
         y: sy(north),
         w,
@@ -146,7 +146,7 @@ function RadarLayer({
     .filter((t): t is NonNullable<typeof t> => t != null);
 
   return (
-    <g opacity="0.55">
+    <g opacity="0.7">
       {tiles.map((t) => (
         <image key={t.key} href={t.href} x={t.x} y={t.y} width={t.w} height={t.h} preserveAspectRatio="none" />
       ))}
@@ -399,21 +399,29 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const samples = story.route?.samples ?? [];
   if (samples.length < 2) return null;
 
-  const lats = samples.map((s) => s.lat).filter((n) => Number.isFinite(n));
-  const lons = samples.map((s) => s.lon).filter((n) => Number.isFinite(n));
-  if (Number.isFinite(story.origin.lat)) lats.push(story.origin.lat);
-  if (Number.isFinite(story.dest.lat)) lats.push(story.dest.lat);
-  if (Number.isFinite(story.origin.lon)) lons.push(story.origin.lon);
-  if (Number.isFinite(story.dest.lon)) lons.push(story.dest.lon);
-  if (story.aircraft && Number.isFinite(story.aircraft.lat)) lats.push(story.aircraft.lat);
-  if (story.aircraft && Number.isFinite(story.aircraft.lon)) lons.push(story.aircraft.lon);
+  // Forecast previews frame the affected segment, rather than the entire trip.
+  const focusSamples = weatherPreview
+    ? samples.filter(s => s.frac >= weatherPreview.from - 0.015 && s.frac <= weatherPreview.to + 0.015)
+    : samples;
+  const boundsSamples = focusSamples.length ? focusSamples : samples;
+  const lats = boundsSamples.map(s => s.lat).filter(Number.isFinite);
+  const lons = boundsSamples.map(s => s.lon).filter(Number.isFinite);
+  if (weatherPreview && lats.length === 1) { lats.push(lats[0]); lons.push(lons[0]); }
+  if (!weatherPreview) {
+    if (Number.isFinite(story.origin.lat)) lats.push(story.origin.lat);
+    if (Number.isFinite(story.dest.lat)) lats.push(story.dest.lat);
+    if (Number.isFinite(story.origin.lon)) lons.push(story.origin.lon);
+    if (Number.isFinite(story.dest.lon)) lons.push(story.dest.lon);
+    if (story.live && story.aircraft && Number.isFinite(story.aircraft.lat)) lats.push(story.aircraft.lat);
+    if (story.live && story.aircraft && Number.isFinite(story.aircraft.lon)) lons.push(story.aircraft.lon);
+  }
   if (lats.length < 2 || lons.length < 2) return null;
   let minLat = Math.min(...lats);
   let maxLat = Math.max(...lats);
   let minLon = Math.min(...lons);
   let maxLon = Math.max(...lons);
-  const latPad = Math.max((maxLat - minLat) * 0.22, 2.2);
-  const lonPad = Math.max((maxLon - minLon) * 0.18, 3);
+  const latPad = Math.max((maxLat - minLat) * 0.22, weatherPreview ? 0.7 : 2.2);
+  const lonPad = Math.max((maxLon - minLon) * 0.18, weatherPreview ? 1 : 3);
   minLat -= latPad;
   maxLat += latPad;
   minLon -= lonPad;
@@ -478,7 +486,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       >
         <rect width={W} height={H} className="fill-bg" />
         <g transform={`translate(${zoom.x} ${zoom.y}) scale(${zoom.s})`} strokeLinejoin="round" strokeLinecap="round">
-        {weatherOn && !weatherPreview && (
+        {(weatherOn || weatherPreview) && (
           <RadarLayer minLon={minLon} maxLon={maxLon} minLat={minLat} maxLat={maxLat} sx={sx} sy={sy} />
         )}
 
@@ -634,10 +642,10 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {story.route.source === "track" ? "ACTUAL TRACK · FIXES" : "PLANNED PATH"}
+          {weatherPreview ? "FORECAST AREA" : story.route.source === "track" ? "ACTUAL TRACK · FIXES" : "PLANNED PATH"}
         </p>
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {atGate ? "At the gate" : landed ? "Landed" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
+          {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
         </p>
       </div>
         {weatherPreview ? null : zoom.s > 1.02 ? (
@@ -673,6 +681,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         </div>
       </div>
 
+      {weatherPreview && <div className="shrink-0 border-t border-border px-3 py-2"><RadarStatus /></div>}
       <div style={weatherPreview ? { display: "none" } : undefined} className="w-full flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
         <Legend swatch="bg-accent" label="Smooth" />
         <Legend swatch="bg-ifr" label="Light / moderate turbulence" />
