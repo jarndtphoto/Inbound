@@ -531,7 +531,7 @@ export function FiledApp() {
 
   useEffect(() => {
     const el = mainRef.current;
-    if (!el) return;
+    if (!el || flightTab === "Route") return;
     let startY = 0;
     let startX = 0;
     let pulling = false;
@@ -583,7 +583,7 @@ export function FiledApp() {
       el.removeEventListener("touchend", onEnd);
       el.removeEventListener("touchcancel", onEnd);
     };
-  }, [story, query]);
+  }, [story, query, flightTab]);
 
   function onSearch(e: FormEvent) {
     e.preventDefault();
@@ -621,9 +621,9 @@ export function FiledApp() {
       <ScreenErrorBoundary>
       <main
         ref={mainRef}
-        className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-4 pt-2 lg:px-8 lg:pt-6"
+        className={cn("min-h-0 min-w-0 flex-1 overflow-x-hidden overscroll-y-contain px-4 pt-2 lg:px-8 lg:pt-6", flightTab === "Route" ? "overflow-y-hidden" : "overflow-y-auto")}
       >
-        <div className="mx-auto min-w-0 max-w-6xl overflow-x-hidden pb-6">
+        <div className={cn("mx-auto min-w-0 max-w-6xl overflow-x-hidden", flightTab === "Route" ? "flex h-full flex-col pb-2" : "pb-6")}>
         {story ? (
           <div
             className="flex flex-col items-center justify-end overflow-hidden text-muted"
@@ -659,13 +659,13 @@ export function FiledApp() {
         {!story && !storyQ.isError && <Skeleton query={query || "the flight"} />}
 
         {story && (
-          <div key={normFlight(query)} className="min-w-0">
+          <div key={normFlight(query)} className={cn("min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
             <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
               <div className="mt-5"><RecordCard story={story} /></div>
             </section>
-            <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"}>
-              <RouteMap story={story} />
+            <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
+              <RouteMap story={story} fixedViewport />
             </section>
             <section id="panel-Weather" role="tabpanel" aria-labelledby="tab-Weather" hidden={flightTab !== "Weather"}>
               <WeatherTimeline story={story} />

@@ -380,7 +380,7 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story }: { story: FlightStory }) {
+export function RouteMap({ story, fixedViewport = false }: { story: FlightStory; fixedViewport?: boolean }) {
   const weatherOn = useFiled((s) => s.weatherOn);
   const setWeatherOn = useFiled((s) => s.setWeatherOn);
   const zoom = useMapBoxZoom(`${story.callsign}:${story.origin.iata}:${story.dest.iata}`);
@@ -450,12 +450,12 @@ export function RouteMap({ story }: { story: FlightStory }) {
   const hazards = upcomingStorms(story.hazards ?? []);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-surface">
+    <div className={cn("overflow-hidden rounded-xl border border-border bg-surface", fixedViewport && "flex h-full flex-col items-center")}>
       <div
         ref={zoom.boxRef}
         data-map-box
         className="relative overflow-hidden select-none"
-        style={{ touchAction: "pan-y" }}
+        style={{ touchAction: fixedViewport ? "none" : "pan-y", ...(fixedViewport ? { width: "min(100cqw, max(0px, calc(100cqh - 140px)))", flexShrink: 0 } : {}) }}
       >
       <svg
         viewBox={`0 0 ${W} ${H}`}
@@ -654,7 +654,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
+      <div className="w-full flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
         <Legend swatch="bg-accent" label="Smooth" />
         <Legend swatch="bg-ifr" label="Light / moderate turbulence" />
         <span className="inline-flex items-center gap-1.5">
@@ -677,7 +677,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
         {weatherOn ? (
           <RadarStatus />
         ) : null}
-        {(story.hazards ?? []).some((h) => h.remaining && h.validity) ? (
+        {!fixedViewport && (story.hazards ?? []).some((h) => h.remaining && h.validity) ? (
           <details className="w-full text-xs leading-relaxed text-muted">
             <summary className="cursor-pointer py-3">Route weather sources and valid times</summary>
             <ul className="space-y-3 pb-3">
