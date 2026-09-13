@@ -1102,7 +1102,7 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 			Accept: "text/html"
 		},
 		redirect,
-		signal: AbortSignal.timeout(8e3)
+		signal: AbortSignal.timeout(12e3)
 	});
 	if (res.status >= 300 && res.status < 400) {
 		const stub = stubAwareFromHistory(res.headers.get("location"), fallbackIdent);
@@ -1118,9 +1118,9 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 			return { ...stub, routeOnly: true };
 		}
 	}
-	if (!res.ok) return null;
+	if (!res.ok) throw new Error(`Current flight route unavailable: schedule provider returned HTTP ${res.status}. Please try again shortly.`);
 	const raw = (await res.text()).split("trackpollBootstrap = ")[1];
-	if (!raw) return null;
+	if (!raw) throw new Error("Current flight route unavailable: schedule provider returned no flight data. Please try again shortly.");
 	const flights = parseJsonObject(raw)?.flights;
 	if (!flights) return null;
 	const f = flights[Object.keys(flights)[0] ?? ""];
@@ -2117,7 +2117,11 @@ async function buildStory(query) {
 			: parsed.registration
 				? safe(adsbByReg(parsed.registration), null)
 				: safe(adsbByCallsign(parsed.callsign), null),
-		safe(loadAware(parsed.callsign), null),
+		loadAware(parsed.callsign).catch((err) => {
+			if (parsed.registration) return null;
+			if (err?.name === "TimeoutError" || err?.name === "AbortError") throw new Error("Flight schedule provider is taking too long to respond. Please try again.");
+			throw err;
+		}),
 		safe(loadRoute(parsed.callsign), null)
 	]);
 	// Flight-number route databases retain old assignments after a number moves
@@ -3019,7 +3023,7 @@ export async function loadFlightStory(query, opts) {
 		const timed = new Promise((_, rej) => {
 			// The first load also fetches field and route weather after flight lookup.
 			// Avoid failing a valid cold request just before those requests complete.
-			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 20e3);
+			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 30e3);
 		});
 		try {
 			return await Promise.race([work, timed]);
