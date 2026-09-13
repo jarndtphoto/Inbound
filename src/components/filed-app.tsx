@@ -1,3 +1,4 @@
+import { flightDiagnostic } from "@/lib/flight-diagnostics";
 import { briefRide } from "@/lib/brief";
 import { briefLogText, composeBrief, logManualRefresh, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
@@ -437,7 +438,10 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         new Promise<never>((_, reject) => {
           requestTimer = setTimeout(() => reject(new Error("Flight data request timed out. Please try again.")), 35_000);
         }),
-      ]).finally(() => clearTimeout(requestTimer));
+      ]).catch((error: unknown) => {
+        console.error("[flight.client]", { diagnostic: flightDiagnostic(error), release: import.meta.env.VITE_INBOUND_RELEASE });
+        throw error;
+      }).finally(() => clearTimeout(requestTimer));
       if (!storyMatchesQuery(s, query)) {
         throw new Error("Could not load that flight. Try another number.");
       }
@@ -468,7 +472,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     retry: (count, err) => {
       if (count >= 2) return false;
       const msg = err instanceof Error ? err.message : "";
-      if (/Try another number|Enter a flight number|Flight number is too long/i.test(msg)) return false;
+      if (/FLIGHT_NUMBER|Try another number|Enter a flight number|Flight number is too long/i.test(msg)) return false;
       return true;
     },
     retryDelay: (attempt) => Math.min(2_000 * 2 ** attempt, 8_000),
@@ -737,6 +741,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
                 ? "Live update failed — showing saved flight data. Position, stage, and times may be out of date. Retrying automatically."
                 : refreshErr}
             </p>
+            {storyQ.isError && <details className="mt-2 text-xs text-muted"><summary>Help with this error</summary><p className="mt-2 break-words">Reference: {flightDiagnostic(storyQ.error)}</p><p>Version: {String(import.meta.env.VITE_INBOUND_RELEASE).slice(0, 8)}</p></details>}
           </div>
         ) : null}
         {storyQ.isError && !story && (
@@ -744,6 +749,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
             <p className="text-sm text-ifr">
               {"We couldn’t get this flight’s latest information. We’ll retry automatically, or you can try again below."}
             </p>
+            <details className="mt-2 text-xs text-muted"><summary>Help with this error</summary><p className="mt-2 break-words">Reference: {flightDiagnostic(storyQ.error)}</p><p>Version: {String(import.meta.env.VITE_INBOUND_RELEASE).slice(0, 8)}</p></details>
             <Button type="button" variant="secondary" className="mt-3" onClick={() => void storyQ.refetch()}>
               Try again
             </Button>
