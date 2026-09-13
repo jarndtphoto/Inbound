@@ -214,8 +214,8 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     fromIata: story.origin.iata,
     toCity: story.dest.city,
     toIata: story.dest.iata,
-    stage: active,
-    now: story.currentStage,
+    stage: story.departureMovement === "reported" && active === "taxi" ? "departure_reported" : active,
+    now: story.departureMovement === "reported" && story.currentStage === "taxi" ? "departure_reported" : story.currentStage,
     live: liveFix(story),
     typeName: story.aircraft?.typeName ?? null,
     registration: story.aircraft?.registration ?? null,
@@ -568,7 +568,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
   useEffect(() => {
     if (!story || !briefing || briefingFor !== flightKey) return;
-    const key = `${takeoffEstimateExpired(story)}|${story.weatherCoverage?.failedSources.join(",") ?? "unknown"}|${story.aircraft?.registration ?? ""}|${story.live}|${Math.round(story.route.etaMin)}|${Math.round(story.route.remainingNm / 10)}|${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}`;
+    const key = `${takeoffEstimateExpired(story)}|${story.weatherCoverage?.failedSources.join(",") ?? "unknown"}|${story.aircraft?.registration ?? ""}|${story.live}|${Math.round(story.route.etaMin)}|${Math.round(story.route.remainingNm / 10)}|${story.currentStage}|${story.departureMovement ?? ""}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}`;
     if (key === lastBriefKey.current) return;
     lastBriefKey.current = key;
     const next = composeBrief(rideFacts(story, query, active), briefing);
@@ -822,6 +822,7 @@ function wheelsDown(story: FlightStory) {
 }
 
 function stageHeadline(story: FlightStory) {
+  if (story.departureMovement === "reported" && ["push", "taxi"].includes(story.currentStage)) return "Reported pushback";
   if (story.currentStage === "gate") return "At the gate";
   if (story.currentStage === "arrival" && wheelsDown(story)) return "Landed";
   if (story.currentStage === "push") return story.times?.pushed ? "On the move" : "Gate";

@@ -224,6 +224,7 @@ export type WxBrief = {
 };
 
 export type FlightStory = {
+  departureMovement?: "reported" | "observed" | null;
   weatherCoverage?: { failedSources: string[] };
   fetchedAt: number;
   query: string;

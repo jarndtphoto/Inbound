@@ -240,6 +240,7 @@ export function briefLogText(entry: BriefLogEntry): string {
 
 function stageLine(stage: string): string | null {
   if (stage === "push") return "Plane is at the gate";
+  if (stage === "departure_reported") return "Reported pushback — movement not yet confirmed";
   if (stage === "taxi") return "On the move — pushback and taxi";
   if (stage === "ride") return "In flight";
   if (stage === "arrival") return "Approaching destination";
@@ -386,7 +387,7 @@ function inboundClause(d: RideFacts) {
 }
 
 function delayClause(d: RideFacts) {
-  if (d.push && d.pushKind === "actual") return `Gate departure reported at ${d.push}.`;
+  if (d.push && d.pushKind === "actual") return `Pushback reported at ${d.push}.`;
   const timing = d.pushKind === "scheduled" ? "Scheduled gate departure" : "Estimated gate departure";
   if (d.delayMin != null && d.delayMin >= 5) {
     return d.push ? `${timing}: ${d.push}, ${d.delayMin} minutes later than scheduled.` : `Departure is estimated to be ${d.delayMin} minutes late.`;
@@ -486,10 +487,12 @@ function composeLead(d: RideFacts) {
     return joinSentences([open, air, left, rideClause(d), destClause(d), taxiInClause(d)]);
   }
 
-  if (stage === "taxi") {
+  if (stage === "taxi" || stage === "departure_reported") {
     return joinSentences([
       open,
-      "You're on the move — pushback or taxi before takeoff.",
+      stage === "departure_reported"
+        ? "Pushback has been reported. Waiting for position data to confirm movement."
+        : "You're on the move — pushback or taxi before takeoff.",
       d.push && d.pushKind === "actual" ? `Gate departure reported at ${d.push}.`
         : d.push && d.pushKind === "estimated" ? `Movement first observed around ${d.push}; this time is approximate.`
         : "Departure time is not yet confirmed.",

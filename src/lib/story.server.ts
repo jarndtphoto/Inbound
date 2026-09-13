@@ -2162,6 +2162,20 @@ async function buildStory(query) {
 	if (!origin || !dest) throw new Error("Flight route unavailable. Try again when the flight feeds respond.");
 	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
+	// Resolve the inbound leg while position fallbacks and weather are loading.
+	let inboundAware = aware?.inbound ?? null;
+	const inboundIdent = inboundAware?.ident ?? aware?.inboundIdent ?? null;
+	const inboundFlightId = aware?.inboundFlightId ?? null;
+	const snapKey = inboundSnapKey(aware, origin, dest, query);
+	const existingSnap = inboundSnapByFlight.get(snapKey);
+	const inboundLocked = Boolean(existingSnap?.frozen);
+	const inboundFetch = inboundAlreadyDone || inboundLocked
+		? Promise.resolve(null)
+		: inboundFlightId
+			? safe(loadAwareById(inboundFlightId), null)
+			: inboundIdent && !inboundLocked
+				? safe(loadAware(inboundIdent), null)
+				: Promise.resolve(inboundAware);
 	live = asOnGround(live, origin);
 	const routeKey = `${origin.iata}|${dest.iata}`;
 	if (hexRouteByIdent.get(identKey) && hexRouteByIdent.get(identKey) !== routeKey) {
@@ -2338,19 +2352,7 @@ async function buildStory(query) {
 			ourLanded = true;
 		}
 	}
-	let inboundAware = aware?.inbound ?? null;
-	const inboundIdent = inboundAware?.ident ?? aware?.inboundIdent ?? null;
-	const inboundFlightId = aware?.inboundFlightId ?? null;
-	const snapKey = inboundSnapKey(aware, origin, dest, query);
-	const existingSnap = inboundSnapByFlight.get(snapKey);
-	const inboundLocked = Boolean(existingSnap?.frozen);
-	const inboundFetch = inboundAlreadyDone || inboundLocked
-		? Promise.resolve(null)
-		: inboundFlightId
-			? safe(loadAwareById(inboundFlightId), null)
-			: inboundIdent && !inboundLocked
-				? safe(loadAware(inboundIdent), null)
-				: Promise.resolve(inboundAware);
+
 	const [[hydOrigin, hydDest, hazardsPack], inboundFetched] = await Promise.all([fieldsP, inboundFetch]);
 	origin = hydOrigin;
 	dest = hydDest;
@@ -2991,6 +2993,9 @@ async function buildStory(query) {
 		airline,
 		live: Boolean(live),
 		currentStage: current,
+		departureMovement: current === "taxi" || current === "push"
+			? (leftGate || latchUnix ? "observed" : times.pushed ? "reported" : null)
+			: null,
 		aircraft,
 		origin,
 		dest,
