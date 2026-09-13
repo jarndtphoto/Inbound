@@ -729,6 +729,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
             </span>
           </div>
         ) : null}
+        {story?.error && <p role="status" className="mb-3 rounded-md border border-ifr/40 bg-surface px-4 py-2 text-sm text-ifr">{story.error}</p>}
         {(refreshErr || storyQ.isError) && story ? (
           <div role="status" className="mb-3 rounded-md border border-ifr/40 bg-surface px-4 py-2">
             <p className="text-sm text-ifr">
