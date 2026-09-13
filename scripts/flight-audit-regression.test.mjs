@@ -10,7 +10,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory, motionFromTrace } = await import('../src/lib/story.server.ts');
+const { loadFlightStory, motionFromTrace, currentStageOf } = await import('../src/lib/story.server.ts');
 
 describe('September 12 flight audit replay', () => {
   for (const [ident, query, destination, pushed] of [
@@ -237,5 +237,21 @@ describe('ground trace freshness', () => {
     assert.equal(motionFromTrace([point(20, 0), point(2, .003)], origin).taxiing, true);
     assert.deepEqual(motionFromTrace([point(90, 0), point(60, .003)], origin), { pushed: false, taxiing: false, flying: false });
     assert.deepEqual(motionFromTrace([point(-10, 0), point(-20, .003)], origin), { pushed: false, taxiing: false, flying: false });
+  });
+});
+
+
+describe('AA2554 inbound/main-stage consistency', () => {
+  it('does not alternate Gate and Inbound as surface positions appear and disappear', () => {
+    const origin = { lat: 41.9786, lon: -87.9048 };
+    const args = { origin, dest: { lat: 33.43, lon: -112.01 }, remainingNm: 1300,
+      inboundStatus: 'at_field', pushed: false, faAirborne: false };
+    const live = { ...origin, onGround: true, gsKt: 0, phase: 'parked' };
+    for (const fix of [live, null, live]) {
+      assert.equal(currentStageOf({ ...args, live: fix }), 'inbound');
+    }
+    assert.equal(currentStageOf({ ...args, live, inboundStatus: 'complete' }), 'push');
+    assert.equal(currentStageOf({ ...args, live, pushed: true }), 'push');
+    assert.equal(currentStageOf({ ...args, live, pushed: true, taxiHint: true }), 'taxi');
   });
 });

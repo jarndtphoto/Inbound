@@ -1880,10 +1880,15 @@ function buildInbound(args) {
 		watch
 	};
 }
-function currentStageOf(args) {
+export function currentStageOf(args) {
 	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed, faAirborne, taxiHint, distPark, parkedAtGate } = args;
 	if (parkedAtGate) return "gate";
 	if (ourLanded || ourLandingActual) return "arrival";
+	// A surface position is not evidence of arrival at the departure gate.
+	// Keep the main stage aligned with the identified inbound leg until there
+	// is departure evidence, regardless of whether a position feed drops out.
+	if (!pushed && !faAirborne && !ourTakeoffActual
+		&& ["airborne", "watching", "at_field"].includes(inboundStatus)) return "inbound";
 	if (!flightBegun(live, origin) && taxiHint && !faAirborne) return "taxi";
 	if (!flightBegun(live, origin) && pushed && !(faAirborne || Boolean(ourTakeoffActual))) return "push";
 	const atOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
