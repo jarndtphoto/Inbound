@@ -25,6 +25,7 @@ const JARGON =
   /\b(SIGMET|AIRMET|PIREP|G-?AIRMET|METAR|TAF|NAS|OOOI|GDP|AFP|FL\d{2,3}|OUT\/OFF|IFR|LIFR|MVFR|VFR)\b/i;
 
 export type RideFacts = {
+  scheduleNote?: string;
   takeoffEstimateExpired?: boolean;
   q: string;
   iata: string;
@@ -536,7 +537,7 @@ function appendLog(log: BriefLogEntry[], added: Omit<BriefLogEntry, "at">[], at:
 export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): CompiledBrief {
   const snap = snapOf(d);
   const ac = [d.typeName, d.registration].filter(Boolean).join(" · ") || null;
-  const lead = composeLead(d);
+  const lead = joinSentences([composeLead(d), d.scheduleNote ?? ""]);
   const at = Date.now();
   const seed: BriefLogEntry[] = previous?.log?.length
     ? previous.log

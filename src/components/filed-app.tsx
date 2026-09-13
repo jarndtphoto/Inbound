@@ -4,7 +4,8 @@ import { briefRide } from "@/lib/brief";
 import { briefLogText, composeBrief, logManualRefresh, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
 import { formatDuration, formatMiles, feetPretty } from "@/lib/geo";
-import { storyMatchesQuery } from "@/lib/flight-parse";
+import { parseFlightQuery, storyMatchesQuery } from "@/lib/flight-parse";
+import { RESUME_MAX_AGE_MS, resumeFromStory, savedScheduleNote } from "@/lib/flight-resume";
 import { useFiled } from "@/lib/store";
 import { getFlightStory } from "@/lib/story";
 import type { Comfort, FlightStory, StageId } from "@/lib/types";
@@ -26,7 +27,8 @@ const STAGES: { id: StageId; label: string }[] = [
   { id: "gate", label: "At the gate" },
 ];
 
-const STORY_CACHE_KEY = "filed-story-cache-v8";
+const STORY_CACHE_KEY = "filed-story-cache-v9";
+const LEGACY_STORY_CACHE_KEY = "filed-story-cache-v8";
 const ORIG_MEM_KEY = "filed-orig-sched-v2";
 
 function normFlight(q: string) {
@@ -36,13 +38,13 @@ function normFlight(q: string) {
 function readCachedStory(q: string): FlightStory | undefined {
   if (typeof window === "undefined") return undefined;
   try {
-    const raw = localStorage.getItem(STORY_CACHE_KEY);
-    if (!raw) return undefined;
-    const parsed = JSON.parse(raw) as { k: string; story: FlightStory; at: number };
-    if (parsed.k !== normFlight(q)) return undefined;
-    if (Date.now() - parsed.at > 45 * 60_000) return undefined;
-    if (!parsed.story?.iata) return undefined;
-    return parsed.story;
+    const key = parseFlightQuery(q)?.callsign ?? normFlight(q);
+    const records = JSON.parse(localStorage.getItem(STORY_CACHE_KEY) || "{}");
+    const legacy = JSON.parse(localStorage.getItem(LEGACY_STORY_CACHE_KEY) || "null");
+    const entry = records[key] ?? (legacy && storyMatchesQuery(legacy.story ?? {}, q) ? legacy : undefined);
+    if (!entry || !Number.isFinite(entry.at) || Date.now() - entry.at > RESUME_MAX_AGE_MS) return undefined;
+    if (!entry.story?.iata || !storyMatchesQuery(entry.story, q)) return undefined;
+    return entry.story;
   } catch {
     return undefined;
   }
@@ -63,7 +65,13 @@ function writeCachedStory(q: string, story: FlightStory) {
       ...story,
       route: { ...story.route, samples: slimSamples },
     };
-    localStorage.setItem(STORY_CACHE_KEY, JSON.stringify({ k: normFlight(q), story: slim, at: Date.now() }));
+    const key = parseFlightQuery(q)?.callsign ?? normFlight(q);
+    const records = JSON.parse(localStorage.getItem(STORY_CACHE_KEY) || "{}");
+    records[key] = { story: slim, at: Date.now() };
+    const recent = Object.entries(records).filter(([, value]) =>
+      Date.now() - (value as { at: number }).at <= RESUME_MAX_AGE_MS
+    ).sort((a, b) => (b[1] as { at: number }).at - (a[1] as { at: number }).at).slice(0, 8);
+    localStorage.setItem(STORY_CACHE_KEY, JSON.stringify(Object.fromEntries(recent)));
   } catch {
     /* quota */
   }
@@ -208,6 +216,7 @@ function takeoffEstimateExpired(story: FlightStory) {
 
 function rideFacts(story: FlightStory, query: string, active: StageId): RideFacts {
   return {
+    scheduleNote: story.schedule?.status === "saved" ? savedScheduleNote(story.schedule.confirmedAt) : undefined,
     q: query,
     iata: story.iata,
     airline: story.airline,
@@ -432,12 +441,14 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
   const storyQ = useQuery({
     queryKey: ["story", query],
-    queryFn: async () => {
+    queryFn: async ({ client }) => {
       const fresh = freshRef.current;
       freshRef.current = false;
+      const saved = storyForQuery(client.getQueryData<FlightStory>(["story", query]), query) ?? readCachedStory(query);
+      const resume = resumeFromStory(saved, query);
       let requestTimer: ReturnType<typeof setTimeout> | undefined;
       const s = await Promise.race([
-        getFlightStory({ data: { q: query, fresh } }),
+        getFlightStory({ data: { q: query, fresh, resume } }),
         new Promise<never>((_, reject) => {
           requestTimer = setTimeout(() => reject(new Error("Flight data request timed out. Please try again.")), 35_000);
         }),
@@ -748,6 +759,11 @@ function FlightPages({ onHome }: { onHome: () => void }) {
                 ? "Live update failed — showing saved flight data. Position, stage, and times may be out of date. Retrying automatically."
                 : refreshErr}
             </p>
+          </div>
+        ) : null}
+        {story?.schedule?.status === "saved" && !storyQ.isError && !refreshErr ? (
+          <div role="status" className="mb-3 rounded-md border border-border bg-surface px-4 py-2 text-sm text-fg">
+            {savedScheduleNote(story.schedule.confirmedAt)}
           </div>
         ) : null}
         {storyQ.isError && !story && (
@@ -1074,7 +1090,7 @@ function TimesStrip({
             />
           </div>
         )}
-        <Freshness failed={failed} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
+        <Freshness failed={failed} partial={story.schedule?.status === "saved"} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       </div>
       {!down ? (
         <div className="mt-3 grid grid-cols-2 gap-3">
@@ -1091,12 +1107,14 @@ function Freshness({
   fetching,
   refreshing,
   failed = false,
+  partial = false,
   onRefresh,
 }: {
   at: number;
   fetching: boolean;
   refreshing: boolean;
   failed?: boolean;
+  partial?: boolean;
   onRefresh: () => void;
 }) {
   const [, setTick] = useState(0);
@@ -1116,7 +1134,7 @@ function Freshness({
         {refreshing ? "Updating…" : "Refresh"}
       </button>
       <p className="font-mono text-xs tracking-widest text-muted uppercase">
-        {refreshing ? "Updating…" : failed ? "Update delayed · showing saved data" : agoLabel(at, false)}
+        {refreshing ? "Updating…" : failed ? "Update delayed · showing saved data" : partial ? "Schedule delayed · " + (Date.now() - at < 8000 ? "other feeds just checked" : agoLabel(at, false)) : agoLabel(at, false)}
       </p>
     </div>
   );

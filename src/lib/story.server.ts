@@ -1,4 +1,6 @@
 // @ts-nocheck
+import { createHash } from "node:crypto";
+import { readFlightResume } from "./flight-resume";
 import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
 import { AIRPORT_BY_ICAO, airportByIata, airportByIcao } from "./airports";
@@ -53,7 +55,7 @@ var inflight = /* @__PURE__ */ new Map();
 function cached(key, ttlMs, fn) {
 	const hit = cache.get(key);
 	const ttl = hit?.ttl ?? ttlMs;
-	if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.value);
+	if (hit && Date.now() >= hit.at && Date.now() - hit.at < ttl) return Promise.resolve(hit.value);
 	const pending = inflight.get(key);
 	if (pending) return pending;
 	let timer;
@@ -884,7 +886,7 @@ function earliestUnix(a, b) {
 function origKey(aware) {
 	const u = seedUnix(aware.gateOut) ?? seedUnix(aware.takeoff) ?? Date.now() / 1e3;
 	const day = (/* @__PURE__ */ new Date(u * 1e3)).toISOString().slice(0, 10);
-	return `${aware.ident}|${aware.originIata ?? ""}|${aware.destIata ?? ""}|${day}`;
+	return `${aware._resumeScope ?? ""}${aware.ident}|${aware.originIata ?? ""}|${aware.destIata ?? ""}|${day}`;
 }
 function rememberOrig(aware) {
 	const key = origKey(aware);
@@ -1233,8 +1235,10 @@ async function loadAware(callsign) {
 	if (rejected && Date.now() < rejected.until) throw rejected.error;
 	awareRejections.delete(callsign);
 	try {
-		return await cached(`aware:${callsign}`, 8e3, async () =>
-			fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true));
+		return await cached(`aware:${callsign}`, 8e3, async () => {
+			const record = await fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true);
+			return record ? { ...record, confirmedAt: Date.now() } : null;
+		});
 	} catch (error) {
 		if (/HTTP 402\b/.test(error?.message ?? "")) {
 			for (const [key, entry] of awareRejections) if (entry.until <= Date.now()) awareRejections.delete(key);
@@ -2162,11 +2166,25 @@ function pointAtFrac(path, frac) {
 		lon: a.lon + (b.lon - a.lon) * f
 	};
 }
-async function buildStory(query) {
+function resumeFromAware(aware, query) {
+	if (!aware) return undefined;
+	return readFlightResume({ ...aware, version: 1, callsign: parseFlightQuery(query)?.callsign }, query);
+}
+function awareFromResume(resume, scope) {
+	return {
+		...resume, _resumeScope: scope, iataIdent: parseFlightQuery(resume.callsign)?.iata,
+		// No old positions, status strings, or inferred inbound state become live data.
+		status: "", faTrack: [], inbound: null, inboundIdent: null, inboundFlightId: null,
+		cancelled: false, averageDelaySec: { departure: null, arrival: null },
+		typicalTaxiOutMin: null, typicalTaxiInMin: null, filedTaxiOutMin: null, filedTaxiInMin: null,
+	};
+}
+async function buildStory(query, resumed = null) {
 	const parsed = parseFlightQuery(query);
 	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
 	const identKey = parsed.callsign.toUpperCase();
-	let knownHex = hexByIdent.get(identKey) || null;
+	const stateIdent = `${resumed?.scope ?? ""}${identKey}`;
+	let knownHex = hexByIdent.get(stateIdent) || null;
 	const hazardsP = loadHazards();
 	const [rawAc0, aware, route] = await Promise.all([
 		knownHex
@@ -2174,7 +2192,7 @@ async function buildStory(query) {
 			: parsed.registration
 				? safe(adsbByReg(parsed.registration), null)
 				: safe(adsbByCallsign(parsed.callsign), null),
-		loadAware(parsed.callsign).catch((err) => {
+		(resumed ? Promise.resolve(awareFromResume(resumed.resume, resumed.scope)) : loadAware(parsed.callsign)).catch((err) => {
 			if (parsed.registration) return null;
 			if (err?.name === "TimeoutError" || err?.name === "AbortError") throw new Error("Flight schedule provider is taking too long to respond. Please try again.");
 			throw err;
@@ -2189,8 +2207,8 @@ async function buildStory(query) {
 	let rawAc = rawAc0;
 	if (rawAc && !rawMatchesQuery(rawAc, parsed, aware)) {
 		rawAc = null;
-		hexByIdent.delete(identKey);
-		hexRouteByIdent.delete(identKey);
+		hexByIdent.delete(stateIdent);
+		hexRouteByIdent.delete(stateIdent);
 	}
 	if (!rawAc && aware?.ident) {
 		const faCs = String(aware.ident).replace(/\s/g, "").toUpperCase();
@@ -2211,9 +2229,9 @@ async function buildStory(query) {
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
 	live = asOnGround(live, origin);
 	const routeKey = `${origin.iata}|${dest.iata}`;
-	if (hexRouteByIdent.get(identKey) && hexRouteByIdent.get(identKey) !== routeKey) {
-		hexByIdent.delete(identKey);
-		hexRouteByIdent.delete(identKey);
+	if (hexRouteByIdent.get(stateIdent) && hexRouteByIdent.get(stateIdent) !== routeKey) {
+		hexByIdent.delete(stateIdent);
+		hexRouteByIdent.delete(stateIdent);
 		knownHex = null;
 		if (live && !flightIdentOk(live.callsign, parsed, aware) && !(aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase())) {
 			live = null;
@@ -2224,13 +2242,13 @@ async function buildStory(query) {
 		&& flightIdentOk(live.callsign, parsed, aware) && takeoffAge < 30 * 60);
 	if (aware?.takeoff?.actual && live?.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 15 && takeoffAge > 4 * 60 && !confirmedSurface) {
 		live = null;
-		hexByIdent.delete(identKey);
-		hexRouteByIdent.delete(identKey);
+		hexByIdent.delete(stateIdent);
+		hexRouteByIdent.delete(stateIdent);
 	}
 	if (destParkedLeftover(live, dest, aware)) {
 		live = null;
-		hexByIdent.delete(identKey);
-		hexRouteByIdent.delete(identKey);
+		hexByIdent.delete(stateIdent);
+		hexRouteByIdent.delete(stateIdent);
 	}
 	if (!live) live = liveFromAware(aware);
 	let fieldList = [];
@@ -2242,12 +2260,12 @@ async function buildStory(query) {
 			if (cand && !destParkedLeftover(cand, dest, aware)) live = cand;
 			else if (cand && destParkedLeftover(cand, dest, aware)) {
 				live = null;
-				hexByIdent.delete(identKey);
-				hexRouteByIdent.delete(identKey);
+				hexByIdent.delete(stateIdent);
+				hexRouteByIdent.delete(stateIdent);
 			}
 		} else if (freshRaw && String(freshRaw.flight ?? "").trim()) {
-			hexByIdent.delete(identKey);
-			hexRouteByIdent.delete(identKey);
+			hexByIdent.delete(stateIdent);
+			hexRouteByIdent.delete(stateIdent);
 		}
 	}
 	if (origin && !Boolean(aware?.landing?.actual) && !Boolean(aware?.takeoff?.actual) && !flightBegun(live, origin)) {
@@ -2344,10 +2362,10 @@ async function buildStory(query) {
 	}
 	if (live && !liveFitsLeg(live, aware, origin)) live = null;
 	if (!ourLanded && Boolean(aware?.takeoff?.actual) && !aware?.landing?.actual) {
-		live = restoreKin(identKey, live, dest, aware);
+		live = restoreKin(stateIdent, live, dest, aware);
 		if (!live) live = liveFromAware(aware);
 		const needTrace = !live || live.altFt == null || live.gsKt == null;
-		const hexForTrace = String(live?.hex || hexByIdent.get(identKey) || aware?.hex || "").toLowerCase();
+		const hexForTrace = String(live?.hex || hexByIdent.get(stateIdent) || aware?.hex || "").toLowerCase();
 		if (needTrace && /^[0-9a-f]{6}$/.test(hexForTrace)) {
 			const [full, recent] = await Promise.all([
 				safe(fetchTrace(hexForTrace, "trace_full"), []),
@@ -2368,22 +2386,27 @@ async function buildStory(query) {
 				}
 			}
 		}
-		live = restoreKin(identKey, live, dest, aware);
-		rememberKin(identKey, live);
+		live = restoreKin(stateIdent, live, dest, aware);
+		rememberKin(stateIdent, live);
 	}
 	if (live?.hex && (flightIdentOk(live.callsign, parsed, aware) || (aware?.tail && live.registration && String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase()))) {
-		hexByIdent.set(identKey, live.hex);
-		hexRouteByIdent.set(identKey, routeKey);
+		hexByIdent.set(stateIdent, live.hex);
+		hexRouteByIdent.set(stateIdent, routeKey);
 	}
-	if (aware?.hex && !hexByIdent.get(identKey)) {
-		hexByIdent.set(identKey, String(aware.hex).toLowerCase());
-		hexRouteByIdent.set(identKey, routeKey);
+	if (aware?.hex && !hexByIdent.get(stateIdent)) {
+		hexByIdent.set(stateIdent, String(aware.hex).toLowerCase());
+		hexRouteByIdent.set(stateIdent, routeKey);
 	}
 	if (live && dest && !live.onGround && ((live.altFt ?? 0) > 1500 || (live.gsKt ?? 0) > 80) && haversineNm({ lat: live.lat, lon: live.lon }, dest) > 6) {
 		if (landedLatch.get(landKey)) {
 			live = null;
 			ourLanded = true;
 		}
+	}
+	// Without a current schedule OR a fresh matching position, retain the last
+	// story as saved data instead of rebuilding a stage from expired estimates.
+	if (resumed && (!live || live.extrapolated || (live.seenSec ?? 999) > 30)) {
+		throw new Error("Schedule updates are delayed, and no fresh position is available for this flight. Please try again shortly.");
 	}
 	let inboundAware = aware?.inbound ?? null;
 	const inboundIdent = inboundAware?.ident ?? aware?.inboundIdent ?? null;
@@ -2739,7 +2762,7 @@ async function buildStory(query) {
 	const park = parkByFlight.get(landKey);
 	const distPark = live && park ? haversineNm({ lat: live.lat, lon: live.lon }, park) : 0;
 	let motion = { pushed: false, taxiing: false, flying: false };
-	const hexNow = String(live?.hex || hexByIdent.get(identKey) || aware?.hex || "").toLowerCase();
+	const hexNow = String(live?.hex || hexByIdent.get(stateIdent) || aware?.hex || "").toLowerCase();
 	const needsGroundTrace = !live || (live.onGround && (live.gsKt ?? 0) < 1.2 && distPark < 0.025 && !pushLatch.has(landKey));
 	if (hexNow && origin && !ourLanded && needsGroundTrace) {
 		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
@@ -2915,7 +2938,7 @@ async function buildStory(query) {
 	});
 	const lateWorst = samples.filter((s) => s.frac >= Math.max(progress, .68)).reduce((acc, s) => worse(acc, s.chop), "smooth");
 	let comfort = comfortOf(samples, uniqHazards, dest, origin, progress, times, inbound.status);
-	comfort = applyGradeTrend(`${query.toUpperCase().replace(/[^A-Z0-9]/g, "")}|${origin.iata}|${dest.iata}`, {
+	comfort = applyGradeTrend(`${stateIdent}|${origin.iata}|${dest.iata}`, {
 		at: Date.now(),
 		score: comfort.score,
 		grade: comfort.grade,
@@ -2936,7 +2959,9 @@ async function buildStory(query) {
 		ourTakeoffActual: aware?.takeoff.actual ?? null,
 		ourLandingActual: aware?.landing.actual ?? null,
 		ourLanded,
-		inboundStatus: inbound.status,
+		// A resume contains no verified inbound leg. Do not relabel the tracked
+		// aircraft's fresh departure-airport position as an inbound flight.
+		inboundStatus: resumed && !inboundAware ? "unknown" : inbound.status,
 		pushed: Boolean(times.pushed || leftGate),
 		faAirborne: Boolean(ourAirborne || motion.flying) && !surfaceFixAtOrigin && !taxiHint,
 		taxiHint,
@@ -3033,6 +3058,8 @@ async function buildStory(query) {
 	}
 	return {
 		fetchedAt: Date.now(),
+		schedule: aware ? { status: resumed ? "saved" : "current", confirmedAt: aware.confirmedAt ?? Date.now() } : undefined,
+		resume: resumed?.resume ?? resumeFromAware(aware, query),
 		query,
 		callsign: liveCs,
 		iata: displayIata(liveCs, parsed.iata ?? aware?.iataIdent ?? route?.callsign_iata ?? null),
@@ -3077,14 +3104,32 @@ async function buildStory(query) {
 export async function loadFlightStory(query, opts) {
 	const fresh = Boolean(opts?.fresh);
 	try {
-		const key = `story42:${String(query || "").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
+		const key = `story43:${String(query || "").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
 		if (fresh) {
 			cache.delete(key);
 			for (const k of [...cache.keys()]) {
 				if (/^(hex4:|cs4:|reg4:|trace3:)/.test(k)) cache.delete(k);
 			}
 		}
-		return await cached(key, fresh ? 0 : 4e3, () => buildStory(query));
+		try {
+			return await cached(key, fresh ? 0 : 4e3, () => buildStory(query));
+		} catch (error) {
+			// A schedule outage must not disable independent position/weather feeds.
+			// Only a recent, leg-specific record can bridge it. New searches still
+			// need a working schedule source; ADS-B route assignments aren't enough.
+			if (!/schedule provider|Current flight route unavailable/i.test(error?.message ?? "")) throw error;
+			const callsign = parseFlightQuery(query)?.callsign;
+			const serverResume = resumeFromAware(cache.get(`aware:${callsign}`)?.value, query);
+			const deviceResume = readFlightResume(opts?.resume, query);
+			const resume = [serverResume, deviceResume].filter(Boolean).sort((a, b) => b.confirmedAt - a.confirmedAt)[0];
+			if (!resume) throw error;
+			// Device context must never enter another passenger's normal story cache
+			// or flight-stage latches. Hash the entire validated context, not just q.
+			const scope = `resume:${createHash("sha256").update(JSON.stringify(resume)).digest("hex")}:`;
+			const resumeKey = `${scope}story`;
+			if (fresh) cache.delete(resumeKey);
+			return await cached(resumeKey, fresh ? 0 : 4e3, () => buildStory(query, { resume, scope }));
+		}
 	} catch (err) {
 		const msg = err instanceof Error && err.message && err.name !== "AbortError" ? err.message : "Could not load that flight. Try again.";
 		throw new Error(msg);

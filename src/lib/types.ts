@@ -224,6 +224,8 @@ export type WxBrief = {
 };
 
 export type FlightStory = {
+  schedule?: { status: "current" | "saved"; confirmedAt: number };
+  resume?: import("./flight-resume").FlightResume;
   weatherCoverage?: { failedSources: string[] };
   fetchedAt: number;
   query: string;
