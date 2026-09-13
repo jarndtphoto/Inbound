@@ -663,7 +663,6 @@ export function FiledApp() {
             <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
               <div className="mt-5"><RecordCard story={story} /></div>
-              <StagePager story={story} active={active} onChange={(id) => setStage(id)} />
             </section>
             <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"}>
               <RouteMap story={story} />
@@ -1058,6 +1057,16 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
     story.currentStage === "gate" ||
     story.route.remainingNm < 40;
   const rows: { label: string; value: string }[] = [];
+  const beforeDeparture = story.currentStage === "inbound" || story.currentStage === "push";
+  if (beforeDeparture) {
+    rows.push({ label: "Inbound aircraft", value: story.inbound.headline });
+    const inbound = story.inbound.watch[0];
+    if (inbound) rows.push({ label: "Inbound flight", value: [inbound.iata, inbound.from ? `from ${inbound.from}` : null].filter(Boolean).join(" · ") });
+  }
+  if (t.originGate) rows.push({ label: "Departure gate", value: t.originGate });
+  if (t.pushed && t.push) rows.push({ label: "Departure", value: `${t.push} · ${t.pushKind === "actual" ? "Reported" : "First observed; approximate"}` });
+  if (t.destGate) rows.push({ label: "Arrival gate", value: t.destGate });
+
   if ((t?.delayMin ?? 0) >= 5) {
     rows.push({
       label: "Delay",
