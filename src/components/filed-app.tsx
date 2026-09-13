@@ -441,7 +441,10 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         new Promise<never>((_, reject) => {
           requestTimer = setTimeout(() => reject(new Error("Flight data request timed out. Please try again.")), 35_000);
         }),
-      ]).finally(() => clearTimeout(requestTimer));
+      ]).catch((error) => {
+        console.error("[Inbound flight request]", error instanceof Error ? error.message : String(error));
+        throw error;
+      }).finally(() => clearTimeout(requestTimer));
       if (!storyMatchesQuery(s, query)) {
         throw new Error("Could not load that flight. Try another number.");
       }
