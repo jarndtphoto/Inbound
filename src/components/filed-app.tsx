@@ -1,5 +1,5 @@
 import { briefRide } from "@/lib/brief";
-import { composeBrief, logManualRefresh, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
+import { briefLogText, composeBrief, logManualRefresh, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
 import { formatDuration, formatMiles, feetPretty } from "@/lib/geo";
 import { storyMatchesQuery } from "@/lib/flight-parse";
@@ -1174,7 +1174,7 @@ function BreakdownCard({
                       {" · "}
                       {BRIEF_LOG_LABEL[entry.kind]}
                     </p>
-                    <p className="text-muted">{entry.text}.</p>
+                    <p className="text-muted">{briefLogText(entry)}.</p>
                   </li>
                 ))}
               </ol>

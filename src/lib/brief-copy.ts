@@ -228,12 +228,21 @@ function snapOf(d: RideFacts): BriefSnap {
   };
 }
 
+/** Older logs recorded broad stage changes as physical takeoff/landing events. */
+export function briefLogText(entry: BriefLogEntry): string {
+  if (entry.kind !== "stage") return entry.text;
+  if (entry.text === "Taking off") return "In-flight status update";
+  if (entry.text === "Landing") return "Arrival status update";
+  if (entry.text === "Arriving at the gate") return "At the destination gate";
+  return entry.text;
+}
+
 function stageLine(stage: string): string | null {
   if (stage === "push") return "Plane is at the gate";
   if (stage === "taxi") return "On the move — pushback and taxi";
-  if (stage === "ride") return "Taking off";
-  if (stage === "arrival") return "Landing";
-  if (stage === "gate") return "Arriving at the gate";
+  if (stage === "ride") return "In flight";
+  if (stage === "arrival") return "Approaching destination";
+  if (stage === "gate") return "At the destination gate";
   if (stage === "inbound") return "Still waiting on the inbound plane";
   return null;
 }
@@ -242,7 +251,7 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
   if (!prev) return [];
   const out: Omit<BriefLogEntry, "at">[] = [];
 
-  if (prev.stage !== next.stage) {
+  if (prev.stage !== next.stage && !(prev.stage === "arrival" && next.stage === "ride")) {
     const line = stageLine(next.stage);
     if (line) out.push({ kind: "stage", text: line });
   }

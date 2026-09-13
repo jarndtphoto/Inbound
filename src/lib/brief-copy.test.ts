@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { composeBrief, diffBriefLog, logManualRefresh, type RideFacts } from "./brief-copy.ts";
+import { briefLogText, composeBrief, diffBriefLog, logManualRefresh, type RideFacts } from "./brief-copy.ts";
 
 function facts(over: Partial<RideFacts> = {}): RideFacts {
   return {
@@ -72,9 +72,9 @@ describe("briefing update log", () => {
     b = composeBrief(facts({ now: "gate" }), b);
     const texts = b.log.map((e) => e.text).join(" | ");
     assert.match(texts, /On the move/);
-    assert.match(texts, /Taking off/);
-    assert.match(texts, /Landing/);
-    assert.match(texts, /Arriving at the gate/);
+    assert.match(texts, /In flight/);
+    assert.match(texts, /Approaching destination/);
+    assert.match(texts, /At the destination gate/);
     assert.equal(JARGON.test(texts), false);
   });
 
@@ -274,4 +274,18 @@ it("refreshes current text even for changes below the history thresholds", () =>
  assert.match(after.lead, /taxi in 12 minutes/i);
  assert.equal(after.log.length, before.log.length);
  assert.ok((after.liveAt ?? 0) >= (before.liveAt ?? 0));
+});
+
+
+describe("UA2762 approach status fluctuations", () => {
+ it("does not record another takeoff when approach is reassessed as flight", () => {
+  const first = composeBrief(facts({now:"arrival",stage:"arrival"}));
+  const next = composeBrief(facts({now:"ride",stage:"ride"}), first);
+  assert.equal(next.log.filter(e => e.kind === "stage").length, 0);
+  assert.doesNotMatch(next.lead, /taking off/i);
+ });
+ it("labels legacy stage entries without claiming physical takeoff or touchdown", () => {
+  assert.equal(briefLogText({at:1,kind:"stage",text:"Taking off"}), "In-flight status update");
+  assert.equal(briefLogText({at:1,kind:"stage",text:"Landing"}), "Arrival status update");
+ });
 });
