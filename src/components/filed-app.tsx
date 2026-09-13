@@ -332,23 +332,21 @@ export function FiledApp() {
     queryFn: async () => {
       const fresh = freshRef.current;
       freshRef.current = false;
-      try {
-        const s = await getFlightStory({ data: { q: query, fresh } });
-        if (!storyMatchesQuery(s, query)) {
-          const cached = readCachedStory(query);
-          if (!fresh && cached && storyMatchesQuery(cached, query)) return rememberOrigOnClient(cached);
-          throw new Error("Could not load that flight. Try another number.");
-        }
-        const merged = rememberOrigOnClient(s);
-        writeCachedStory(query, merged);
-        return merged;
-      } catch (err) {
-        if (fresh) throw err;
-        const cached = readCachedStory(query);
-        if (cached && storyMatchesQuery(cached, query)) return rememberOrigOnClient(cached);
-        throw err;
+      const s = await getFlightStory({ data: { q: query, fresh } });
+      if (!storyMatchesQuery(s, query)) {
+        throw new Error("Could not load that flight. Try another number.");
       }
+      const merged = rememberOrigOnClient(s);
+      writeCachedStory(query, merged);
+      return merged;
     },
+    // Seed saved data once; failed requests must remain errors, not successful
+    // cache reads. React Query retains the last good story during a failure.
+    initialData: () => {
+      const cached = storyForQuery(readCachedStory(query), query);
+      return cached ? rememberOrigOnClient(cached) : undefined;
+    },
+    initialDataUpdatedAt: 0,
     enabled: cacheOk && query.length > 0,
     refetchInterval: (q) => {
       if (q.state.fetchStatus === "fetching") return false;
@@ -588,9 +586,13 @@ export function FiledApp() {
             </span>
           </div>
         ) : null}
-        {refreshErr && story ? (
-          <div className="mb-3 rounded-md border border-ifr/40 bg-surface px-4 py-2">
-            <p className="text-sm text-ifr">{refreshErr}</p>
+        {(refreshErr || storyQ.isError) && story ? (
+          <div role="status" className="mb-3 rounded-md border border-ifr/40 bg-surface px-4 py-2">
+            <p className="text-sm text-ifr">
+              {storyQ.isError
+                ? "Live update failed — showing saved flight data. Position, stage, and times may be out of date. Retrying automatically."
+                : refreshErr}
+            </p>
           </div>
         ) : null}
         {storyQ.isError && !story && (
