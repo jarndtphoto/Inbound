@@ -347,6 +347,12 @@ export function FiledApp() {
       </section>
       {recents.length > 0 && <section aria-label="Recent flights"><h2 className="mb-3 font-semibold">Pick up where you left off</h2><div className="flex flex-wrap gap-2">{recents.map(q => <button key={q} type="button" onClick={() => start(q)} className="rounded-xl border border-border bg-surface px-4 py-3">{q}</button>)}</div></section>}
       <section id="home-settings" className="scroll-mt-5 rounded-2xl border border-border bg-surface p-6">
+        <div className="mb-6 border-b border-border pb-5">
+          <h2 className="text-xl font-semibold">Install Inbound</h2>
+          <p className="mt-2 text-sm text-muted">On iPhone, open this page in Safari, tap Share, then Add to Home Screen. Keep Open as Web App enabled and tap Add.</p>
+          <p className="mt-2 text-sm text-muted">Your Home Screen app receives the same releases as this website. Reopen to load the latest version, or use Update now when a new version is ready.</p>
+          <p className="mt-2 text-xs text-muted">Live flight data needs an internet connection. Background flight alerts are not enabled.</p>
+        </div>
         <h2 className="text-xl font-semibold">Settings</h2><p className="mt-1 text-sm text-muted">Choose the light that suits your journey.</p>
         <fieldset className="mt-5"><legend className="mb-3 text-sm font-semibold">Appearance</legend><div className="grid grid-cols-2 gap-3">
           {(["sunrise", "sunset"] as const).map(mode => <button key={mode} type="button" aria-pressed={theme === mode} onClick={() => chooseTheme(mode)} className={cn("rounded-xl border-2 p-4 text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent", theme === mode ? "ring-2 ring-accent ring-offset-2 ring-offset-bg" : "")} style={{ background: mode === "sunrise" ? "#fff3ce" : "#172238", color: mode === "sunrise" ? "#30230c" : "#f4f6ff", borderColor: mode === "sunrise" ? "#ad7415" : "#748cb5" }}>
