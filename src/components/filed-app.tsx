@@ -1,3 +1,4 @@
+import { FlightMap } from "@/components/airport-map";
 import { flightDiagnostic } from "@/lib/flight-diagnostics";
 import { briefRide } from "@/lib/brief";
 import { briefLogText, composeBrief, logManualRefresh, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
@@ -14,7 +15,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Clock, Gauge, Plane, Radio, Search, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type FormEvent, type ReactNode } from "react";
 
-const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
+const FLIGHT_TABS = ["Overview", "Map", "Weather", "Briefing"] as const;
 
 const STAGES: { id: StageId; label: string }[] = [
   { id: "inbound", label: "Inbound" },
@@ -621,7 +622,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
   useEffect(() => {
     const el = mainRef.current;
-    if (!el || flightTab === "Route") return;
+    if (!el || flightTab === "Map") return;
     let startY = 0;
     let startX = 0;
     let pulling = false;
@@ -713,9 +714,9 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       <ScreenErrorBoundary>
       <main
         ref={mainRef}
-        className={cn("min-h-0 min-w-0 flex-1 overflow-x-hidden overscroll-y-contain px-4 pt-2 lg:px-8 lg:pt-6", flightTab === "Route" ? "overflow-y-hidden" : "overflow-y-auto")}
+        className={cn("min-h-0 min-w-0 flex-1 overflow-x-hidden overscroll-y-contain px-4 pt-2 lg:px-8 lg:pt-6", flightTab === "Map" ? "overflow-y-hidden" : "overflow-y-auto")}
       >
-        <div className={cn("mx-auto min-w-0 max-w-6xl overflow-x-hidden", flightTab === "Route" ? "flex h-full flex-col pb-2" : "pb-6")}>
+        <div className={cn("mx-auto min-w-0 max-w-6xl overflow-x-hidden", flightTab === "Map" ? "flex h-full flex-col pb-2" : "pb-6")}>
         {story ? (
           <div
             className="flex flex-col items-center justify-end overflow-hidden text-muted"
@@ -753,13 +754,13 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         {!story && !storyQ.isError && <Skeleton query={query || "the flight"} />}
 
         {story && (
-          <div key={normFlight(query)} className={cn("min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
+          <div key={normFlight(query)} className={cn("min-w-0", flightTab === "Map" && "min-h-0 flex-1")}>
             <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
               <div className="mt-5"><RecordCard story={story} /></div>
             </section>
-            <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
-              <RouteMap story={story} fixedViewport />
+            <section id="panel-Map" role="tabpanel" aria-labelledby="tab-Map" hidden={flightTab !== "Map"} className="h-full min-h-0" style={{ containerType: "size" }}>
+              {flightTab === "Map" && <FlightMap story={story} />}
             </section>
             <section id="panel-Weather" role="tabpanel" aria-labelledby="tab-Weather" hidden={flightTab !== "Weather"}>
               <WeatherTimeline story={story} />
