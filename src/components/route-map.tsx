@@ -663,48 +663,31 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-border bg-surface px-3 py-2 text-sm leading-snug text-fg">
-        {ticks.map((s, i) => <p key={s.frac} className="flex items-start gap-2 py-0.5"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{i + 1}</span><span>About {formatDuration(s.etaMin)} from now · {s.chop === "smooth" ? "No turbulence flagged" : turbLabel(s.chop)}</span></p>)}
-        {hazards.length > 0 && <p className="py-0.5"><span className="mr-2 inline-block size-3 rounded-full border-2 border-ifr bg-ifr/30" />Storm areas marked by circles</p>}
-      </div>
-      {weatherPreview && <div className="shrink-0 border-t border-border px-3 py-2"><RadarStatus /></div>}
-      <div style={weatherPreview ? { display: "none" } : undefined} className="w-full flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
-        <Legend swatch="bg-accent" label="Smooth" />
-        <Legend swatch="bg-ifr" label="Light / moderate turbulence" />
-        <span className="inline-flex items-center gap-1.5">
-          <span className="size-2.5 rounded-full border border-ifr/70 bg-ifr/40" />
-          Thunderstorms
-        </span>
-        <button
-          type="button"
-          onClick={() => setWeatherOn(!weatherOn)}
-          className={cn(
-            "ml-auto inline-flex h-9 items-center gap-1.5 rounded-sm border px-2.5 font-mono text-xs tracking-wide",
-            weatherOn
-              ? "border-accent bg-surface-2 text-fg"
-              : "border-border bg-surface text-muted hover:text-fg",
-          )}
-        >
-          <CloudRain className="size-3.5" />
-          {weatherOn ? "Radar on" : "Live weather"}
-        </button>
-        {weatherOn ? (
-          <RadarStatus />
-        ) : null}
-        {!fixedViewport && (story.hazards ?? []).some((h) => h.remaining && h.validity) ? (
-          <details className="w-full text-xs leading-relaxed text-muted">
-            <summary className="cursor-pointer py-3">Route weather sources and valid times</summary>
-            <ul className="space-y-3 pb-3">
-              {story.hazards.filter((h) => h.remaining && h.validity).map((h) => (
-                <li key={h.id}>
-                  <p className="font-semibold text-fg">{h.label}</p>
-                  <p>{h.source === "forecast" ? "Forecast" : "Advisory"} · {h.validity}</p>
-                </li>
-              ))}
-            </ul>
-            <p className="pb-3">Valid times describe the weather product, not when this page refreshed. Route timing is estimated.</p>
-          </details>
-        ) : null}
+      <div className="pointer-events-auto relative z-20 flex shrink-0 items-center gap-3 border-t border-border bg-surface px-3 py-1 text-xs text-fg">
+        <details className="group">
+          <summary className="cursor-pointer py-3 font-semibold">Weather alerts</summary>
+          <div className="absolute inset-x-0 bottom-full max-h-48 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
+            {ticks.map((s, i) => <p key={s.frac} className="flex items-start gap-2 py-1"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{i + 1}</span><span>About {formatDuration(s.etaMin)} from now · {s.chop === "smooth" ? "No turbulence flagged" : turbLabel(s.chop)}</span></p>)}
+            {hazards.length > 0 && <p className="py-1"><span className="mr-2 inline-block size-3 rounded-full border-2 border-ifr bg-ifr/30" />Storm areas marked by circles</p>}
+            {!ticks.length && !hazards.length && <p>No map alerts shown. Coverage may be incomplete.</p>}
+          </div>
+        </details>
+        <details>
+          <summary className="cursor-pointer py-3 font-semibold">Map details</summary>
+          <div className="absolute inset-x-0 bottom-full max-h-48 space-y-3 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
+            <div className="flex flex-wrap gap-3">
+              <Legend swatch="bg-accent" label="Smooth" />
+              <Legend swatch="bg-ifr" label="Light / moderate turbulence" />
+              <span>○ Thunderstorms</span>
+            </div>
+            {(weatherOn || weatherPreview) && <RadarStatus />}
+            {story.hazards.filter(h => h.remaining && h.validity).map(h => <p key={h.id}>{h.label} · {h.validity}</p>)}
+          </div>
+        </details>
+        {!weatherPreview && <button type="button" onClick={() => setWeatherOn(!weatherOn)} aria-pressed={weatherOn}
+          className="ml-auto inline-flex min-h-10 shrink-0 items-center gap-1 rounded-sm border border-border px-2 text-fg">
+          <CloudRain className="size-3.5" />{weatherOn ? "Radar on" : "Radar off"}
+        </button>}
       </div>
     </div>
   );
