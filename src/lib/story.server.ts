@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { distinctRouteHazards } from "./route-hazards";
+import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
 import { AIRPORT_BY_ICAO, airportByIata, airportByIcao } from "./airports";
 import { IATA_TO_ICAO, displayIata, parseFlightQuery } from "./flight-parse";
@@ -2476,6 +2476,7 @@ async function buildStory(query) {
 				notes.push(hazard === "TURB-HI" ? "High-altitude turbulence airmet" : hazard === "LLWS" ? "Low-level wind shear" : "Low-level turbulence airmet");
 				hazards.push({
 					id: `g-${hazard}-${i}`,
+					validity: advisoryTiming(f.properties),
 					kind: "turb",
 					chop: c,
 					label: hazard === "TURB-HI" ? "High turbulence airmet" : hazard === "LLWS" ? "Low-level wind shear" : "Low turbulence airmet",
@@ -2505,6 +2506,7 @@ async function buildStory(query) {
 				notes.push("Convective SIGMET — thunderstorms");
 				hazards.push({
 					id: `s-${i}`,
+					validity: advisoryTiming(f.properties),
 					kind: "convective",
 					chop: "moderate",
 					label: "Thunderstorm SIGMET",
@@ -2520,6 +2522,7 @@ async function buildStory(query) {
 				notes.push("Turbulence SIGMET");
 				hazards.push({
 					id: `st-${i}`,
+					validity: advisoryTiming(f.properties),
 					kind: "turb",
 					chop: "moderate",
 					label: "Turbulence SIGMET",
@@ -2541,6 +2544,7 @@ async function buildStory(query) {
 				notes.push("Center weather advisory — storms");
 				hazards.push({
 					id: `cwa-${i}`,
+					validity: advisoryTiming(f.properties),
 					kind: "convective",
 					chop: "moderate",
 					label: "Center weather advisory",
@@ -2566,6 +2570,7 @@ async function buildStory(query) {
 			notes.push("Forecast storms (TCF)");
 			hazards.push({
 				id: `tcf-${i}`,
+				validity: advisoryTiming(f.properties),
 				kind: "convective",
 				chop: chopF,
 				label: "Forecast storms (TCF)",

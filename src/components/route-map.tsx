@@ -677,6 +677,20 @@ export function RouteMap({ story }: { story: FlightStory }) {
         {weatherOn ? (
           <RadarStatus />
         ) : null}
+        {(story.hazards ?? []).some((h) => h.remaining && h.validity) ? (
+          <details className="w-full text-xs leading-relaxed text-muted">
+            <summary className="cursor-pointer py-3">Route weather sources and valid times</summary>
+            <ul className="space-y-3 pb-3">
+              {story.hazards.filter((h) => h.remaining && h.validity).map((h) => (
+                <li key={h.id}>
+                  <p className="font-semibold text-fg">{h.label}</p>
+                  <p>{h.source === "forecast" ? "Forecast" : "Advisory"} · {h.validity}</p>
+                </li>
+              ))}
+            </ul>
+            <p className="pb-3">Valid times describe the weather product, not when this page refreshed. Route timing is estimated.</p>
+          </details>
+        ) : null}
       </div>
     </div>
   );

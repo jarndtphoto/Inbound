@@ -88,6 +88,7 @@ export type Hazard = {
   lat?: number;
   lon?: number;
   source?: "observed" | "advisory" | "forecast";
+  validity?: string;
 };
 
 export type NasDelay = {
