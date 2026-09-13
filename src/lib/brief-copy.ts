@@ -330,6 +330,9 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
     out.push({ kind: "schedule", text: `Estimated taxi in is now ${next.taxiIn} minutes` });
   }
 
+  // Touchdown ends en-route and departure weather updates; preserve existing history.
+  const landed = next.stage === "gate" || d?.landKind === "actual";
+  if (!landed) {
   const ridePrev = chopRank(prev.worstChop ?? prev.ride);
   const rideNext = chopRank(next.worstChop ?? next.ride);
   if (rideNext !== ridePrev && next.stage !== "arrival" && next.stage !== "gate") {
@@ -351,12 +354,13 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
     if (extras[0]) out.push({ kind: "weather", text: extras[0] });
   }
 
+  }
   return out.filter((e) => e.text && !JARGON.test(e.text));
 }
 
 function passengerWxDelta(raw: string): string | null {
   const s = String(raw || "");
-  if (!s) return null;
+  if (!s || /\b(?:UNK|unknown|n\/a)\b/i.test(s)) return null;
   if (/thunder|storm/i.test(s) && /drop|ease|off/i.test(s)) return "Thunderstorms along the route have eased";
   if (/thunder|storm/i.test(s)) return "Thunderstorms along the route";
   if (/chop|pirep|turb/i.test(s) && /smooth|drop|ease/i.test(s)) return "Turbulence easing — ride looks smooth";

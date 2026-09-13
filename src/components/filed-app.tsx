@@ -1,3 +1,5 @@
+import { TravelerCompanion } from "@/components/traveler-companion";
+import { isLanded } from "@/lib/traveler";
 import { briefRide } from "@/lib/brief";
 import { briefLogText, composeBrief, logManualRefresh, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
@@ -758,6 +760,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
           <div key={normFlight(query)} className={cn("min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
             <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
+              <TravelerCompanion story={story} failed={storyQ.isError} />
               <div className="mt-5"><RecordCard story={story} /></div>
             </section>
             <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
@@ -1734,13 +1737,8 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     } else i++;
   }
   const noConditions = "No conditions flagged in available data";
-  const coverageComplete = Boolean(story.weatherCoverage && story.weatherCoverage.failedSources.length === 0);
-  const visibleGroups = groups.filter(group => {
-    if (group.label !== noConditions) return true;
-    const minutes = airborne ? group.end.etaMin - group.start.etaMin
-      : duration == null ? null : (group.end.frac - group.start.frac) * duration;
-    return minutes == null || minutes >= 10 || groups.length === 1;
-  });
+  
+  const visibleGroups = groups.filter(group => group.label !== noConditions);
   const timeLabel = (group: typeof groups[number]) => {
     const from = airborne ? group.start.etaMin : duration == null ? null : group.start.frac * duration;
     const to = airborne ? group.end.etaMin : duration == null ? null : group.end.frac * duration;
@@ -1754,7 +1752,8 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       ? from < 1 ? "Around now" : `Starts in about ${formatMinutes(from)}`
       : from < 1 ? "Around takeoff" : `Starts about ${formatMinutes(from)} after takeoff`;
     const span = Math.round(to - from);
-    return <span>{start}{span > 0 && <span className="block">{group.gaps ? "Intermittent areas over about " : "Continues for about "}{formatMinutes(span)}</span>}</span>;
+    const intoFlight = airborne && story.times.airborne && takeoff ? Math.max(0, (story.fetchedAt / 1000 - takeoff) / 60) + from : from;
+    return <span>{start}{airborne && <span className="block">Around {formatMinutes(intoFlight)} into flight</span>}{span > 0 && <span className="block">{group.gaps ? "Intermittent areas over about " : "Continues for about "}{formatMinutes(span)}</span>}</span>;
   };
   const fieldCard = (field: FlightStory["origin"], title: string) => <article className="rounded-xl border border-border bg-surface p-4">
     <p className="text-sm text-muted">{title}</p>
@@ -1768,13 +1767,13 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       <p className="mt-2 text-sm leading-relaxed text-muted">Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters. Unflagged areas may have incomplete coverage.</p>
       <p className="mt-2 text-xs text-muted">Flight data fetched {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Weather observation and advisory times are shown in their source details.</p>
     </div>
-    {fieldCard(story.origin, "Takeoff · departure conditions")}
+    {!landed && fieldCard(story.origin, "Takeoff · departure conditions")}
     {(!story.weatherCoverage || story.weatherCoverage.failedSources.length > 0) && <p role="status" className="rounded-xl border border-border p-4 text-sm">Weather coverage is incomplete. Missing feeds do not mean smooth conditions. {story.weatherCoverage?.failedSources.join(" · ")}</p>}
     <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
     {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="space-y-3">
       {visibleGroups.map((g, i) => <li key={i} className="rounded-xl border border-border bg-surface p-4">
         <p className="flex items-center gap-2 text-sm text-muted"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
-        <p className="mt-2 font-semibold">{g.label === noConditions ? coverageComplete ? "Projected smooth ride" : "Weather coverage incomplete" : g.label}</p>{g.label === noConditions && <p className="mt-1 text-sm text-muted">{coverageComplete ? "Based on available forecasts; conditions can change." : "Not enough weather data to assess the ride along this section."}</p>}{g.gaps && <p className="mt-1 text-sm text-muted">Nearby areas grouped together; brief gaps may occur.</p>}
+        <p className="mt-2 font-semibold">{g.label}</p>{g.gaps && <p className="mt-1 text-sm text-muted">Nearby areas grouped together; brief gaps may occur.</p>}
         {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
           <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={`Route preview: ${g.label}`}>
             <RouteMap story={story} fixedViewport weatherPreview={{ from: g.start.frac, to: g.end.frac, ranges: g.ranges }} />
@@ -1783,7 +1782,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
         </figure>}
         {g.note && <details className="mt-2 text-sm text-muted"><summary className="cursor-pointer py-2">More details</summary><p>{g.note}</p></details>}
       </li>)}
-    </ol> : <p className="text-sm text-muted">Route weather data unavailable.</p>}
+    </ol> : <p className="text-sm text-muted">{samples.length ? "No significant conditions flagged in the available route forecast. This does not guarantee a smooth ride." : "Route weather data unavailable."}</p>}
     {fieldCard(story.dest, "Landing · arrival conditions")}
     <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer py-2">Advisory sources and valid times</summary>
       {story.hazards.filter(h => h.remaining).map(h => <div key={h.id} className="mt-3 text-sm"><p className="font-semibold">{h.label}</p><p className="text-muted">{h.validity || "Validity time unavailable"}</p><p className="mt-1 text-muted">{h.detail}</p></div>)}
@@ -1810,8 +1809,8 @@ function FlightWelcome({ open, onClose, story, brief }: { open: boolean; onClose
       <p>{brief?.lead || "The briefing is being prepared. Current flight information is below."}</p>
       {(story.times.delayMin ?? 0) >= 5 && <p><strong>Departure delay:</strong> {story.times.delayMin} minutes.</p>}
       {(story.currentStage === "inbound" || story.currentStage === "push") && <p><strong>Inbound aircraft:</strong> {story.inbound.detail || story.inbound.headline}</p>}
-      {story.hazards.some(h => h.remaining) && <p><strong>Route weather:</strong> {[...new Set(story.hazards.filter(h => h.remaining).map(h => h.label))].join(" · ")}</p>}
-      {story.origin.nas?.delayed && <p><strong>Departure airport:</strong> {story.origin.nas.reason}</p>}
+      {!isLanded(story) && story.hazards.some(h => h.remaining) && <p><strong>Route weather:</strong> {[...new Set(story.hazards.filter(h => h.remaining).map(h => h.label))].join(" · ")}</p>}
+      {!isLanded(story) && story.origin.nas?.delayed && <p><strong>Departure airport:</strong> {story.origin.nas.reason}</p>}
       {story.dest.nas?.delayed && <p><strong>Arrival airport:</strong> {story.dest.nas.reason}</p>}
     </div>
     <p className="mt-4 text-xs text-muted">Data as of {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Estimates may change. Full details remain in Briefing and Weather.</p>
