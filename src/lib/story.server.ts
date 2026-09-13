@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { distinctRouteHazards } from "./route-hazards";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
 import { AIRPORT_BY_ICAO, airportByIata, airportByIcao } from "./airports";
 import { IATA_TO_ICAO, displayIata, parseFlightQuery } from "./flight-parse";
@@ -2623,13 +2624,7 @@ async function buildStory(query) {
 			source: "observed"
 		});
 	}
-	const seenH = /* @__PURE__ */ new Set();
-	const uniqHazards = hazards.filter((h) => {
-		const k = `${h.kind}:${h.label}:${h.chop}`;
-		if (seenH.has(k)) return false;
-		seenH.add(k);
-		return true;
-	});
+	const uniqHazards = distinctRouteHazards(hazards);
 	let times = timesOf(aware, origin, dest);
 	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;

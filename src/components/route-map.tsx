@@ -1,4 +1,5 @@
 import { formatDuration, formatMiles, haversineNm } from "@/lib/geo";
+import { upcomingStorms } from "@/lib/route-hazards";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
@@ -422,9 +423,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
   const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
   const admin1 = ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
   const lakes = GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
-  const hazards = (story.hazards ?? [])
-    .filter((h) => h.lat != null && h.lon != null && h.kind === "convective")
-    .slice(0, 6);
+  const hazards = upcomingStorms(story.hazards ?? []);
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-surface">
