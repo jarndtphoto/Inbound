@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { recentScheduleFallback, bootstrapPayload } from "./schedule-fallback";
 import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
 import { AIRPORT_BY_ICAO, airportByIata, airportByIcao } from "./airports";
@@ -1119,7 +1118,7 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 		}
 	}
 	if (!res.ok) throw new Error(`Current flight route unavailable: schedule provider returned HTTP ${res.status}. Please try again shortly.`);
-	const raw = bootstrapPayload(await res.text());
+	const raw = (await res.text()).split("trackpollBootstrap = ")[1];
 	if (!raw) throw new Error("Current flight route unavailable: schedule provider returned no flight data. Please try again shortly.");
 	const flights = parseJsonObject(raw)?.flights;
 	if (!flights) return null;
@@ -1184,23 +1183,9 @@ function stubAwareFromHistory(loc, fallbackIdent) {
 	};
 }
 async function loadAware(callsign) {
-	const key = `aware:${callsign}`;
-	try {
-		return await cached(key, 8e3, async () => {
-			const value = await fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true);
-			if (!(value?.originIata || value?.originIcao) || !(value?.destIata || value?.destIcao)) {
-				throw new Error("Current flight route unavailable: schedule provider returned no flight data.");
-			}
-			return value;
-		});
-	} catch (error) {
-		const hit = cache.get(key);
-		const fallback = recentScheduleFallback(hit?.value, hit?.at);
-		if (!fallback) throw error;
-		// Never put the fallback back in the cache: its original age must keep increasing.
-		console.warn("[flight.schedule]", { event: "recent-schedule-fallback", ageSec: Math.round((Date.now() - hit.at) / 1000) });
-		return fallback;
-	}
+	return cached(`aware:${callsign}`, 8e3, async () => {
+		return fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true);
+	});
 }
 /** Specific FA instance (UAL2290-…), not the current flight using that number. */
 function faInstanceId(flightId) {
@@ -2095,7 +2080,6 @@ function buildStages(args) {
 	};
 }
 function liveFromAware(aware) {
-	if (aware?.scheduleStaleAt) return null;
 	const live = liveFromAwareTrack(aware);
 	if (!live) return null;
 	const type = live.type ?? aware?.type ?? null;
@@ -2990,7 +2974,6 @@ async function buildStory(query) {
 		wx = null;
 	}
 	return {
-		error: aware?.scheduleStaleAt ? "Schedule updates are delayed. Using a verified schedule from less than two minutes ago; positions update separately when available." : null,
 		fetchedAt: Date.now(),
 		query,
 		callsign: liveCs,
