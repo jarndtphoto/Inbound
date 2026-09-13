@@ -70,8 +70,11 @@ describe('September 12 flight audit replay', () => {
     });
     const load = () => loadFlightStory('UA1533', {fresh: true});
     assert.equal((await load()).times.pushed, false, 'stationary aircraft has not left its stand');
-    const beforeMovement = traceRequests;
     now += 65000;
+    record.gateDepartureTimes.actual = now / 1000 - 10;
+    assert.equal((await load()).times.pushed, false, 'a fresh fix at the previously observed stand rejects premature gate-out');
+    const beforeMovement = traceRequests;
+    now += 5000;
     gs = 3;
     lon += 0.0013;
     assert.equal((await load()).times.pushed, true, 'movement registers pushback');
@@ -178,7 +181,7 @@ describe('September 12 flight audit replay', () => {
 describe('MDW departure surface-stage replays', () => {
   const now = 1789231976;
   for (const [flight, speed, status, gateActual, takeoffActual, expectedStage, expectedPush] of [
-    ['WN363', 0, 'scheduled', now - 90, null, 'push', false],
+    ['WN363', 0, 'scheduled', now - 90, null, 'push', true],
     ['WN1035', 14, 'airborne', now - 180, now - 30, 'taxi', true],
     ['WN102', 65, 'airborne', now - 580, now - 480, 'taxi', true],
   ]) {
@@ -216,7 +219,10 @@ describe('MDW departure surface-stage replays', () => {
       assert.equal(story.times.airborne, false);
       assert.equal(story.times.pushed, expectedPush);
       assert.equal(story.aircraft.onGround, true);
-      if (flight === 'WN363') assert.ok(groundTraceRequests > 0, 'reported gate-out must not suppress movement checks');
+      if (flight === 'WN363') {
+        assert.ok(groundTraceRequests > 0, 'reported gate-out must not suppress movement checks');
+        assert.equal(story.times.pushKind, 'actual', 'a stopped aircraft at the airport center does not establish a gate position');
+      }
     });
   }
 });

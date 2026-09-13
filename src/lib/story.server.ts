@@ -2633,7 +2633,7 @@ async function buildStory(query) {
 	let times = timesOf(aware, origin, dest);
 	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
-	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && dOrigLive < 0.4 && !pushLatch.get(landKey) && !times.pushed) {
+	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30 && !pushLatch.get(landKey) && !times.pushed) {
 		const prev = parkByFlight.get(landKey);
 		if (!prev) parkByFlight.set(landKey, { lat: live.lat, lon: live.lon, at: Date.now() });
 		else if (haversineNm({ lat: live.lat, lon: live.lon }, prev) < 0.03) {
@@ -2662,7 +2662,15 @@ async function buildStory(query) {
 		offRamp ||
 		(live && live.onGround && atOrigLive && (distPark >= 0.10 || ((live.gsKt ?? 0) >= 4 && (distPark >= 0.05 || dOrigLive >= 0.38))))
 	);
-	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && (live.gsKt ?? 0) < 1.2 && dOrigLive < 0.38 && !pushLatch.has(landKey));
+	// Airport reference coordinates are not gate coordinates. Only a stand
+	// observed before departure can contradict a reported gate-out, and the
+	// position itself must be fresh and newer than that report.
+	const fixUnix = live ? Date.now() / 1e3 - (live.seenSec ?? 999) : 0;
+	const gateOutUnix = aware?.gateOut?.actual;
+	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && park
+		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) < 1.2
+		&& distPark < 0.025 && !pushLatch.has(landKey)
+		&& (!gateOutUnix || (park.at / 1e3 < gateOutUnix && fixUnix >= gateOutUnix)));
 	// A recent stationary surface fix is stronger evidence than a provider's
 	// prematurely stamped gate-out or takeoff time.
 	if (stationaryAtStand && !motion.pushed && !motion.taxiing && !leftGate) {
