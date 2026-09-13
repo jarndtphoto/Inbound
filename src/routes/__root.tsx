@@ -23,6 +23,7 @@ export const Route = createRootRoute({
       { name: "description", content: "Your flight, stage by stage — inbound aircraft, route weather, turbulence, delays, and the gate." },
       { name: "theme-color", content: "#08090c" },
       { name: "color-scheme", content: "dark" },
+      { name: "apple-mobile-web-app-title", content: "Inbound" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
     ],
     links: [
@@ -32,8 +33,8 @@ export const Route = createRootRoute({
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap",
       },
-      { rel: "manifest", href: "/__grok/manifest.webmanifest" },
-      { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
+      { rel: "manifest", href: "/inbound.webmanifest" },
+      { rel: "apple-touch-icon", href: "/inbound-icon-180.png" },
       {
         rel: "apple-touch-startup-image",
         href: "/startup-1170x2532.png",
