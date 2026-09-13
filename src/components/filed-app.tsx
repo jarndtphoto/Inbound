@@ -304,15 +304,15 @@ export function FiledApp() {
   const [ready, setReady] = useState(false);
   const [entered, setEntered] = useState(false);
   const [page, setPage] = useState<"home" | "flight">("home");
-  const [theme, setTheme] = useState<"sunset" | "sunrise">("sunset");
+  const [theme, setTheme] = useState<"sunset" | "sunrise">("sunrise");
   const [flight, setFlight] = useState("");
   const recents = useFiled(s => s.recents);
   const hydrate = useFiled(s => s.hydrate);
   const setQuery = useFiled(s => s.setQuery);
   useEffect(() => {
     hydrate();
-    let saved: "sunset" | "sunrise" = "sunset";
-    try { if (localStorage.getItem("inbound-theme") === "sunrise") saved = "sunrise"; } catch { /* storage optional */ }
+    let saved: "sunset" | "sunrise" = "sunrise";
+    try { if (localStorage.getItem("inbound-theme") === "sunset") saved = "sunset"; } catch { /* storage optional */ }
     setTheme(saved);
     document.documentElement.dataset.theme = saved;
     setReady(true);
