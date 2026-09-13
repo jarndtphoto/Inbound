@@ -453,15 +453,31 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       ? sy(ac!.lat)
       : sy(origin.lat);
   const rot = landed ? 0 : story.route.heading;
-  const future = samples.filter((s) => weatherPreview ? s.frac >= weatherPreview.from && s.frac <= weatherPreview.to : s.frac > progress + 0.08);
-  const firstBump = future.find((s) => s.chop !== "smooth");
-  const mid = future[Math.max(0, Math.floor(future.length * 0.45))];
-  const ticks = [firstBump, mid].filter((s, i, arr): s is NonNullable<typeof s> => {
-    if (!s) return false;
-    if (s.frac > 0.88) return false;
-    if (Math.abs(s.lon - dest.lon) + Math.abs(s.lat - dest.lat) < 2.8) return false;
-    return arr.findIndex((x) => x && Math.abs(x.frac - s.frac) < 0.04) === i;
-  });
+  const future = samples.filter(s => weatherPreview
+    ? s.frac >= weatherPreview.from && s.frac <= weatherPreview.to
+    : s.frac >= progress);
+  const areas: { start: RouteSample; end: RouteSample; label: string }[] = [];
+  for (const sample of future) {
+    const label = [sample.convective ? "Thunderstorms possible" : "",
+      sample.chop !== "smooth" ? turbLabel(sample.chop) : ""].filter(Boolean).join(" · ");
+    const previous = areas[areas.length - 1];
+    if (previous && previous.label === label) previous.end = sample;
+    else areas.push({start: sample, end: sample, label});
+  }
+  const takeoffAt = story.times.takeoffUnix;
+  const airborneNow = story.currentStage === "ride" || story.currentStage === "arrival";
+  const elapsedMin = airborneNow && story.times.takeoffKind === "actual" && takeoffAt != null
+    ? Math.max(0, (story.fetchedAt / 1000 - takeoffAt) / 60) : null;
+  const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
+    ? (story.times.landUnix - takeoffAt) / 60 : null;
+  const ticks = areas.filter(area => area.label).map(area => ({
+    ...area.start,
+    alertLabel: area.label,
+    durationMin: airborneNow ? area.end.etaMin - area.start.etaMin
+      : plannedMinutes == null ? null : (area.end.frac - area.start.frac) * plannedMinutes,
+    intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + area.start.etaMin
+      : plannedMinutes == null ? null : area.start.frac * plannedMinutes,
+  }));
   const fixes = samples.filter((s) => s.fix);
   const runs = pathRuns(samples, progress).build(sx, sy);
   const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
@@ -667,9 +683,9 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         <details className="group">
           <summary className="cursor-pointer py-3 font-semibold">Weather alerts</summary>
           <div className="absolute inset-x-0 bottom-full max-h-48 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
-            {ticks.map((s, i) => <p key={s.frac} className="flex items-start gap-2 py-1"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{i + 1}</span><span>About {formatDuration(s.etaMin)} from now · {s.chop === "smooth" ? "No turbulence flagged" : turbLabel(s.chop)}</span></p>)}
-            {hazards.length > 0 && <p className="py-1"><span className="mr-2 inline-block size-3 rounded-full border-2 border-ifr bg-ifr/30" />Storm areas marked by circles</p>}
-            {!ticks.length && !hazards.length && <p>No map alerts shown. Coverage may be incomplete.</p>}
+            {ticks.map((s, i) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{i + 1}</span><div><p className="font-semibold">{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
+            
+            {!ticks.length && <p>No map alerts shown. Coverage may be incomplete.</p>}
           </div>
         </details>
         <details>
