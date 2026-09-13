@@ -34,15 +34,11 @@ export function TravelerCompanion({story, failed=false}:{story:FlightStory;faile
       <p className="text-xs font-semibold uppercase tracking-wide text-muted">What happens next</p>
       <h2 className="mt-2 text-xl font-semibold">{step.title}</h2><p className="mt-2 text-sm leading-relaxed">{step.body}</p>
       <p className="mt-3 text-xs text-muted">{step.confidence} · Updated {new Date(story.fetchedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</p>
-      <details className="mt-3 text-sm"><summary className="min-h-11 cursor-pointer py-3">How to read your flight data</summary>
-        <p>Reported times come from the flight-status feed. Estimates can change. A recent aircraft position supports movement, but it does not identify a gate by itself.</p>
-      </details>
     </section>
     <section className="rounded-xl border border-border bg-surface p-5" aria-label="Arrival help">
       <h2 className="text-lg font-semibold">Arriving in {story.dest.city}</h2><p className="mt-1 text-sm text-muted">{localTime}</p>
       <dl className="mt-3 grid grid-cols-2 gap-4 text-sm"><div><dt className="text-muted">Arrival gate</dt><dd className="mt-1 font-semibold">{story.times.destGate||"Not assigned"}</dd></div><div><dt className="text-muted">{story.times.gateKind==="actual"?"Reported gate arrival":"Estimated gate arrival"}</dt><dd className="mt-1 font-semibold">{story.times.gate||"Awaiting update"}</dd></div></dl>
       {isLanded(story)&&story.currentStage!=="gate"&&<p className="mt-3 text-sm">Landed; waiting for gate confirmation.</p>}
-      <details className="mt-3 text-sm"><summary className="min-h-11 cursor-pointer py-3">Connections and baggage</summary><p>Terminal, baggage belt, and connection walking times are not supplied by the current feed. Check your airline app and airport displays. Gate labels alone do not establish the terminal or connection time.</p></details>
     </section>
     <details className="rounded-xl border border-border bg-surface p-5"><summary className="cursor-pointer py-2 font-semibold">Important changes {events.length? "("+events.length+")":""}</summary>
       <p className="mt-2 text-xs text-muted">Recorded on this device while this flight is open. Changes during gaps in tracking may be missing.</p>
