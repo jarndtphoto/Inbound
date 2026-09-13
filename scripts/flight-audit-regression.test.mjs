@@ -10,7 +10,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory, motionFromTrace, currentStageOf } = await import('../src/lib/story.server.ts');
+const { loadFlightStory, motionFromTrace, currentStageOf, fetchAwarePage } = await import('../src/lib/story.server.ts');
 
 describe('September 12 flight audit replay', () => {
   for (const [ident, query, destination, pushed] of [
@@ -253,5 +253,24 @@ describe('AA2554 inbound/main-stage consistency', () => {
     assert.equal(currentStageOf({ ...args, live, inboundStatus: 'complete' }), 'push');
     assert.equal(currentStageOf({ ...args, live, pushed: true }), 'push');
     assert.equal(currentStageOf({ ...args, live, pushed: true, taxiHint: true }), 'taxi');
+  });
+});
+
+
+describe('inbound canonical history details', () => {
+  it('reads actual gate arrival from the redirected dated flight', async (t) => {
+    const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
+    record.gateArrivalTimes.actual = 1789231900;
+    const history = 'https://www.flightaware.com/live/flight/UAL1532/history/20260912/1200Z/KORD/KMSY';
+    const requests = [];
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      requests.push(String(url));
+      if (String(url).includes('/flight/id/')) return new Response(null, { status: 302, headers: { location: history } });
+      return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
+    });
+    const result = await fetchAwarePage('https://www.flightaware.com/live/flight/id/UAL1532-test', 'UAL1532', false, 'manual');
+    assert.equal(result.gateIn.actual, 1789231900);
+    assert.equal(requests[1], history);
+    assert.equal(requests.length, 2);
   });
 });

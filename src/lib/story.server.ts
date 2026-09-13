@@ -1088,7 +1088,7 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 		faTrack
 	};
 }
-async function fetchAwarePage(url, fallbackIdent, withInbound, redirect = "follow") {
+export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect = "follow", historyFollowed = false) {
 	const res = await fetch(url, {
 		headers: {
 			"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -1099,7 +1099,17 @@ async function fetchAwarePage(url, fallbackIdent, withInbound, redirect = "follo
 	});
 	if (res.status >= 300 && res.status < 400) {
 		const stub = stubAwareFromHistory(res.headers.get("location"), fallbackIdent);
-		if (stub) return stub;
+		if (stub) {
+			// Read the exact dated instance, never the current flight-number page.
+			const target = new URL(res.headers.get("location"), url);
+			if (!historyFollowed && target.origin === "https://www.flightaware.com"
+				&& target.pathname.startsWith(`/live/flight/${stub.ident}/history/`)) {
+				const detail = await safe(fetchAwarePage(target.href, fallbackIdent, withInbound, "manual", true), null);
+				if (detail && detail.ident === stub.ident && detail.originIcao === stub.originIcao
+					&& detail.destIcao === stub.destIcao) return detail;
+			}
+			return { ...stub, routeOnly: true };
+		}
 	}
 	if (!res.ok) return null;
 	const raw = (await res.text()).split("trackpollBootstrap = ")[1];
@@ -2312,13 +2322,13 @@ async function buildStory(query) {
 		? Promise.resolve(null)
 		: inboundFlightId
 			? safe(loadAwareById(inboundFlightId), null)
-			: inboundIdent && !existingSnap
+			: inboundIdent && !inboundLocked
 				? safe(loadAware(inboundIdent), null)
 				: Promise.resolve(inboundAware);
 	const [[hydOrigin, hydDest, hazardsPack], inboundFetched] = await Promise.all([fieldsP, inboundFetch]);
 	origin = hydOrigin;
 	dest = hydDest;
-	if (inboundFetched) inboundAware = inboundFetched;
+	if (inboundFetched && (!inboundFetched.routeOnly || !inboundAware)) inboundAware = inboundFetched;
 	if (inboundAware && !inboundServesOrigin(inboundAware, origin.iata)) inboundAware = null;
 	const originTz = tzOf(origin);
 	if (inboundAware) rememberInboundSnap(snapKey, {
