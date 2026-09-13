@@ -1619,9 +1619,9 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
   const samples = story.route.samples.filter(s => !airborne || s.frac >= story.route.progress);
   const groups: { label: string; note: string | null; start: typeof samples[number]; end: typeof samples[number] }[] = [];
   for (const sample of samples) {
-    const label = [sample.convective ? "Thunderstorm advisory or forecast" : null,
-      sample.chop !== "smooth" ? `${sample.chop} turbulence indicated` : null,
-      sample.cloud ? "Clouds indicated" : null].filter(Boolean).join(" · ") || "No conditions flagged in available data";
+    const label = [sample.convective ? "Storms possible near the route" : null,
+      sample.chop !== "smooth" ? sample.chop === "light" ? "Light turbulence possible" : sample.chop === "moderate" ? "Moderate turbulence possible" : "Severe turbulence possible" : null,
+      sample.cloud ? "Clouds may limit the view" : null].filter(Boolean).join(" · ") || "No conditions flagged in available data";
     const prev = groups[groups.length - 1];
     if (prev && prev.label === label && prev.note === sample.note) prev.end = sample;
     else groups.push({ label, note: sample.note, start: sample, end: sample });
@@ -1651,7 +1651,13 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       {groups.map((g, i) => <li key={i} className="rounded-xl border border-border bg-surface p-4">
         <p className="flex items-center gap-2 text-sm text-muted"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
         <p className="mt-2 font-semibold">{g.label}</p>
-        {g.note && <p className="mt-2 text-sm text-muted">{g.note}</p>}
+        {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
+          <div className="pointer-events-none h-64 overflow-hidden rounded-xl" aria-label={`Route preview: ${g.label}`}>
+            <RouteMap story={story} fixedViewport weatherPreview={{ from: g.start.frac, to: g.end.frac }} />
+          </div>
+          <figcaption className="mt-2 text-xs text-muted">Highlighted: the stretch this forecast refers to. Updates with your flight; not a radar image. {story.live ? "Aircraft position available." : "Live aircraft position unavailable; route shown for context."}</figcaption>
+        </figure>}
+        {g.note && <details className="mt-2 text-sm text-muted"><summary className="cursor-pointer py-2">More details</summary><p>{g.note}</p></details>}
       </li>)}
     </ol> : <p className="text-sm text-muted">Route weather data unavailable.</p>}
     {fieldCard(story.dest, "Landing · arrival conditions")}

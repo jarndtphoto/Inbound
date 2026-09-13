@@ -380,7 +380,7 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story, fixedViewport = false }: { story: FlightStory; fixedViewport?: boolean }) {
+export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { from: number; to: number } }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [mapHeight, setMapHeight] = useState(800);
   useEffect(() => {
@@ -478,7 +478,7 @@ export function RouteMap({ story, fixedViewport = false }: { story: FlightStory;
       >
         <rect width={W} height={H} className="fill-bg" />
         <g transform={`translate(${zoom.x} ${zoom.y}) scale(${zoom.s})`} strokeLinejoin="round" strokeLinecap="round">
-        {weatherOn && (
+        {weatherOn && !weatherPreview && (
           <RadarLayer minLon={minLon} maxLon={maxLon} minLat={minLat} maxLat={maxLat} sx={sx} sy={sy} />
         )}
 
@@ -539,6 +539,13 @@ export function RouteMap({ story, fixedViewport = false }: { story: FlightStory;
           );
         })}
 
+        {weatherPreview && (() => {
+          const section = samples.filter(s => s.frac >= weatherPreview.from && s.frac <= weatherPreview.to);
+          return <g aria-label="Weather area for this forecast">
+            <polyline points={section.map(s => `${sx(s.lon)},${sy(s.lat)}`).join(" ")} fill="none" className="stroke-ifr" strokeWidth="18" opacity="0.55" />
+            {section.length === 1 && <circle cx={sx(section[0].lon)} cy={sy(section[0].lat)} r="12" className="fill-ifr" opacity="0.65" />}
+          </g>;
+        })()}
         {fixes.map((s) => (
           <rect
             key={`fix-${s.frac}`}
@@ -633,7 +640,7 @@ export function RouteMap({ story, fixedViewport = false }: { story: FlightStory;
           {atGate ? "At the gate" : landed ? "Landed" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
         </p>
       </div>
-        {zoom.s > 1.02 ? (
+        {weatherPreview ? null : zoom.s > 1.02 ? (
           <button
             type="button"
             onClick={zoom.reset}
@@ -646,7 +653,7 @@ export function RouteMap({ story, fixedViewport = false }: { story: FlightStory;
             Pinch to zoom
           </p>
         )}
-        <div className="absolute right-3 bottom-3 z-10 flex gap-1">
+        <div style={weatherPreview ? { display: "none" } : undefined} className="absolute right-3 bottom-3 z-10 flex gap-1">
           <button
             type="button"
             aria-label="Zoom in"
@@ -666,7 +673,7 @@ export function RouteMap({ story, fixedViewport = false }: { story: FlightStory;
         </div>
       </div>
 
-      <div className="w-full flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
+      <div style={weatherPreview ? { display: "none" } : undefined} className="w-full flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
         <Legend swatch="bg-accent" label="Smooth" />
         <Legend swatch="bg-ifr" label="Light / moderate turbulence" />
         <span className="inline-flex items-center gap-1.5">
