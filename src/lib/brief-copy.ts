@@ -228,7 +228,7 @@ function snapOf(d: RideFacts): BriefSnap {
 
 function stageLine(stage: string): string | null {
   if (stage === "push") return "Plane is at the gate";
-  if (stage === "taxi") return "Taxiing to the runway";
+  if (stage === "taxi") return "On the move — pushback and taxi";
   if (stage === "ride") return "Taking off";
   if (stage === "arrival") return "Landing";
   if (stage === "gate") return "Arriving at the gate";

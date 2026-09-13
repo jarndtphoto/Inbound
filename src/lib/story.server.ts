@@ -1910,12 +1910,12 @@ export function currentStageOf(args) {
 		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) >= 8
 		&& haversineNm(live, origin) < 10);
 	if (!flightBegun(live, origin) && (taxiHint || freshTaxiMovement) && !faAirborne) return "taxi";
-	if (!flightBegun(live, origin) && pushed && !(faAirborne || Boolean(ourTakeoffActual))) return "push";
+	if (!flightBegun(live, origin) && pushed && !(faAirborne || Boolean(ourTakeoffActual))) return "taxi";
 	const atOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const begun = flightBegun(live, origin);
 	const taxiing = Boolean(
 		taxiHint ||
-		(live && atOrigin && ((live.gsKt ?? 0) >= 2 || live.phase === "taxi" || (distPark ?? 0) >= 0.08))
+		(live && live.onGround && !live.extrapolated && (live.seenSec ?? 999) <= 30 && atOrigin && ((live.gsKt ?? 0) >= 4 || (distPark ?? 0) >= 0.08))
 	);
 	if (live && atOrigin && !begun) {
 		if (taxiing) return "taxi";
@@ -1934,7 +1934,8 @@ export function currentStageOf(args) {
 	}
 	if (atOrigin && live) return taxiing ? "taxi" : "push";
 	if (inboundStatus === "airborne" || inboundStatus === "watching" || inboundStatus === "at_field") return "inbound";
-	if (inboundStatus === "complete" || pushed) return "push";
+	if (pushed) return "taxi";
+	if (inboundStatus === "complete") return "push";
 	return "inbound";
 }
 async function hydrateField(base) {
@@ -2031,18 +2032,19 @@ function buildStages(args) {
 	return {
 		push: {
 			state: state("push"),
-			title: pushed ? "Pushback" : `At the gate · ${origin.iata}`,
-			body: pushed ? (times.push ? `Pushback at ${times.push}.` : "Pushback.") : (times.push ? `Push ${times.push}.` : ""),
+			title: `At the gate · ${origin.iata}`,
+			body: times.push ? `${pushed ? "Departure" : "Estimated push"} ${times.push}.` : "",
 			watchouts: []
 		},
 		taxi: {
 			state: state("taxi"),
-			title: current === "ride" || current === "arrival" || current === "gate" ? "Taxied" : `Taxi at ${origin.iata}`,
-			body: taxiingNow
-				? "Taxiing."
-				: current === "ride" || current === "arrival" || current === "gate"
-					? (times.taxiOutKind === "measured" && times.taxiOutMin != null ? `${times.taxiOutMin} min taxi out.` : "")
-					: "",
+			title: "On the move",
+			body: current === "taxi"
+				? times.pushKind === "actual" && times.push
+					? `Gate departure reported at ${times.push}. Pushback and taxi before takeoff.`
+					: "Ground movement detected. Departure time is still being confirmed."
+				: times.taxiOutKind === "measured" && times.taxiOutMin != null
+					? `${times.taxiOutMin} min from gate departure to takeoff.` : "Pushback and taxi before takeoff.",
 			watchouts: []
 		},
 		inbound: {
@@ -2673,19 +2675,18 @@ async function buildStory(query) {
 	if (hexNow && origin && !ourLanded && needsGroundTrace) {
 		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
 	}
-	const offRamp = Boolean(live && live.onGround && atOrigLive && dOrigLive >= 0.65);
+	const freshSurface = Boolean(live && live.onGround && atOrigLive && !live.extrapolated && (live.seenSec ?? 999) <= 30);
 	const leftGate = Boolean(
 		!ourLanded &&
 		(
-			(live && live.onGround && atOrigLive && (distPark >= 0.05 || offRamp || ((live.gsKt ?? 0) >= 4 && dOrigLive >= 0.38))) ||
+			(freshSurface && (distPark >= 0.05 || (live.gsKt ?? 0) >= 4)) ||
 			motion.pushed ||
 			motion.taxiing
 		)
 	);
 	const taxiHint = Boolean(
 		(leftGate && motion.taxiing) ||
-		offRamp ||
-		(live && live.onGround && atOrigLive && (distPark >= 0.10 || ((live.gsKt ?? 0) >= 4 && (distPark >= 0.05 || dOrigLive >= 0.38))))
+		(freshSurface && (distPark >= 0.10 || (live.gsKt ?? 0) >= 8))
 	);
 	// Airport reference coordinates are not gate coordinates. Only a stand
 	// observed before departure can contradict a reported gate-out, and the
@@ -2722,6 +2723,7 @@ async function buildStory(query) {
 		times = {
 			...times,
 			pushed: true,
+			pushKind: "estimated",
 			pushUnix,
 			push: clockAt(pushUnix, otz),
 			delayMin,

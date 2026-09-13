@@ -16,7 +16,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type 
 const STAGES: { id: StageId; label: string }[] = [
   { id: "inbound", label: "Inbound" },
   { id: "push", label: "Gate" },
-  { id: "taxi", label: "Taxi" },
+  { id: "taxi", label: "On the move" },
   { id: "ride", label: "Flight" },
   { id: "arrival", label: "Arrival" },
   { id: "gate", label: "At the gate" },
@@ -711,7 +711,7 @@ function wheelsDown(story: FlightStory) {
 function stageHeadline(story: FlightStory) {
   if (story.currentStage === "gate") return "At the gate";
   if (story.currentStage === "arrival" && wheelsDown(story)) return "Landed";
-  if (story.currentStage === "push") return story.times?.pushed ? "Pushback" : "Gate";
+  if (story.currentStage === "push") return story.times?.pushed ? "On the move" : "Gate";
   return STAGES.find((s) => s.id === story.currentStage)?.label ?? story.currentStage;
 }
 
@@ -928,7 +928,7 @@ function TimesStrip({
         ) : (
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
             <ClockCell
-              title="Push"
+              title={t?.pushed ? "Departure" : "Est. push"}
               time={t?.push}
               kind={t?.pushKind ?? (t?.pushed ? "actual" : t?.push ? "scheduled" : null)}
               hint={
@@ -1390,6 +1390,11 @@ function extraFor(story: FlightStory, stage: StageId) {
     return (
       <>
         <dl className="mt-4 grid grid-cols-1 gap-2">
+          <TimeChip
+            label="Departure"
+            value={times.pushed ? times.push ?? "Awaiting confirmation" : "Awaiting departure"}
+            sub={times.pushed && times.pushKind === "actual" ? "Gate departure reported" : "Movement time not confirmed"}
+          />
           <TimeChip
             label="Taxi out"
             value={times.taxiOutMin == null ? "—" : `${times.taxiOutMin} min`}

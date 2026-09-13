@@ -38,7 +38,7 @@ describe('September 12 flight audit replay', () => {
       if (pushed) {
         assert.equal(story.times.pushUnix, 1789231380);
         assert.equal(story.times.pushKind, 'actual');
-        assert.equal(story.currentStage, 'push');
+        assert.equal(story.currentStage, 'taxi');
       }
       const pireps = requests.filter(u => u.includes('/api/data/pirep?'));
       assert.ok(pireps.length > 0);
@@ -181,7 +181,7 @@ describe('September 12 flight audit replay', () => {
 describe('MDW departure surface-stage replays', () => {
   const now = 1789231976;
   for (const [flight, speed, status, gateActual, takeoffActual, expectedStage, expectedPush] of [
-    ['WN363', 0, 'scheduled', now - 90, null, 'push', true],
+    ['WN363', 0, 'scheduled', now - 90, null, 'taxi', true],
     ['WN1035', 14, 'airborne', now - 180, now - 30, 'taxi', true],
     ['WN102', 65, 'airborne', now - 580, now - 480, 'taxi', true],
   ]) {
@@ -251,7 +251,7 @@ describe('AA2554 inbound/main-stage consistency', () => {
       assert.equal(currentStageOf({ ...args, live: fix }), 'inbound');
     }
     assert.equal(currentStageOf({ ...args, live, inboundStatus: 'complete' }), 'push');
-    assert.equal(currentStageOf({ ...args, live, pushed: true }), 'push');
+    assert.equal(currentStageOf({ ...args, live, pushed: true }), 'taxi');
     assert.equal(currentStageOf({ ...args, live, pushed: true, taxiHint: true }), 'taxi');
   });
 });
@@ -292,8 +292,27 @@ describe('AA3177 pushback to taxi transition', () => {
     const args = { origin, inboundStatus: 'complete', pushed: true, faAirborne: false, taxiHint: false };
     const live = { ...origin, onGround: true, gsKt: 8, seenSec: 1 };
     assert.equal(currentStageOf({ ...args, live }), 'taxi');
-    assert.equal(currentStageOf({ ...args, live: { ...live, gsKt: 3 } }), 'push');
-    assert.equal(currentStageOf({ ...args, live: { ...live, seenSec: 60 } }), 'push');
-    assert.equal(currentStageOf({ ...args, live: null }), 'push');
+    assert.equal(currentStageOf({ ...args, live: { ...live, gsKt: 3 } }), 'taxi');
+    assert.equal(currentStageOf({ ...args, live: { ...live, seenSec: 60 } }), 'taxi');
+    assert.equal(currentStageOf({ ...args, live: null }), 'taxi');
+  });
+});
+
+
+describe('on the move evidence', () => {
+  it('does not advance a stationary aircraft just because scheduled departure passed', async (t) => {
+    const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
+    record.ident = 'AAL9917'; record.iataIdent = 'AA9917';
+    record.inboundFlight = null; record.flightStatus = 'scheduled';
+    record.gateDepartureTimes = { scheduled: 1789230000, estimated: 1789230100, actual: null };
+    record.takeoffTimes = { scheduled: 1789230600, estimated: 1789230700, actual: null };
+    t.mock.method(Date, 'now', () => 1789231976000);
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      if (String(url).startsWith('https://www.flightaware.com/live/flight/')) return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
+      return new Response(JSON.stringify({ ac: [{ hex: 'a99177', flight: 'AAL9917', lat: 41.99, lon: -87.91, gs: 0, alt_baro: 'ground', seen_pos: 0 }], features: [] }));
+    });
+    const s = await loadFlightStory('AA9917', { fresh: true });
+    assert.equal(s.times.pushed, false);
+    assert.notEqual(s.currentStage, 'taxi');
   });
 });

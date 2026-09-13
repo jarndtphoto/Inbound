@@ -71,7 +71,7 @@ describe("briefing update log", () => {
     b = composeBrief(facts({ now: "arrival" }), b);
     b = composeBrief(facts({ now: "gate" }), b);
     const texts = b.log.map((e) => e.text).join(" | ");
-    assert.match(texts, /Taxiing to the runway/);
+    assert.match(texts, /On the move/);
     assert.match(texts, /Taking off/);
     assert.match(texts, /Landing/);
     assert.match(texts, /Arriving at the gate/);
