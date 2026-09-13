@@ -235,6 +235,7 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     inboundStatus: story.inbound?.status,
     rideLabel: rideLabelOf(story),
     push: story.times?.push ?? null,
+    pushKind: story.times?.pushKind ?? null,
     taxiOutMin: story.times?.taxiOutMin ?? null,
     taxiOutKind: story.times?.taxiOutKind ?? null,
     takeoff: story.times?.takeoff ?? null,

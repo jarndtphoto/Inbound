@@ -53,6 +53,7 @@ export type RideFacts = {
   inboundStatus?: string;
   rideLabel?: string;
   push: string | null;
+  pushKind?: string | null;
   taxiOutMin: number | null;
   taxiOutKind?: string | null;
   takeoff: string | null;
@@ -104,6 +105,7 @@ export type BriefSnap = {
   land: string | null;
   takeoff: string | null;
   push: string | null;
+  pushKind?: string | null;
   destGate: string | null;
   wx: string;
   worstChop: string | null;
@@ -469,6 +471,23 @@ function composeLead(d: RideFacts) {
       ? "You're in the air."
       : "In the air — live position unavailable right now.";
     return joinSentences([open, air, left, rideClause(d), destClause(d), taxiInClause(d)]);
+  }
+
+  if (stage === "taxi") {
+    return joinSentences([
+      open,
+      "You're on the move — pushback or taxi before takeoff.",
+      d.push && d.pushKind === "actual" ? `Gate departure reported at ${d.push}.`
+        : d.push && d.pushKind === "estimated" ? `Movement first observed around ${d.push}; this time is approximate.`
+        : "Departure time is not yet confirmed.",
+      d.pushKind === "actual" && d.delayMin != null && d.delayMin >= 5 ? `Departure was ${d.delayMin} minutes later than scheduled.` : "",
+      d.takeoff ? `Estimated takeoff around ${d.takeoff}.` : "",
+      taxiOutClause(d),
+      originNas ? `${d.fromIata} delay: ${originNas}.` : "",
+      rideClause(d),
+      destClause(d),
+      taxiInClause(d),
+    ]);
   }
 
   return joinSentences([

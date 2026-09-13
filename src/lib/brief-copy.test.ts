@@ -249,3 +249,20 @@ describe("briefing update log", () => {
     assert.equal(JARGON.test(lines[0].text), false);
   });
 });
+
+
+describe("on the move briefing", () => {
+  it("describes a recorded departure without obsolete inbound or future push wording", () => {
+    const brief = composeBrief(facts({now:"taxi",stage:"taxi",pushKind:"actual",delayMin:82,push:"9:42 PM CDT",takeoff:"10:33 PM CDT"}));
+    assert.match(brief.lead, /on the move/i);
+    assert.match(brief.lead, /Gate departure reported at 9:42 PM CDT/);
+    assert.doesNotMatch(brief.lead, /Inbound|Push is/);
+    assert.match(brief.lead, /Estimated takeoff around 10:33 PM CDT/);
+  });
+});
+
+it("does not call an estimated movement time a reported departure", () => {
+ const b = composeBrief(facts({now:"taxi",pushKind:"estimated"}));
+ assert.match(b.lead, /first observed around/);
+ assert.doesNotMatch(b.lead, /Gate departure reported/);
+});
