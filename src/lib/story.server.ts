@@ -56,18 +56,17 @@ function cached(key, ttlMs, fn) {
 	if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.value);
 	const pending = inflight.get(key);
 	if (pending) return pending;
-	const p = fn().then((value) => {
+	let timer;
+	const deadline = new Promise((_, reject) => {
+		timer = setTimeout(() => reject(new Error("Flight data request timed out. Please try again.")), 30000);
+	});
+	const p = Promise.race([Promise.resolve().then(fn), deadline]).then((value) => {
 		const empty = value == null || (Array.isArray(value) && value.length === 0);
-		cache.set(key, {
-			at: Date.now(),
-			value,
-			ttl: empty ? Math.min(1200, ttlMs) : ttlMs
-		});
-		inflight.delete(key);
+		cache.set(key, { at: Date.now(), value, ttl: empty ? Math.min(1200, ttlMs) : ttlMs });
 		return value;
-	}).catch((err) => {
-		inflight.delete(key);
-		throw err;
+	}).finally(() => {
+		clearTimeout(timer);
+		if (inflight.get(key) === p) inflight.delete(key);
 	});
 	inflight.set(key, p);
 	return p;
@@ -3027,18 +3026,7 @@ export async function loadFlightStory(query, opts) {
 				if (/^(hex4:|cs4:|reg4:|trace3:)/.test(k)) cache.delete(k);
 			}
 		}
-		const work = cached(key, fresh ? 0 : 4e3, () => buildStory(query));
-		let timer;
-		const timed = new Promise((_, rej) => {
-			// The first load also fetches field and route weather after flight lookup.
-			// Avoid failing a valid cold request just before those requests complete.
-			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 30e3);
-		});
-		try {
-			return await Promise.race([work, timed]);
-		} finally {
-			clearTimeout(timer);
-		}
+		return await cached(key, fresh ? 0 : 4e3, () => buildStory(query));
 	} catch (err) {
 		const msg = err instanceof Error && err.message && err.name !== "AbortError" ? err.message : "Could not load that flight. Try again.";
 		throw new Error(msg);

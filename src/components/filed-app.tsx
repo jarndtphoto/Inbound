@@ -424,7 +424,13 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     queryFn: async () => {
       const fresh = freshRef.current;
       freshRef.current = false;
-      const s = await getFlightStory({ data: { q: query, fresh } });
+      let requestTimer: ReturnType<typeof setTimeout> | undefined;
+      const s = await Promise.race([
+        getFlightStory({ data: { q: query, fresh } }),
+        new Promise<never>((_, reject) => {
+          requestTimer = setTimeout(() => reject(new Error("Flight data request timed out. Please try again.")), 35_000);
+        }),
+      ]).finally(() => clearTimeout(requestTimer));
       if (!storyMatchesQuery(s, query)) {
         throw new Error("Could not load that flight. Try another number.");
       }
