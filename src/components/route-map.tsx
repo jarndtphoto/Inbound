@@ -640,7 +640,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {weatherPreview ? "FORECAST AREA" : story.route.source === "track" ? "ACTUAL TRACK · FIXES" : "PLANNED PATH"}
+          {weatherPreview ? "FORECAST AREA" : story.route.source === "track" ? "TRACK + PROJECTED ROUTE" : "PROJECTED ROUTE"}
         </p>
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
           {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}

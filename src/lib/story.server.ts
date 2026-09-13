@@ -369,6 +369,28 @@ function directSpine(origin, dest, live) {
 	if (haversineNm(spine[spine.length - 1], dest) > 2) spine.push(dest);
 	return densifyPath(downsampleNm(spine, 18), 55);
 }
+
+// Keep both map views and weather sampling anchored to the same fresh aircraft fix.
+// The connection to remaining waypoints is a projection, not an ATC clearance.
+function anchorRouteAtLive(path, live) {
+	if (path.length < 2 || !live || live.onGround || live.extrapolated
+		|| !Number.isFinite(live.seenSec) || live.seenSec < 0 || live.seenSec > 30
+		|| !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) return path;
+	const here = { lat: live.lat, lon: live.lon };
+	const along = progressAlongPath(path, here);
+	const fracs = pathFracs(path);
+	let next = fracs.findIndex(f => f > along.frac + 0.000001);
+	if (next < 0) next = path.length - 1;
+	// Densify each side separately so resampling cannot erase the live anchor.
+	const before = path.slice(0, next);
+	const after = path.slice(next);
+	if (haversineNm(before[before.length - 1], here) > 0.01) before.push(here);
+	else before[before.length - 1] = here;
+	const left = densifyPath(before, Math.max(2, before.length));
+	const right = densifyPath([here, ...after], Math.max(2, after.length + 1));
+	return [...left, ...right.slice(1)];
+}
+
 async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, faTrack) {
 	const spine = makeSpine(origin, dest, waypoints);
 	let hexRaw = [];
@@ -2449,6 +2471,7 @@ async function buildStory(query) {
 			}
 		}
 	}
+	if (!ourLanded && ourAirborne) path = anchorRouteAtLive(path, live);
 	const totalNm = Math.max(1, polylineLengthNm(path));
 	let remainingNm;
 	let progress;
