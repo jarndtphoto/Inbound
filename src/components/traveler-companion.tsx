@@ -9,8 +9,7 @@ export function TravelerCompanion({story, failed=false}:{story:FlightStory;faile
   if(story.dest.tz)try{localTime=new Intl.DateTimeFormat(undefined,{timeZone:story.dest.tz,hour:"numeric",minute:"2-digit",timeZoneName:"short"}).format(now)}catch{}
   return <div className="mt-5 space-y-4">
     <section className="rounded-xl border border-border bg-surface p-5" aria-label="What happens next">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted">What happens next</p>
-      <h2 className="mt-2 text-xl font-semibold">{step.title}</h2><p className="mt-2 text-sm leading-relaxed">{step.body}</p>
+      <h2 className="text-xl font-semibold">{step.title}</h2><p className="mt-2 text-sm leading-relaxed">{step.body}</p>
       <p className="mt-3 text-xs text-muted">{step.confidence} · Updated {new Date(story.fetchedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</p>
     </section>
     <section className="rounded-xl border border-border bg-surface p-5" aria-label="Arrival help">
