@@ -5,8 +5,6 @@ import { AppProviders } from "@/components/providers";
 import appCss from "../styles.css?url";
 import appCssInline from "../styles.css?inline";
 
-import { AppUpdateNotice } from "@/components/app-update-notice";
-
 const APP_NAME = "Inbound";
 
 function stylesheetHref(href: string) {
@@ -24,8 +22,7 @@ export const Route = createRootRoute({
       { title: APP_NAME },
       { name: "description", content: "Your flight, stage by stage — inbound aircraft, route weather, turbulence, delays, and the gate." },
       { name: "theme-color", content: "#08090c" },
-      { name: "color-scheme", content: "dark light" },
-      { name: "apple-mobile-web-app-title", content: "Inbound" },
+      { name: "color-scheme", content: "dark" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
     ],
     links: [
@@ -35,7 +32,7 @@ export const Route = createRootRoute({
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap",
       },
-      { rel: "manifest", href: "/manifest.webmanifest" },
+      { rel: "manifest", href: "/__grok/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
       {
         rel: "apple-touch-startup-image",
@@ -58,7 +55,7 @@ export const Route = createRootRoute({
     <html
       lang="en"
       className="dark h-full antialiased"
-      style={{ background: "var(--color-bg)", color: "var(--color-fg)", height: "100%" }}
+      style={{ background: "#08090c", color: "#e7eaee", colorScheme: "dark", height: "100%" }}
       suppressHydrationWarning
     >
       <head>
@@ -67,11 +64,10 @@ export const Route = createRootRoute({
           <style id="inbound-css" dangerouslySetInnerHTML={{ __html: appCssInline }} />
         ) : null}
       </head>
-      <body className="h-full bg-bg text-fg" style={{ background: "var(--color-bg)", color: "var(--color-fg)", margin: 0, height: "100%" }} suppressHydrationWarning>
+      <body className="h-full bg-bg text-fg" style={{ background: "#08090c", color: "#e7eaee", margin: 0, height: "100%" }} suppressHydrationWarning>
         <PreviewHostBridge />
         <AuthProvider>
           <AppProviders>
-            <AppUpdateNotice />
             <Outlet />
           </AppProviders>
         </AuthProvider>

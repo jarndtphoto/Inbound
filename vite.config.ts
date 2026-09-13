@@ -1,4 +1,4 @@
-import { readdirSync, writeFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
@@ -145,11 +145,7 @@ function authPopupPlugin(): Plugin {
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
-export default defineConfig(({ command, isPreview }) => {
-  const release = process.env.VERCEL_GIT_COMMIT_SHA || (command === "build" ? String(Date.now()) : "development");
-  if (command === "build") writeFileSync("public/inbound-version.json", JSON.stringify({ version: release }));
-  return ({
-  define: { "import.meta.env.VITE_INBOUND_RELEASE": JSON.stringify(release) },
+export default defineConfig(({ command, isPreview }) => ({
   server: {
     host: "0.0.0.0",
     port: 8080,
@@ -184,5 +180,4 @@ export default defineConfig(({ command, isPreview }) => {
       : []),
     viteReact(),
   ],
-});
-});
+}));
