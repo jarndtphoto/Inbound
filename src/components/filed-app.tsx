@@ -914,7 +914,7 @@ function FlightHead({
           {story.dest.city} <span className="text-muted">{story.dest.iata}</span>
         </p>
       </div>
-      <TimesStrip story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
+      <TimesStrip failed={failed} story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       <dl className={cn("mt-4 grid gap-3", showAlt || showRemaining ? "grid-cols-2" : "grid-cols-1")}>
         <Stat
           icon={Plane}
@@ -974,11 +974,13 @@ function TimesStrip({
   story,
   fetching,
   refreshing,
+  failed = false,
   onRefresh,
 }: {
   story: FlightStory;
   fetching: boolean;
   refreshing: boolean;
+  failed?: boolean;
   onRefresh: () => void;
 }) {
   const t = story.times;
