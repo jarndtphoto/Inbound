@@ -1,6 +1,26 @@
 import type { Chop, Hazard, RouteSample } from "./types";
 import type { Taf } from "./metar";
 
+/** AWC bbox order is south,west,north,east. Split routes across the dateline. */
+export function pirepRouteBounds(path: { lat: number; lon: number }[]): string[] {
+  const points = path.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180);
+  if (!points.length) return [];
+  const south = Math.max(-90, Math.floor(Math.min(...points.map(p => p.lat)) - 2));
+  const north = Math.min(90, Math.ceil(Math.max(...points.map(p => p.lat)) + 2));
+  const west = Math.min(...points.map(p => p.lon));
+  const east = Math.max(...points.map(p => p.lon));
+  const pad = 2 / Math.max(0.1, Math.cos(Math.max(Math.abs(south), Math.abs(north)) * Math.PI / 180));
+  if (east - west > 180) {
+    const positive = points.filter(p => p.lon >= 0);
+    const negative = points.filter(p => p.lon < 0);
+    return [
+      `${south},${Math.max(-180, Math.floor(Math.min(...positive.map(p => p.lon)) - pad))},${north},180`,
+      `${south},-180,${north},${Math.min(180, Math.ceil(Math.max(...negative.map(p => p.lon)) + pad))}`,
+    ];
+  }
+  return [`${south},${Math.max(-180, Math.floor(west - pad))},${north},${Math.min(180, Math.ceil(east + pad))}`];
+}
+
 export type WxDigest = {
   at: number;
   hash: string;
@@ -46,6 +66,27 @@ export function sampleAltFt(frac: number, remainingNm: number, liveAlt: number |
   if (frac < 0.1) return 16_000;
   if (frac < 0.16) return 26_000;
   return cruise;
+}
+
+/** Match a route sample to the advisory's actual or forecast validity window. */
+export function advisoryValidAt(properties: Record<string, unknown> | null | undefined, atUnix: number): boolean {
+  if (!properties || !Number.isFinite(atUnix)) return true;
+  const parse = (value: unknown): number | null => {
+    if (typeof value !== "string") return null;
+    const compact = value.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})$/);
+    const millis = Date.parse(compact
+      ? `${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:00Z`
+      : value);
+    return Number.isFinite(millis) ? millis / 1000 : null;
+  };
+  const from = parse(properties.validTimeFrom);
+  const to = parse(properties.validTimeTo);
+  if (from != null || to != null) return (from == null || atUnix >= from) && (to == null || atUnix <= to);
+  const forecast = parse(properties.validTime);
+  if (forecast == null) return true;
+  // G-AIRMETs are three-hourly snapshots; TCF is a shorter valid-hour forecast.
+  const tolerance = properties.data === "tcf" ? 60 * 60 : 90 * 60;
+  return Math.abs(atUnix - forecast) <= tolerance;
 }
 
 /** G-AIRMET top/base are usually flight levels ("210") or "SFC". */
@@ -215,17 +256,17 @@ export function decodeTafPassenger(taf: Taf | null | undefined, whenUnix?: numbe
     if (!taf) return null;
     const fcsts = Array.isArray(taf.fcsts) ? taf.fcsts : [];
     const when = whenUnix ?? Date.now() / 1e3;
-    const covering =
-      fcsts.find((f) => (f.timeFrom ?? 0) <= when && (f.timeTo ?? Infinity) > when) ??
-      fcsts.find((f) => (f.timeFrom ?? 0) > when) ??
-      fcsts[0] ??
-      null;
+    const active = fcsts.filter((f) => (f.timeFrom ?? 0) <= when && (f.timeTo ?? Infinity) > when);
+    const next = fcsts.find((f) => (f.timeFrom ?? 0) > when);
+    if (fcsts.length && !active.length && !next) return null;
+    const covering = active[0] ?? next ?? null;
+    const relevant = active.length ? active : covering ? [covering] : [];
     const bits: string[] = [];
     const raw = String(taf.rawTAF ?? "").toUpperCase();
-    const wx = String(covering?.wxString ?? "").toUpperCase();
-    const blob = `${wx} ${raw}`;
-    if (/\bTS\b|VCTS|TEMPO[^\n]{0,40}TS|PROB\d{2}[^\n]{0,40}TS/.test(blob)) bits.push("thunderstorms in the forecast");
-    else if (/\bFG\b|\bBR\b/.test(wx) || /TEMPO[^\n]{0,30}(FG|BR)/.test(raw)) bits.push("fog or mist");
+    const wx = relevant.map((f) => String(f.wxString ?? "")).join(" ").toUpperCase();
+    const blob = fcsts.length ? wx : raw;
+    if (/\b(?:VC)?TS[A-Z]*\b|TEMPO[^\n]{0,40}TS|PROB\d{2}[^\n]{0,40}TS/.test(blob)) bits.push("thunderstorms in the forecast");
+    else if (/\bFG\b|\bBR\b/.test(wx) || (!fcsts.length && /TEMPO[^\n]{0,30}(FG|BR)/.test(raw))) bits.push("fog or mist");
     else if (/\bSN\b|BLSN/.test(blob)) bits.push("snow");
     else if (/\bRA\b|\bSHRA\b/.test(wx)) bits.push("rain");
     const vis = covering?.visib;
@@ -243,10 +284,10 @@ export function decodeTafPassenger(taf: Taf | null | undefined, whenUnix?: numbe
     const spd = covering?.wspd;
     const gst = covering?.wgst;
     if ((gst ?? 0) >= 25 || (spd ?? 0) >= 20) bits.push(gst ? `wind ${spd} gusting ${gst} kt` : `wind ${spd} kt`);
-    if (covering?.fcstChange === "TEMPO") bits.push("tempo period");
-    if (covering?.probability && covering.probability >= 30) bits.push(`PROB${covering.probability}`);
+    if (relevant.some((f) => f.fcstChange === "TEMPO")) bits.push("temporary conditions possible");
+    if (covering?.probability && covering.probability >= 30) bits.push(`${covering.probability}% chance`);
     if (!bits.length) {
-      if (/SKC|CLR|NSC|SCT2/.test(raw) && !/BKN00|OVC00|FG|TS/.test(raw)) return "VFR, no significant weather in the TAF";
+      if (/SKC|CLR|NSC|SCT2/.test(raw) && !/BKN00|OVC00|FG|TS/.test(raw)) return "No significant weather indicated in the forecast";
       return null;
     }
     return bits.slice(0, 3).join(", ");

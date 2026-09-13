@@ -59,7 +59,9 @@ export const STALE_GROUND_SEC = 45;
 export const TELEPORT_NM = 5;
 export const TELEPORT_NM_FAST = 3;
 export const GAP_EXTRAPOLATE_SEC = 10;
-export const GAP_EXTRAPOLATE_ENROUTE_SEC = 8 * 60;
+// A heading and ground speed are not a flight plan. Long straight-line coasts
+// routinely put turning or holding aircraft tens of miles from their position.
+export const GAP_EXTRAPOLATE_ENROUTE_SEC = 20;
 export const STALE_KEEP_SEC = 45;
 export const STALE_KEEP_ENROUTE_SEC = 15 * 60;
 
@@ -214,7 +216,8 @@ export function scoreObservation(
 ): number | null {
   if (!coordsOk(obs.lat, obs.lon)) return null;
   if (isStaleObs(obs, now, airside)) return null;
-  if (prev && isTeleport(prev, obs, now)) return null;
+  // A projected point is a guess, and must never veto a real provider fix.
+  if (prev && !prev.extrapolated && isTeleport(prev, obs, now)) return null;
   const age = ageOf(obs, now);
   let score = 80 - age * 8;
   score += completeness(obs);
@@ -285,14 +288,16 @@ function commitTrack(hex: string, raw: AdsbRaw, provider: ProviderId, now: numbe
 }
 
 export function maybeExtrapolate(prev: TrackState, now: number, airside = false): AdsbRaw | null {
+  // Do not repeatedly coast a coasted point: doing so resets the gap clock.
+  if (prev.extrapolated) return null;
   const dt = (now - prev.at) / 1000;
   if (dt <= 0.15) {
     return { ...prev.raw, extrapolated: false, _fusion: { provider: prev.provider, extrapolated: false, ageSec: 0 } };
   }
   const cruise = !onGroundOf(prev.altBaro) && ((prev.gs ?? 0) >= 180 || (typeof prev.altBaro === "number" && prev.altBaro > 15_000));
   const maxGap = airside || !cruise ? GAP_EXTRAPOLATE_SEC : GAP_EXTRAPOLATE_ENROUTE_SEC;
-  if (dt > maxGap) return null;
-  if (prev.gs == null || prev.gs < 40 || prev.track == null) return null;
+  if (dt + (prev.raw._fusion?.ageSec ?? 0) > maxGap) return null;
+  if (prev.gs == null || prev.gs < 40 || prev.track == null || !Number.isFinite(prev.track)) return null;
   if (onGroundOf(prev.altBaro)) return null;
   const moved = destPoint({ lat: prev.lat, lon: prev.lon }, prev.track, (prev.gs / 3600) * dt);
   const raw: AdsbRaw = {
@@ -339,13 +344,13 @@ export function chooseBest(
     };
   }
   if (prev) {
-    const age = (now - prev.at) / 1000;
+    const age = (now - prev.at) / 1000 + (prev.raw._fusion?.ageSec ?? 0);
     const keep = airside || onGroundOf(prev.altBaro) ? STALE_KEEP_SEC : STALE_KEEP_ENROUTE_SEC;
     if (age <= keep) {
       return {
         ...prev.raw,
-        extrapolated: false,
-        _fusion: { provider: prev.provider, extrapolated: false, ageSec: age },
+        extrapolated: prev.extrapolated,
+        _fusion: { provider: prev.provider, extrapolated: prev.extrapolated, ageSec: age },
       };
     }
   }

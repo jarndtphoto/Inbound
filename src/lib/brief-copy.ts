@@ -25,6 +25,7 @@ const JARGON =
   /\b(SIGMET|AIRMET|PIREP|G-?AIRMET|METAR|TAF|NAS|OOOI|GDP|AFP|FL\d{2,3}|OUT\/OFF|IFR|LIFR|MVFR|VFR)\b/i;
 
 export type RideFacts = {
+  takeoffEstimateExpired?: boolean;
   q: string;
   iata: string;
   airline: string | null;
@@ -53,6 +54,7 @@ export type RideFacts = {
   inboundStatus?: string;
   rideLabel?: string;
   push: string | null;
+  pushKind?: string | null;
   taxiOutMin: number | null;
   taxiOutKind?: string | null;
   takeoff: string | null;
@@ -104,6 +106,7 @@ export type BriefSnap = {
   land: string | null;
   takeoff: string | null;
   push: string | null;
+  pushKind?: string | null;
   destGate: string | null;
   wx: string;
   worstChop: string | null;
@@ -226,12 +229,22 @@ function snapOf(d: RideFacts): BriefSnap {
   };
 }
 
+/** Older logs recorded broad stage changes as physical takeoff/landing events. */
+export function briefLogText(entry: BriefLogEntry): string {
+  if (entry.kind !== "stage") return entry.text;
+  if (entry.text === "Taking off") return "In-flight status update";
+  if (entry.text === "Landing") return "Arrival status update";
+  if (entry.text === "Arriving at the gate") return "At the destination gate";
+  return entry.text;
+}
+
 function stageLine(stage: string): string | null {
   if (stage === "push") return "Plane is at the gate";
-  if (stage === "taxi") return "Taxiing to the runway";
-  if (stage === "ride") return "Taking off";
-  if (stage === "arrival") return "Landing";
-  if (stage === "gate") return "Arriving at the gate";
+  if (stage === "departure_reported") return "Reported pushback — movement not yet confirmed";
+  if (stage === "taxi") return "On the move — pushback and taxi";
+  if (stage === "ride") return "In flight";
+  if (stage === "arrival") return "Approaching destination";
+  if (stage === "gate") return "At the destination gate";
   if (stage === "inbound") return "Still waiting on the inbound plane";
   return null;
 }
@@ -240,7 +253,7 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
   if (!prev) return [];
   const out: Omit<BriefLogEntry, "at">[] = [];
 
-  if (prev.stage !== next.stage) {
+  if (prev.stage !== next.stage && !(prev.stage === "arrival" && next.stage === "ride")) {
     const line = stageLine(next.stage);
     if (line) out.push({ kind: "stage", text: line });
   }
@@ -374,10 +387,12 @@ function inboundClause(d: RideFacts) {
 }
 
 function delayClause(d: RideFacts) {
+  if (d.push && d.pushKind === "actual") return `Pushback reported at ${d.push}.`;
+  const timing = d.pushKind === "scheduled" ? "Scheduled gate departure" : "Estimated gate departure";
   if (d.delayMin != null && d.delayMin >= 5) {
-    return d.push ? `Push is ${d.delayMin} minutes late at ${d.push}.` : `Push is ${d.delayMin} minutes late.`;
+    return d.push ? `${timing}: ${d.push}, ${d.delayMin} minutes later than scheduled.` : `Departure is estimated to be ${d.delayMin} minutes late.`;
   }
-  if (d.push) return `Push is ${d.push}.`;
+  if (d.push) return `${timing}: ${d.push}.`;
   if (d.typicalDelayMin != null && d.typicalDelayMin >= 25) {
     return `This flight often leaves about ${d.typicalDelayMin} minutes late even when the board still looks on time.`;
   }
@@ -395,6 +410,7 @@ function rideClause(d: RideFacts) {
   if (d.now === "arrival" || d.now === "gate") return "";
   const label = d.rideLabel || "Smooth";
   if (label === "Smooth") return "Ride looks smooth.";
+  if (label === "Weather coverage incomplete" || label === "Weather coverage unavailable") return `${label}.`;
   return `${label} on the remaining path.`;
 }
 
@@ -471,6 +487,25 @@ function composeLead(d: RideFacts) {
     return joinSentences([open, air, left, rideClause(d), destClause(d), taxiInClause(d)]);
   }
 
+  if (stage === "taxi" || stage === "departure_reported") {
+    return joinSentences([
+      open,
+      stage === "departure_reported"
+        ? "Pushback has been reported. Waiting for position data to confirm movement."
+        : "You're on the move — pushback or taxi before takeoff.",
+      d.push && d.pushKind === "actual" ? `Gate departure reported at ${d.push}.`
+        : d.push && d.pushKind === "estimated" ? `Movement first observed around ${d.push}; this time is approximate.`
+        : "Departure time is not yet confirmed.",
+      d.pushKind === "actual" && d.delayMin != null && d.delayMin >= 5 ? `Departure was ${d.delayMin} minutes later than scheduled.` : "",
+      d.takeoffEstimateExpired ? "Awaiting updated takeoff time." : d.takeoff ? `Estimated takeoff around ${d.takeoff}.` : "",
+      taxiOutClause(d),
+      originNas ? `${d.fromIata} delay: ${originNas}.` : "",
+      rideClause(d),
+      destClause(d),
+      taxiInClause(d),
+    ]);
+  }
+
   return joinSentences([
     open,
     inboundClause(d),
@@ -506,7 +541,7 @@ export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): Com
     ? previous.log
     : [{ at, kind: "update", text: "Filed briefing is up" }];
   const added = previous?.snap ? diffBriefLog(previous.snap, snap, d) : [];
-  if (previous && added.length === 0) return previous;
+  if (previous && added.length === 0 && lead === previous.lead && ac === previous.aircraft) return previous;
   const log = appendLog(seed, added, at);
   const why = whyChanged(previous?.snap, snap, d);
   return {

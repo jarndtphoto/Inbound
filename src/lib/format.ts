@@ -43,8 +43,8 @@ export function delayPhrase(min: number | null | undefined): string | null {
 export function agoLabel(at: number, fetching: boolean): string {
   if (fetching) return "Checking weather, chop, and times";
   const sec = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (sec < 8) return "Whole brief just updated";
-  if (sec < 60) return `Brief from ${sec}s ago`;
+  if (sec < 8) return "Flight data just updated";
+  if (sec < 60) return `Data from ${sec}s ago`;
   const min = Math.round(sec / 60);
-  return `Brief from ${min} min ago`;
+  return `Data from ${min} min ago`;
 }

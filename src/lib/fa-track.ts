@@ -1,5 +1,3 @@
-import { destPoint } from "./geo.ts";
-
 export function parseJsonObject(raw: string): Record<string, unknown> | null {
   if (typeof raw !== "string") return null;
   const start = raw.indexOf("{");
@@ -45,13 +43,31 @@ export function faAltFt(v: unknown): number | null {
   return v > 1000 ? v : v * 100;
 }
 
+// "Departed" can mean off-block / taxi-out, before wheels-up.
+export function hasAirborneStatus(status: string | null | undefined): boolean {
+  return /^(airborne|en[ -]?route|climbed)$/i.test(status?.trim() ?? "");
+}
+
+export function hasAirborneEvidence(aware: {
+  status?: string | null;
+  takeoff?: { actual?: number | null; estimated?: number | null; scheduled?: number | null } | null;
+  landing?: { actual?: number | null } | null;
+} | null, now = Date.now() / 1000): boolean {
+  if (!aware || aware.landing?.actual) return false;
+  const takeoff = aware.takeoff?.actual;
+  if (typeof takeoff === "number" && Number.isFinite(takeoff)) return takeoff > 0 && takeoff <= now + 30;
+  // Providers can label a flight airborne at gate departure. Estimated clocks
+  // are not wheels-up evidence; fresh aircraft observations are checked separately.
+  return false;
+}
+
 export function timeFracOf(aware: {
   status?: string | null;
   takeoff?: { actual?: number | null; estimated?: number | null; scheduled?: number | null } | null;
   landing?: { actual?: number | null; estimated?: number | null; scheduled?: number | null } | null;
   gateOut?: { actual?: number | null } | null;
 }): number {
-  const air = /airborne|en.?route|climbed|departed/i.test(aware?.status ?? "");
+  const air = hasAirborneStatus(aware?.status);
   const to = aware?.takeoff?.actual
     ?? (air ? (aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? aware?.gateOut?.actual) : null);
   if (!to) return 0;
@@ -102,24 +118,19 @@ export function liveFromAware(aware: {
   let last: FaTrackPt | null = null;
   for (let i = pts.length - 1; i >= 0; i--) {
     const p = pts[i];
-    if (p && typeof p.lat === "number" && typeof p.lon === "number") {
+    if (p && typeof p.lat === "number" && Number.isFinite(p.lat) && Math.abs(p.lat) <= 90 && typeof p.lon === "number" && Number.isFinite(p.lon) && Math.abs(p.lon) <= 180 && typeof p.t === "number" && Number.isFinite(p.t) && p.t > 0 && p.t <= Date.now() / 1000 + 30) {
       last = p;
       break;
     }
   }
   if (!last || typeof last.lat !== "number" || typeof last.lon !== "number") return null;
   const now = Date.now() / 1e3;
-  const age = last.t ? Math.max(0, now - last.t) : 0;
+  const age = Math.max(0, now - last.t!);
   if (age > 20 * 60) return null;
   let lat = last.lat;
   let lon = last.lon;
   const gs = last.gs ?? aware.gsKt ?? null;
   const hdg = last.track ?? aware.heading ?? null;
-  if (age > 20 && (gs ?? 0) > 80 && hdg != null && Number.isFinite(hdg)) {
-    const moved = destPoint({ lat, lon }, hdg, ((gs ?? 0) / 3600) * Math.min(age, 8 * 60));
-    lat = moved.lat;
-    lon = moved.lon;
-  }
   const altFt = last.alt ?? aware.altFt ?? null;
   const onGround = Boolean(last.ground) || ((altFt == null || altFt < 50) && (gs == null || gs < 40));
   return {
@@ -134,7 +145,7 @@ export function liveFromAware(aware: {
     track: hdg,
     onGround,
     phase: onGround ? ((gs ?? 0) >= 2 ? "taxi" : "parked") : ((altFt ?? 0) < 10000 ? "climb" : "cruise"),
-    extrapolated: age > 45,
+    extrapolated: false,
     seenSec: age,
   };
 }

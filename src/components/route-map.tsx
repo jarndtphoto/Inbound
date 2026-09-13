@@ -1,7 +1,9 @@
 import { formatDuration, formatMiles, haversineNm } from "@/lib/geo";
+import { upcomingStorms } from "@/lib/route-hazards";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
+import { GREAT_LAKES } from "@/lib/great-lakes";
 import { latToTileY, pickRadarTiles, tileXToLon, tileYToLat } from "@/lib/radar-tiles";
 import { WORLD_COUNTRY_RINGS } from "@/lib/world-country-lines";
 import { cn } from "@/lib/utils";
@@ -33,7 +35,7 @@ function mercY(lat: number) {
   return latToTileY(Math.max(-85, Math.min(85, lat)), 0);
 }
 
-function projectBox(minLon: number, maxLon: number, minLat: number, maxLat: number) {
+function projectBox(minLon: number, maxLon: number, minLat: number, maxLat: number, H = 800) {
   const innerW = W - PAD * 2;
   const innerH = H - PAD * 2;
   let x0 = mercX(minLon);
@@ -69,6 +71,39 @@ type RadarMaps = {
   radar: { past?: { time: number; path: string }[] };
 };
 
+function useRadarMaps() {
+  return useQuery({
+    queryKey: ["radar-maps"],
+    queryFn: async () => {
+      const res = await fetch("https://api.rainviewer.com/public/weather-maps.json", {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error("radar unavailable");
+      return (await res.json()) as RadarMaps;
+    },
+    staleTime: 2 * 60_000,
+    refetchInterval: 2 * 60_000,
+  });
+}
+
+function RadarStatus() {
+  const q = useRadarMaps();
+  const stamp = q.data?.radar.past?.at(-1)?.time;
+  const validStamp = typeof stamp === "number" && Number.isFinite(stamp) && stamp > 0;
+  const time = validStamp ? new Date(stamp * 1000).toLocaleString("en-US", {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    hour12: false, timeZone: "UTC",
+  }) : null;
+  return (
+    <p role="status" className="w-full text-xs leading-snug text-subtle">
+      RainViewer precipitation · {time ? `Frame ${time} UTC` : q.isPending ? "Loading…" : "Frame unavailable"}.
+      {q.isError ? " Update failed; any displayed frame is the last available." : ""}
+      {validStamp && Date.now() / 1000 - stamp > 20 * 60 ? " Frame is over 20 minutes old." : ""}
+      {" "}Coverage is mostly over land. Frame time applies to radar, not route forecasts.
+    </p>
+  );
+}
+
 function RadarLayer({
   minLon,
   maxLon,
@@ -84,16 +119,7 @@ function RadarLayer({
   sx: (lon: number) => number;
   sy: (lat: number) => number;
 }) {
-  const q = useQuery({
-    queryKey: ["radar-maps"],
-    queryFn: async () => {
-      const res = await fetch("https://api.rainviewer.com/public/weather-maps.json");
-      if (!res.ok) throw new Error("radar unavailable");
-      return (await res.json()) as RadarMaps;
-    },
-    staleTime: 5 * 60_000,
-    enabled: true,
-  });
+  const q = useRadarMaps();
 
   const frame = q.data?.radar.past?.at(-1);
   if (!frame || !q.data) return null;
@@ -110,7 +136,7 @@ function RadarLayer({
       if (w <= 1 || h <= 1) return null;
       return {
         key: `${t.z}-${t.x}-${t.y}`,
-        href: `${q.data!.host}${frame.path}/256/${t.z}/${t.x}/${t.y}/2/1_1.png`,
+        href: `${q.data!.host}${frame.path}/512/${t.z}/${t.x}/${t.y}/2/0_1.png`,
         x: sx(west),
         y: sy(north),
         w,
@@ -120,7 +146,7 @@ function RadarLayer({
     .filter((t): t is NonNullable<typeof t> => t != null);
 
   return (
-    <g opacity="0.55">
+    <g opacity="0.7">
       {tiles.map((t) => (
         <image key={t.key} href={t.href} x={t.x} y={t.y} width={t.w} height={t.h} preserveAspectRatio="none" />
       ))}
@@ -140,7 +166,7 @@ function clampView(next: { s: number; x: number; y: number }) {
   };
 }
 
-function useMapBoxZoom(resetKey: string) {
+function useMapBoxZoom(resetKey: string, H = 800) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ s: 1, x: 0, y: 0 });
   const viewRef = useRef(view);
@@ -177,11 +203,11 @@ function useMapBoxZoom(resetKey: string) {
         y: cy - ((cy - y) * ns) / s,
       }),
     );
-  }, []);
+  }, [H]);
 
   useEffect(() => {
     setView({ s: 1, x: 0, y: 0 });
-  }, [resetKey]);
+  }, [resetKey, H]);
 
   useEffect(() => {
     const el = boxRef.current;
@@ -281,7 +307,7 @@ function useMapBoxZoom(resetKey: string) {
       document.removeEventListener("gesturechange", blockPageGesture);
       document.removeEventListener("gestureend", blockPageGesture);
     };
-  }, []);
+  }, [H]);
 
   return { boxRef, s: view.s, x: view.x, y: view.y, reset, zoomBy };
 }
@@ -301,14 +327,14 @@ function pathRuns(samples: RouteSample[], progress: number) {
           cur = { chop, past, pts: [pt] };
           continue;
         }
-        const dx = pt.x - cur.pts[cur.pts.length - 1]!.x;
-        const dy = pt.y - cur.pts[cur.pts.length - 1]!.y;
-        const jump = Math.hypot(dx, dy);
-        if (cur.chop === chop && cur.past === past && jump < 240) {
+        // Split only at the longitude seam; zoom can make valid adjacent
+        // route samples hundreds of screen pixels apart.
+        const crossesSeam = Math.abs(s.lon - samples[i - 1]!.lon) > 180;
+        if (cur.chop === chop && cur.past === past && !crossesSeam) {
           cur.pts.push(pt);
         } else {
           if (cur.pts.length >= 2) out.push(cur);
-          cur = { chop, past, pts: jump < 240 ? [cur.pts[cur.pts.length - 1]!, pt] : [pt] };
+          cur = { chop, past, pts: !crossesSeam ? [cur.pts[cur.pts.length - 1]!, pt] : [pt] };
         }
       }
       if (cur && cur.pts.length >= 2) out.push(cur);
@@ -354,33 +380,53 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story }: { story: FlightStory }) {
+export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { from: number; to: number; ranges?: {from: number; to: number}[] } }) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [mapHeight, setMapHeight] = useState(800);
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !fixedViewport) return;
+    const observer = new ResizeObserver(() => {
+      if (frame.clientWidth && frame.clientHeight) setMapHeight(800 * frame.clientHeight / frame.clientWidth);
+    });
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [fixedViewport]);
+  const H = fixedViewport ? mapHeight : 800;
   const weatherOn = useFiled((s) => s.weatherOn);
   const setWeatherOn = useFiled((s) => s.setWeatherOn);
-  const zoom = useMapBoxZoom(`${story.callsign}:${story.origin.iata}:${story.dest.iata}`);
+  const zoom = useMapBoxZoom(`${story.callsign}:${story.origin.iata}:${story.dest.iata}`, H);
   const samples = story.route?.samples ?? [];
   if (samples.length < 2) return null;
 
-  const lats = samples.map((s) => s.lat).filter((n) => Number.isFinite(n));
-  const lons = samples.map((s) => s.lon).filter((n) => Number.isFinite(n));
-  if (Number.isFinite(story.origin.lat)) lats.push(story.origin.lat);
-  if (Number.isFinite(story.dest.lat)) lats.push(story.dest.lat);
-  if (Number.isFinite(story.origin.lon)) lons.push(story.origin.lon);
-  if (Number.isFinite(story.dest.lon)) lons.push(story.dest.lon);
-  if (story.aircraft && Number.isFinite(story.aircraft.lat)) lats.push(story.aircraft.lat);
-  if (story.aircraft && Number.isFinite(story.aircraft.lon)) lons.push(story.aircraft.lon);
+  // Forecast previews frame the affected segment, rather than the entire trip.
+  const focusSamples = weatherPreview
+    ? samples.filter(s => s.frac >= weatherPreview.from - 0.015 && s.frac <= weatherPreview.to + 0.015)
+    : samples;
+  const boundsSamples = focusSamples.length ? focusSamples : samples;
+  const lats = boundsSamples.map(s => s.lat).filter(Number.isFinite);
+  const lons = boundsSamples.map(s => s.lon).filter(Number.isFinite);
+  if (weatherPreview && lats.length === 1) { lats.push(lats[0]); lons.push(lons[0]); }
+  if (!weatherPreview) {
+    if (Number.isFinite(story.origin.lat)) lats.push(story.origin.lat);
+    if (Number.isFinite(story.dest.lat)) lats.push(story.dest.lat);
+    if (Number.isFinite(story.origin.lon)) lons.push(story.origin.lon);
+    if (Number.isFinite(story.dest.lon)) lons.push(story.dest.lon);
+    if (story.live && story.aircraft && Number.isFinite(story.aircraft.lat)) lats.push(story.aircraft.lat);
+    if (story.live && story.aircraft && Number.isFinite(story.aircraft.lon)) lons.push(story.aircraft.lon);
+  }
   if (lats.length < 2 || lons.length < 2) return null;
   let minLat = Math.min(...lats);
   let maxLat = Math.max(...lats);
   let minLon = Math.min(...lons);
   let maxLon = Math.max(...lons);
-  const latPad = Math.max((maxLat - minLat) * 0.22, 2.2);
-  const lonPad = Math.max((maxLon - minLon) * 0.18, 3);
+  const latPad = Math.max((maxLat - minLat) * 0.22, weatherPreview ? 0.7 : 2.2);
+  const lonPad = Math.max((maxLon - minLon) * 0.18, weatherPreview ? 1 : 3);
   minLat -= latPad;
   maxLat += latPad;
   minLon -= lonPad;
   maxLon += lonPad;
-  const proj = projectBox(minLon, maxLon, minLat, maxLat);
+  const proj = projectBox(minLon, maxLon, minLat, maxLat, H);
   minLat = proj.minLat;
   maxLat = proj.maxLat;
   minLon = proj.minLon;
@@ -391,7 +437,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
   const origin = { lat: story.origin.lat, lon: story.origin.lon };
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
   const ac = story.aircraft;
-  const hasFix = Boolean(ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
+  const hasFix = Boolean(story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
   const onField = Boolean(hasFix && ac?.onGround && haversineNm(ac, dest) < 8);
   const atGate = story.currentStage === "gate";
   const landed = atGate || onField;
@@ -407,41 +453,56 @@ export function RouteMap({ story }: { story: FlightStory }) {
       ? sy(ac!.lat)
       : sy(origin.lat);
   const rot = landed ? 0 : story.route.heading;
-  const future = samples.filter((s) => s.frac > progress + 0.08);
-  const firstBump = future.find((s) => s.chop !== "smooth");
-  const mid = future[Math.max(0, Math.floor(future.length * 0.45))];
-  const ticks = [firstBump, mid].filter((s, i, arr): s is NonNullable<typeof s> => {
-    if (!s) return false;
-    if (s.frac > 0.88) return false;
-    if (Math.abs(s.lon - dest.lon) + Math.abs(s.lat - dest.lat) < 2.8) return false;
-    return arr.findIndex((x) => x && Math.abs(x.frac - s.frac) < 0.04) === i;
-  });
+  const future = samples.filter(s => weatherPreview
+    ? s.frac >= weatherPreview.from && s.frac <= weatherPreview.to
+    : s.frac >= progress);
+  const areas: { start: RouteSample; end: RouteSample; label: string }[] = [];
+  for (const sample of future) {
+    const label = [sample.convective ? "Thunderstorms possible" : "",
+      sample.chop !== "smooth" ? turbLabel(sample.chop) : ""].filter(Boolean).join(" · ");
+    const previous = areas[areas.length - 1];
+    if (previous && previous.label === label) previous.end = sample;
+    else areas.push({start: sample, end: sample, label});
+  }
+  const takeoffAt = story.times.takeoffUnix;
+  const airborneNow = story.currentStage === "ride" || story.currentStage === "arrival";
+  const elapsedMin = airborneNow && story.times.takeoffKind === "actual" && takeoffAt != null
+    ? Math.max(0, (story.fetchedAt / 1000 - takeoffAt) / 60) : null;
+  const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
+    ? (story.times.landUnix - takeoffAt) / 60 : null;
+  const ticks = areas.filter(area => area.label).map(area => ({
+    ...area.start,
+    alertLabel: area.label,
+    durationMin: airborneNow ? area.end.etaMin - area.start.etaMin
+      : plannedMinutes == null ? null : (area.end.frac - area.start.frac) * plannedMinutes,
+    intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + area.start.etaMin
+      : plannedMinutes == null ? null : area.start.frac * plannedMinutes,
+  }));
   const fixes = samples.filter((s) => s.fix);
   const runs = pathRuns(samples, progress).build(sx, sy);
   const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
   const admin1 = ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
-  const hazards = (story.hazards ?? [])
-    .filter((h) => h.lat != null && h.lon != null && h.kind === "convective")
-    .slice(0, 6);
+  const lakes = GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
+  const hazards = upcomingStorms(story.hazards ?? []);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-surface">
+    <div className={cn("overflow-hidden rounded-xl border border-border bg-surface", fixedViewport && "flex h-full flex-col items-center")}>
       <div
-        ref={zoom.boxRef}
+        ref={(node) => { zoom.boxRef.current = node; frameRef.current = node; }}
         data-map-box
-        className="relative overflow-hidden select-none"
-        style={{ touchAction: "pan-y" }}
+        className={cn("relative overflow-hidden select-none", fixedViewport && "w-full min-h-0 flex-1")}
+        style={{ touchAction: fixedViewport ? "none" : "pan-y",  }}
       >
       <svg
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="xMidYMid meet"
-        className="block aspect-square h-auto w-full"
+        className={fixedViewport ? "block h-full w-full" : "block aspect-square h-auto w-full"}
         role="img"
         aria-label={`Route ${story.origin.iata} to ${story.dest.iata}`}
       >
         <rect width={W} height={H} className="fill-bg" />
         <g transform={`translate(${zoom.x} ${zoom.y}) scale(${zoom.s})`} strokeLinejoin="round" strokeLinecap="round">
-        {weatherOn && (
+        {(weatherOn || weatherPreview) && (
           <RadarLayer minLon={minLon} maxLon={maxLon} minLat={minLat} maxLat={maxLat} sx={sx} sy={sy} />
         )}
 
@@ -480,6 +541,15 @@ export function RouteMap({ story }: { story: FlightStory }) {
               />
             );
           })}
+          {lakes.map((lake) => (
+            <path
+              key={lake.name}
+              d={lake.rings.map((ring) => `${ring.map(([lo, la], i) => `${i ? "L" : "M"}${sx(lo).toFixed(1)} ${sy(la).toFixed(1)}`).join(" ")} Z`).join(" ")}
+              fillRule="evenodd"
+              className="fill-bg/95 stroke-fg/35"
+              strokeWidth="1.25"
+            />
+          ))}
         </g>
 
         {runs.map((run, i) => {
@@ -493,6 +563,13 @@ export function RouteMap({ story }: { story: FlightStory }) {
           );
         })}
 
+        {weatherPreview && (weatherPreview.ranges ?? [weatherPreview]).map((range, index) => {
+          const section = samples.filter(s => s.frac >= range.from && s.frac <= range.to);
+          return <g key={index} aria-label="Weather area for this forecast">
+            <polyline points={section.map(s => `${sx(s.lon)},${sy(s.lat)}`).join(" ")} fill="none" className="stroke-ifr" strokeWidth="18" opacity="0.55" />
+            {section.length === 1 && <circle cx={sx(section[0].lon)} cy={sy(section[0].lat)} r="12" className="fill-ifr" opacity="0.65" />}
+          </g>;
+        })}
         {fixes.map((s) => (
           <rect
             key={`fix-${s.frac}`}
@@ -520,39 +597,21 @@ export function RouteMap({ story }: { story: FlightStory }) {
                 className="fill-ifr/25 stroke-ifr/70"
                 strokeWidth="1"
               />
-              <text
-                x={cx + 13}
-                y={cy + 3.5}
-                className="fill-ifr"
-                fontSize="11"
-                fontFamily="IBM Plex Sans, system-ui, sans-serif"
-              >
-                Thunderstorms
-              </text>
+
             </g>
           );
         })}
 
-        {ticks.map((s) => (
-          <g key={`t-${s.frac}`}>
-            <circle cx={sx(s.lon)} cy={sy(s.lat)} r="2.6" className="fill-fg/80" />
-            <text
-              x={sx(s.lon) + 8}
-              y={sy(s.lat) + (s.chop === "smooth" ? 16 : -10)}
-              className="fill-muted"
-              fontSize="11"
-              fontFamily="IBM Plex Mono, ui-monospace, monospace"
-            >
-              {s.chop === "smooth"
-                ? formatDuration(s.etaMin)
-                : `${formatDuration(s.etaMin)} ${turbLabel(s.chop)}`}
-            </text>
+        {ticks.map((s, i) => (
+          <g key={s.frac} aria-label={`Weather marker ${i + 1}`}>
+            <circle cx={sx(s.lon)} cy={sy(s.lat)} r="10" className="fill-bg stroke-fg" strokeWidth="2" />
+            <text x={sx(s.lon)} y={sy(s.lat) + 4} textAnchor="middle" className="fill-fg" fontSize="12" fontWeight="700">{i + 1}</text>
           </g>
         ))}
 
-        <g transform={`translate(${ax} ${ay}) rotate(${rot})`}>
+        {hasFix && <g transform={`translate(${ax} ${ay}) rotate(${rot})`}>
           <polygon points="0,-10 8,11 -8,11" className="fill-fg stroke-bg" strokeWidth="1.4" />
-        </g>
+        </g>}
 
         <text
           x={sx(origin.lon)}
@@ -581,13 +640,13 @@ export function RouteMap({ story }: { story: FlightStory }) {
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {story.route.source === "track" ? "ACTUAL TRACK · FIXES" : "PLANNED PATH"}
+          {weatherPreview ? "FORECAST AREA" : story.route.source === "track" ? "ACTUAL TRACK · FIXES" : "PLANNED PATH"}
         </p>
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {atGate ? "At the gate" : landed ? "Landed" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
+          {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
         </p>
       </div>
-        {zoom.s > 1.02 ? (
+        {weatherPreview ? null : zoom.s > 1.02 ? (
           <button
             type="button"
             onClick={zoom.reset}
@@ -600,7 +659,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
             Pinch to zoom
           </p>
         )}
-        <div className="absolute right-3 bottom-3 z-10 flex gap-1">
+        <div style={weatherPreview ? { display: "none" } : undefined} className="absolute right-3 bottom-3 z-10 flex gap-1">
           <button
             type="button"
             aria-label="Zoom in"
@@ -620,29 +679,31 @@ export function RouteMap({ story }: { story: FlightStory }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
-        <Legend swatch="bg-accent" label="Smooth" />
-        <Legend swatch="bg-ifr" label="Light / moderate turbulence" />
-        <span className="inline-flex items-center gap-1.5">
-          <span className="size-2.5 rounded-full border border-ifr/70 bg-ifr/40" />
-          Thunderstorms
-        </span>
-        <button
-          type="button"
-          onClick={() => setWeatherOn(!weatherOn)}
-          className={cn(
-            "ml-auto inline-flex h-9 items-center gap-1.5 rounded-sm border px-2.5 font-mono text-xs tracking-wide",
-            weatherOn
-              ? "border-accent bg-surface-2 text-fg"
-              : "border-border bg-surface text-muted hover:text-fg",
-          )}
-        >
-          <CloudRain className="size-3.5" />
-          {weatherOn ? "Radar on" : "Live weather"}
-        </button>
-        {weatherOn ? (
-          <p className="w-full text-[11px] leading-snug text-subtle">Radar coverage is mostly over land.</p>
-        ) : null}
+      <div className="pointer-events-auto relative z-20 flex shrink-0 items-center gap-3 border-t border-border bg-surface px-3 py-1 text-xs text-fg">
+        <details className="group">
+          <summary className="cursor-pointer py-3 font-semibold">Weather alerts</summary>
+          <div className="absolute inset-x-0 bottom-full max-h-48 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
+            {ticks.map((s, i) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{i + 1}</span><div><p className="font-semibold">{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
+            
+            {!ticks.length && <p>No map alerts shown. Coverage may be incomplete.</p>}
+          </div>
+        </details>
+        <details>
+          <summary className="cursor-pointer py-3 font-semibold">Map details</summary>
+          <div className="absolute inset-x-0 bottom-full max-h-48 space-y-3 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
+            <div className="flex flex-wrap gap-3">
+              <Legend swatch="bg-accent" label="Smooth" />
+              <Legend swatch="bg-ifr" label="Light / moderate turbulence" />
+              <span>○ Thunderstorms</span>
+            </div>
+            {(weatherOn || weatherPreview) && <RadarStatus />}
+            {story.hazards.filter(h => h.remaining && h.validity).map(h => <p key={h.id}>{h.label} · {h.validity}</p>)}
+          </div>
+        </details>
+        {!weatherPreview && <button type="button" onClick={() => setWeatherOn(!weatherOn)} aria-pressed={weatherOn}
+          className="ml-auto inline-flex min-h-10 shrink-0 items-center gap-1 rounded-sm border border-border px-2 text-fg">
+          <CloudRain className="size-3.5" />{weatherOn ? "Radar on" : "Radar off"}
+        </button>}
       </div>
     </div>
   );

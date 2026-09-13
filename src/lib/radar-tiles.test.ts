@@ -27,7 +27,7 @@ describe("radar tiles", () => {
   it("still covers a short domestic hop at a tighter zoom", () => {
     const tiles = pickRadarTiles(-88.5, -86.5, 41.2, 42.4);
     assert.ok(tiles.length >= 1);
-    assert.ok(tiles[0]!.z >= 4);
+    assert.equal(tiles[0]!.z, 7);
     assert.equal(coversLon(tiles, -87.6), true);
   });
 

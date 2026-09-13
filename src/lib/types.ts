@@ -88,6 +88,7 @@ export type Hazard = {
   lat?: number;
   lon?: number;
   source?: "observed" | "advisory" | "forecast";
+  validity?: string;
 };
 
 export type NasDelay = {
@@ -223,6 +224,8 @@ export type WxBrief = {
 };
 
 export type FlightStory = {
+  departureMovement?: "reported" | "observed" | null;
+  weatherCoverage?: { failedSources: string[] };
   fetchedAt: number;
   query: string;
   callsign: string;

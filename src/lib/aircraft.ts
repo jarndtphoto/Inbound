@@ -70,6 +70,7 @@ export const AIRFRAMES: Record<string, Airframe> = {
 export const AIRLINES: Record<string, string> = {
   UAL: "United",
   AAL: "American",
+  AAY: "Allegiant",
   DAL: "Delta",
   SWA: "Southwest",
   JBU: "JetBlue",

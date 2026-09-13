@@ -159,14 +159,26 @@ describe("extrapolated flag", () => {
     assert.equal(fused[0]?.gs, 478);
   });
 
-  it("coasts an enroute track for a few minutes", () => {
+  it("stops projecting an enroute track after a short gap", () => {
     fuseProviderLists(
       [{ provider: "fi", ac: [ac({ lat: 30.2, lon: -140.4, gs: 480, track: 70, alt_baro: 35000, seen: 0 })] }],
       { now: T0, airside: false },
     );
     const coast = fuseProviderLists([], { now: T0 + 90_000, airside: false });
     assert.equal(coast.length, 1);
-    assert.equal(coast[0]?.extrapolated, true);
+    assert.equal(coast[0]?.extrapolated, false);
+    assert.equal(coast[0]?.lat, 30.2);
     assert.equal(coast[0]?.alt_baro, 35000);
+  });
+
+  it("never repeatedly projects an extrapolated point or rejects a real fix", () => {
+    fuseProviderLists([{ provider: "fi", ac: [ac({ lat: 30.2, lon: -140.4, gs: 480 })] }], { now: T0 });
+    const first = fuseProviderLists([], { now: T0 + 6000 });
+    const second = fuseProviderLists([], { now: T0 + 30_000 });
+    assert.ok((first[0]?.lon ?? -140.4) > -140.4);
+    assert.equal(second[0]?.lon, -140.4);
+    assert.equal(second[0]?._fusion?.ageSec, 30);
+    const fix = fuseProviderLists([{ provider: "lol", ac: [ac({ lat: 30.25, lon: -139.2, gs: 480 })] }], { now: T0 + 31_000 });
+    assert.equal(fix[0]?.lon, -139.2);
   });
 });

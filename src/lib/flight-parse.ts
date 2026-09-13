@@ -3,6 +3,7 @@ import { AIRLINES } from "./aircraft.ts";
 export const IATA_TO_ICAO: Record<string, string> = {
   UA: "UAL",
   AA: "AAL",
+  G4: "AAY",
   DL: "DAL",
   WN: "SWA",
   "9E": "EDV",
@@ -73,9 +74,9 @@ export function parseFlightQuery(raw: string): ParsedFlight | null {
   }
 
   const icaoNum = s.match(/^([A-Z]{3})(\d{1,4}[A-Z]?)$/);
-  if (icaoNum && (AIRLINES[icaoNum[1]] || IATA_TO_ICAO[icaoNum[1].slice(0, 2)])) {
-    const icao = AIRLINES[icaoNum[1]] ? icaoNum[1] : IATA_TO_ICAO[icaoNum[1].slice(0, 2)];
-    if (icao && AIRLINES[icao]) {
+  if (icaoNum && (AIRLINES[icaoNum[1]] || Object.values(IATA_TO_ICAO).includes(icaoNum[1]))) {
+    const icao = icaoNum[1];
+    if (icao) {
       const num = icaoNum[2];
       const iataLetter = Object.entries(IATA_TO_ICAO).find(([, v]) => v === icao)?.[0];
       return {
@@ -126,7 +127,7 @@ export function storyMatchesQuery(
 ): boolean {
   const want = parseFlightQuery(q);
   if (!want) return false;
-  if (story.query && compactIdent(story.query) === compactIdent(q)) return true;
+  if (!story.iata && !story.callsign && story.query && compactIdent(story.query) === compactIdent(q)) return true;
   const have =
     parseFlightQuery(story.iata ?? "") ?? parseFlightQuery(story.callsign ?? "");
   if (have && have.callsign === want.callsign) return true;

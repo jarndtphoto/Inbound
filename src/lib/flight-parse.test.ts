@@ -38,3 +38,18 @@ describe("regional codeshare idents", () => {
     );
   });
 });
+
+
+describe("airline identity isolation", () => {
+  it("resolves both Allegiant formats without switching to American", () => {
+    for (const q of ["G44417", "G4 4417", "AAY4417"]) {
+      assert.equal(parseFlightQuery(q)?.callsign, "AAY4417");
+      assert.equal(parseFlightQuery(q)?.iata, "G44417");
+    }
+    assert.equal(parseFlightQuery("AAX4417"), null);
+  });
+  it("rejects a wrong airline even when the original query was echoed", () => {
+    assert.equal(storyMatchesQuery({query:"AAY4417",iata:"AA4417",callsign:"AAL4417"}, "AAY4417"), false);
+    assert.equal(storyMatchesQuery({iata:"G4 4417",callsign:"AAY4417"}, "G44417"), true);
+  });
+});

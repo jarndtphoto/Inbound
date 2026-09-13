@@ -42,7 +42,7 @@ export function pickRadarTiles(
   const east = Math.max(minLon, maxLon);
   const south = Math.min(minLat, maxLat);
   const north = Math.max(minLat, maxLat);
-  for (const z of [6, 5, 4, 3]) {
+  for (const z of [7, 6, 5, 4, 3]) {
     const n = 2 ** z;
     const xs = spanIndexes(lonToTileX(west, z), lonToTileX(east, z), n);
     const ys = spanIndexes(latToTileY(north, z), latToTileY(south, z), n);

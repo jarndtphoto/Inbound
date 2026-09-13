@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { composeBrief, diffBriefLog, logManualRefresh, type RideFacts } from "./brief-copy.ts";
+import { briefLogText, composeBrief, diffBriefLog, logManualRefresh, type RideFacts } from "./brief-copy.ts";
 
 function facts(over: Partial<RideFacts> = {}): RideFacts {
   return {
@@ -71,10 +71,10 @@ describe("briefing update log", () => {
     b = composeBrief(facts({ now: "arrival" }), b);
     b = composeBrief(facts({ now: "gate" }), b);
     const texts = b.log.map((e) => e.text).join(" | ");
-    assert.match(texts, /Taxiing to the runway/);
-    assert.match(texts, /Taking off/);
-    assert.match(texts, /Landing/);
-    assert.match(texts, /Arriving at the gate/);
+    assert.match(texts, /On the move/);
+    assert.match(texts, /In flight/);
+    assert.match(texts, /Approaching destination/);
+    assert.match(texts, /At the destination gate/);
     assert.equal(JARGON.test(texts), false);
   });
 
@@ -92,7 +92,7 @@ describe("briefing update log", () => {
   it("ignores tiny schedule jitter", () => {
     let b = composeBrief(facts({ landUnix: 1_200_000, land: "11:04 AM" }));
     const next = composeBrief(facts({ landUnix: 1_200_000 + 90, land: "11:05 AM" }), b);
-    assert.equal(next, b);
+    assert.deepEqual(next.log, b.log);
   });
 
   it("logs material turbulence and thunderstorms without aviation codes", () => {
@@ -248,4 +248,44 @@ describe("briefing update log", () => {
     assert.match(lines[0].text, /thunderstorms/i);
     assert.equal(JARGON.test(lines[0].text), false);
   });
+});
+
+
+describe("on the move briefing", () => {
+  it("describes a recorded departure without obsolete inbound or future push wording", () => {
+    const brief = composeBrief(facts({now:"taxi",stage:"taxi",pushKind:"actual",delayMin:82,push:"9:42 PM CDT",takeoff:"10:33 PM CDT"}));
+    assert.match(brief.lead, /on the move/i);
+    assert.match(brief.lead, /Gate departure reported at 9:42 PM CDT/);
+    assert.doesNotMatch(brief.lead, /Inbound|Push is/);
+    assert.match(brief.lead, /Estimated takeoff around 10:33 PM CDT/);
+  });
+});
+
+it("does not call an estimated movement time a reported departure", () => {
+ const b = composeBrief(facts({now:"taxi",pushKind:"estimated"}));
+ assert.match(b.lead, /first observed around/);
+ assert.doesNotMatch(b.lead, /Gate departure reported/);
+});
+
+
+it("refreshes current text even for changes below the history thresholds", () => {
+ const before = composeBrief(facts({taxiInMin:10}));
+ const after = composeBrief(facts({taxiInMin:12}), before);
+ assert.match(after.lead, /taxi in 12 minutes/i);
+ assert.equal(after.log.length, before.log.length);
+ assert.ok((after.liveAt ?? 0) >= (before.liveAt ?? 0));
+});
+
+
+describe("UA2762 approach status fluctuations", () => {
+ it("does not record another takeoff when approach is reassessed as flight", () => {
+  const first = composeBrief(facts({now:"arrival",stage:"arrival"}));
+  const next = composeBrief(facts({now:"ride",stage:"ride"}), first);
+  assert.equal(next.log.filter(e => e.kind === "stage").length, 0);
+  assert.doesNotMatch(next.lead, /taking off/i);
+ });
+ it("labels legacy stage entries without claiming physical takeoff or touchdown", () => {
+  assert.equal(briefLogText({at:1,kind:"stage",text:"Taking off"}), "In-flight status update");
+  assert.equal(briefLogText({at:1,kind:"stage",text:"Landing"}), "Arrival status update");
+ });
 });

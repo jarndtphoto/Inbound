@@ -1,0 +1,360 @@
+{
+  "ident": "UAL1532",
+  "iataIdent": "UA1532",
+  "flightStatus": "airborne",
+  "origin": {
+    "TZ": ":America/Chicago",
+    "isValidAirportCode": true,
+    "isCustomGlobalAirport": false,
+    "altIdent": null,
+    "iata": "ORD",
+    "friendlyName": "Chicago O'Hare Intl",
+    "friendlyLocation": "Chicago, IL",
+    "coord": [
+      -87.9081,
+      41.9769
+    ],
+    "isLatLon": false,
+    "icao": "KORD",
+    "gate": "B19",
+    "terminal": "1",
+    "delays": null
+  },
+  "destination": {
+    "TZ": ":America/Chicago",
+    "isValidAirportCode": true,
+    "isCustomGlobalAirport": false,
+    "altIdent": null,
+    "iata": "MSY",
+    "friendlyName": "Louis Armstrong New Orleans International Airport",
+    "friendlyLocation": "New Orleans, LA",
+    "coord": [
+      -90.259,
+      29.9933
+    ],
+    "isLatLon": false,
+    "icao": "KMSY",
+    "gate": "C7",
+    "terminal": null,
+    "delays": null
+  },
+  "gateDepartureTimes": {
+    "scheduled": 1789227420,
+    "estimated": 1789231200,
+    "actual": 1789231380
+  },
+  "takeoffTimes": {
+    "scheduled": 1789228020,
+    "estimated": 1789232580,
+    "actual": null
+  },
+  "landingTimes": {
+    "scheduled": 1789234620,
+    "estimated": 1789239180,
+    "actual": null
+  },
+  "gateArrivalTimes": {
+    "scheduled": 1789236540,
+    "estimated": 1789239360,
+    "actual": null
+  },
+  "aircraft": {
+    "type": "A320",
+    "lifeguard": false,
+    "heavy": false,
+    "tail": null,
+    "owner": null,
+    "ownerLocation": null,
+    "owner_type": null,
+    "canMessage": false,
+    "friendlyType": "Airbus A320 (twin-jet)",
+    "typeDetails": {
+      "manufacturer": "Airbus",
+      "model": "A320",
+      "type": "twin-jet",
+      "engCount": "2",
+      "engType": "jet"
+    }
+  },
+  "flightPlan": {
+    "speed": 468,
+    "altitude": 340,
+    "route": "BACEN BLOKR BEKKI ENL MEMFS IZAAC MCB TRSSH2",
+    "directDistance": 729,
+    "plannedDistance": null,
+    "departure": 1789228020,
+    "ete": 6600,
+    "fuelBurn": {
+      "gallons": 2000,
+      "pounds": 13000
+    }
+  },
+  "altitude": null,
+  "groundspeed": null,
+  "heading": null,
+  "coord": null,
+  "track": null,
+  "waypoints": [
+    [
+      -87.91,
+      41.98
+    ],
+    [
+      -87.92,
+      41.91
+    ],
+    [
+      -87.93,
+      41.88
+    ],
+    [
+      -87.94,
+      41.81
+    ],
+    [
+      -87.94,
+      41.81
+    ],
+    [
+      -87.96,
+      41.73
+    ],
+    [
+      -87.96,
+      41.72
+    ],
+    [
+      -87.99,
+      41.58
+    ],
+    [
+      -88.03,
+      41.42
+    ],
+    [
+      -88.03,
+      41.41
+    ],
+    [
+      -88.03,
+      41.41
+    ],
+    [
+      -88.04,
+      41.36
+    ],
+    [
+      -88.06,
+      41.32
+    ],
+    [
+      -88.08,
+      41.25
+    ],
+    [
+      -88.09,
+      41.22
+    ],
+    [
+      -88.14,
+      41.04
+    ],
+    [
+      -88.2,
+      40.83
+    ],
+    [
+      -88.24,
+      40.7
+    ],
+    [
+      -88.28,
+      40.56
+    ],
+    [
+      -88.28,
+      40.55
+    ],
+    [
+      -88.35,
+      40.32
+    ],
+    [
+      -88.37,
+      40.27
+    ],
+    [
+      -88.42,
+      40.16
+    ],
+    [
+      -88.49,
+      40
+    ],
+    [
+      -88.51,
+      39.94
+    ],
+    [
+      -88.61,
+      39.71
+    ],
+    [
+      -88.66,
+      39.59
+    ],
+    [
+      -89.03,
+      38.73
+    ],
+    [
+      -89.16,
+      38.42
+    ],
+    [
+      -89.24,
+      38.08
+    ],
+    [
+      -89.41,
+      37.41
+    ],
+    [
+      -89.7,
+      36.23
+    ],
+    [
+      -89.84,
+      35.63
+    ],
+    [
+      -89.98,
+      35.02
+    ],
+    [
+      -90.03,
+      34.75
+    ],
+    [
+      -90.16,
+      34.1
+    ],
+    [
+      -90.28,
+      33.46
+    ],
+    [
+      -90.27,
+      32.11
+    ],
+    [
+      -90.26,
+      31.84
+    ],
+    [
+      -90.26,
+      31.79
+    ],
+    [
+      -90.26,
+      31.73
+    ],
+    [
+      -90.26,
+      31.65
+    ],
+    [
+      -90.26,
+      31.49
+    ],
+    [
+      -90.26,
+      31.44
+    ],
+    [
+      -90.26,
+      31.3
+    ],
+    [
+      -90.25,
+      31.24
+    ],
+    [
+      -90.23,
+      30.89
+    ],
+    [
+      -90.23,
+      30.88
+    ],
+    [
+      -90.22,
+      30.79
+    ],
+    [
+      -90.22,
+      30.78
+    ],
+    [
+      -90.21,
+      30.69
+    ],
+    [
+      -90.21,
+      30.62
+    ],
+    [
+      -90.21,
+      30.61
+    ],
+    [
+      -90.21,
+      30.58
+    ],
+    [
+      -90.19,
+      30.41
+    ],
+    [
+      -90.19,
+      30.4
+    ],
+    [
+      -90.18,
+      30.24
+    ],
+    [
+      -90.18,
+      30.23
+    ],
+    [
+      -90.18,
+      30.21
+    ],
+    [
+      -90.19,
+      30.19
+    ],
+    [
+      -90.2,
+      30.15
+    ],
+    [
+      -90.2,
+      30.15
+    ],
+    [
+      -90.22,
+      30.1
+    ],
+    [
+      -90.23,
+      30.07
+    ],
+    [
+      -90.26,
+      29.99
+    ]
+  ],
+  "cancelled": false
+}

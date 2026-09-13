@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
 import { AIRPORT_BY_ICAO, airportByIata, airportByIcao } from "./airports";
 import { IATA_TO_ICAO, displayIata, parseFlightQuery } from "./flight-parse";
@@ -20,11 +21,13 @@ import {
 } from "./geo";
 import { decodeMetar } from "./metar";
 import {
+	advisoryValidAt,
 	decodeTafPassenger,
 	digestWx,
 	gairmetApplies,
 	gairmetChop as gairmetChopOf,
 	pirepAltFt,
+	pirepRouteBounds,
 	pirepChop as pirepChopOf,
 	pirepMatchesSample,
 	rememberFiledWx,
@@ -32,7 +35,7 @@ import {
 	corridorStations,
 	wxDeltas,
 } from "./wx-brief";
-import { faAltFt, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
+import { faAltFt, hasAirborneEvidence, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
 import {
 	fetchAround,
 	fetchByCallsign,
@@ -53,18 +56,17 @@ function cached(key, ttlMs, fn) {
 	if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.value);
 	const pending = inflight.get(key);
 	if (pending) return pending;
-	const p = fn().then((value) => {
+	let timer;
+	const deadline = new Promise((_, reject) => {
+		timer = setTimeout(() => reject(new Error("Flight data request timed out. Please try again.")), 30000);
+	});
+	const p = Promise.race([Promise.resolve().then(fn), deadline]).then((value) => {
 		const empty = value == null || (Array.isArray(value) && value.length === 0);
-		cache.set(key, {
-			at: Date.now(),
-			value,
-			ttl: empty ? Math.min(1200, ttlMs) : ttlMs
-		});
-		inflight.delete(key);
+		cache.set(key, { at: Date.now(), value, ttl: empty ? Math.min(1200, ttlMs) : ttlMs });
 		return value;
-	}).catch((err) => {
-		inflight.delete(key);
-		throw err;
+	}).finally(() => {
+		clearTimeout(timer);
+		if (inflight.get(key) === p) inflight.delete(key);
 	});
 	inflight.set(key, p);
 	return p;
@@ -450,8 +452,8 @@ function coastTracePt(pt) {
 	const age = Math.max(0, now - pt.t);
 	let lat = pt.lat;
 	let lon = pt.lon;
-	if (age > 25 && (pt.gs ?? 0) > 80 && pt.track != null && Number.isFinite(pt.track)) {
-		const moved = destPoint(pt, pt.track, (pt.gs / 3600) * Math.min(age, 8 * 60));
+	if (age > 0 && age <= 20 && (pt.gs ?? 0) > 80 && pt.track != null && Number.isFinite(pt.track)) {
+		const moved = destPoint(pt, pt.track, (pt.gs / 3600) * age);
 		lat = moved.lat;
 		lon = moved.lon;
 	}
@@ -492,8 +494,8 @@ function restoreKin(identKey, live, dest, aware) {
 		const age = (Date.now() - prev.at) / 1000;
 		let lat = prev.lat;
 		let lon = prev.lon;
-		if (age > 25 && (prev.gsKt ?? 0) > 80 && prev.track != null) {
-			const moved = destPoint(prev, prev.track, (prev.gsKt / 3600) * Math.min(age, 8 * 60));
+		if (age > 0 && age <= 20 && (prev.gsKt ?? 0) > 80 && prev.track != null && Number.isFinite(prev.track)) {
+			const moved = destPoint(prev, prev.track, (prev.gsKt / 3600) * age);
 			lat = moved.lat;
 			lon = moved.lon;
 		}
@@ -583,19 +585,21 @@ function stillOnField(live, origin) {
 }
 function flightBegun(live, origin) {
 	if (!live) return false;
-	const gs = live.gsKt ?? 0;
-	if (gs >= 60) return true;
-	if (gs < 60 && stillOnField(live, origin)) return false;
+	// Ground speed alone cannot establish takeoff: surface receivers regularly
+	// report a fast roll (or a noisy speed) before the wheels leave the runway.
 	if (live.onGround) return false;
+	const gs = live.gsKt ?? 0;
 	const agl = (live.altFt ?? 0) - fieldElev(origin);
-	return agl > 400;
+	if (agl > 400) return true;
+	if (stillOnField(live, origin)) return false;
+	return gs >= 90 && Boolean(origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) > 3);
 }
-function motionFromTrace(points, origin) {
+export function motionFromTrace(points, origin) {
 	if (!points?.length || !origin) return { pushed: false, taxiing: false, flying: false };
 	const now = Date.now() / 1e3;
-	const recent = points.filter((p) => now - p.t < 18 * 60 && haversineNm(p, origin) < 8);
-	const last = (recent.length ? recent : points)[ (recent.length ? recent : points).length - 1 ];
-	if (!last) return { pushed: false, taxiing: false, flying: false };
+	const recent = points.filter((p) => p.t <= now && now - p.t < 18 * 60 && haversineNm(p, origin) < 8);
+	const last = recent[recent.length - 1];
+	if (!last || now - last.t > 30) return { pushed: false, taxiing: false, flying: false };
 	const lastGs = last.gs ?? 0;
 	const lastAlt = last.alt ?? 0;
 	const lastGround = Boolean(last.ground) || lastAlt < 200;
@@ -607,8 +611,8 @@ function motionFromTrace(points, origin) {
 		const d = haversineNm(first, p);
 		if (d > maxDist) maxDist = d;
 	}
-	const taxiing = lastGround && (maxDist > 0.10 || lastGs >= 4);
-	const pushed = lastGround && (maxDist > 0.03 || lastGs >= 1.5 || taxiing);
+	const taxiing = lastGround && (maxDist > 0.10 || (lastGs >= 8 && maxDist > 0.05));
+	const pushed = lastGround && (maxDist > 0.05 || (lastGs >= 4 && maxDist > 0.03));
 	return { pushed, taxiing, flying };
 }
 function callsignVariants(callsign) {
@@ -667,9 +671,23 @@ function rawMatchesQuery(raw, parsed, aware) {
 	const fl = String(raw.flight ?? "").replace(/\s/g, "").toUpperCase();
 	const r = String(raw.r ?? "").replace(/[-\s]/g, "").toUpperCase();
 	const tail = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
+	// A reused or incorrect callsign cannot override the assigned aircraft.
+	if (tail && r && r !== tail) return false;
 	if (flightIdentOk(fl, parsed, aware)) return true;
 	if (tail && r === tail) return true;
 	return false;
+}
+function liveFitsLeg(live, aware, origin) {
+	if (!live) return false;
+	const assigned = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
+	const observed = String(live.registration ?? "").replace(/[-\s]/g, "").toUpperCase();
+	if (assigned && observed && assigned !== observed) return false;
+	const expected = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled;
+	if (!aware?.takeoff?.actual && expected && expected > Date.now() / 1e3 + 5 * 60 && !live.onGround && origin && haversineNm(live, origin) > 25) {
+		// A distant flight with this number cannot be the leg still awaiting departure.
+		return false;
+	}
+	return true;
 }
 function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex) {
 	if (!near?.length || !origin) return null;
@@ -693,6 +711,7 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex)
 		if (dOrig > maxNm && dDest > maxNm) continue;
 		const fl = String(a.flight ?? "").replace(/\s/g, "").toUpperCase();
 		const r = String(a.r ?? "").replace(/[-\s]/g, "").toUpperCase();
+		if (tail && r && r !== tail) continue;
 		const hex = String(a.hex ?? "").toLowerCase();
 		if (lockedHex && hex === String(lockedHex).toLowerCase() && rawMatchesQuery(a, parsed, aware)) locked = a;
 		if (vars.has(fl)) return a;
@@ -718,7 +737,8 @@ async function adsbByCallsign(callsign) {
 		const iata = displayIata(u, null).replace(/\s/g, "");
 		const idents = [...new Set([u, iata])].filter(Boolean).slice(0, 2);
 		const packs = (await Promise.all(idents.map((v) => fetchByCallsign(v)))).flat();
-		return fusePacks(packs, false)[0] ?? null;
+		const variants = new Set(callsignVariants(u));
+		return fusePacks(packs, false).find((a) => variants.has(String(a.flight ?? "").replace(/\s/g, "").toUpperCase())) ?? null;
 	});
 }
 async function adsbByReg(reg) {
@@ -726,7 +746,7 @@ async function adsbByReg(reg) {
 	if (!u) return null;
 	return cached(`reg4:${u}`, 2000, async () => {
 		const packs = await fetchByReg(u);
-		return fusePacks(packs, false)[0] ?? null;
+		return fusePacks(packs, false).find((a) => String(a.r ?? "").replace(/[-\s]/g, "").toUpperCase() === u) ?? null;
 	});
 }
 async function adsbAround(lat, lon, dist) {
@@ -762,10 +782,11 @@ async function loadRoute(callsign) {
 }
 function asTimes(v) {
 	const o = v ?? {};
+	const actual = typeof o.actual === "number" && Number.isFinite(o.actual) && o.actual > 0 && o.actual <= Date.now() / 1e3 + 30 ? o.actual : null;
 	return {
 		scheduled: typeof o.scheduled === "number" ? o.scheduled : null,
 		estimated: typeof o.estimated === "number" ? o.estimated : null,
-		actual: typeof o.actual === "number" ? o.actual : null
+		actual
 	};
 }
 function bestUnix(t) {
@@ -908,13 +929,20 @@ function typicalTaxiFromLog(f) {
 		inn: medianMin(inns.slice(0, 8))
 	};
 }
-function pickTaxi(start, end, explicit, typical) {
+export function pickTaxi(start, end, explicit, typical) {
 	if (start.actual && end.actual && end.actual > start.actual) {
 		const m = Math.round((end.actual - start.actual) / 60);
 		if (m >= 2 && m <= 180) return {
 			min: m,
 			kind: "measured"
 		};
+	}
+	// Current endpoint estimates outrank a generic filed/typical taxi duration.
+	const currentStart = start.actual ?? start.estimated;
+	const currentEnd = end.actual ?? end.estimated;
+	if (currentStart != null && currentEnd != null && currentEnd > currentStart) {
+		const minutes = Math.round((currentEnd - currentStart) / 60);
+		if (minutes >= 1 && minutes <= 180) return { min: minutes, kind: "posted" };
 	}
 	if (explicit != null) return {
 		min: explicit,
@@ -1066,26 +1094,46 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 		faTrack
 	};
 }
-async function fetchAwarePage(url, fallbackIdent, withInbound, redirect = "follow") {
+export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect = "follow", historyFollowed = false) {
 	const res = await fetch(url, {
 		headers: {
 			"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 			Accept: "text/html"
 		},
 		redirect,
-		signal: AbortSignal.timeout(8e3)
+		signal: AbortSignal.timeout(12e3)
 	});
 	if (res.status >= 300 && res.status < 400) {
 		const stub = stubAwareFromHistory(res.headers.get("location"), fallbackIdent);
-		if (stub) return stub;
+		if (stub) {
+			// Read the exact dated instance, never the current flight-number page.
+			const target = new URL(res.headers.get("location"), url);
+			if (!historyFollowed && target.origin === "https://www.flightaware.com"
+				&& target.pathname.startsWith(`/live/flight/${stub.ident}/history/`)) {
+				const detail = await safe(fetchAwarePage(target.href, fallbackIdent, withInbound, "manual", true), null);
+				if (detail && detail.ident === stub.ident && detail.originIcao === stub.originIcao
+					&& detail.destIcao === stub.destIcao) return detail;
+			}
+			return { ...stub, routeOnly: true };
+		}
 	}
-	if (!res.ok) return null;
-	const raw = (await res.text()).split("trackpollBootstrap = ")[1];
-	if (!raw) return null;
+	if (!res.ok) throw new Error(`Current flight route unavailable: schedule provider returned HTTP ${res.status}. Please try again shortly.`);
+	const html = await res.text();
+	const raw = html.split("trackpollBootstrap = ")[1];
+	if (!raw) {
+		const title = (html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] || "").toLowerCase();
+		const code = /just a moment|access denied|verify.*human|attention required/.test(title)
+			? "FLIGHT_PROVIDER_ACCESS_PAGE"
+			: /sign in|log in/.test(title) ? "FLIGHT_PROVIDER_SIGNIN"
+			: html.includes("trackpollBootstrap") ? "FLIGHT_PROVIDER_FORMAT"
+			: "FLIGHT_PROVIDER_NO_EMBEDDED_DATA";
+		console.error("[flight.provider]", { code, status: res.status, hasBootstrap: html.includes("trackpollBootstrap") });
+		throw new Error(code);
+	}
 	const flights = parseJsonObject(raw)?.flights;
-	if (!flights) return null;
+	if (!flights) throw new Error("FLIGHT_PROVIDER_INVALID_DATA");
 	const f = flights[Object.keys(flights)[0] ?? ""];
-	if (!f) return null;
+	if (!f) throw new Error("FLIGHT_PROVIDER_EMPTY_DATA");
 	return parseAwareRecord(f, fallbackIdent, withInbound);
 }
 function stubAwareFromHistory(loc, fallbackIdent) {
@@ -1104,7 +1152,10 @@ function stubAwareFromHistory(loc, fallbackIdent) {
 	return {
 		ident: ident || fallbackIdent,
 		iataIdent: parsed?.iata ?? null,
-		status: "arrived",
+		// A canonical history URL identifies a flight instance; it does not prove
+		// that the aircraft has arrived. Live ADS-B or actual arrival timestamps
+		// must establish landing and gate state.
+		status: "",
 		originIata: origin?.iata ?? m[4].slice(1),
 		originIcao: origin?.icao ?? m[4].toUpperCase(),
 		originName: origin?.name ?? null,
@@ -1233,18 +1284,19 @@ async function loadTaf(icao) {
 async function loadHazards() {
 	return cached("hazards", 22e3, async () => {
 		const [gairmet, sigmet, pirep, cwa, tcf] = await Promise.all([
-			safe(fetchJson("https://aviationweather.gov/api/data/gairmet?format=geojson").then((d) => d.features ?? []), []),
-			safe(fetchJson("https://aviationweather.gov/api/data/airsigmet?format=geojson").then((d) => d.features ?? []), []),
-			safe(fetchJson("https://aviationweather.gov/api/data/pirep?format=geojson").then((d) => d.features ?? []), []),
-			safe(fetchJson("https://aviationweather.gov/api/data/cwa?format=geojson").then((d) => d.features ?? []), []),
-			safe(fetchJson("https://aviationweather.gov/api/data/tcf?format=geojson").then((d) => d.features ?? []), [])
+			safe(fetchJson("https://aviationweather.gov/api/data/gairmet?format=geojson").then((d) => d.features ?? []), null),
+			safe(fetchJson("https://aviationweather.gov/api/data/airsigmet?format=geojson").then((d) => d.features ?? []), null),
+			Promise.resolve([]),
+			safe(fetchJson("https://aviationweather.gov/api/data/cwa?format=geojson").then((d) => d.features ?? []), null),
+			safe(fetchJson("https://aviationweather.gov/api/data/tcf?format=geojson").then((d) => d.features ?? []), null)
 		]);
 		return {
-			gairmet,
-			sigmet,
+			gairmet: gairmet ?? [],
+			sigmet: sigmet ?? [],
 			pirep,
-			cwa,
-			tcf
+			cwa: cwa ?? [],
+			tcf: tcf ?? [],
+			failedSources: [["Turbulence advisories", gairmet], ["Storm advisories", sigmet], ["Local advisories", cwa], ["Storm forecasts", tcf]].filter(([, data]) => data == null).map(([name]) => name)
 		};
 	});
 }
@@ -1602,6 +1654,9 @@ function timesOf(aware, origin, dest) {
 	const arriveLate = (arriveDelayMin ?? 0) >= 5;
 	const taxiOut = pickTaxi(aware.gateOut, aware.takeoff, aware.filedTaxiOutMin, aware.typicalTaxiOutMin);
 	const taxiIn = pickTaxi(aware.landing, aware.gateIn, aware.filedTaxiInMin, aware.typicalTaxiInMin);
+	const gateEta = !aware.gateIn.actual && ld && gi != null && gi <= ld
+		? ld + Math.max(1, taxiIn.min ?? 10) * 60
+		: gi;
 	return {
 		push: clockAt(go, otz),
 		takeoff: clockAt(to, otz),
@@ -1618,7 +1673,7 @@ function timesOf(aware, origin, dest) {
 		delayMin,
 		arriveDelayMin,
 		typicalDelayMin,
-		pushed: false,
+		pushed: Boolean(aware.gateOut.actual),
 		airborne: Boolean(aware.takeoff.actual),
 		pushUnix: go,
 		takeoffUnix: to,
@@ -1629,9 +1684,9 @@ function timesOf(aware, origin, dest) {
 		pushKind: stampKind(aware.gateOut) ?? (go ? "scheduled" : null),
 		takeoffKind: stampKind(aware.takeoff) ?? (to ? "scheduled" : null),
 		landKind: stampKind(aware.landing) ?? (ld ? "scheduled" : null),
-		gateKind: stampKind(aware.gateIn) ?? (gi ? "scheduled" : null),
-		gate: clockAt(gi, dtz),
-		gateUnix: gi
+		gateKind: gateEta !== gi ? "estimated" : stampKind(aware.gateIn) ?? (gi ? "scheduled" : null),
+		gate: clockAt(gateEta, dtz),
+		gateUnix: gateEta
 	};
 }
 function inboundLanded(inb) {
@@ -1742,7 +1797,7 @@ async function adsbByHex(hex) {
 	if (!/^[0-9a-f]{6}$/.test(id)) return null;
 	return cached(`hex4:${id}`, 2000, async () => {
 		const packs = await fetchByHex(id);
-		return fusePacks(packs, false)[0] ?? null;
+		return fusePacks(packs, false).find((a) => String(a.hex ?? "").toLowerCase() === id) ?? null;
 	});
 }
 function buildInbound(args) {
@@ -1852,17 +1907,25 @@ function buildInbound(args) {
 		watch
 	};
 }
-function currentStageOf(args) {
+export function currentStageOf(args) {
 	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed, faAirborne, taxiHint, distPark, parkedAtGate } = args;
 	if (parkedAtGate) return "gate";
 	if (ourLanded || ourLandingActual) return "arrival";
-	if (!flightBegun(live, origin) && taxiHint && !faAirborne) return "taxi";
-	if (!flightBegun(live, origin) && pushed && !(faAirborne || Boolean(ourTakeoffActual))) return "push";
+	// A surface position is not evidence of arrival at the departure gate.
+	// Keep the main stage aligned with the identified inbound leg until there
+	// is departure evidence, regardless of whether a position feed drops out.
+	if (!pushed && !faAirborne && !ourTakeoffActual
+		&& ["airborne", "watching", "at_field"].includes(inboundStatus)) return "inbound";
+	const freshTaxiMovement = Boolean(pushed && live?.onGround && origin
+		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) >= 8
+		&& haversineNm(live, origin) < 10);
+	if (!flightBegun(live, origin) && (taxiHint || freshTaxiMovement) && !faAirborne) return "taxi";
+	if (!flightBegun(live, origin) && pushed && !(faAirborne || Boolean(ourTakeoffActual))) return "taxi";
 	const atOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const begun = flightBegun(live, origin);
 	const taxiing = Boolean(
 		taxiHint ||
-		(live && atOrigin && ((live.gsKt ?? 0) >= 2 || live.phase === "taxi" || (distPark ?? 0) >= 0.08))
+		(live && live.onGround && !live.extrapolated && (live.seenSec ?? 999) <= 30 && atOrigin && ((live.gsKt ?? 0) >= 4 || (distPark ?? 0) >= 0.08))
 	);
 	if (live && atOrigin && !begun) {
 		if (taxiing) return "taxi";
@@ -1881,7 +1944,8 @@ function currentStageOf(args) {
 	}
 	if (atOrigin && live) return taxiing ? "taxi" : "push";
 	if (inboundStatus === "airborne" || inboundStatus === "watching" || inboundStatus === "at_field") return "inbound";
-	if (inboundStatus === "complete" || pushed) return "push";
+	if (pushed) return "taxi";
+	if (inboundStatus === "complete") return "push";
 	return "inbound";
 }
 async function hydrateField(base) {
@@ -1978,18 +2042,19 @@ function buildStages(args) {
 	return {
 		push: {
 			state: state("push"),
-			title: pushed ? "Pushback" : `At the gate · ${origin.iata}`,
-			body: pushed ? (times.push ? `Pushback at ${times.push}.` : "Pushback.") : (times.push ? `Push ${times.push}.` : ""),
+			title: `At the gate · ${origin.iata}`,
+			body: times.push ? `${pushed ? "Departure" : "Estimated push"} ${times.push}.` : "",
 			watchouts: []
 		},
 		taxi: {
 			state: state("taxi"),
-			title: current === "ride" || current === "arrival" || current === "gate" ? "Taxied" : `Taxi at ${origin.iata}`,
-			body: taxiingNow
-				? "Taxiing."
-				: current === "ride" || current === "arrival" || current === "gate"
-					? (times.taxiOutKind === "measured" && times.taxiOutMin != null ? `${times.taxiOutMin} min taxi out.` : "")
-					: "",
+			title: "On the move",
+			body: current === "taxi"
+				? times.pushKind === "actual" && times.push
+					? `Gate departure reported at ${times.push}. Pushback and taxi before takeoff.`
+					: "Ground movement detected. Departure time is still being confirmed."
+				: times.taxiOutKind === "measured" && times.taxiOutMin != null
+					? `${times.taxiOutMin} min from gate departure to takeoff.` : "Pushback and taxi before takeoff.",
 			watchouts: []
 		},
 		inbound: {
@@ -2062,9 +2127,18 @@ async function buildStory(query) {
 			: parsed.registration
 				? safe(adsbByReg(parsed.registration), null)
 				: safe(adsbByCallsign(parsed.callsign), null),
-		safe(loadAware(parsed.callsign), null),
+		loadAware(parsed.callsign).catch((err) => {
+			if (parsed.registration) return null;
+			if (err?.name === "TimeoutError" || err?.name === "AbortError") throw new Error("Flight schedule provider is taking too long to respond. Please try again.");
+			throw err;
+		}),
 		safe(loadRoute(parsed.callsign), null)
 	]);
+	// Flight-number route databases retain old assignments after a number moves
+	// to a different city pair. Require a current, leg-specific schedule feed.
+	if (!parsed.registration && (!(aware?.originIata || aware?.originIcao) || !(aware?.destIata || aware?.destIcao))) {
+		throw new Error("FLIGHT_PROVIDER_MISSING_AIRPORTS");
+	}
 	let rawAc = rawAc0;
 	if (rawAc && !rawMatchesQuery(rawAc, parsed, aware)) {
 		rawAc = null;
@@ -2075,7 +2149,7 @@ async function buildStory(query) {
 		const faCs = String(aware.ident).replace(/\s/g, "").toUpperCase();
 		if (faCs && faCs !== identKey) {
 			const byFa = await safe(adsbByCallsign(faCs), null);
-			if (byFa) rawAc = byFa;
+			if (byFa && rawMatchesQuery(byFa, parsed, aware)) rawAc = byFa;
 		}
 	}
 	if (!rawAc && knownHex) rawAc = parsed.registration
@@ -2085,35 +2159,23 @@ async function buildStory(query) {
 	let live = rawAc ? toLive(rawAc) : liveFromAware(aware);
 	let origin = fieldFromKnown(aware?.originIata ?? null, aware?.originIcao ?? null, aware?.originLat ?? null, aware?.originLon ?? null, aware?.originName ?? null, aware?.originCity ?? null, aware?.originTz ?? null) ?? fieldFromAdsbdb(route?.origin);
 	let dest = fieldFromKnown(aware?.destIata ?? null, aware?.destIcao ?? null, aware?.destLat ?? null, aware?.destLon ?? null, aware?.destName ?? null, aware?.destCity ?? null, aware?.destTz ?? null) ?? fieldFromAdsbdb(route?.destination);
-	if (!origin && live) origin = nearestKnown(live);
-	if (!origin) origin = {
-		icao: "KORD",
-		iata: "ORD",
-		name: "O'Hare",
-		city: "Chicago",
-		lat: 41.9786,
-		lon: -87.9048,
-		tz: "America/Chicago",
-		decoded: null,
-		rawMetar: null,
-		nas: null,
-		category: "UNK"
-	};
-	if (!dest) dest = {
-		icao: "KLAX",
-		iata: "LAX",
-		name: "Los Angeles",
-		city: "Los Angeles",
-		lat: 33.9425,
-		lon: -118.408,
-		tz: "America/Los_Angeles",
-		decoded: null,
-		rawMetar: null,
-		nas: null,
-		category: "UNK"
-	};
+	if (!origin || !dest) throw new Error("Flight route unavailable. Try again when the flight feeds respond.");
 	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
+	// Resolve the inbound leg while position fallbacks and weather are loading.
+	let inboundAware = aware?.inbound ?? null;
+	const inboundIdent = inboundAware?.ident ?? aware?.inboundIdent ?? null;
+	const inboundFlightId = aware?.inboundFlightId ?? null;
+	const snapKey = inboundSnapKey(aware, origin, dest, query);
+	const existingSnap = inboundSnapByFlight.get(snapKey);
+	const inboundLocked = Boolean(existingSnap?.frozen);
+	const inboundFetch = inboundAlreadyDone || inboundLocked
+		? Promise.resolve(null)
+		: inboundFlightId
+			? safe(loadAwareById(inboundFlightId), null)
+			: inboundIdent && !inboundLocked
+				? safe(loadAware(inboundIdent), null)
+				: Promise.resolve(inboundAware);
 	live = asOnGround(live, origin);
 	const routeKey = `${origin.iata}|${dest.iata}`;
 	if (hexRouteByIdent.get(identKey) && hexRouteByIdent.get(identKey) !== routeKey) {
@@ -2124,7 +2186,10 @@ async function buildStory(query) {
 			live = null;
 		}
 	}
-	if (aware?.takeoff?.actual && live?.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 15 && Date.now() / 1e3 - aware.takeoff.actual > 4 * 60) {
+	const takeoffAge = aware?.takeoff?.actual ? Date.now() / 1e3 - aware.takeoff.actual : 0;
+	const confirmedSurface = Boolean(live && (live.seenSec ?? 999) <= 30 && liveFitsLeg(live, aware, origin)
+		&& flightIdentOk(live.callsign, parsed, aware) && takeoffAge < 30 * 60);
+	if (aware?.takeoff?.actual && live?.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 15 && takeoffAge > 4 * 60 && !confirmedSurface) {
 		live = null;
 		hexByIdent.delete(identKey);
 		hexRouteByIdent.delete(identKey);
@@ -2183,6 +2248,7 @@ async function buildStory(query) {
 			}
 		}
 	}
+	if (live && !liveFitsLeg(live, aware, origin)) live = null;
 	const faLanded = Boolean(aware?.landing?.actual) || /arrived|landed/i.test(aware?.status ?? "");
 	const dLiveDest = live && dest ? haversineNm({ lat: live.lat, lon: live.lon }, dest) : 999;
 	const onFieldNow = Boolean(
@@ -2228,8 +2294,9 @@ async function buildStory(query) {
 		const originSide = [];
 		const destSide = [];
 		for (const raw of extras) {
+			if (!rawMatchesQuery(raw, parsed, aware)) continue;
 			const cand = raw ? asOnGround(toLive(raw), origin) : null;
-			if (!cand) continue;
+			if (!cand || !liveFitsLeg(cand, aware, origin)) continue;
 			if (destParkedLeftover(cand, dest, aware)) continue;
 			const dOrig = haversineNm({ lat: cand.lat, lon: cand.lon }, origin);
 			const dDest = haversineNm({ lat: cand.lat, lon: cand.lon }, dest);
@@ -2242,6 +2309,7 @@ async function buildStory(query) {
 		else if (airborneAway[0]) live = airborneAway[0];
 		else if (!ourLanded && originSide[0]) live = originSide[0];
 	}
+	if (live && !liveFitsLeg(live, aware, origin)) live = null;
 	if (!ourLanded && Boolean(aware?.takeoff?.actual) && !aware?.landing?.actual) {
 		live = restoreKin(identKey, live, dest, aware);
 		if (!live) live = liveFromAware(aware);
@@ -2284,23 +2352,11 @@ async function buildStory(query) {
 			ourLanded = true;
 		}
 	}
-	let inboundAware = aware?.inbound ?? null;
-	const inboundIdent = inboundAware?.ident ?? aware?.inboundIdent ?? null;
-	const inboundFlightId = aware?.inboundFlightId ?? null;
-	const snapKey = inboundSnapKey(aware, origin, dest, query);
-	const existingSnap = inboundSnapByFlight.get(snapKey);
-	const inboundLocked = Boolean(existingSnap?.frozen);
-	const inboundFetch = inboundAlreadyDone || inboundLocked
-		? Promise.resolve(null)
-		: inboundFlightId
-			? safe(loadAwareById(inboundFlightId), null)
-			: inboundIdent && !existingSnap
-				? safe(loadAware(inboundIdent), null)
-				: Promise.resolve(inboundAware);
+
 	const [[hydOrigin, hydDest, hazardsPack], inboundFetched] = await Promise.all([fieldsP, inboundFetch]);
 	origin = hydOrigin;
 	dest = hydDest;
-	if (inboundFetched) inboundAware = inboundFetched;
+	if (inboundFetched && (!inboundFetched.routeOnly || !inboundAware)) inboundAware = inboundFetched;
 	if (inboundAware && !inboundServesOrigin(inboundAware, origin.iata)) inboundAware = null;
 	const originTz = tzOf(origin);
 	if (inboundAware) rememberInboundSnap(snapKey, {
@@ -2310,10 +2366,10 @@ async function buildStory(query) {
 	const landed = inboundLanded(inboundAware) || Boolean(inboundSnapByFlight.get(snapKey)?.landUnix);
 	const atGateFa = inboundAtGate(inboundAware);
 	const onField = Boolean(live && stillOnField(live, origin));
-	const faSaysAir = /airborne|en.?route|climbed|departed/i.test(aware?.status ?? "");
+	const faSaysAir = hasAirborneEvidence(aware);
+	const surfaceFixAtOrigin = Boolean(live && live.onGround && stillOnField(live, origin));
 	const ourAirborne = Boolean(flightBegun(live, origin))
-		|| Boolean(aware?.takeoff?.actual)
-		|| (Boolean(faSaysAir) && !(aware?.landing?.actual) && !(live && live.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 8));
+		|| (Boolean(faSaysAir) && !(aware?.landing?.actual) && !surfaceFixAtOrigin);
 	let inboundRaw = null;
 	if (!inboundLocked && !atGateFa && !inboundAlreadyDone) {
 		const tail = inboundAware?.tail ?? existingSnap?.tail ?? null;
@@ -2394,33 +2450,8 @@ async function buildStory(query) {
 			const fromFa = liveFromAware(aware);
 			if (fromFa && !fromFa.onGround) live = fromFa;
 		}
-		if (!live || !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) {
-			const frac = Math.max(0.03, timeFracOf(aware) || 0.03);
-			const p = pointAtFrac(path, frac);
-			if (p) {
-				const i = Math.max(0, Math.min(path.length - 2, Math.floor(frac * (path.length - 1))));
-				const hdg = aware?.heading ?? initialBearing(path[i], path[i + 1] ?? end);
-				live = {
-					hex: String(aware?.hex || "").toLowerCase(),
-					callsign: parsed.callsign,
-					registration: aware?.tail ?? null,
-					type: aware?.type ?? null,
-					typeName: airframeOf(aware?.type)?.name ?? aware?.type ?? null,
-					year: null,
-					operator: null,
-					lat: p.lat,
-					lon: p.lon,
-					altFt: aware?.altFt ?? null,
-					gsKt: aware?.gsKt ?? null,
-					track: hdg,
-					vertFpm: null,
-					onGround: false,
-					phase: (aware?.altFt ?? 0) < 10000 ? "climb" : "cruise",
-					extrapolated: true,
-					seenSec: 0
-				};
-			}
-		}
+		// Elapsed time is an ETA input, never an observed aircraft position.
+
 		if (live && Number.isFinite(live.lat) && Number.isFinite(live.lon) && (!live.hex || live.extrapolated)) {
 			const nearby = await safe(adsbAround(live.lat, live.lon, 90), []);
 			const match = pickAroundAircraft(nearby, parsed, aware, origin, dest, 90, live.hex || knownHex);
@@ -2456,6 +2487,7 @@ async function buildStory(query) {
 		: live?.track ?? initialBearing(start, end);
 	const hazards = [];
 	let sinceFix = 0;
+	const routeNowUnix = Date.now() / 1e3;
 	const samples = path.map((p, i) => {
 		const prev = path[i - 1];
 		const step = prev ? haversineNm(prev, p) : 0;
@@ -2469,11 +2501,19 @@ async function buildStory(query) {
 		const frac = distNm / totalNm;
 		const remainingHere = Math.max(0, totalNm - distNm);
 		const sampleAlt = sampleAltFt(frac, remainingHere, live?.altFt ?? null);
+		const plannedTakeoff = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled;
+		const plannedLanding = aware?.landing?.estimated ?? aware?.landing?.scheduled;
+		const beforeTakeoff = !ourAirborne && !ourLanded && plannedTakeoff && plannedLanding > plannedTakeoff;
+		const etaHere = beforeTakeoff
+			? Math.max(0, (plannedTakeoff - routeNowUnix) / 60) + frac * (plannedLanding - plannedTakeoff) / 60
+			: frac <= progress ? 0 : (frac - progress) / Math.max(.01, 1 - progress) * etaMin;
+		const sampleUnix = routeNowUnix + etaHere * 60;
 		let chop = "smooth";
 		let cloud = false;
 		let convective = false;
 		const notes = [];
 		for (const f of hazardsPack.gairmet) {
+			if (!advisoryValidAt(f.properties, sampleUnix)) continue;
 			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
 			const hazard = String(f.properties?.hazard ?? "");
 			const due = String(f.properties?.dueTo ?? "");
@@ -2484,6 +2524,7 @@ async function buildStory(query) {
 				notes.push(hazard === "TURB-HI" ? "High-altitude turbulence airmet" : hazard === "LLWS" ? "Low-level wind shear" : "Low-level turbulence airmet");
 				hazards.push({
 					id: `g-${hazard}-${i}`,
+					validity: advisoryTiming(f.properties),
 					kind: "turb",
 					chop: c,
 					label: hazard === "TURB-HI" ? "High turbulence airmet" : hazard === "LLWS" ? "Low-level wind shear" : "Low turbulence airmet",
@@ -2504,6 +2545,7 @@ async function buildStory(query) {
 			}
 		}
 		for (const f of hazardsPack.sigmet) {
+			if (!advisoryValidAt(f.properties, sampleUnix)) continue;
 			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
 			const hz = String(f.properties?.hazard ?? f.properties?.airSigmetType ?? "").toUpperCase();
 			if (hz.includes("CONVECTIVE") || hz.includes("TS")) {
@@ -2512,6 +2554,7 @@ async function buildStory(query) {
 				notes.push("Convective SIGMET — thunderstorms");
 				hazards.push({
 					id: `s-${i}`,
+					validity: advisoryTiming(f.properties),
 					kind: "convective",
 					chop: "moderate",
 					label: "Thunderstorm SIGMET",
@@ -2527,6 +2570,7 @@ async function buildStory(query) {
 				notes.push("Turbulence SIGMET");
 				hazards.push({
 					id: `st-${i}`,
+					validity: advisoryTiming(f.properties),
 					kind: "turb",
 					chop: "moderate",
 					label: "Turbulence SIGMET",
@@ -2539,6 +2583,7 @@ async function buildStory(query) {
 			}
 		}
 		for (const f of hazardsPack.cwa ?? []) {
+			if (!advisoryValidAt(f.properties, sampleUnix)) continue;
 			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
 			const txt = String(f.properties?.text ?? f.properties?.hazard ?? f.properties?.cwaText ?? "CWA").toUpperCase();
 			if (txt.includes("TS") || txt.includes("CONVECT")) {
@@ -2547,6 +2592,7 @@ async function buildStory(query) {
 				notes.push("Center weather advisory — storms");
 				hazards.push({
 					id: `cwa-${i}`,
+					validity: advisoryTiming(f.properties),
 					kind: "convective",
 					chop: "moderate",
 					label: "Center weather advisory",
@@ -2563,6 +2609,7 @@ async function buildStory(query) {
 			}
 		}
 		for (const f of hazardsPack.tcf ?? []) {
+			if (!advisoryValidAt(f.properties, sampleUnix)) continue;
 			if (!pointInGeoJson(p.lat, p.lon, f.geometry ?? null)) continue;
 			const cov = String(f.properties?.coverage ?? "").toLowerCase();
 			const chopF = cov === "solid" || cov === "medium" ? "moderate" : "light";
@@ -2571,6 +2618,7 @@ async function buildStory(query) {
 			notes.push("Forecast storms (TCF)");
 			hazards.push({
 				id: `tcf-${i}`,
+				validity: advisoryTiming(f.properties),
 				kind: "convective",
 				chop: chopF,
 				label: "Forecast storms (TCF)",
@@ -2581,7 +2629,6 @@ async function buildStory(query) {
 				source: "forecast"
 			});
 		}
-		const etaHere = frac <= progress ? 0 : (frac - progress) / Math.max(.01, 1 - progress) * etaMin;
 		return {
 			lat: p.lat,
 			lon: p.lon,
@@ -2596,7 +2643,12 @@ async function buildStory(query) {
 			fix: isFix
 		};
 	});
-	for (const f of hazardsPack.pirep) {
+	const corridorAps = corridorStations(path, origin.iata, dest.iata, Object.values(AIRPORT_BY_ICAO), haversineNm);
+	const corridorMetsP = Promise.all(corridorAps.map((ap) => safe(loadMetar(ap.icao), { metar: null })));
+	const pirepPacks = await Promise.all(pirepRouteBounds(path).map((bbox) =>
+		cached(`pirep:${bbox}`, 120_000, () => safe(fetchJson(`https://aviationweather.gov/api/data/pirep?format=geojson&bbox=${bbox}`).then((d) => d.features ?? []), null))
+	));
+	for (const f of pirepPacks.flatMap(pack => pack ?? [])) {
 		const coords = f.geometry?.type === "Point" ? f.geometry.coordinates : null;
 		if (!coords || coords.length < 2) continue;
 		const lon = coords[0];
@@ -2627,17 +2679,11 @@ async function buildStory(query) {
 			source: "observed"
 		});
 	}
-	const seenH = /* @__PURE__ */ new Set();
-	const uniqHazards = hazards.filter((h) => {
-		const k = `${h.kind}:${h.label}:${h.chop}`;
-		if (seenH.has(k)) return false;
-		seenH.add(k);
-		return true;
-	});
+	const uniqHazards = distinctRouteHazards(hazards);
 	let times = timesOf(aware, origin, dest);
 	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
-	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && dOrigLive < 0.4 && !pushLatch.get(landKey) && !times.pushed) {
+	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30 && !pushLatch.get(landKey) && !times.pushed) {
 		const prev = parkByFlight.get(landKey);
 		if (!prev) parkByFlight.set(landKey, { lat: live.lat, lon: live.lon, at: Date.now() });
 		else if (haversineNm({ lat: live.lat, lon: live.lon }, prev) < 0.03) {
@@ -2648,28 +2694,49 @@ async function buildStory(query) {
 	const distPark = live && park ? haversineNm({ lat: live.lat, lon: live.lon }, park) : 0;
 	let motion = { pushed: false, taxiing: false, flying: false };
 	const hexNow = String(live?.hex || hexByIdent.get(identKey) || aware?.hex || "").toLowerCase();
-	if (hexNow && origin && !ourLanded && (!live || (live.onGround && (live.gsKt ?? 0) < 4 && distPark < 0.12))) {
+	const needsGroundTrace = !live || (live.onGround && (live.gsKt ?? 0) < 1.2 && distPark < 0.025 && !pushLatch.has(landKey));
+	if (hexNow && origin && !ourLanded && needsGroundTrace) {
 		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
 	}
-	const offRamp = Boolean(live && live.onGround && atOrigLive && dOrigLive >= 0.65);
-	const parkedAtStand = Boolean(live && live.onGround && atOrigLive && (live.gsKt ?? 0) < 1.2 && dOrigLive < 0.38);
+	const freshSurface = Boolean(live && live.onGround && atOrigLive && !live.extrapolated && (live.seenSec ?? 999) <= 30);
 	const leftGate = Boolean(
 		!ourLanded &&
 		(
-			(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 1.2 || distPark >= 0.025 || live.phase === "taxi" || offRamp)) ||
+			(freshSurface && (distPark >= 0.05 || (live.gsKt ?? 0) >= 4)) ||
 			motion.pushed ||
 			motion.taxiing
 		)
 	);
 	const taxiHint = Boolean(
-		motion.taxiing ||
-		offRamp ||
-		(live && live.onGround && atOrigLive && ((live.gsKt ?? 0) >= 2 || distPark >= 0.07 || live.phase === "taxi"))
+		(leftGate && motion.taxiing) ||
+		(freshSurface && (distPark >= 0.10 || (live.gsKt ?? 0) >= 8))
 	);
+	// Airport reference coordinates are not gate coordinates. Only a stand
+	// observed before departure can contradict a reported gate-out, and the
+	// position itself must be fresh and newer than that report.
+	const fixUnix = live ? Date.now() / 1e3 - (live.seenSec ?? 999) : 0;
+	const gateOutUnix = aware?.gateOut?.actual;
+	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && park
+		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) < 1.2
+		&& distPark < 0.025 && !pushLatch.has(landKey)
+		&& (!gateOutUnix || (park.at / 1e3 < gateOutUnix && fixUnix >= gateOutUnix)));
+	// A recent stationary surface fix is stronger evidence than a provider's
+	// prematurely stamped gate-out or takeoff time.
+	if (stationaryAtStand && !motion.pushed && !motion.taxiing && !leftGate) {
+		const nextPush = aware?.gateOut?.estimated ?? aware?.gateOut?.scheduled ?? null;
+		times = { ...times, pushed: false, airborne: false,
+			pushUnix: nextPush, push: clockAt(nextPush, tzOf(origin)), pushKind: nextPush ? "estimated" : null };
+	}
+	if (surfaceFixAtOrigin) {
+		const nextTakeoff = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? null;
+		times = { ...times, airborne: false, takeoffUnix: nextTakeoff,
+			takeoff: clockAt(nextTakeoff, tzOf(origin)), takeoffKind: nextTakeoff ? "estimated" : null };
+	}
 	if (ourAirborne && !times.airborne) {
 		times = { ...times, airborne: true };
 	}
-	if (parkedAtStand) pushLatch.delete(landKey);
+	// A taxi hold can look stationary near the departure stand. Preserve the
+	// observed pushback until this flight's identity changes.
 	if (leftGate && !times.pushed) {
 		const now = Date.now() / 1e3;
 		const otz = tzOf(origin);
@@ -2679,6 +2746,7 @@ async function buildStory(query) {
 		times = {
 			...times,
 			pushed: true,
+			pushKind: "estimated",
 			pushUnix,
 			push: clockAt(pushUnix, otz),
 			delayMin,
@@ -2694,7 +2762,7 @@ async function buildStory(query) {
 	}
 	const latched = pushLatch.get(landKey);
 	const latchUnix = latched && typeof latched === "object" ? latched.unix : typeof latched === "number" ? null : null;
-	if (latchUnix && !times.pushed && !parkedAtStand) {
+	if (latchUnix && !times.pushed) {
 		const age = Date.now() / 1e3 - (latched.at ?? latchUnix);
 		if (live || times.airborne || (latched.live && age < 180)) {
 			const otz = tzOf(origin);
@@ -2726,8 +2794,8 @@ async function buildStory(query) {
 	if (times.taxiOutKind !== "measured") {
 		const wheelsUp = Boolean(live && !live.onGround) || (Boolean(aware?.takeoff?.actual) && !(live && live.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 12));
 		if (wheelsUp) {
-			const pushU = aware?.gateOut?.actual ?? times.pushUnix;
-			const toU = aware?.takeoff?.actual ?? times.takeoffUnix;
+			const pushU = aware?.gateOut?.actual;
+			const toU = aware?.takeoff?.actual;
 			if (pushU && toU && toU > pushU) {
 				const m = Math.round((toU - pushU) / 60);
 				if (m >= 1 && m <= 180) times = { ...times, taxiOutMin: m, taxiOutKind: "measured" };
@@ -2824,7 +2892,7 @@ async function buildStory(query) {
 		ourLanded,
 		inboundStatus: inbound.status,
 		pushed: Boolean(times.pushed || leftGate),
-		faAirborne: Boolean(ourAirborne || motion.flying) && !taxiHint,
+		faAirborne: Boolean(ourAirborne || motion.flying) && !surfaceFixAtOrigin && !taxiHint,
 		taxiHint,
 		distPark,
 		parkedAtGate
@@ -2883,10 +2951,10 @@ async function buildStory(query) {
 			origin.taf = decodeTafPassenger(origin.tafRaw, times.pushUnix ?? Date.now() / 1e3) ?? origin.taf;
 			dest.taf = decodeTafPassenger(dest.tafRaw, times.landUnix ?? Date.now() / 1e3) ?? dest.taf;
 		}
-		const corridorAps = corridorStations(path, origin.iata, dest.iata, Object.values(AIRPORT_BY_ICAO), haversineNm);
+
 		const corridor = [];
 		if (corridorAps.length) {
-			const mets = await Promise.all(corridorAps.map((ap) => safe(loadMetar(ap.icao), { metar: null })));
+			const mets = await corridorMetsP;
 			for (let i = 0; i < corridorAps.length; i++) {
 				const m = mets[i]?.metar;
 				if (!m) continue;
@@ -2925,6 +2993,9 @@ async function buildStory(query) {
 		airline,
 		live: Boolean(live),
 		currentStage: current,
+		departureMovement: current === "taxi" || current === "push"
+			? (leftGate || latchUnix ? "observed" : times.pushed ? "reported" : null)
+			: null,
 		aircraft,
 		origin,
 		dest,
@@ -2939,6 +3010,7 @@ async function buildStory(query) {
 			samples
 		},
 		hazards: uniqHazards.slice(0, 12),
+		weatherCoverage: { failedSources: [...(hazardsPack.failedSources ?? []), ...(pirepPacks.some(pack => pack == null) ? ["Pilot reports"] : [])] },
 		comfort,
 		wx,
 		inbound,
@@ -2959,33 +3031,6 @@ async function buildStory(query) {
 		})
 	};
 }
-function nearestKnown(live) {
-	let best = null;
-	let bestD = Infinity;
-	for (const ap of Object.values(AIRPORT_BY_ICAO)) {
-		const d = haversineNm({
-			lat: live.lat,
-			lon: live.lon
-		}, ap);
-		if (d < bestD) {
-			bestD = d;
-			best = {
-				icao: ap.icao,
-				iata: ap.iata,
-				name: ap.name,
-				city: ap.city,
-				lat: ap.lat,
-				lon: ap.lon,
-				tz: ap.tz,
-				decoded: null,
-				rawMetar: null,
-				nas: null,
-				category: "UNK"
-			};
-		}
-	}
-	return best;
-}
 export async function loadFlightStory(query, opts) {
 	const fresh = Boolean(opts?.fresh);
 	try {
@@ -2996,16 +3041,7 @@ export async function loadFlightStory(query, opts) {
 				if (/^(hex4:|cs4:|reg4:|trace3:)/.test(k)) cache.delete(k);
 			}
 		}
-		const work = cached(key, fresh ? 0 : 4e3, () => buildStory(query));
-		let timer;
-		const timed = new Promise((_, rej) => {
-			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 12e3);
-		});
-		try {
-			return await Promise.race([work, timed]);
-		} finally {
-			clearTimeout(timer);
-		}
+		return await cached(key, fresh ? 0 : 4e3, () => buildStory(query));
 	} catch (err) {
 		const msg = err instanceof Error && err.message && err.name !== "AbortError" ? err.message : "Could not load that flight. Try again.";
 		throw new Error(msg);
@@ -3071,4 +3107,3 @@ export async function loadLiveBoard() {
 		return cards.slice(0, 8);
 	});
 }
-
