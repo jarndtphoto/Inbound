@@ -1725,6 +1725,14 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       groups.splice(i + 1, 2);
     } else i++;
   }
+  const noConditions = "No conditions flagged in available data";
+  const coverageComplete = Boolean(story.weatherCoverage && story.weatherCoverage.failedSources.length === 0);
+  const visibleGroups = groups.filter(group => {
+    if (group.label !== noConditions) return true;
+    const minutes = airborne ? group.end.etaMin - group.start.etaMin
+      : duration == null ? null : (group.end.frac - group.start.frac) * duration;
+    return minutes == null || minutes >= 10 || groups.length === 1;
+  });
   const timeLabel = (group: typeof groups[number]) => {
     const from = airborne ? group.start.etaMin : duration == null ? null : group.start.frac * duration;
     const to = airborne ? group.end.etaMin : duration == null ? null : group.end.frac * duration;
@@ -1755,10 +1763,10 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     {fieldCard(story.origin, "Takeoff · departure conditions")}
     {(!story.weatherCoverage || story.weatherCoverage.failedSources.length > 0) && <p role="status" className="rounded-xl border border-border p-4 text-sm">Weather coverage is incomplete. Missing feeds do not mean smooth conditions. {story.weatherCoverage?.failedSources.join(" · ")}</p>}
     <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
-    {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : groups.length ? <ol className="space-y-3">
-      {groups.map((g, i) => <li key={i} className="rounded-xl border border-border bg-surface p-4">
+    {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="space-y-3">
+      {visibleGroups.map((g, i) => <li key={i} className="rounded-xl border border-border bg-surface p-4">
         <p className="flex items-center gap-2 text-sm text-muted"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
-        <p className="mt-2 font-semibold">{g.label}</p>{g.gaps && <p className="mt-1 text-sm text-muted">Nearby areas grouped together; brief gaps may occur.</p>}
+        <p className="mt-2 font-semibold">{g.label === noConditions ? coverageComplete ? "Projected smooth ride" : "Weather coverage incomplete" : g.label}</p>{g.label === noConditions && <p className="mt-1 text-sm text-muted">{coverageComplete ? "Based on available forecasts; conditions can change." : "Not enough weather data to assess the ride along this section."}</p>}{g.gaps && <p className="mt-1 text-sm text-muted">Nearby areas grouped together; brief gaps may occur.</p>}
         {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
           <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={`Route preview: ${g.label}`}>
             <RouteMap story={story} fixedViewport weatherPreview={{ from: g.start.frac, to: g.end.frac, ranges: g.ranges }} />
