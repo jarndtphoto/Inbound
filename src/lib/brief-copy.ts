@@ -385,10 +385,12 @@ function inboundClause(d: RideFacts) {
 }
 
 function delayClause(d: RideFacts) {
+  if (d.push && d.pushKind === "actual") return `Gate departure reported at ${d.push}.`;
+  const timing = d.pushKind === "scheduled" ? "Scheduled gate departure" : "Estimated gate departure";
   if (d.delayMin != null && d.delayMin >= 5) {
-    return d.push ? `Push is ${d.delayMin} minutes late at ${d.push}.` : `Push is ${d.delayMin} minutes late.`;
+    return d.push ? `${timing}: ${d.push}, ${d.delayMin} minutes later than scheduled.` : `Departure is estimated to be ${d.delayMin} minutes late.`;
   }
-  if (d.push) return `Push is ${d.push}.`;
+  if (d.push) return `${timing}: ${d.push}.`;
   if (d.typicalDelayMin != null && d.typicalDelayMin >= 25) {
     return `This flight often leaves about ${d.typicalDelayMin} minutes late even when the board still looks on time.`;
   }

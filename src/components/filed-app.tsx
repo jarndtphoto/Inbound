@@ -376,6 +376,7 @@ export function FiledApp() {
     refetchInterval: (q) => {
       if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
+      if (q.state.status === "error") return 15_000;
       if (!s) return 5_000;
       if (s.live || s.currentStage === "push" || s.currentStage === "taxi") return 3_000;
       if (s.currentStage === "ride" || s.currentStage === "arrival") return 4_000;
@@ -385,11 +386,12 @@ export function FiledApp() {
     staleTime: 2_500,
     gcTime: 10 * 60_000,
     retry: (count, err) => {
-      if (count >= 1) return false;
+      if (count >= 2) return false;
       const msg = err instanceof Error ? err.message : "";
-      if (/Could not load that flight/.test(msg)) return false;
+      if (/Try another number|Enter a flight number|Flight number is too long/i.test(msg)) return false;
       return true;
     },
+    retryDelay: (attempt) => Math.min(2_000 * 2 ** attempt, 8_000),
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     placeholderData: (previousData) => {
@@ -651,7 +653,7 @@ export function FiledApp() {
         {storyQ.isError && !story && (
           <div className="mb-4 rounded-md border border-ifr/40 bg-surface px-4 py-3">
             <p className="text-sm text-ifr">
-              {(storyQ.error as Error).message || "Could not load that flight. Try another number."}
+              {"We couldn’t get this flight’s latest information. We’ll retry automatically, or you can try again below."}
             </p>
             <Button type="button" variant="secondary" className="mt-3" onClick={() => void storyQ.refetch()}>
               Try again
