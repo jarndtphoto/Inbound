@@ -1146,7 +1146,20 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 			reason = /insufficient.{0,30}(credit|balance)|credit.{0,30}exhaust/i.test(body) ? "credit limit"
 				: /payment required/i.test(body) ? "payment required"
 				: /access denied|request blocked/i.test(body) ? "access denied"
+				: /captcha|automated|robot|bot detection/i.test(body) ? "automated-access screening"
 				: /FlightAware/i.test(body) ? "FlightAware response" : "unidentified response";
+			const clean = (value) => String(value || "absent").replace(/[^a-zA-Z0-9 ._:/;-]/g, "").slice(0, 100);
+			const provider = /cloudflare/i.test(body) ? "cloudflare" : /vercel/i.test(body) ? "vercel" : "unidentified";
+			const meta = [
+				"host=" + clean(new URL(res.url || url).hostname),
+				"server=" + clean(res.headers.get("server")),
+				"type=" + clean(res.headers.get("content-type")),
+				"bodyChars=" + body.length,
+				"branding=" + provider,
+				"vercelError=" + clean(res.headers.get("x-vercel-error")),
+				"retryAfter=" + clean(res.headers.get("retry-after")),
+			].join("; ");
+			reason += "; " + meta;
 		}
 		throw new Error(`Current flight route unavailable: schedule provider returned HTTP ${res.status}${reason ? " (" + reason + ")" : ""}. Please try again shortly.`);
 	}
