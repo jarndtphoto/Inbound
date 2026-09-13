@@ -37,15 +37,15 @@
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     color-scheme: dark;
-    background: #08090c;
+    background: var(--color-bg);
   }
 
   html,
   body,
   #app,
   #root {
-    background: #08090c !important;
-    color: #e7eaee;
+    background: var(--color-bg) !important;
+    color: var(--color-fg);
     width: 100%;
     min-height: 100%;
     min-height: 100dvh;
@@ -156,4 +156,22 @@
 
 .pb-safe {
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+}
+
+/* Sunrise uses the same semantic palette across every flight tab. */
+html[data-theme="sunrise"] {
+  color-scheme: light;
+  --color-bg: #faf7f1;
+  --color-surface: #ffffff;
+  --color-surface-2: #f0ebe2;
+  --color-fg: #202b36;
+  --color-muted: #52616d;
+  --color-subtle: #606a73;
+  --color-accent: #315e74;
+  --color-accent-fg: #ffffff;
+  --color-border: #d3d9db;
+  --color-vfr: #38684a;
+  --color-mvfr: #826316;
+  --color-ifr: #a34033;
+  --color-ring: #315e74;
 }

@@ -275,7 +275,7 @@ class ScreenErrorBoundary extends Component<{ children: ReactNode }, { err: Erro
       return (
         <div
           className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16"
-          style={{ background: "#08090c", color: "#e7eaee", minHeight: "100%" }}
+          style={{ background: "var(--color-bg)", color: "var(--color-fg)", minHeight: "100%" }}
         >
           <p className="max-w-sm text-center text-sm text-muted">Could not load this screen. Try another flight.</p>
           <button
@@ -293,6 +293,65 @@ class ScreenErrorBoundary extends Component<{ children: ReactNode }, { err: Erro
 }
 
 export function FiledApp() {
+  const [ready, setReady] = useState(false);
+  const [page, setPage] = useState<"home" | "flight">("home");
+  const [theme, setTheme] = useState<"sunset" | "sunrise">("sunset");
+  const [flight, setFlight] = useState("");
+  const recents = useFiled(s => s.recents);
+  const hydrate = useFiled(s => s.hydrate);
+  const setQuery = useFiled(s => s.setQuery);
+  useEffect(() => {
+    hydrate();
+    let saved: "sunset" | "sunrise" = "sunset";
+    try { if (localStorage.getItem("inbound-theme") === "sunrise") saved = "sunrise"; } catch { /* storage optional */ }
+    setTheme(saved);
+    document.documentElement.dataset.theme = saved;
+    setReady(true);
+  }, [hydrate]);
+  const chooseTheme = (next: "sunset" | "sunrise") => {
+    setTheme(next);
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("inbound-theme", next); } catch { /* storage optional */ }
+  };
+  const start = (value: string) => {
+    const q = value.trim();
+    if (!q) return;
+    setQuery(q);
+    setPage("flight");
+  };
+  if (!ready) return <main className="flex h-dvh flex-col items-center justify-center gap-4 bg-bg text-fg" role="status">
+    <Plane className="h-10 w-10 text-accent motion-safe:animate-pulse" aria-hidden="true" />
+    <h1 className="font-display text-5xl">Inbound</h1><p className="text-muted">Preparing your journey…</p>
+  </main>;
+  if (page === "flight") return <FlightPages onHome={() => setPage("home")} />;
+  return <main className="h-dvh overflow-y-auto bg-bg px-5 py-8 text-fg sm:px-8">
+    <div className="mx-auto max-w-2xl space-y-7 pb-8">
+      <header className="flex items-center justify-between"><span className="flex items-center gap-2 font-semibold"><Plane className="h-5 w-5 text-accent" aria-hidden="true" /> Inbound</span><a href="#home-settings" className="rounded-lg border border-border px-4 py-3 text-sm">Settings</a></header>
+      <section className="rounded-2xl border border-border bg-surface p-6 sm:p-8">
+        <p className="text-sm text-muted">From your gate to your destination</p>
+        <h1 className="mt-3 font-display text-5xl sm:text-6xl">Your flight.<br />A clearer picture.</h1>
+        <p className="mt-4 max-w-md text-muted">Follow your aircraft, see weather ahead, and keep up with important changes.</p>
+        <form className="mt-6 space-y-3" onSubmit={e => { e.preventDefault(); start(flight); }}>
+          <label htmlFor="home-flight" className="block text-sm font-semibold">Flight number</label>
+          <input id="home-flight" required maxLength={16} value={flight} onChange={e => setFlight(e.target.value)} placeholder="For example, AA1114" autoCapitalize="characters" autoComplete="off" spellCheck={false} className="w-full rounded-xl border border-border bg-bg px-4 py-4 text-lg outline-none focus:ring-2 focus:ring-accent" />
+          <button type="submit" disabled={!flight.trim()} className="w-full rounded-xl bg-accent px-5 py-4 font-semibold text-accent-fg disabled:opacity-50">Track my flight →</button>
+        </form>
+      </section>
+      {recents.length > 0 && <section aria-label="Recent flights"><h2 className="mb-3 font-semibold">Pick up where you left off</h2><div className="flex flex-wrap gap-2">{recents.map(q => <button key={q} type="button" onClick={() => start(q)} className="rounded-xl border border-border bg-surface px-4 py-3">{q}</button>)}</div></section>}
+      <section id="home-settings" className="scroll-mt-5 rounded-2xl border border-border bg-surface p-6">
+        <h2 className="text-xl font-semibold">Settings</h2><p className="mt-1 text-sm text-muted">Choose the light that suits your journey.</p>
+        <fieldset className="mt-5"><legend className="mb-3 text-sm font-semibold">Appearance</legend><div className="grid grid-cols-2 gap-3">
+          {(["sunset", "sunrise"] as const).map(mode => <button key={mode} type="button" aria-pressed={theme === mode} onClick={() => chooseTheme(mode)} className={cn("rounded-xl border-2 p-4 text-left", theme === mode ? "border-accent bg-bg" : "border-border")}>
+            <span aria-hidden="true" className="mb-3 block text-2xl">{mode === "sunset" ? "☾" : "☀"}</span>
+            <span className="block font-semibold">{mode === "sunset" ? "Sunset" : "Sunrise"}</span><span className="mt-1 block text-sm text-muted">{mode === "sunset" ? "Dark & calm" : "Light & bright"}</span>
+          </button>)}
+        </div></fieldset><p className="mt-4 text-xs text-muted">Your preference is saved on this device and used throughout the app.</p>
+      </section>
+    </div>
+  </main>;
+}
+
+function FlightPages({ onHome }: { onHome: () => void }) {
   const query = useFiled((s) => s.query);
   const recents = useFiled((s) => s.recents);
   const stagePref = useFiled((s) => s.stage);
@@ -317,8 +376,8 @@ export function FiledApp() {
   const mainRef = useRef<HTMLElement>(null);
   const flightKey = normFlight(query);
   const shellStyle = {
-    background: "#08090c",
-    color: "#e7eaee",
+    background: "var(--color-bg)",
+    color: "var(--color-fg)",
     height: "100%",
     minHeight: "100%",
   };
@@ -599,6 +658,7 @@ export function FiledApp() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg" style={shellStyle}>
+      <div className="shrink-0 border-b border-border bg-bg px-4 py-2"><div className="mx-auto max-w-6xl"><button type="button" onClick={onHome} className="min-h-10 text-sm text-muted">← Home & settings</button></div></div>
       {story && <header className="shrink-0 border-b border-border bg-bg px-4 pt-3 lg:px-8">
         <div className="mx-auto max-w-6xl">
           <div className="mb-3 flex items-center justify-between gap-3">
