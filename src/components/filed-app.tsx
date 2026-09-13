@@ -83,6 +83,25 @@ function origMemKey(story: FlightStory) {
   return `${normFlight(story.callsign)}:${story.origin.iata}:${story.dest.iata}:${day}`;
 }
 
+const BRIEF_HISTORY_KEY = "inbound-brief-history-v1";
+function savedBrief(story: FlightStory): CompiledBrief | null {
+  try {
+    const entry = JSON.parse(localStorage.getItem(BRIEF_HISTORY_KEY) || "{}")[origMemKey(story)];
+    const b = entry?.brief;
+    return b && typeof b.lead === "string" && b.snap && Array.isArray(b.log)
+      && Array.isArray(b.segments) ? b : null;
+  } catch { return null; }
+}
+function saveBrief(story: FlightStory, brief: CompiledBrief) {
+  try {
+    const records = JSON.parse(localStorage.getItem(BRIEF_HISTORY_KEY) || "{}");
+    records[origMemKey(story)] = { at: Date.now(), brief };
+    const latest = Object.entries(records).sort((a, b) =>
+      (b[1] as {at: number}).at - (a[1] as {at: number}).at).slice(0, 30);
+    localStorage.setItem(BRIEF_HISTORY_KEY, JSON.stringify(Object.fromEntries(latest)));
+  } catch { /* Storage can be unavailable; live tracking still works. */ }
+}
+
 function rememberOrigOnClient(story: FlightStory): FlightStory {
   if (typeof window === "undefined") return story;
   const t = story.times;
@@ -389,7 +408,7 @@ export function FiledApp() {
       const gen = briefGen.current;
       const flight = flightKey;
       const facts = rideFacts(story, query, active);
-      const local = composeBrief(facts, briefingRef.current);
+      const local = composeBrief(facts, briefingRef.current ?? savedBrief(story));
       try {
         const remote = await briefRide({ data: facts });
         if (remote && "ok" in remote && remote.ok && remote.text?.trim()) {
@@ -403,7 +422,7 @@ export function FiledApp() {
     onMutate: () => {
       if (!story) return;
       setBriefingFor(flightKey);
-      const next = composeBrief(rideFacts(story, query, active), briefingRef.current);
+      const next = composeBrief(rideFacts(story, query, active), briefingRef.current ?? savedBrief(story));
       briefingRef.current = next;
       setBriefing(next);
     },
@@ -464,6 +483,10 @@ export function FiledApp() {
       setBriefing(next);
     }
   }, [story, briefing, briefingFor, flightKey, query, active]);
+
+  useEffect(() => {
+    if (story && briefing && briefingFor === flightKey) saveBrief(story, briefing);
+  }, [story, briefing, briefingFor, flightKey]);
 
   async function refreshNow() {
     if (!query || refreshingRef.current) return;
