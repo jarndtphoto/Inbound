@@ -1615,8 +1615,6 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
   const takeoff = story.times.takeoffUnix;
   const landing = story.times.landUnix;
   const duration = takeoff && landing && landing > takeoff ? (landing - takeoff) / 60 : null;
-  const elapsed = story.times.takeoffKind === "actual" && takeoff
-    ? Math.max(0, (story.fetchedAt / 1000 - takeoff) / 60) : null;
   const samples = story.route.samples.filter(s => !airborne || s.frac >= story.route.progress);
   const groups: { label: string; note: string | null; start: typeof samples[number]; end: typeof samples[number] }[] = [];
   for (const sample of samples) {
@@ -1631,8 +1629,16 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     const from = airborne ? group.start.etaMin : duration == null ? null : group.start.frac * duration;
     const to = airborne ? group.end.etaMin : duration == null ? null : group.end.frac * duration;
     if (from == null || to == null) return "Timing unavailable";
-    const range = `${Math.round(from)}${Math.round(to) > Math.round(from) ? `–${Math.round(to)}` : ""} min`;
-    return airborne ? `In approximately ${range}${elapsed == null ? "" : ` · around ${Math.round(elapsed + from)} min into flight`}` : `Approximately ${range} after takeoff`;
+    const formatMinutes = (value: number) => {
+      const minutes = Math.max(0, Math.round(value));
+      const hours = Math.floor(minutes / 60);
+      return hours ? `${hours} ${hours === 1 ? "hour" : "hours"}${minutes % 60 ? ` ${minutes % 60} ${minutes % 60 === 1 ? "minute" : "minutes"}` : ""}` : `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+    };
+    const start = airborne
+      ? from < 1 ? "Around now" : `Starts in about ${formatMinutes(from)}`
+      : from < 1 ? "Around takeoff" : `Starts about ${formatMinutes(from)} after takeoff`;
+    const span = Math.round(to - from);
+    return <span>{start}{span > 0 && <span className="block">Continues for about {formatMinutes(span)}</span>}</span>;
   };
   const fieldCard = (field: FlightStory["origin"], title: string) => <article className="rounded-xl border border-border bg-surface p-4">
     <p className="text-sm text-muted">{title}</p>
