@@ -463,7 +463,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     refetchInterval: (q) => {
       if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
-      if (q.state.status === "error") return 15_000;
+      if (q.state.status === "error") return /HTTP 402\b/.test(String(q.state.error?.message ?? "")) ? 60_000 : 15_000;
       if (!s) return 5_000;
       if (s.live || s.currentStage === "push" || s.currentStage === "taxi") return 3_000;
       if (s.currentStage === "ride" || s.currentStage === "arrival") return 4_000;
@@ -473,7 +473,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     staleTime: 2_500,
     gcTime: 10 * 60_000,
     retry: (count, err) => {
-      if (count >= 2) return false;
+      if (count >= 2 || /HTTP 402\b/.test(err instanceof Error ? err.message : "")) return false;
       const msg = err instanceof Error ? err.message : "";
       if (/Try another number|Enter a flight number|Flight number is too long/i.test(msg)) return false;
       return true;

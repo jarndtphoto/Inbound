@@ -1139,7 +1139,17 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 			return { ...stub, routeOnly: true };
 		}
 	}
-	if (!res.ok) throw new Error(`Current flight route unavailable: schedule provider returned HTTP ${res.status}. Please try again shortly.`);
+	if (!res.ok) {
+		let reason = "";
+		if (res.status === 402) {
+			const body = (await res.text()).slice(0, 16000);
+			reason = /insufficient.{0,30}(credit|balance)|credit.{0,30}exhaust/i.test(body) ? "credit limit"
+				: /payment required/i.test(body) ? "payment required"
+				: /access denied|request blocked/i.test(body) ? "access denied"
+				: /FlightAware/i.test(body) ? "FlightAware response" : "unidentified response";
+		}
+		throw new Error(`Current flight route unavailable: schedule provider returned HTTP ${res.status}${reason ? " (" + reason + ")" : ""}. Please try again shortly.`);
+	}
 	const raw = (await res.text()).split("trackpollBootstrap = ")[1];
 	if (!raw) throw new Error("Current flight route unavailable: schedule provider returned no flight data. Please try again shortly.");
 	const flights = parseJsonObject(raw)?.flights;
@@ -1204,10 +1214,22 @@ function stubAwareFromHistory(loc, fallbackIdent) {
 		filedTaxiInMin: null
 	};
 }
+const awareRejections = new Map();
 async function loadAware(callsign) {
-	return cached(`aware:${callsign}`, 8e3, async () => {
-		return fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true);
-	});
+	const rejected = awareRejections.get(callsign);
+	if (rejected && Date.now() < rejected.until) throw rejected.error;
+	awareRejections.delete(callsign);
+	try {
+		return await cached(`aware:${callsign}`, 8e3, async () =>
+			fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true));
+	} catch (error) {
+		if (/HTTP 402\b/.test(error?.message ?? "")) {
+			for (const [key, entry] of awareRejections) if (entry.until <= Date.now()) awareRejections.delete(key);
+			if (awareRejections.size >= 100) awareRejections.delete(awareRejections.keys().next().value);
+			awareRejections.set(callsign, { until: Date.now() + 60000, error });
+		}
+		throw error;
+	}
 }
 /** Specific FA instance (UAL2290-…), not the current flight using that number. */
 function faInstanceId(flightId) {
