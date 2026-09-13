@@ -4,6 +4,40 @@ export const isLanded = (s: FlightStory) => s.currentStage === "gate" || s.times
 export function journeyKey(s: FlightStory) {
   return [s.callsign, s.origin.icao, s.dest.icao, s.times.origPushUnix ?? s.times.origTakeoffUnix ?? new Date(s.fetchedAt).toISOString().slice(0,10)].join("|");
 }
+
+export function rideOutlook(s: FlightStory): string {
+  const samples = s.route.samples;
+  if (!samples.length) return "The projected ride is currently unavailable. We’re waiting for route weather data.";
+  const current = samples.reduce((best, sample) =>
+    Math.abs(sample.frac - s.route.progress) < Math.abs(best.frac - s.route.progress) ? sample : best, samples[0]);
+  const describe = (sample: typeof current) => [
+    sample.convective ? "Storms near the route" : "",
+    sample.chop !== "smooth" ? sample.chop + " turbulence" : "",
+  ].filter(Boolean).join(" and ");
+  const conditions = describe(current);
+  const incomplete = !s.weatherCoverage || s.weatherCoverage.failedSources.length > 0;
+  let text = current.chop !== "smooth"
+    ? "Projected ride is currently choppy, with " + current.chop + " turbulence possible."
+    : current.convective
+      ? "Storms are possible near the current route; the ride may be unsettled."
+      : incomplete
+        ? "Weather coverage is incomplete, so the current ride is uncertain."
+        : "Projected ride is currently smooth, based on available forecasts.";
+  const upcoming = samples.find(sample => sample.frac > s.route.progress
+    && Number.isFinite(sample.etaMin) && sample.etaMin > 0
+    && describe(sample) && describe(sample) !== conditions);
+  if (upcoming) {
+    const words = describe(upcoming);
+    const minutes = Math.max(1, Math.round(upcoming.etaMin));
+    text += " " + words.charAt(0).toUpperCase() + words.slice(1)
+      + " possible in about " + minutes + (minutes === 1 ? " minute." : " minutes.");
+  } else if (!conditions && !incomplete) {
+    text += " No significant conditions are currently flagged ahead.";
+  }
+  if (incomplete && conditions) text += " Weather coverage is incomplete.";
+  return text;
+}
+
 export function nextStep(s: FlightStory, now = Date.now(), failed = false) {
   const age = Math.max(0, (now - s.fetchedAt) / 1000);
   const fixAge = (s.aircraft?.seenSec ?? Infinity) + age;
@@ -13,7 +47,7 @@ export function nextStep(s: FlightStory, now = Date.now(), failed = false) {
   if (s.currentStage === "gate") return {title:s.times.gateKind === "actual" ? "You’ve reached your destination gate" : "Aircraft appears parked",body:s.times.gateKind === "actual" ? "Gate arrival has been reported. Check airport displays for baggage and onward travel." : "The app indicates the aircraft is parked. An actual gate-arrival time is not yet confirmed.",confidence};
   if (isLanded(s)) return {title:"Awaiting gate confirmation",body:"Your flight has landed. We’re watching for the gate-arrival report; a stopped or disappearing radar signal alone does not confirm arrival at the gate.",confidence};
   if (s.currentStage === "arrival") return {title:"Landing is next",body:`Landing ${s.times.land ? "is estimated around "+s.times.land : "time is not yet available"}. Gate arrival follows taxi-in.`,confidence};
-  if (s.currentStage === "ride") return {title:"En route to "+s.dest.city,body:"Check Weather for significant conditions ahead. Timing changes with the route, altitude, and speed.",confidence};
+  if (s.currentStage === "ride") return {title:"En route to "+s.dest.city,body:rideOutlook(s),confidence};
   if (s.currentStage === "taxi" || s.times.pushed) return {title:"Takeoff is next",body:s.times.pushKind === "actual" ? `Pushback was reported${s.times.push ? " at "+s.times.push : ""}. Takeoff time remains an estimate until confirmed.` : "Ground movement has been indicated. An exact pushback time is not yet confirmed.",confidence};
   if (s.inbound.status !== "complete") return {title:"Watching your inbound aircraft",body:s.inbound.detail || "We’re waiting for a reliable update on the aircraft assigned to your flight.",confidence};
   return {title:"Waiting for pushback",body:`Your aircraft is reported at the departure airport. ${s.times.push ? "Pushback is estimated around "+s.times.push+"." : "A pushback estimate is not available yet."} Scheduled times do not confirm movement.`,confidence};
