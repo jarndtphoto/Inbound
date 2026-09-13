@@ -1118,12 +1118,22 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 		}
 	}
 	if (!res.ok) throw new Error(`Current flight route unavailable: schedule provider returned HTTP ${res.status}. Please try again shortly.`);
-	const raw = (await res.text()).split("trackpollBootstrap = ")[1];
-	if (!raw) throw new Error("Current flight route unavailable: schedule provider returned no flight data. Please try again shortly.");
+	const html = await res.text();
+	const raw = html.split("trackpollBootstrap = ")[1];
+	if (!raw) {
+		const title = (html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] || "").toLowerCase();
+		const code = /just a moment|access denied|verify.*human|attention required/.test(title)
+			? "FLIGHT_PROVIDER_ACCESS_PAGE"
+			: /sign in|log in/.test(title) ? "FLIGHT_PROVIDER_SIGNIN"
+			: html.includes("trackpollBootstrap") ? "FLIGHT_PROVIDER_FORMAT"
+			: "FLIGHT_PROVIDER_NO_EMBEDDED_DATA";
+		console.error("[flight.provider]", { code, status: res.status, hasBootstrap: html.includes("trackpollBootstrap") });
+		throw new Error(code);
+	}
 	const flights = parseJsonObject(raw)?.flights;
-	if (!flights) return null;
+	if (!flights) throw new Error("FLIGHT_PROVIDER_INVALID_DATA");
 	const f = flights[Object.keys(flights)[0] ?? ""];
-	if (!f) return null;
+	if (!f) throw new Error("FLIGHT_PROVIDER_EMPTY_DATA");
 	return parseAwareRecord(f, fallbackIdent, withInbound);
 }
 function stubAwareFromHistory(loc, fallbackIdent) {
@@ -2127,7 +2137,7 @@ async function buildStory(query) {
 	// Flight-number route databases retain old assignments after a number moves
 	// to a different city pair. Require a current, leg-specific schedule feed.
 	if (!parsed.registration && (!(aware?.originIata || aware?.originIcao) || !(aware?.destIata || aware?.destIcao))) {
-		throw new Error("Current flight route unavailable. Try again when the flight feed responds.");
+		throw new Error("FLIGHT_PROVIDER_MISSING_AIRPORTS");
 	}
 	let rawAc = rawAc0;
 	if (rawAc && !rawMatchesQuery(rawAc, parsed, aware)) {
