@@ -334,7 +334,7 @@ export function FiledApp() {
     <div className="inbound-welcome-content">
       <img className="inbound-welcome-art" src="/inbound-welcome.svg" alt="An aircraft approaching a runway through a glowing gold halo" width={768} height={768} fetchPriority="high" />
       <h1 className="font-display text-6xl">Inbound</h1>
-      <p className="inbound-welcome-tagline">Your journey, in view.</p>
+      <p className="inbound-welcome-tagline">Your all in one flight information app</p>
       <p className="inbound-welcome-description">From your gate to your destination.</p>
       <button type="button" className="inbound-welcome-button" disabled={!ready} onClick={() => setEntered(true)}>
         {ready ? "Track my flight" : "Preparing your journey…"}
