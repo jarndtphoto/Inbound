@@ -13,6 +13,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Clock, Gauge, Plane, Radio, Search, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type FormEvent, type ReactNode } from "react";
 
+const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
+
 const STAGES: { id: StageId; label: string }[] = [
   { id: "inbound", label: "Inbound" },
   { id: "push", label: "Gate" },
@@ -297,6 +299,7 @@ export function FiledApp() {
   const setQuery = useFiled((s) => s.setQuery);
   const setStage = useFiled((s) => s.setStage);
   const hydrate = useFiled((s) => s.hydrate);
+  const [flightTab, setFlightTab] = useState<typeof FLIGHT_TABS[number]>("Overview");
   const [draft, setDraft] = useState("");
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
   const [briefingFor, setBriefingFor] = useState("");
@@ -325,6 +328,7 @@ export function FiledApp() {
     briefGen.current += 1;
     setBriefing(null);
     setBriefingFor("");
+    setFlightTab("Overview");
     setQuery(next);
   }
 
@@ -591,6 +595,29 @@ export function FiledApp() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg" style={shellStyle}>
+      {story && <header className="shrink-0 border-b border-border bg-bg px-4 pt-3 lg:px-8">
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-semibold">{story.callsign}</p>
+              <p className="text-sm text-muted">{story.origin.iata} → {story.dest.iata}</p>
+            </div>
+            <p className="text-sm font-semibold">{stageHeadline(story)}</p>
+          </div>
+          <div role="tablist" aria-label="Flight details" className="grid grid-cols-4 gap-1">
+            {FLIGHT_TABS.map((tab, index) => <button key={tab} id={`tab-${tab}`} type="button" role="tab"
+              aria-selected={flightTab === tab} aria-controls={`panel-${tab}`} tabIndex={flightTab === tab ? 0 : -1}
+              className={cn("min-h-11 border-b-2 px-1 py-3 text-sm font-semibold", flightTab === tab ? "border-primary text-fg" : "border-transparent text-muted")}
+              onClick={() => { setFlightTab(tab); mainRef.current?.scrollTo(0, 0); }}
+              onKeyDown={(e) => {
+                const next = e.key === "ArrowRight" ? (index + 1) % 4 : e.key === "ArrowLeft" ? (index + 3) % 4 : e.key === "Home" ? 0 : e.key === "End" ? 3 : -1;
+                if (next < 0) return;
+                e.preventDefault(); setFlightTab(FLIGHT_TABS[next]);
+                document.getElementById(`tab-${FLIGHT_TABS[next]}`)?.focus(); mainRef.current?.scrollTo(0, 0);
+              }}>{tab}</button>)}
+          </div>
+        </div>
+      </header>}
       <ScreenErrorBoundary>
       <main
         ref={mainRef}
@@ -632,27 +659,28 @@ export function FiledApp() {
         {!story && !storyQ.isError && <Skeleton query={query || "the flight"} />}
 
         {story && (
-          <div key={normFlight(query)} className="grid min-w-0 gap-5 lg:grid-cols-12">
-            <section className="min-w-0 lg:col-span-7">
-              <FlightHead
-                story={story}
-                fetching={storyQ.isFetching}
-                refreshing={manualBusy}
-                onRefresh={() => void refreshNow()}
-              />
-              <div className="mt-4">
-                <RouteMap story={story} />
-              </div>
-            </section>
-
-            <section className="min-w-0 overflow-x-hidden lg:col-span-5">
-              <RecordCard story={story} />
+          <div key={normFlight(query)} className="min-w-0">
+            <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
+              <FlightHead story={story} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
+              <div className="mt-5"><RecordCard story={story} /></div>
               <StagePager story={story} active={active} onChange={(id) => setStage(id)} />
-              <BreakdownCard
-                briefing={shownBrief}
-                pending={briefM.isPending}
-                onCompile={() => briefM.mutate()}
-              />
+            </section>
+            <div hidden={flightTab !== "Route" && flightTab !== "Weather"}>
+              <section id={`panel-${flightTab === "Weather" ? "Weather" : "Route"}`} role="tabpanel" aria-labelledby={`tab-${flightTab === "Weather" ? "Weather" : "Route"}`}>
+                <h2 className="mb-3 text-xl font-semibold">{flightTab === "Weather" ? "Weather along your route" : "Your route"}</h2>
+                <RouteMap story={story} />
+                <div hidden={flightTab !== "Weather"} className="mt-5 grid gap-4 lg:grid-cols-2">
+                  {[story.origin, story.dest].map((field, index) => <article key={field.icao} className="rounded-xl border border-border bg-surface p-4">
+                    <p className="text-sm text-muted">{index === 0 ? "Departure" : "Arrival"}</p>
+                    <h3 className="mt-1 text-lg font-semibold">{field.iata} · {field.category || "Unavailable"}</h3>
+                    <p className="mt-3 text-sm leading-relaxed">{field.taf || "Forecast unavailable."}</p>
+                    <details className="mt-3 text-sm"><summary className="cursor-pointer py-2">Reported weather · METAR</summary><p className="break-words font-mono text-muted">{field.rawMetar || "Observation unavailable."}</p></details>
+                  </article>)}
+                </div>
+              </section>
+            </div>
+            <section id="panel-Briefing" role="tabpanel" aria-labelledby="tab-Briefing" hidden={flightTab !== "Briefing"}>
+              <BreakdownCard briefing={shownBrief} pending={briefM.isPending} onCompile={() => briefM.mutate()} />
             </section>
           </div>
         )}
