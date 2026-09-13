@@ -484,6 +484,10 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     },
   });
 
+  useEffect(() => {
+    if (storyQ.dataUpdatedAt > 0) setRefreshErr(null);
+  }, [query, storyQ.dataUpdatedAt]);
+
   const story = storyForQuery(storyQ.data, query);
   useEffect(() => {
     if (!story) return;
@@ -759,8 +763,8 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         {story && (
           <div key={normFlight(query)} className={cn("min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
             <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
-              <FlightHead story={story} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
-              <TravelerCompanion story={story} failed={storyQ.isError} />
+              <FlightHead story={story} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
+              <TravelerCompanion story={story} failed={storyQ.isError || Boolean(refreshErr)} />
               <div className="mt-5"><RecordCard story={story} /></div>
             </section>
             <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
@@ -878,11 +882,13 @@ function FlightHead({
   story,
   fetching,
   refreshing,
+  failed = false,
   onRefresh,
 }: {
   story: FlightStory;
   fetching: boolean;
   refreshing: boolean;
+  failed?: boolean;
   onRefresh: () => void;
 }) {
   const ac = story.aircraft;
@@ -1063,7 +1069,7 @@ function TimesStrip({
             />
           </div>
         )}
-        <Freshness at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
+        <Freshness failed={failed} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       </div>
       {!down ? (
         <div className="mt-3 grid grid-cols-2 gap-3">
@@ -1079,11 +1085,13 @@ function Freshness({
   at,
   fetching,
   refreshing,
+  failed = false,
   onRefresh,
 }: {
   at: number;
   fetching: boolean;
   refreshing: boolean;
+  failed?: boolean;
   onRefresh: () => void;
 }) {
   const [, setTick] = useState(0);
@@ -1103,7 +1111,7 @@ function Freshness({
         {refreshing ? "Updating…" : "Refresh"}
       </button>
       <p className="font-mono text-xs tracking-widest text-muted uppercase">
-        {refreshing ? "Updating…" : agoLabel(at, false)}
+        {refreshing ? "Updating…" : failed ? "Update delayed · showing saved data" : agoLabel(at, false)}
       </p>
     </div>
   );
