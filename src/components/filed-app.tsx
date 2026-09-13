@@ -299,6 +299,7 @@ export function FiledApp() {
   const setQuery = useFiled((s) => s.setQuery);
   const setStage = useFiled((s) => s.setStage);
   const hydrate = useFiled((s) => s.hydrate);
+  const [briefPopupOpen, setBriefPopupOpen] = useState(true);
   const [flightTab, setFlightTab] = useState<typeof FLIGHT_TABS[number]>("Overview");
   const [draft, setDraft] = useState("");
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
@@ -328,6 +329,7 @@ export function FiledApp() {
     briefGen.current += 1;
     setBriefing(null);
     setBriefingFor("");
+    setBriefPopupOpen(true);
     setFlightTab("Overview");
     setQuery(next);
   }
@@ -618,6 +620,7 @@ export function FiledApp() {
           </div>
         </div>
       </header>}
+      {story && <FlightWelcome open={briefPopupOpen} onClose={() => setBriefPopupOpen(false)} story={story} brief={shownBrief} />}
       <ScreenErrorBoundary>
       <main
         ref={mainRef}
@@ -1657,4 +1660,30 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       {!story.hazards.some(h => h.remaining) && <p className="mt-3 text-sm text-muted">No remaining advisories returned. This does not establish complete weather coverage.</p>}
     </details>
   </div>;
+}
+
+
+function FlightWelcome({ open, onClose, story, brief }: { open: boolean; onClose: () => void; story: FlightStory; brief: CompiledBrief | null }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (open && !ref.current?.open) ref.current?.showModal();
+    if (!open && ref.current?.open) ref.current?.close();
+  }, [open]);
+  return <dialog aria-labelledby="flight-welcome-title" ref={ref} onCancel={onClose} onClose={onClose}
+    className="fixed inset-0 m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-xl border border-border bg-surface p-5 text-fg backdrop:bg-black/70">
+    <div className="flex items-start justify-between gap-3">
+      <h2 className="text-xl font-semibold" id="flight-welcome-title">Important information about your flight</h2>
+      <button type="button" autoFocus aria-label="Close flight briefing" onClick={onClose} className="flex size-11 shrink-0 items-center justify-center rounded-md border border-border text-xl">×</button>
+    </div>
+    <p className="mt-2 text-sm text-muted">{story.iata || story.callsign} · {story.origin.iata} → {story.dest.iata}</p>
+    <div className="mt-4 space-y-3 text-sm leading-relaxed">
+      <p>{brief?.lead || "The briefing is being prepared. Current flight information is below."}</p>
+      {(story.times.delayMin ?? 0) >= 5 && <p><strong>Departure delay:</strong> {story.times.delayMin} minutes.</p>}
+      {(story.currentStage === "inbound" || story.currentStage === "push") && <p><strong>Inbound aircraft:</strong> {story.inbound.detail || story.inbound.headline}</p>}
+      {story.hazards.some(h => h.remaining) && <p><strong>Route weather:</strong> {[...new Set(story.hazards.filter(h => h.remaining).map(h => h.label))].join(" · ")}</p>}
+      {story.origin.nas?.delayed && <p><strong>Departure airport:</strong> {story.origin.nas.reason}</p>}
+      {story.dest.nas?.delayed && <p><strong>Arrival airport:</strong> {story.dest.nas.reason}</p>}
+    </div>
+    <p className="mt-4 text-xs text-muted">Data as of {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Estimates may change. Full details remain in Briefing and Weather.</p>
+  </dialog>;
 }

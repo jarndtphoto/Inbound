@@ -35,7 +35,7 @@ function mercY(lat: number) {
   return latToTileY(Math.max(-85, Math.min(85, lat)), 0);
 }
 
-function projectBox(minLon: number, maxLon: number, minLat: number, maxLat: number) {
+function projectBox(minLon: number, maxLon: number, minLat: number, maxLat: number, H = 800) {
   const innerW = W - PAD * 2;
   const innerH = H - PAD * 2;
   let x0 = mercX(minLon);
@@ -166,7 +166,7 @@ function clampView(next: { s: number; x: number; y: number }) {
   };
 }
 
-function useMapBoxZoom(resetKey: string) {
+function useMapBoxZoom(resetKey: string, H = 800) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ s: 1, x: 0, y: 0 });
   const viewRef = useRef(view);
@@ -203,11 +203,11 @@ function useMapBoxZoom(resetKey: string) {
         y: cy - ((cy - y) * ns) / s,
       }),
     );
-  }, []);
+  }, [H]);
 
   useEffect(() => {
     setView({ s: 1, x: 0, y: 0 });
-  }, [resetKey]);
+  }, [resetKey, H]);
 
   useEffect(() => {
     const el = boxRef.current;
@@ -307,7 +307,7 @@ function useMapBoxZoom(resetKey: string) {
       document.removeEventListener("gesturechange", blockPageGesture);
       document.removeEventListener("gestureend", blockPageGesture);
     };
-  }, []);
+  }, [H]);
 
   return { boxRef, s: view.s, x: view.x, y: view.y, reset, zoomBy };
 }
@@ -381,9 +381,21 @@ function ringFillable(ring: [number, number][]) {
 }
 
 export function RouteMap({ story, fixedViewport = false }: { story: FlightStory; fixedViewport?: boolean }) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [mapHeight, setMapHeight] = useState(800);
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !fixedViewport) return;
+    const observer = new ResizeObserver(() => {
+      if (frame.clientWidth && frame.clientHeight) setMapHeight(800 * frame.clientHeight / frame.clientWidth);
+    });
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [fixedViewport]);
+  const H = fixedViewport ? mapHeight : 800;
   const weatherOn = useFiled((s) => s.weatherOn);
   const setWeatherOn = useFiled((s) => s.setWeatherOn);
-  const zoom = useMapBoxZoom(`${story.callsign}:${story.origin.iata}:${story.dest.iata}`);
+  const zoom = useMapBoxZoom(`${story.callsign}:${story.origin.iata}:${story.dest.iata}`, H);
   const samples = story.route?.samples ?? [];
   if (samples.length < 2) return null;
 
@@ -406,7 +418,7 @@ export function RouteMap({ story, fixedViewport = false }: { story: FlightStory;
   maxLat += latPad;
   minLon -= lonPad;
   maxLon += lonPad;
-  const proj = projectBox(minLon, maxLon, minLat, maxLat);
+  const proj = projectBox(minLon, maxLon, minLat, maxLat, H);
   minLat = proj.minLat;
   maxLat = proj.maxLat;
   minLon = proj.minLon;
@@ -452,15 +464,15 @@ export function RouteMap({ story, fixedViewport = false }: { story: FlightStory;
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-surface", fixedViewport && "flex h-full flex-col items-center")}>
       <div
-        ref={zoom.boxRef}
+        ref={(node) => { zoom.boxRef.current = node; frameRef.current = node; }}
         data-map-box
-        className="relative overflow-hidden select-none"
-        style={{ touchAction: fixedViewport ? "none" : "pan-y", ...(fixedViewport ? { width: "min(100cqw, max(0px, calc(100cqh - 140px)))", flexShrink: 0 } : {}) }}
+        className={cn("relative overflow-hidden select-none", fixedViewport && "w-full min-h-0 flex-1")}
+        style={{ touchAction: fixedViewport ? "none" : "pan-y",  }}
       >
       <svg
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="xMidYMid meet"
-        className="block aspect-square h-auto w-full"
+        className={fixedViewport ? "block h-full w-full" : "block aspect-square h-auto w-full"}
         role="img"
         aria-label={`Route ${story.origin.iata} to ${story.dest.iata}`}
       >
