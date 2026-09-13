@@ -284,3 +284,16 @@ describe('taxi duration consistency', () => {
     assert.equal(pickTaxi({}, {}, 25, 20).min, 25);
   });
 });
+
+
+describe('AA3177 pushback to taxi transition', () => {
+  it('advances on fresh taxi speed without waiting for distance from airport center', () => {
+    const origin = { lat: 41.9786, lon: -87.9048 };
+    const args = { origin, inboundStatus: 'complete', pushed: true, faAirborne: false, taxiHint: false };
+    const live = { ...origin, onGround: true, gsKt: 8, seenSec: 1 };
+    assert.equal(currentStageOf({ ...args, live }), 'taxi');
+    assert.equal(currentStageOf({ ...args, live: { ...live, gsKt: 3 } }), 'push');
+    assert.equal(currentStageOf({ ...args, live: { ...live, seenSec: 60 } }), 'push');
+    assert.equal(currentStageOf({ ...args, live: null }), 'push');
+  });
+});

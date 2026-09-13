@@ -1906,7 +1906,10 @@ export function currentStageOf(args) {
 	// is departure evidence, regardless of whether a position feed drops out.
 	if (!pushed && !faAirborne && !ourTakeoffActual
 		&& ["airborne", "watching", "at_field"].includes(inboundStatus)) return "inbound";
-	if (!flightBegun(live, origin) && taxiHint && !faAirborne) return "taxi";
+	const freshTaxiMovement = Boolean(pushed && live?.onGround && origin
+		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) >= 8
+		&& haversineNm(live, origin) < 10);
+	if (!flightBegun(live, origin) && (taxiHint || freshTaxiMovement) && !faAirborne) return "taxi";
 	if (!flightBegun(live, origin) && pushed && !(faAirborne || Boolean(ourTakeoffActual))) return "push";
 	const atOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const begun = flightBegun(live, origin);
