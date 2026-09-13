@@ -327,14 +327,14 @@ function pathRuns(samples: RouteSample[], progress: number) {
           cur = { chop, past, pts: [pt] };
           continue;
         }
-        const dx = pt.x - cur.pts[cur.pts.length - 1]!.x;
-        const dy = pt.y - cur.pts[cur.pts.length - 1]!.y;
-        const jump = Math.hypot(dx, dy);
-        if (cur.chop === chop && cur.past === past && jump < 240) {
+        // Split only at the longitude seam; zoom can make valid adjacent
+        // route samples hundreds of screen pixels apart.
+        const crossesSeam = Math.abs(s.lon - samples[i - 1]!.lon) > 180;
+        if (cur.chop === chop && cur.past === past && !crossesSeam) {
           cur.pts.push(pt);
         } else {
           if (cur.pts.length >= 2) out.push(cur);
-          cur = { chop, past, pts: jump < 240 ? [cur.pts[cur.pts.length - 1]!, pt] : [pt] };
+          cur = { chop, past, pts: !crossesSeam ? [cur.pts[cur.pts.length - 1]!, pt] : [pt] };
         }
       }
       if (cur && cur.pts.length >= 2) out.push(cur);
