@@ -175,3 +175,21 @@ html[data-theme="sunrise"] {
   --color-ifr: #a34033;
   --color-ring: #315e74;
 }
+
+/* Gold-halo welcome screen */
+.inbound-welcome {
+  --welcome-bg: #030f20;
+  --welcome-fg: #fff5db;
+  --welcome-muted: #c6cbd4;
+  --welcome-gold: #ffd65b;
+  min-height: 100dvh; overflow-y: auto; background: var(--welcome-bg);
+  color: var(--welcome-fg); display: grid; place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+}
+.inbound-welcome-content { width: 100%; max-width: 420px; text-align: center; }
+.inbound-welcome-art { display: block; width: min(100%, 42dvh); height: auto; margin: 0 auto 16px; border-radius: 24px; }
+.inbound-welcome-tagline { font-size: 22px; margin-top: 12px; }
+.inbound-welcome-description { color: var(--welcome-muted); margin-top: 8px; }
+.inbound-welcome-button { width: 100%; min-height: 56px; margin-top: 28px; padding: 16px 24px; border-radius: 16px; background: var(--welcome-gold); color: var(--welcome-bg); font-weight: 600; cursor: pointer; }
+.inbound-welcome-button:focus-visible { outline: 3px solid var(--welcome-fg); outline-offset: 5px; }
+.inbound-welcome-button:disabled { opacity: .65; cursor: wait; }

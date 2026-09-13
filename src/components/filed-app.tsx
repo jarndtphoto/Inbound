@@ -302,6 +302,7 @@ class ScreenErrorBoundary extends Component<{ children: ReactNode }, { err: Erro
 
 export function FiledApp() {
   const [ready, setReady] = useState(false);
+  const [entered, setEntered] = useState(false);
   const [page, setPage] = useState<"home" | "flight">("home");
   const [theme, setTheme] = useState<"sunset" | "sunrise">("sunset");
   const [flight, setFlight] = useState("");
@@ -327,9 +328,16 @@ export function FiledApp() {
     setQuery(q);
     setPage("flight");
   };
-  if (!ready) return <main className="flex h-dvh flex-col items-center justify-center gap-4 bg-bg text-fg" role="status">
-    <Plane className="h-10 w-10 text-accent motion-safe:animate-pulse" aria-hidden="true" />
-    <h1 className="font-display text-5xl">Inbound</h1><p className="text-muted">Preparing your journey…</p>
+  if (!entered) return <main className="inbound-welcome">
+    <div className="inbound-welcome-content">
+      <img className="inbound-welcome-art" src="/inbound-welcome.svg" alt="An aircraft approaching a runway through a glowing gold halo" width={768} height={768} fetchPriority="high" />
+      <h1 className="font-display text-6xl">Inbound</h1>
+      <p className="inbound-welcome-tagline">Your journey, in view.</p>
+      <p className="inbound-welcome-description">From your gate to your destination.</p>
+      <button type="button" className="inbound-welcome-button" disabled={!ready} onClick={() => setEntered(true)}>
+        {ready ? "Track my flight" : "Preparing your journey…"}
+      </button>
+    </div>
   </main>;
   if (page === "flight") return <FlightPages onHome={() => setPage("home")} />;
   return <main className="h-dvh overflow-y-auto bg-bg px-5 py-8 text-fg sm:px-8">
