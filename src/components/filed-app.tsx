@@ -887,7 +887,9 @@ function TimesStrip({
               <p className="mt-1 break-words text-xs text-muted">{formatMiles(story.route.remainingNm)}</p>
             </div>
             <div className="flex aspect-square min-w-0 flex-col justify-center rounded-md border border-border bg-bg p-3 sm:aspect-auto sm:min-h-32">
-              <p className="font-mono text-xs tracking-wide text-subtle uppercase">Flown</p>
+              <p className="flex items-center gap-1.5 font-mono text-xs tracking-wide text-subtle uppercase">
+                <Clock className="size-3 shrink-0" /> Flown
+              </p>
               <p className="mt-1 break-words font-display text-2xl font-semibold leading-none">{elapsed ? formatDuration(elapsed.minutes) : "—"}</p>
               <p className="mt-1 break-words text-xs text-muted">
                 {elapsed?.estimated || !liveFix(story) ? "Est. " : "Approx. "}

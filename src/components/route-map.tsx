@@ -71,6 +71,39 @@ type RadarMaps = {
   radar: { past?: { time: number; path: string }[] };
 };
 
+function useRadarMaps() {
+  return useQuery({
+    queryKey: ["radar-maps"],
+    queryFn: async () => {
+      const res = await fetch("https://api.rainviewer.com/public/weather-maps.json", {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error("radar unavailable");
+      return (await res.json()) as RadarMaps;
+    },
+    staleTime: 2 * 60_000,
+    refetchInterval: 2 * 60_000,
+  });
+}
+
+function RadarStatus() {
+  const q = useRadarMaps();
+  const stamp = q.data?.radar.past?.at(-1)?.time;
+  const validStamp = typeof stamp === "number" && Number.isFinite(stamp) && stamp > 0;
+  const time = validStamp ? new Date(stamp * 1000).toLocaleString("en-US", {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    hour12: false, timeZone: "UTC",
+  }) : null;
+  return (
+    <p role="status" className="w-full text-xs leading-snug text-subtle">
+      RainViewer radar · {time ? `Frame ${time} UTC` : q.isPending ? "Loading…" : "Frame unavailable"}.
+      {q.isError ? " Update failed; any displayed frame is the last available." : ""}
+      {validStamp && Date.now() / 1000 - stamp > 20 * 60 ? " Frame is over 20 minutes old." : ""}
+      {" "}Coverage is mostly over land. Frame time applies to radar, not route forecasts.
+    </p>
+  );
+}
+
 function RadarLayer({
   minLon,
   maxLon,
@@ -86,16 +119,7 @@ function RadarLayer({
   sx: (lon: number) => number;
   sy: (lat: number) => number;
 }) {
-  const q = useQuery({
-    queryKey: ["radar-maps"],
-    queryFn: async () => {
-      const res = await fetch("https://api.rainviewer.com/public/weather-maps.json");
-      if (!res.ok) throw new Error("radar unavailable");
-      return (await res.json()) as RadarMaps;
-    },
-    staleTime: 5 * 60_000,
-    enabled: true,
-  });
+  const q = useRadarMaps();
 
   const frame = q.data?.radar.past?.at(-1);
   if (!frame || !q.data) return null;
@@ -651,7 +675,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
           {weatherOn ? "Radar on" : "Live weather"}
         </button>
         {weatherOn ? (
-          <p className="w-full text-[11px] leading-snug text-subtle">Radar coverage is mostly over land.</p>
+          <RadarStatus />
         ) : null}
       </div>
     </div>
