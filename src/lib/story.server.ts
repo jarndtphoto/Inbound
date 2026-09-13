@@ -930,13 +930,20 @@ function typicalTaxiFromLog(f) {
 		inn: medianMin(inns.slice(0, 8))
 	};
 }
-function pickTaxi(start, end, explicit, typical) {
+export function pickTaxi(start, end, explicit, typical) {
 	if (start.actual && end.actual && end.actual > start.actual) {
 		const m = Math.round((end.actual - start.actual) / 60);
 		if (m >= 2 && m <= 180) return {
 			min: m,
 			kind: "measured"
 		};
+	}
+	// Current endpoint estimates outrank a generic filed/typical taxi duration.
+	const currentStart = start.actual ?? start.estimated;
+	const currentEnd = end.actual ?? end.estimated;
+	if (currentStart != null && currentEnd != null && currentEnd > currentStart) {
+		const minutes = Math.round((currentEnd - currentStart) / 60);
+		if (minutes >= 1 && minutes <= 180) return { min: minutes, kind: "posted" };
 	}
 	if (explicit != null) return {
 		min: explicit,

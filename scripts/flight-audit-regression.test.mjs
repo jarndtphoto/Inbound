@@ -10,7 +10,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory, motionFromTrace, currentStageOf, fetchAwarePage } = await import('../src/lib/story.server.ts');
+const { loadFlightStory, motionFromTrace, currentStageOf, fetchAwarePage, pickTaxi } = await import('../src/lib/story.server.ts');
 
 describe('September 12 flight audit replay', () => {
   for (const [ident, query, destination, pushed] of [
@@ -272,5 +272,15 @@ describe('inbound canonical history details', () => {
     assert.equal(result.gateIn.actual, 1789231900);
     assert.equal(requests[1], history);
     assert.equal(requests.length, 2);
+  });
+});
+
+
+describe('taxi duration consistency', () => {
+  it('uses current push and takeoff estimates instead of a generic 25 minutes', () => {
+    assert.deepEqual(pickTaxi({ estimated: 10000 }, { estimated: 10600 }, 25, 25), { min: 10, kind: 'posted' });
+    assert.deepEqual(pickTaxi({ actual: 10000 }, { estimated: 10900 }, 25, 25), { min: 15, kind: 'posted' });
+    assert.deepEqual(pickTaxi({ actual: 10000 }, { actual: 11200 }, 25, 25), { min: 20, kind: 'measured' });
+    assert.equal(pickTaxi({}, {}, 25, 20).min, 25);
   });
 });
