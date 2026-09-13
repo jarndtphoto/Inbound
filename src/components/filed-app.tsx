@@ -665,20 +665,12 @@ export function FiledApp() {
               <div className="mt-5"><RecordCard story={story} /></div>
               <StagePager story={story} active={active} onChange={(id) => setStage(id)} />
             </section>
-            <div hidden={flightTab !== "Route" && flightTab !== "Weather"}>
-              <section id={`panel-${flightTab === "Weather" ? "Weather" : "Route"}`} role="tabpanel" aria-labelledby={`tab-${flightTab === "Weather" ? "Weather" : "Route"}`}>
-                <h2 className="mb-3 text-xl font-semibold">{flightTab === "Weather" ? "Weather along your route" : "Your route"}</h2>
-                <RouteMap story={story} />
-                <div hidden={flightTab !== "Weather"} className="mt-5 grid gap-4 lg:grid-cols-2">
-                  {[story.origin, story.dest].map((field, index) => <article key={field.icao} className="rounded-xl border border-border bg-surface p-4">
-                    <p className="text-sm text-muted">{index === 0 ? "Departure" : "Arrival"}</p>
-                    <h3 className="mt-1 text-lg font-semibold">{field.iata} · {field.category || "Unavailable"}</h3>
-                    <p className="mt-3 text-sm leading-relaxed">{field.taf || "Forecast unavailable."}</p>
-                    <details className="mt-3 text-sm"><summary className="cursor-pointer py-2">Reported weather · METAR</summary><p className="break-words font-mono text-muted">{field.rawMetar || "Observation unavailable."}</p></details>
-                  </article>)}
-                </div>
-              </section>
-            </div>
+            <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"}>
+              <RouteMap story={story} />
+            </section>
+            <section id="panel-Weather" role="tabpanel" aria-labelledby="tab-Weather" hidden={flightTab !== "Weather"}>
+              <WeatherTimeline story={story} />
+            </section>
             <section id="panel-Briefing" role="tabpanel" aria-labelledby="tab-Briefing" hidden={flightTab !== "Briefing"}>
               <BreakdownCard briefing={shownBrief} pending={briefM.isPending} onCompile={() => briefM.mutate()} />
             </section>
@@ -1601,4 +1593,59 @@ function Skeleton({ query }: { query: string }) {
       </div>
     </div>
   );
+}
+
+
+function WeatherTimeline({ story }: { story: FlightStory }) {
+  const airborne = story.currentStage === "ride" || story.currentStage === "arrival";
+  const landed = story.times.landKind === "actual" || story.currentStage === "gate";
+  const takeoff = story.times.takeoffUnix;
+  const landing = story.times.landUnix;
+  const duration = takeoff && landing && landing > takeoff ? (landing - takeoff) / 60 : null;
+  const elapsed = story.times.takeoffKind === "actual" && takeoff
+    ? Math.max(0, (story.fetchedAt / 1000 - takeoff) / 60) : null;
+  const samples = story.route.samples.filter(s => !airborne || s.frac >= story.route.progress);
+  const groups: { label: string; note: string | null; start: typeof samples[number]; end: typeof samples[number] }[] = [];
+  for (const sample of samples) {
+    const label = [sample.convective ? "Thunderstorm advisory or forecast" : null,
+      sample.chop !== "smooth" ? `${sample.chop} turbulence indicated` : null,
+      sample.cloud ? "Clouds indicated" : null].filter(Boolean).join(" · ") || "No conditions flagged in available data";
+    const prev = groups[groups.length - 1];
+    if (prev && prev.label === label && prev.note === sample.note) prev.end = sample;
+    else groups.push({ label, note: sample.note, start: sample, end: sample });
+  }
+  const timeLabel = (group: typeof groups[number]) => {
+    const from = airborne ? group.start.etaMin : duration == null ? null : group.start.frac * duration;
+    const to = airborne ? group.end.etaMin : duration == null ? null : group.end.frac * duration;
+    if (from == null || to == null) return "Timing unavailable";
+    const range = `${Math.round(from)}${Math.round(to) > Math.round(from) ? `–${Math.round(to)}` : ""} min`;
+    return airborne ? `In approximately ${range}${elapsed == null ? "" : ` · around ${Math.round(elapsed + from)} min into flight`}` : `Approximately ${range} after takeoff`;
+  };
+  const fieldCard = (field: FlightStory["origin"], title: string) => <article className="rounded-xl border border-border bg-surface p-4">
+    <p className="text-sm text-muted">{title}</p>
+    <h3 className="mt-1 text-lg font-semibold">{field.iata} · {field.category || "Unavailable"}</h3>
+    <p className="mt-3 text-sm leading-relaxed">{field.decoded?.summary || "Current observation unavailable."}</p>
+    <p className="mt-3 text-sm leading-relaxed">Forecast: {field.taf || "Unavailable."}</p>
+    <details className="mt-3 text-sm"><summary className="cursor-pointer py-2">Observation source · METAR</summary><p className="break-words font-mono text-muted">{field.rawMetar || "Observation unavailable."}</p></details>
+  </article>;
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-semibold">Weather through your flight</h2>
+      <p className="mt-2 text-sm leading-relaxed text-muted">Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters. Unflagged areas may have incomplete coverage.</p>
+      <p className="mt-2 text-xs text-muted">Flight data fetched {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Weather observation and advisory times are shown in their source details.</p>
+    </div>
+    {fieldCard(story.origin, "Takeoff · departure conditions")}
+    <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
+    {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : groups.length ? <ol className="space-y-3">
+      {groups.map((g, i) => <li key={i} className="rounded-xl border border-border bg-surface p-4">
+        <p className="flex items-center gap-2 text-sm text-muted"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
+        <p className="mt-2 font-semibold">{g.label}</p>
+        {g.note && <p className="mt-2 text-sm text-muted">{g.note}</p>}
+      </li>)}
+    </ol> : <p className="text-sm text-muted">Route weather data unavailable.</p>}
+    {fieldCard(story.dest, "Landing · arrival conditions")}
+    <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer py-2">Advisory sources and valid times</summary>
+      {story.hazards.filter(h => h.remaining).map(h => <div key={h.id} className="mt-3 text-sm"><p className="font-semibold">{h.label}</p><p className="text-muted">{h.validity || "Validity time unavailable"}</p><p className="mt-1 text-muted">{h.detail}</p></div>)}
+      {!story.hazards.some(h => h.remaining) && <p className="mt-3 text-sm text-muted">No remaining advisories returned. This does not establish complete weather coverage.</p>}
+    </details>
+  </div>;
 }
