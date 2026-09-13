@@ -595,12 +595,12 @@ function flightBegun(live, origin) {
 	if (stillOnField(live, origin)) return false;
 	return gs >= 90 && Boolean(origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) > 3);
 }
-function motionFromTrace(points, origin) {
+export function motionFromTrace(points, origin) {
 	if (!points?.length || !origin) return { pushed: false, taxiing: false, flying: false };
 	const now = Date.now() / 1e3;
-	const recent = points.filter((p) => now - p.t < 18 * 60 && haversineNm(p, origin) < 8);
+	const recent = points.filter((p) => p.t <= now && now - p.t < 18 * 60 && haversineNm(p, origin) < 8);
 	const last = recent[recent.length - 1];
-	if (!last) return { pushed: false, taxiing: false, flying: false };
+	if (!last || now - last.t > 30) return { pushed: false, taxiing: false, flying: false };
 	const lastGs = last.gs ?? 0;
 	const lastAlt = last.alt ?? 0;
 	const lastGround = Boolean(last.ground) || lastAlt < 200;
@@ -2644,7 +2644,7 @@ async function buildStory(query) {
 	const distPark = live && park ? haversineNm({ lat: live.lat, lon: live.lon }, park) : 0;
 	let motion = { pushed: false, taxiing: false, flying: false };
 	const hexNow = String(live?.hex || hexByIdent.get(identKey) || aware?.hex || "").toLowerCase();
-	const needsGroundTrace = !live || (live.onGround && (live.gsKt ?? 0) < 1.2 && distPark < 0.025 && !times.pushed && !pushLatch.has(landKey));
+	const needsGroundTrace = !live || (live.onGround && (live.gsKt ?? 0) < 1.2 && distPark < 0.025 && !pushLatch.has(landKey));
 	if (hexNow && origin && !ourLanded && needsGroundTrace) {
 		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
 	}

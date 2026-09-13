@@ -10,7 +10,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory } = await import('../src/lib/story.server.ts');
+const { loadFlightStory, motionFromTrace } = await import('../src/lib/story.server.ts');
 
 describe('September 12 flight audit replay', () => {
   for (const [ident, query, destination, pushed] of [
@@ -202,8 +202,10 @@ describe('MDW departure surface-stage replays', () => {
         lat: 41.7868, lon: -87.7524, alt_baro: 'ground', gs: speed,
         seen: 1, seen_pos: 1,
       };
+      let groundTraceRequests = 0;
       t.mock.method(Date, 'now', () => now * 1000);
       t.mock.method(globalThis, 'fetch', async (url) => {
+        if (String(url).includes('/trace_recent_')) groundTraceRequests++;
         if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
           return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
         }
@@ -214,6 +216,20 @@ describe('MDW departure surface-stage replays', () => {
       assert.equal(story.times.airborne, false);
       assert.equal(story.times.pushed, expectedPush);
       assert.equal(story.aircraft.onGround, true);
+      if (flight === 'WN363') assert.ok(groundTraceRequests > 0, 'reported gate-out must not suppress movement checks');
     });
   }
+});
+
+
+describe('ground trace freshness', () => {
+  it('accepts recent movement but rejects stale and future movement', (t) => {
+    const now = 1789231976;
+    t.mock.method(Date, 'now', () => now * 1000);
+    const origin = { lat: 41.9786, lon: -87.9048 };
+    const point = (age, offset) => ({ t: now - age, lat: origin.lat, lon: origin.lon + offset, gs: 9, alt: 0, ground: true });
+    assert.equal(motionFromTrace([point(20, 0), point(2, .003)], origin).taxiing, true);
+    assert.deepEqual(motionFromTrace([point(90, 0), point(60, .003)], origin), { pushed: false, taxiing: false, flying: false });
+    assert.deepEqual(motionFromTrace([point(-10, 0), point(-20, .003)], origin), { pushed: false, taxiing: false, flying: false });
+  });
 });
