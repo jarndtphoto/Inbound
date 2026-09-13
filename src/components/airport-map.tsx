@@ -96,7 +96,7 @@ function AirportMap({ story, arrival }: { story: FlightStory; arrival: boolean }
     for (let y = Math.max(0, Math.floor(top / tileSize)); y <= Math.min(count - 1, Math.floor((top + size.h) / tileSize)); y++) {
       const wrappedX = ((x % count) + count) % count;
       const key = `${z}/${wrappedX}/${y}`;
-      tiles.push({ key, src: `https://tile.openstreetmap.org/${key}.png`, x: x * tileSize - left, y: y * tileSize - top });
+      tiles.push({ key, src: `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${wrappedX}`, x: x * tileSize - left, y: y * tileSize - top });
     }
   }
   const visibleTileError = tiles.some(tile => failedTiles.has(tile.key));
@@ -125,7 +125,7 @@ function AirportMap({ story, arrival }: { story: FlightStory; arrival: boolean }
   return <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-surface">
     <div className="shrink-0 px-3 py-2">
       <p className="text-sm font-semibold">{airport.iata} · {arrival ? "Arrival airport" : "Departure airport"}</p>
-      <p role="status" className="text-xs text-muted">{fresh ? `Ground position · ${ageText(age)}` : point ? `Last position · ${ageText(age)}` : "Ground position unavailable · showing airport"}</p>
+      <p role="status" className="text-xs text-muted">{fresh ? `Ground position · ${ageText(age)}` : point ? `Last position · ${ageText(age)}` : (story.currentStage === "taxi" && !arrival ? "Departure reported · waiting for ground coordinates" : "Ground position unavailable · showing airport")}</p>
     </div>
     <div ref={box} className="relative min-h-0 flex-1 overflow-hidden bg-[#e5e7eb]" style={{ touchAction: "none" }} aria-label={`${airport.iata} airport ground map`}
       onPointerDown={event => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); startGesture(); }}
@@ -140,11 +140,11 @@ function AirportMap({ story, arrival }: { story: FlightStory; arrival: boolean }
       </div>}
       {visibleTileError && <p role="status" className="absolute inset-x-2 top-2 rounded-lg bg-surface px-3 py-2 text-xs text-fg">Some airport map detail could not load.</p>}
       <div className="absolute inset-x-2 bottom-7 flex flex-wrap items-center gap-1" onPointerDown={event => event.stopPropagation()}>
-        <button type="button" className={controls} aria-pressed={following} disabled={!fresh} onClick={() => { setFollowing(true); if (target) setCenter(target); }}>{following && fresh ? "Following" : "Follow aircraft"}</button>
+        <button type="button" className={controls} aria-pressed={following && fresh} disabled={!fresh} onClick={() => { setFollowing(true); if (target) setCenter(target); }}>{following && fresh ? "Following" : "Follow aircraft"}</button>
         <button type="button" className={controls} onClick={() => { setFollowing(false); setCenter(airportPoint); setZoom(14); }}>Airport</button>
         <div className="ml-auto flex gap-1"><button type="button" className={controls} aria-label="Zoom in airport map" disabled={zoom >= 19} onClick={() => setZoom(z => Math.min(19, Math.floor(z) + 1))}>+</button><button type="button" className={controls} aria-label="Zoom out airport map" disabled={zoom <= 12} onClick={() => setZoom(z => Math.max(12, Math.ceil(z) - 1))}>−</button></div>
       </div>
-      <a className="absolute bottom-0 right-0 bg-white/95 px-2 py-1 text-[10px] text-[#263238]" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer noopener" onPointerDown={event => event.stopPropagation()}>© OpenStreetMap contributors</a>
+      <a className="absolute inset-x-0 bottom-0 bg-white/95 px-2 py-1 text-center text-[9px] text-[#263238]" href="https://goto.arcgisonline.com/maps/World_Imagery" target="_blank" rel="noreferrer noopener" onPointerDown={event => event.stopPropagation()}>Imagery: Esri, Vantor, Earthstar Geographics, GIS community</a>
     </div>
   </div>;
 }
