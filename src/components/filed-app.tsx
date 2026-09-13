@@ -366,7 +366,8 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   const setQuery = useFiled((s) => s.setQuery);
   const setStage = useFiled((s) => s.setStage);
   const hydrate = useFiled((s) => s.hydrate);
-  const [briefPopupOpen, setBriefPopupOpen] = useState(true);
+  const [briefPopupOpen, setBriefPopupOpen] = useState(false);
+  const openedBriefings = useRef(new Set<string>());
   const [flightTab, setFlightTab] = useState<typeof FLIGHT_TABS[number]>("Overview");
   const [draft, setDraft] = useState("");
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
@@ -396,7 +397,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     briefGen.current += 1;
     setBriefing(null);
     setBriefingFor("");
-    setBriefPopupOpen(true);
+    setBriefPopupOpen(false);
     setFlightTab("Overview");
     setQuery(next);
   }
@@ -474,6 +475,14 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   });
 
   const story = storyForQuery(storyQ.data, query);
+  useEffect(() => {
+    if (!story) return;
+    const key = normFlight(query);
+    if (!openedBriefings.current.has(key)) {
+      openedBriefings.current.add(key);
+      setBriefPopupOpen(true);
+    }
+  }, [query, story?.times.origPushUnix, story?.times.pushUnix, Boolean(story)]);
   const rawStage = String(stagePref === "auto" ? (story?.currentStage ?? "inbound") : stagePref);
   const active: StageId = rawStage === "ground"
     ? "push"
@@ -873,22 +882,20 @@ function FlightHead({
   const showRemaining = !airborne && !down;
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2">
+        <div className="min-w-0">
           <p className="font-mono text-xs tracking-wide text-muted">{headStatus(story)}</p>
-          <h2 className="font-display text-display font-semibold leading-none">{story.iata}</h2>
-          <p className="mt-2 text-lg text-fg">
-            {story.origin.city} <span className="text-muted">{story.origin.iata}</span>
-            <span className="mx-2 text-subtle">→</span>
-            {story.dest.city} <span className="text-muted">{story.dest.iata}</span>
-          </p>
+          <h2 className="font-display text-[clamp(1.8rem,7vw,4.25rem)] font-semibold leading-none">{story.iata}</h2>
         </div>
-        <div className="text-right">
+        <div className="max-w-36 text-right">
           <p className="font-mono text-xs tracking-widest text-muted uppercase">Stage</p>
-          <p className="font-display text-2xl font-semibold">
-            {stageHeadline(story)}
-          </p>
+          <p className="font-display text-xl font-semibold leading-tight sm:text-2xl">{stageHeadline(story)}</p>
         </div>
+        <p className="col-span-2 text-lg text-fg">
+          {story.origin.city} <span className="text-muted">{story.origin.iata}</span>
+          <span className="mx-2 text-subtle">→</span>
+          {story.dest.city} <span className="text-muted">{story.dest.iata}</span>
+        </p>
       </div>
       <TimesStrip story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       <dl className={cn("mt-4 grid gap-3", showAlt || showRemaining ? "grid-cols-2" : "grid-cols-1")}>
@@ -1692,14 +1699,31 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
   const landing = story.times.landUnix;
   const duration = takeoff && landing && landing > takeoff ? (landing - takeoff) / 60 : null;
   const samples = story.route.samples.filter(s => !airborne || s.frac >= story.route.progress);
-  const groups: { label: string; note: string | null; start: typeof samples[number]; end: typeof samples[number] }[] = [];
+  const groups: { label: string; note: string | null; start: typeof samples[number]; end: typeof samples[number]; ranges: {from: number; to: number}[]; gaps?: boolean }[] = [];
   for (const sample of samples) {
     const label = [sample.convective ? "Storms possible near the route" : null,
       sample.chop !== "smooth" ? sample.chop === "light" ? "Light turbulence possible" : sample.chop === "moderate" ? "Moderate turbulence possible" : "Severe turbulence possible" : null,
       sample.cloud ? "Clouds may limit the view" : null].filter(Boolean).join(" · ") || "No conditions flagged in available data";
     const prev = groups[groups.length - 1];
-    if (prev && prev.label === label && prev.note === sample.note) prev.end = sample;
-    else groups.push({ label, note: sample.note, start: sample, end: sample });
+    if (prev && prev.label === label) {
+      prev.end = sample;
+      prev.ranges[prev.ranges.length - 1].to = sample.frac;
+      prev.note = [...new Set([prev.note, sample.note].filter(Boolean))].join("\n") || null;
+    } else groups.push({ label, note: sample.note, start: sample, end: sample, ranges: [{from: sample.frac, to: sample.frac}] });
+  }
+  // Combine equal-severity areas separated by no more than five minutes.
+  for (let i = 0; i + 2 < groups.length;) {
+    const first = groups[i], gap = groups[i + 1], next = groups[i + 2];
+    const gapMinutes = airborne ? next.start.etaMin - first.end.etaMin
+      : duration == null ? Infinity : (next.start.frac - first.end.frac) * duration;
+    if (first.start.chop !== "smooth" && first.label === next.label
+      && gap.label === "No conditions flagged in available data" && gapMinutes >= 0 && gapMinutes <= 5) {
+      first.end = next.end;
+      first.ranges.push(...next.ranges);
+      first.gaps = true;
+      first.note = [...new Set([first.note, next.note].filter(Boolean))].join("\n") || null;
+      groups.splice(i + 1, 2);
+    } else i++;
   }
   const timeLabel = (group: typeof groups[number]) => {
     const from = airborne ? group.start.etaMin : duration == null ? null : group.start.frac * duration;
@@ -1714,7 +1738,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       ? from < 1 ? "Around now" : `Starts in about ${formatMinutes(from)}`
       : from < 1 ? "Around takeoff" : `Starts about ${formatMinutes(from)} after takeoff`;
     const span = Math.round(to - from);
-    return <span>{start}{span > 0 && <span className="block">Continues for about {formatMinutes(span)}</span>}</span>;
+    return <span>{start}{span > 0 && <span className="block">{group.gaps ? "Intermittent areas over about " : "Continues for about "}{formatMinutes(span)}</span>}</span>;
   };
   const fieldCard = (field: FlightStory["origin"], title: string) => <article className="rounded-xl border border-border bg-surface p-4">
     <p className="text-sm text-muted">{title}</p>
@@ -1734,10 +1758,10 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : groups.length ? <ol className="space-y-3">
       {groups.map((g, i) => <li key={i} className="rounded-xl border border-border bg-surface p-4">
         <p className="flex items-center gap-2 text-sm text-muted"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
-        <p className="mt-2 font-semibold">{g.label}</p>
+        <p className="mt-2 font-semibold">{g.label}</p>{g.gaps && <p className="mt-1 text-sm text-muted">Nearby areas grouped together; brief gaps may occur.</p>}
         {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
           <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={`Route preview: ${g.label}`}>
-            <RouteMap story={story} fixedViewport weatherPreview={{ from: g.start.frac, to: g.end.frac }} />
+            <RouteMap story={story} fixedViewport weatherPreview={{ from: g.start.frac, to: g.end.frac, ranges: g.ranges }} />
           </div>
           <figcaption className="mt-2 text-xs text-muted">Highlighted: the forecast area along your route. Radar colors show recent precipitation, not turbulence or the weather guaranteed at your arrival time. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
         </figure>}

@@ -380,7 +380,7 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { from: number; to: number } }) {
+export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { from: number; to: number; ranges?: {from: number; to: number}[] } }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [mapHeight, setMapHeight] = useState(800);
   useEffect(() => {
@@ -453,7 +453,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       ? sy(ac!.lat)
       : sy(origin.lat);
   const rot = landed ? 0 : story.route.heading;
-  const future = samples.filter((s) => s.frac > progress + 0.08);
+  const future = samples.filter((s) => weatherPreview ? s.frac >= weatherPreview.from && s.frac <= weatherPreview.to : s.frac > progress + 0.08);
   const firstBump = future.find((s) => s.chop !== "smooth");
   const mid = future[Math.max(0, Math.floor(future.length * 0.45))];
   const ticks = [firstBump, mid].filter((s, i, arr): s is NonNullable<typeof s> => {
@@ -547,13 +547,13 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           );
         })}
 
-        {weatherPreview && (() => {
-          const section = samples.filter(s => s.frac >= weatherPreview.from && s.frac <= weatherPreview.to);
-          return <g aria-label="Weather area for this forecast">
+        {weatherPreview && (weatherPreview.ranges ?? [weatherPreview]).map((range, index) => {
+          const section = samples.filter(s => s.frac >= range.from && s.frac <= range.to);
+          return <g key={index} aria-label="Weather area for this forecast">
             <polyline points={section.map(s => `${sx(s.lon)},${sy(s.lat)}`).join(" ")} fill="none" className="stroke-ifr" strokeWidth="18" opacity="0.55" />
             {section.length === 1 && <circle cx={sx(section[0].lon)} cy={sy(section[0].lat)} r="12" className="fill-ifr" opacity="0.65" />}
           </g>;
-        })()}
+        })}
         {fixes.map((s) => (
           <rect
             key={`fix-${s.frac}`}
@@ -581,33 +581,15 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
                 className="fill-ifr/25 stroke-ifr/70"
                 strokeWidth="1"
               />
-              <text
-                x={cx + 13}
-                y={cy + 3.5}
-                className="fill-ifr"
-                fontSize="11"
-                fontFamily="IBM Plex Sans, system-ui, sans-serif"
-              >
-                Thunderstorms
-              </text>
+
             </g>
           );
         })}
 
-        {ticks.map((s) => (
-          <g key={`t-${s.frac}`}>
-            <circle cx={sx(s.lon)} cy={sy(s.lat)} r="2.6" className="fill-fg/80" />
-            <text
-              x={sx(s.lon) + 8}
-              y={sy(s.lat) + (s.chop === "smooth" ? 16 : -10)}
-              className="fill-muted"
-              fontSize="11"
-              fontFamily="IBM Plex Mono, ui-monospace, monospace"
-            >
-              {s.chop === "smooth"
-                ? `${formatDuration(s.etaMin)} from now`
-                : `${formatDuration(s.etaMin)} from now · ${turbLabel(s.chop)}`}
-            </text>
+        {ticks.map((s, i) => (
+          <g key={s.frac} aria-label={`Weather marker ${i + 1}`}>
+            <circle cx={sx(s.lon)} cy={sy(s.lat)} r="10" className="fill-bg stroke-fg" strokeWidth="2" />
+            <text x={sx(s.lon)} y={sy(s.lat) + 4} textAnchor="middle" className="fill-fg" fontSize="12" fontWeight="700">{i + 1}</text>
           </g>
         ))}
 
@@ -681,6 +663,10 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         </div>
       </div>
 
+      <div className="shrink-0 border-t border-border bg-surface px-3 py-2 text-sm leading-snug text-fg">
+        {ticks.map((s, i) => <p key={s.frac} className="flex items-start gap-2 py-0.5"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{i + 1}</span><span>About {formatDuration(s.etaMin)} from now · {s.chop === "smooth" ? "No turbulence flagged" : turbLabel(s.chop)}</span></p>)}
+        {hazards.length > 0 && <p className="py-0.5"><span className="mr-2 inline-block size-3 rounded-full border-2 border-ifr bg-ifr/30" />Storm areas marked by circles</p>}
+      </div>
       {weatherPreview && <div className="shrink-0 border-t border-border px-3 py-2"><RadarStatus /></div>}
       <div style={weatherPreview ? { display: "none" } : undefined} className="w-full flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-2 text-xs text-muted">
         <Legend swatch="bg-accent" label="Smooth" />
