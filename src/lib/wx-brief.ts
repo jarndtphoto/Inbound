@@ -284,10 +284,10 @@ export function decodeTafPassenger(taf: Taf | null | undefined, whenUnix?: numbe
     const spd = covering?.wspd;
     const gst = covering?.wgst;
     if ((gst ?? 0) >= 25 || (spd ?? 0) >= 20) bits.push(gst ? `wind ${spd} gusting ${gst} kt` : `wind ${spd} kt`);
-    if (relevant.some((f) => f.fcstChange === "TEMPO")) bits.push("tempo period");
-    if (covering?.probability && covering.probability >= 30) bits.push(`PROB${covering.probability}`);
+    if (relevant.some((f) => f.fcstChange === "TEMPO")) bits.push("temporary conditions possible");
+    if (covering?.probability && covering.probability >= 30) bits.push(`${covering.probability}% chance`);
     if (!bits.length) {
-      if (/SKC|CLR|NSC|SCT2/.test(raw) && !/BKN00|OVC00|FG|TS/.test(raw)) return "VFR, no significant weather in the TAF";
+      if (/SKC|CLR|NSC|SCT2/.test(raw) && !/BKN00|OVC00|FG|TS/.test(raw)) return "No significant weather indicated in the forecast";
       return null;
     }
     return bits.slice(0, 3).join(", ");

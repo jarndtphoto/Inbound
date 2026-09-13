@@ -397,6 +397,7 @@ function rideClause(d: RideFacts) {
   if (d.now === "arrival" || d.now === "gate") return "";
   const label = d.rideLabel || "Smooth";
   if (label === "Smooth") return "Ride looks smooth.";
+  if (label === "Weather coverage incomplete" || label === "Weather coverage unavailable") return `${label}.`;
   return `${label} on the remaining path.`;
 }
 
@@ -525,7 +526,7 @@ export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): Com
     ? previous.log
     : [{ at, kind: "update", text: "Filed briefing is up" }];
   const added = previous?.snap ? diffBriefLog(previous.snap, snap, d) : [];
-  if (previous && added.length === 0) return previous;
+  if (previous && added.length === 0 && lead === previous.lead && ac === previous.aircraft) return previous;
   const log = appendLog(seed, added, at);
   const why = whyChanged(previous?.snap, snap, d);
   return {

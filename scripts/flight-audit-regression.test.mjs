@@ -316,3 +316,19 @@ describe('on the move evidence', () => {
     assert.notEqual(s.currentStage, 'taxi');
   });
 });
+
+it('preserves missing weather feeds as unknown while the flight still loads', async (t) => {
+  const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
+  record.ident = 'UAL1599'; record.iataIdent = 'UA1599';
+  t.mock.method(Date, 'now', () => 1789311976000);
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    const u = String(url);
+    if (u.startsWith('https://www.flightaware.com/live/flight/')) return new Response(`trackpollBootstrap = ${JSON.stringify({flights:{replay:record}})};`);
+    if (u.includes('aviationweather.gov')) return new Response('Unavailable', {status:503});
+    return new Response(JSON.stringify({ac:[],features:[]}), {headers:{'content-type':'application/json'}});
+  });
+  const story = await loadFlightStory('UA1599', {fresh:true});
+  assert.equal(story.origin.iata, 'ORD');
+  assert.ok(story.weatherCoverage.failedSources.includes('Turbulence advisories'));
+  assert.ok(story.weatherCoverage.failedSources.includes('Pilot reports'));
+});

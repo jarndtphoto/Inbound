@@ -76,3 +76,12 @@ describe("live from FA track", () => {
     assert.equal(live.track, 195);
   });
 });
+
+
+describe("estimated takeoff is not observation", () => {
+ it("keeps off-block flights on the ground when an airborne label precedes actual takeoff", () => {
+   const now = Date.now() / 1000;
+   assert.equal(hasAirborneEvidence({status:"airborne",takeoff:{estimated:now-120,scheduled:now-300}}, now), false);
+   assert.equal(hasAirborneEvidence({status:"airborne",takeoff:{actual:now-20}}, now), true);
+ });
+});

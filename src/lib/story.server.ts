@@ -1275,18 +1275,19 @@ async function loadTaf(icao) {
 async function loadHazards() {
 	return cached("hazards", 22e3, async () => {
 		const [gairmet, sigmet, pirep, cwa, tcf] = await Promise.all([
-			safe(fetchJson("https://aviationweather.gov/api/data/gairmet?format=geojson").then((d) => d.features ?? []), []),
-			safe(fetchJson("https://aviationweather.gov/api/data/airsigmet?format=geojson").then((d) => d.features ?? []), []),
+			safe(fetchJson("https://aviationweather.gov/api/data/gairmet?format=geojson").then((d) => d.features ?? []), null),
+			safe(fetchJson("https://aviationweather.gov/api/data/airsigmet?format=geojson").then((d) => d.features ?? []), null),
 			Promise.resolve([]),
-			safe(fetchJson("https://aviationweather.gov/api/data/cwa?format=geojson").then((d) => d.features ?? []), []),
-			safe(fetchJson("https://aviationweather.gov/api/data/tcf?format=geojson").then((d) => d.features ?? []), [])
+			safe(fetchJson("https://aviationweather.gov/api/data/cwa?format=geojson").then((d) => d.features ?? []), null),
+			safe(fetchJson("https://aviationweather.gov/api/data/tcf?format=geojson").then((d) => d.features ?? []), null)
 		]);
 		return {
-			gairmet,
-			sigmet,
+			gairmet: gairmet ?? [],
+			sigmet: sigmet ?? [],
 			pirep,
-			cwa,
-			tcf
+			cwa: cwa ?? [],
+			tcf: tcf ?? [],
+			failedSources: [["Turbulence advisories", gairmet], ["Storm advisories", sigmet], ["Local advisories", cwa], ["Storm forecasts", tcf]].filter(([, data]) => data == null).map(([name]) => name)
 		};
 	});
 }
@@ -2489,7 +2490,12 @@ async function buildStory(query) {
 		const frac = distNm / totalNm;
 		const remainingHere = Math.max(0, totalNm - distNm);
 		const sampleAlt = sampleAltFt(frac, remainingHere, live?.altFt ?? null);
-		const etaHere = frac <= progress ? 0 : (frac - progress) / Math.max(.01, 1 - progress) * etaMin;
+		const plannedTakeoff = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled;
+		const plannedLanding = aware?.landing?.estimated ?? aware?.landing?.scheduled;
+		const beforeTakeoff = !ourAirborne && !ourLanded && plannedTakeoff && plannedLanding > plannedTakeoff;
+		const etaHere = beforeTakeoff
+			? Math.max(0, (plannedTakeoff - routeNowUnix) / 60) + frac * (plannedLanding - plannedTakeoff) / 60
+			: frac <= progress ? 0 : (frac - progress) / Math.max(.01, 1 - progress) * etaMin;
 		const sampleUnix = routeNowUnix + etaHere * 60;
 		let chop = "smooth";
 		let cloud = false;
@@ -2626,10 +2632,12 @@ async function buildStory(query) {
 			fix: isFix
 		};
 	});
+	const corridorAps = corridorStations(path, origin.iata, dest.iata, Object.values(AIRPORT_BY_ICAO), haversineNm);
+	const corridorMetsP = Promise.all(corridorAps.map((ap) => safe(loadMetar(ap.icao), { metar: null })));
 	const pirepPacks = await Promise.all(pirepRouteBounds(path).map((bbox) =>
-		cached(`pirep:${bbox}`, 120_000, () => safe(fetchJson(`https://aviationweather.gov/api/data/pirep?format=geojson&bbox=${bbox}`).then((d) => d.features ?? []), []))
+		cached(`pirep:${bbox}`, 120_000, () => safe(fetchJson(`https://aviationweather.gov/api/data/pirep?format=geojson&bbox=${bbox}`).then((d) => d.features ?? []), null))
 	));
-	for (const f of pirepPacks.flat()) {
+	for (const f of pirepPacks.flatMap(pack => pack ?? [])) {
 		const coords = f.geometry?.type === "Point" ? f.geometry.coordinates : null;
 		if (!coords || coords.length < 2) continue;
 		const lon = coords[0];
@@ -2932,10 +2940,10 @@ async function buildStory(query) {
 			origin.taf = decodeTafPassenger(origin.tafRaw, times.pushUnix ?? Date.now() / 1e3) ?? origin.taf;
 			dest.taf = decodeTafPassenger(dest.tafRaw, times.landUnix ?? Date.now() / 1e3) ?? dest.taf;
 		}
-		const corridorAps = corridorStations(path, origin.iata, dest.iata, Object.values(AIRPORT_BY_ICAO), haversineNm);
+
 		const corridor = [];
 		if (corridorAps.length) {
-			const mets = await Promise.all(corridorAps.map((ap) => safe(loadMetar(ap.icao), { metar: null })));
+			const mets = await corridorMetsP;
 			for (let i = 0; i < corridorAps.length; i++) {
 				const m = mets[i]?.metar;
 				if (!m) continue;
@@ -2988,6 +2996,7 @@ async function buildStory(query) {
 			samples
 		},
 		hazards: uniqHazards.slice(0, 12),
+		weatherCoverage: { failedSources: [...(hazardsPack.failedSources ?? []), ...(pirepPacks.some(pack => pack == null) ? ["Pilot reports"] : [])] },
 		comfort,
 		wx,
 		inbound,

@@ -188,13 +188,12 @@ function storyForQuery(s: FlightStory | undefined, q: string): FlightStory | und
 }
 
 function rideLabelOf(story: FlightStory) {
-  if (story.currentStage === "arrival" || story.currentStage === "gate" || story.route.remainingNm < 40) {
-    return "Smooth";
-  }
   const ahead = story.route.samples.filter((s) => s.frac >= story.route.progress);
   if (ahead.some((s) => s.chop === "severe")) return "Severe turbulence";
   if (ahead.some((s) => s.chop === "moderate")) return "Moderate turbulence";
   if (ahead.some((s) => s.chop === "light")) return "Light turbulence";
+  if (!story.weatherCoverage) return "Weather coverage unavailable";
+  if (story.weatherCoverage.failedSources.length) return "Weather coverage incomplete";
   return "Smooth";
 }
 
@@ -481,7 +480,7 @@ export function FiledApp() {
 
   useEffect(() => {
     if (!story || !briefing || briefingFor !== flightKey) return;
-    const key = `${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}`;
+    const key = `${story.weatherCoverage?.failedSources.join(",") ?? "unknown"}|${story.aircraft?.registration ?? ""}|${story.live}|${Math.round(story.route.etaMin)}|${Math.round(story.route.remainingNm / 10)}|${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}`;
     if (key === lastBriefKey.current) return;
     lastBriefKey.current = key;
     const next = composeBrief(rideFacts(story, query, active), briefing);
@@ -833,7 +832,7 @@ function FlightHead({
         ) : showRemaining ? (
           <Stat
             icon={Radio}
-            label="Remaining"
+            label="Until landing"
             value={formatMiles(story.route.remainingNm)}
             sub={formatDuration(story.route.etaMin)}
           />
@@ -1091,7 +1090,7 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
   }
   if (!arriving) {
     const ahead = story.route.samples.filter((s) => s.frac >= story.route.progress);
-    let ride = "Smooth";
+    let ride = rideLabelOf(story);
     if (ahead.some((s) => s.chop === "severe")) ride = "Severe turbulence";
     else if (ahead.some((s) => s.chop === "moderate")) ride = "Moderate turbulence";
     else if (ahead.some((s) => s.chop === "light")) ride = "Light turbulence";
@@ -1143,8 +1142,8 @@ function BreakdownCard({
   pending: boolean;
   onCompile: () => void;
 }) {
-  const asOf = briefing?.filedAt
-    ? new Date(briefing.filedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+  const asOf = briefing?.liveAt
+    ? new Date(briefing.liveAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
     : null;
   const log = briefing?.log ?? [];
   return (
@@ -1161,7 +1160,7 @@ function BreakdownCard({
       {briefing && (
         <div className="mt-3 space-y-3">
           {asOf ? (
-            <p className="font-mono text-xs tracking-wide text-subtle uppercase">Briefing as of {asOf}</p>
+            <p className="font-mono text-xs tracking-wide text-subtle uppercase">Briefing updated {asOf}</p>
           ) : null}
           <p className="text-sm leading-relaxed text-fg whitespace-pre-wrap">{briefing.lead}</p>
           {log.length > 0 ? (
@@ -1636,7 +1635,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
   };
   const fieldCard = (field: FlightStory["origin"], title: string) => <article className="rounded-xl border border-border bg-surface p-4">
     <p className="text-sm text-muted">{title}</p>
-    <h3 className="mt-1 text-lg font-semibold">{field.iata} · {field.category || "Unavailable"}</h3>
+    <h3 className="mt-1 text-lg font-semibold">{field.iata}</h3>
     <p className="mt-3 text-sm leading-relaxed">{field.decoded?.summary || "Current observation unavailable."}</p>
     <p className="mt-3 text-sm leading-relaxed">Forecast: {field.taf || "Unavailable."}</p>
     <details className="mt-3 text-sm"><summary className="cursor-pointer py-2">Observation source · METAR</summary><p className="break-words font-mono text-muted">{field.rawMetar || "Observation unavailable."}</p></details>
@@ -1647,6 +1646,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       <p className="mt-2 text-xs text-muted">Flight data fetched {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Weather observation and advisory times are shown in their source details.</p>
     </div>
     {fieldCard(story.origin, "Takeoff · departure conditions")}
+    {(!story.weatherCoverage || story.weatherCoverage.failedSources.length > 0) && <p role="status" className="rounded-xl border border-border p-4 text-sm">Weather coverage is incomplete. Missing feeds do not mean smooth conditions. {story.weatherCoverage?.failedSources.join(" · ")}</p>}
     <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
     {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : groups.length ? <ol className="space-y-3">
       {groups.map((g, i) => <li key={i} className="rounded-xl border border-border bg-surface p-4">

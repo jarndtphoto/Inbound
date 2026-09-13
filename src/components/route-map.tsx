@@ -597,8 +597,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
               fontFamily="IBM Plex Mono, ui-monospace, monospace"
             >
               {s.chop === "smooth"
-                ? formatDuration(s.etaMin)
-                : `${formatDuration(s.etaMin)} ${turbLabel(s.chop)}`}
+                ? `${formatDuration(s.etaMin)} from now`
+                : `${formatDuration(s.etaMin)} from now · ${turbLabel(s.chop)}`}
             </text>
           </g>
         ))}

@@ -92,7 +92,7 @@ describe("briefing update log", () => {
   it("ignores tiny schedule jitter", () => {
     let b = composeBrief(facts({ landUnix: 1_200_000, land: "11:04 AM" }));
     const next = composeBrief(facts({ landUnix: 1_200_000 + 90, land: "11:05 AM" }), b);
-    assert.equal(next, b);
+    assert.deepEqual(next.log, b.log);
   });
 
   it("logs material turbulence and thunderstorms without aviation codes", () => {
@@ -265,4 +265,13 @@ it("does not call an estimated movement time a reported departure", () => {
  const b = composeBrief(facts({now:"taxi",pushKind:"estimated"}));
  assert.match(b.lead, /first observed around/);
  assert.doesNotMatch(b.lead, /Gate departure reported/);
+});
+
+
+it("refreshes current text even for changes below the history thresholds", () => {
+ const before = composeBrief(facts({taxiInMin:10}));
+ const after = composeBrief(facts({taxiInMin:12}), before);
+ assert.match(after.lead, /taxi in 12 minutes/i);
+ assert.equal(after.log.length, before.log.length);
+ assert.ok((after.liveAt ?? 0) >= (before.liveAt ?? 0));
 });

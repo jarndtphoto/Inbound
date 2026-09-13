@@ -56,8 +56,9 @@ export function hasAirborneEvidence(aware: {
   if (!aware || aware.landing?.actual) return false;
   const takeoff = aware.takeoff?.actual;
   if (typeof takeoff === "number" && Number.isFinite(takeoff)) return takeoff > 0 && takeoff <= now + 30;
-  const expected = aware.takeoff?.estimated ?? aware.takeoff?.scheduled;
-  return hasAirborneStatus(aware.status) && typeof expected === "number" && Number.isFinite(expected) && expected > 0 && expected <= now + 30;
+  // Providers can label a flight airborne at gate departure. Estimated clocks
+  // are not wheels-up evidence; fresh aircraft observations are checked separately.
+  return false;
 }
 
 export function timeFracOf(aware: {

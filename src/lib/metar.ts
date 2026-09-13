@@ -58,13 +58,13 @@ function categoryOf(code?: string): DecodedField["category"] {
 function categoryLabel(cat: DecodedField["category"]): string {
   switch (cat) {
     case "VFR":
-      return "Clear to fly — good views";
+      return "Good visibility and higher cloud ceilings";
     case "MVFR":
-      return "A bit socked in — delays possible";
+      return "Lower clouds or reduced visibility";
     case "IFR":
-      return "Low weather — expect holding and slowdowns";
+      return "Low clouds or limited visibility";
     case "LIFR":
-      return "Very low — diversions and long delays possible";
+      return "Very low clouds or very limited visibility";
     default:
       return "Category unknown";
   }
@@ -117,7 +117,7 @@ function ceilingText(clouds?: Cloud[], cover?: string): string {
   if (c == null) {
     if (!clouds?.length || cover === "CLR" || cover === "SKC") return "Sky clear of significant cloud";
     const few = clouds[0];
-    if (few?.base) return `${few.cover} at ${few.base.toLocaleString("en-US")} ft — no solid ceiling`;
+    if (few?.base) return `${({ FEW: "A few clouds", SCT: "Scattered clouds" } as Record<string, string>)[few.cover] ?? "Clouds"} at ${few.base.toLocaleString("en-US")} ft — no solid ceiling`;
     return "No solid ceiling";
   }
   if (c < 500) return `Ceiling very low, ${c.toLocaleString("en-US")} ft`;

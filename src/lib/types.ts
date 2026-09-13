@@ -224,6 +224,7 @@ export type WxBrief = {
 };
 
 export type FlightStory = {
+  weatherCoverage?: { failedSources: string[] };
   fetchedAt: number;
   query: string;
   callsign: string;
