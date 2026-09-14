@@ -25,6 +25,7 @@ const STAGES: { id: StageId; label: string }[] = [
   { id: "taxi", label: "On the move" },
   { id: "ride", label: "Flight" },
   { id: "arrival", label: "Arrival" },
+  { id: "taxi_in", label: "Taxiing in" },
   { id: "gate", label: "At the gate" },
 ];
 
@@ -52,7 +53,7 @@ function readCachedStory(q: string): FlightStory | undefined {
 }
 
 export function cachedStorySafeDuringRefreshFailure(story: FlightStory, now = Date.now()) {
-  const moving = story.live || story.currentStage === "ride" || story.currentStage === "arrival";
+  const moving = story.live || story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "taxi_in";
   const positionAge = story.providers?.chosenPositionAgeSec;
   const positionFresh = !moving || (typeof positionAge === "number" && positionAge <= 60);
   return positionFresh && now - story.fetchedAt <= (moving ? 15_000 : 45 * 60_000);
@@ -485,7 +486,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       if (q.state.status === "error") return /HTTP 402\b/.test(String(q.state.error?.message ?? "")) ? 60_000 : 15_000;
       if (!s) return 5_000;
       if (s.live || s.currentStage === "push" || s.currentStage === "taxi") return 3_000;
-      if (s.currentStage === "ride" || s.currentStage === "arrival") return 4_000;
+      if (s.currentStage === "ride" || s.currentStage === "arrival" || s.currentStage === "taxi_in") return 4_000;
       if (s.currentStage === "inbound") return 5_000;
       return 8_000;
     },
@@ -851,7 +852,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 }
 
 function wheelsDown(story: FlightStory) {
-  if (story.currentStage === "gate") return true;
+  if (story.currentStage === "gate" || story.currentStage === "taxi_in") return true;
   if (story.times?.landKind === "actual") return true;
   if (story.currentStage === "arrival" && story.aircraft?.onGround) return true;
   return false;
@@ -859,7 +860,7 @@ function wheelsDown(story: FlightStory) {
 
 function stageHeadline(story: FlightStory) {
   if (story.currentStage === "gate") return "At the gate";
-  if (story.arrivalStatus === "taxi_in") return "Taxiing in";
+  if (story.currentStage === "taxi_in") return "Taxiing in";
   if (story.currentStage === "arrival" && wheelsDown(story)) return "Landed";
   if (story.currentStage === "push") return story.times?.pushed ? "On the move" : "Gate";
   return STAGES.find((s) => s.id === story.currentStage)?.label ?? story.currentStage;
@@ -876,6 +877,7 @@ function flightAirborne(story: FlightStory) {
     story.currentStage === "push" ||
     story.currentStage === "taxi" ||
     story.currentStage === "inbound" ||
+    story.currentStage === "taxi_in" ||
     story.currentStage === "gate"
   ) {
     return false;
@@ -899,7 +901,7 @@ function headStatus(story: FlightStory) {
   const live = liveFix(story);
   const inAirLive = Boolean(live && story.aircraft && !story.aircraft.onGround);
   if (story.currentStage === "gate") return airline ?? "Parked";
-  if (story.arrivalStatus === "taxi_in") return airline ? `Taxiing in · ${airline}` : "Taxiing in";
+  if (story.currentStage === "taxi_in") return airline ? `Taxiing in · ${airline}` : "Taxiing in";
   if (wheelsDown(story)) return airline ? `Landed · ${airline}` : "Landed";
   if (air && inAirLive) return airline ? `In the air · ${airline}` : "In the air";
   if (air) return "In the air — live position unavailable right now";
@@ -1022,7 +1024,7 @@ function TimesStrip({
   const late = (delay ?? 0) >= 5;
   const phrase = delayPhrase(delay);
   const landHint = down && !parked
-    ? story.arrivalStatus === "taxi_in" ? "Taxiing in" : "Rollout"
+    ? story.currentStage === "taxi_in" ? "Taxiing in" : "Rollout"
     : t?.landWas && t.landWas !== t.land
       ? `Was ${t.landWas}`
       : null;
@@ -1193,6 +1195,7 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
   const t = story.times;
   const arriving =
     story.currentStage === "arrival" ||
+    story.currentStage === "taxi_in" ||
     story.currentStage === "gate" ||
     story.route.remainingNm < 40;
   const rows: { label: string; value: string }[] = [];
@@ -1217,6 +1220,7 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
     const up =
       story.currentStage === "ride" ||
       story.currentStage === "arrival" ||
+      story.currentStage === "taxi_in" ||
       story.currentStage === "gate";
     rows.push({
       label: "Taxi out",
@@ -1621,7 +1625,7 @@ function extraFor(story: FlightStory, stage: StageId) {
       />
     );
   }
-  if (stage === "gate") {
+  if (stage === "taxi_in" || stage === "gate") {
     if (!times.destGate && times.taxiInMin == null) return null;
     return (
       <dl className="mt-4 grid grid-cols-2 gap-2">
@@ -1640,7 +1644,7 @@ function extraFor(story: FlightStory, stage: StageId) {
     );
   }
   if (stage === "ride") {
-    if (story.currentStage === "arrival" || story.currentStage === "gate" || story.route.remainingNm < 40) {
+    if (story.currentStage === "arrival" || story.currentStage === "taxi_in" || story.currentStage === "gate" || story.route.remainingNm < 40) {
       return null;
     }
     const ahead = story.route.samples.filter((s) => s.frac >= story.route.progress && s.etaMin > 2);

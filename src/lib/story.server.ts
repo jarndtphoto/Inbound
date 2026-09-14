@@ -1990,9 +1990,11 @@ function buildInbound(args) {
 	};
 }
 export function currentStageOf(args) {
-	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed, faAirborne, taxiHint, distPark, parkedAtGate } = args;
-	if (parkedAtGate) return "gate";
-	if (ourLanded || ourLandingActual) return "arrival";
+	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed, faAirborne, taxiHint, distPark, parkedAtGate, gateInActual } = args;
+	const postLanding = postLandingState({ ourLanded, ourLandingActual, gateInActual, parkedAtGate, live, dest });
+	if (postLanding === "gate") return "gate";
+	if (postLanding === "taxi_in") return "taxi_in";
+	if (postLanding === "landed") return "arrival";
 	// A surface position is not evidence of arrival at the departure gate.
 	// Keep the main stage aligned with the identified inbound leg until there
 	// is departure evidence, regardless of whether a position feed drops out.
@@ -2032,15 +2034,18 @@ export function currentStageOf(args) {
 }
 
 export function postLandingState(args) {
-	const { ourLanded, gateInActual, parkedAtGate, live, dest } = args;
-	if (!ourLanded) return "airborne";
+	const { ourLanded, ourLandingActual, gateInActual, parkedAtGate, live, dest } = args;
 	if (gateInActual || parkedAtGate) return "gate";
-	const atDestination = Boolean(live && dest && live.onGround &&
-		(live.seenSec ?? 999) <= 60 && haversineNm(live, dest) < 10);
-	if (!atDestination) return "landed";
-	// Keep the high-speed runway rollout as the immediate Landed transition;
-	// normal surface movement after that is passenger-facing taxi-in.
-	return (live.gsKt ?? 0) >= 1.2 && (live.gsKt ?? 0) < 40 ? "taxi_in" : "landed";
+	if (!(ourLanded || ourLandingActual)) return "airborne";
+	const freshHighSpeedRollout = Boolean(
+		live && dest && live.onGround &&
+		(live.seenSec ?? 999) <= 60 &&
+		haversineNm(live, dest) < 10 &&
+		(live.gsKt ?? 0) >= 40
+	);
+	// Once landing is latched, taxi-in is the durable intermediate state.
+	// Missing or stale surface ADS-B must not revert the passenger view to Landed.
+	return freshHighSpeedRollout ? "landed" : "taxi_in";
 }
 async function hydrateField(base) {
 	const [{ metar }, nas, taf] = await Promise.all([loadMetar(base.icao), loadNas(base.iata), loadTaf(base.icao)]);
@@ -2075,6 +2080,7 @@ function buildStages(args) {
 		"taxi",
 		"ride",
 		"arrival",
+		"taxi_in",
 		"gate"
 	];
 	const idx = order.indexOf(current);
@@ -2101,7 +2107,7 @@ function buildStages(args) {
 	const gateWatch = [];
 	const ramp = rampWx(dest.decoded);
 	if (ramp) gateWatch.push(ramp);
-	const pushed = Boolean(times.pushed || times.airborne || current === "taxi" || current === "ride" || current === "arrival" || current === "gate");
+	const pushed = Boolean(times.pushed || times.airborne || current === "taxi" || current === "ride" || current === "arrival" || current === "taxi_in" || current === "gate");
 	const taxiingNow = Boolean(taxiHint || (live?.onGround && (live.gsKt ?? 0) >= 2));
 	const inboundTitle = inbound.status === "complete" ? "Inbound is at the gate" : inbound.status === "at_field" ? "Inbound is taxiing in" : inbound.status === "airborne" ? "Inbound to the field" : "The inbound aircraft";
 	const arrivalBody = (() => {
@@ -2130,7 +2136,7 @@ function buildStages(args) {
 		? `${formatMiles(remainingNm)} still to run, about ${formatDuration(etaMin)}.`
 		: inAir
 			? `${formatMiles(remainingNm)} still to run, about ${formatDuration(etaMin)}. Live position unavailable right now.`
-			: current === "gate" || current === "arrival"
+			: current === "gate" || current === "taxi_in" || current === "arrival"
 				? ""
 				: `Once you’re up, ${formatMiles(remainingNm)} on the filed path.`;
 	return {
@@ -2165,20 +2171,22 @@ function buildStages(args) {
 		},
 		arrival: {
 			state: state("arrival"),
-		title: current === "arrival" && times.landKind === "actual"
-			? `Landed · ${dest.iata}`
-			: `Into ${dest.iata}`,
+			title: current === "arrival" && times.landKind === "actual"
+				? `Landed · ${dest.iata}`
+				: `Into ${dest.iata}`,
 			body: arrivalBody,
 			watchouts: arrivalWatch.slice(0, 3)
 		},
+		taxi_in: {
+			state: state("taxi_in"),
+			title: "Taxiing in",
+			body: times.destGate ? `Taxiing to gate ${times.destGate}.` : "Taxiing to the arrival gate.",
+			watchouts: []
+		},
 		gate: {
 			state: state("gate"),
-			title: parkedAtGate
-				? (times.destGate ? `Gate ${times.destGate}` : "Parked at gate")
-				: current === "gate"
-					? "Taxiing in"
-					: (times.destGate ? `Gate ${times.destGate}` : "At the gate"),
-			body: parkedAtGate || current !== "gate" ? "" : (times.destGate ? `To gate ${times.destGate}.` : ""),
+			title: times.destGate ? `Gate ${times.destGate}` : "At the gate",
+			body: "",
 			watchouts: gateWatch.slice(0, 3)
 		}
 	};
@@ -3107,15 +3115,16 @@ async function buildStory(query, resumed = null) {
 		faAirborne: Boolean(ourAirborne || motion.flying) && !surfaceFixAtOrigin && !taxiHint,
 		taxiHint,
 		distPark,
-		parkedAtGate
-	});
-	const arrivalStatus = postLandingState({
-		ourLanded,
-		gateInActual: aware?.gateIn?.actual ?? null,
 		parkedAtGate,
-		live,
-		dest
+		gateInActual: aware?.gateIn?.actual ?? null
 	});
+	const arrivalStatus = current === "taxi_in"
+		? "taxi_in"
+		: current === "gate"
+			? "gate"
+			: ourLanded
+				? "landed"
+				: "airborne";
 	const finalPositionAgeSec = liveAgeSec(live);
 	const finalPositionSource = live?.source ?? (live?.extrapolated ? "estimated" : "fallback");
 	const faPosition = official.flightaware?.position ?? null;

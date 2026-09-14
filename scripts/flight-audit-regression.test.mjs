@@ -16,21 +16,49 @@ describe('post-landing passenger stage', () => {
   const dest = { lat: 40.6925, lon: -74.1687 };
   const surface = { lat: 40.691, lon: -74.167, onGround: true, seenSec: 4 };
 
-  it('keeps touchdown and runway rollout as Landed', () => {
-    assert.equal(postLandingState({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live: { ...surface, gsKt: 72 } }), 'landed');
+  it('keeps a fresh 120 kt touchdown as Landed/rollout', () => {
+    const live = { ...surface, gsKt: 120 };
+    assert.equal(postLandingState({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live }), 'landed');
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live }), 'arrival');
   });
 
-  it('shows Taxiing in for on-ground movement after landing', () => {
-    assert.equal(postLandingState({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live: { ...surface, gsKt: 14 } }), 'taxi_in');
+  it('makes fresh 18 kt ground movement a first-class Taxiing in stage', () => {
+    const live = { ...surface, gsKt: 18 };
+    assert.equal(postLandingState({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live }), 'taxi_in');
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live }), 'taxi_in');
   });
 
-  it('shows At gate for a parked aircraft or confirmed gate-in', () => {
-    assert.equal(postLandingState({ ourLanded: true, gateInActual: null, parkedAtGate: true, dest, live: { ...surface, gsKt: 0 } }), 'gate');
-    assert.equal(postLandingState({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live: { ...surface, gsKt: 8 } }), 'gate');
+  it('makes fresh 35 kt post-rollout movement Taxiing in', () => {
+    const live = { ...surface, gsKt: 35 };
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live }), 'taxi_in');
   });
 
-  it('never marks a moving aircraft At gate', () => {
-    assert.notEqual(postLandingState({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live: { ...surface, gsKt: 9 } }), 'gate');
+  it('retains Taxiing in when the surface position disappears', () => {
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live: null }), 'taxi_in');
+  });
+
+  it('retains Taxiing in with a stale surface fix', () => {
+    const live = { ...surface, gsKt: 18, seenSec: 180 };
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live }), 'taxi_in');
+  });
+
+  it('never marks a moving aircraft At gate without gate-in', () => {
+    const live = { ...surface, gsKt: 9 };
+    assert.notEqual(currentStageOf({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live }), 'gate');
+  });
+
+  it('marks confirmed gate-in At gate', () => {
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live: { ...surface, gsKt: 8 } }), 'gate');
+  });
+
+  it('marks robust stationary/parked detection At gate', () => {
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: null, parkedAtGate: true, dest, live: { ...surface, gsKt: 0 } }), 'gate');
+  });
+
+  it('renders Taxiing in as the actual passenger stage', () => {
+    const source = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
+    assert.match(source, /\{ id: "taxi_in", label: "Taxiing in" \}/);
+    assert.match(source, /story\.currentStage === "taxi_in"/);
   });
 });
 
