@@ -493,6 +493,10 @@ describe('first-class pushback and taxi-out stages', () => {
   it('keeps Taxiing out monotonic once its latch is established', () => {
     const slow = { ...origin, onGround: true, gsKt: 2, seenSec: 5 };
     assert.equal(currentStageOf({ ...base, live: slow, pushed: true, taxiOutLatched: true }), 'taxi');
+    assert.equal(currentStageOf({ ...base, live: { ...slow, gsKt: 0 }, pushed: true, taxiOutLatched: true }), 'taxi');
+    assert.equal(currentStageOf({ ...base, live: { ...slow, seenSec: 180 }, pushed: true, taxiOutLatched: true }), 'taxi');
+    assert.equal(currentStageOf({ ...base, live: { ...slow, track: 275 }, pushed: true, taxiOutLatched: true }), 'taxi');
+    assert.equal(currentStageOf({ ...base, live: null, pushed: true, taxiOutLatched: true }), 'taxi');
   });
 
   it('preserves the existing takeoff transition', () => {
@@ -510,6 +514,92 @@ describe('first-class pushback and taxi-out stages', () => {
 });
 
 describe('on the move evidence', () => {
+  it('UA219: keeps an overdue estimate non-actual, then records only observed/provider push', async (t) => {
+    const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
+    record.ident = 'UAL9219'; record.iataIdent = 'UA9219'; record.flightId = 'UAL9219-20260914-test';
+    record.inboundFlight = null; record.flightStatus = 'scheduled';
+    record.gateDepartureTimes = { scheduled: 1789230300, estimated: 1789230300, actual: null };
+    record.takeoffTimes = { scheduled: 1789231800, estimated: 1789232400, actual: null };
+    let now = 1789230600000; // 9:30: estimate passed five minutes ago.
+    let lat = 41.9786; let lon = -87.9048; let gs = 0;
+    t.mock.method(Date, 'now', () => now);
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
+        return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
+      }
+      return new Response(JSON.stringify({
+        ac: [{ hex: 'a92190', flight: 'UAL9219', lat, lon, gs, alt_baro: 'ground', seen_pos: 0 }], features: [],
+      }), { headers: { 'content-type': 'application/json' } });
+    });
+
+    const parked = await loadFlightStory('UA9219', { fresh: true });
+    assert.notEqual(parked.currentStage, 'push');
+    assert.notEqual(parked.currentStage, 'taxi');
+    assert.equal(parked.times.pushed, false);
+    assert.equal(parked.times.pushUnix, 1789230300, 'estimate remains available for display');
+    assert.equal(parked.times.pushSource, null, 'estimate is not operational push evidence');
+
+    now = 1789231020000; // 9:37
+    lon += 0.0012; gs = 4;
+    const observed = await loadFlightStory('UA9219', { fresh: true });
+    assert.equal(observed.currentStage, 'push');
+    assert.equal(observed.times.pushed, true);
+    assert.equal(observed.times.pushUnix, 1789231020);
+    assert.equal(observed.times.pushSource, 'live_detected');
+
+    now += 70_000;
+    record.gateDepartureTimes.actual = 1789231080; // Provider later reports 9:38.
+    const reconciled = await loadFlightStory('UA9219', { fresh: true });
+    assert.equal(reconciled.times.pushUnix, 1789231080);
+    assert.equal(reconciled.times.pushSource, 'provider_actual');
+    assert.notEqual(reconciled.times.pushUnix, 1789230300);
+  });
+
+  it('UA3600: never regresses from Taxiing out to Pushback during normal surface changes', async (t) => {
+    const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
+    record.ident = 'UAL9360'; record.iataIdent = 'UA9360'; record.flightId = 'UAL9360-20260914-test';
+    record.inboundFlight = null; record.flightStatus = 'scheduled';
+    record.gateDepartureTimes = { scheduled: 1789230000, estimated: 1789230600, actual: null };
+    record.takeoffTimes = { scheduled: 1789232400, estimated: 1789233000, actual: null };
+    let now = 1789230600000;
+    let aircraft = { hex: 'a93600', flight: 'UAL9360', lat: 41.9786, lon: -87.9048, gs: 0, track: 90, alt_baro: 'ground', seen_pos: 0 };
+    t.mock.method(Date, 'now', () => now);
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
+        return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
+      }
+      return new Response(JSON.stringify({ ac: aircraft ? [aircraft] : [], features: [] }), { headers: { 'content-type': 'application/json' } });
+    });
+    const load = () => loadFlightStory('UA9360', { fresh: true });
+
+    await load();
+    now += 10_000;
+    aircraft = { ...aircraft, lon: aircraft.lon + 0.0012, gs: 4 };
+    const pushed = await load();
+    assert.equal(pushed.currentStage, 'push');
+    const observedPushUnix = pushed.times.pushUnix;
+
+    now += 10_000;
+    aircraft = { ...aircraft, lon: aircraft.lon + 0.0020, gs: 15 };
+    const taxiing = await load();
+    assert.equal(taxiing.currentStage, 'taxi');
+    assert.equal(taxiing.resume?.departureStage, 'taxi');
+    assert.equal(taxiing.resume?.detectedPushUnix, observedPushUnix);
+
+    for (const update of [
+      { gs: 2, track: 270, seen_pos: 0 },
+      { gs: 0, track: 15, seen_pos: 0 },
+      { gs: 0, track: 190, seen_pos: 125 },
+    ]) {
+      now += 10_000;
+      aircraft = { ...aircraft, ...update };
+      const story = await load();
+      assert.equal(story.currentStage, 'taxi');
+      assert.equal(story.times.pushed, true);
+      assert.equal(story.times.pushUnix, observedPushUnix, 'first live movement timestamp remains latched');
+    }
+  });
+
   it('does not advance a stationary aircraft just because scheduled departure passed', async (t) => {
     const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
     record.ident = 'AAL9917'; record.iataIdent = 'AA9917';

@@ -193,6 +193,8 @@ export type FlightTimes = {
   origTakeoffUnix?: number | null;
   origLandUnix?: number | null;
   pushKind?: "scheduled" | "estimated" | "actual" | null;
+  /** Provenance for an operational push timestamp. Null while push is only scheduled/estimated. */
+  pushSource?: "provider_actual" | "live_detected" | null;
   takeoffKind?: "scheduled" | "estimated" | "actual" | null;
   landKind?: "scheduled" | "estimated" | "actual" | null;
   gateKind?: "scheduled" | "estimated" | "actual" | null;

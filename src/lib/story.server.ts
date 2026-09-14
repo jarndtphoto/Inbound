@@ -933,6 +933,11 @@ function origKey(aware) {
 	const day = (/* @__PURE__ */ new Date(u * 1e3)).toISOString().slice(0, 10);
 	return `${aware._resumeScope ?? ""}${aware.ident}|${aware.originIata ?? ""}|${aware.destIata ?? ""}|${day}`;
 }
+function flightInstanceKey(aware, fallback) {
+	const id = typeof aware?.flightId === "string" ? aware.flightId.trim() : "";
+	if (id) return `${aware._resumeScope ?? ""}${id}|${aware.originIata ?? ""}|${aware.destIata ?? ""}`;
+	return aware ? origKey(aware) : fallback;
+}
 function rememberOrig(aware) {
 	const key = origKey(aware);
 	const prev = origByFlight.get(key);
@@ -1758,6 +1763,7 @@ function timesOf(aware, origin, dest) {
 		origTakeoffUnix: null,
 		origLandUnix: null,
 		pushKind: null,
+		pushSource: null,
 		takeoffKind: null,
 		landKind: null,
 		gateKind: null,
@@ -1810,6 +1816,7 @@ function timesOf(aware, origin, dest) {
 		origTakeoffUnix: origTo,
 		origLandUnix: origLd,
 		pushKind: stampKind(aware.gateOut) ?? (go ? "scheduled" : null),
+		pushSource: aware.gateOut.actual ? "provider_actual" : null,
 		takeoffKind: stampKind(aware.takeoff) ?? (to ? "scheduled" : null),
 		landKind: stampKind(aware.landing) ?? (ld ? "scheduled" : null),
 		gateKind: gateEta !== gi ? "estimated" : stampKind(aware.gateIn) ?? (gi ? "scheduled" : null),
@@ -2076,6 +2083,10 @@ export function currentStageOf(args) {
 	if (postLanding === "gate") return "gate";
 	if (postLanding === "taxi_in") return "taxi_in";
 	if (postLanding === "landed") return "arrival";
+	// Departure progress is monotonic for a dated flight instance. Once taxi-out
+	// has been established, a stop, turn, stale fix, or provider handoff cannot
+	// demote the aircraft back to Pushback.
+	if (taxiOutLatched && !ourTakeoffActual && !(live && !live.onGround)) return "taxi";
 	// A surface position is not evidence of arrival at the departure gate.
 	// Keep the main stage aligned with the identified inbound leg until there
 	// is departure evidence, regardless of whether a position feed drops out.
@@ -2381,7 +2392,7 @@ function awareFromResume(resume, scope) {
 		typicalTaxiOutMin: null, typicalTaxiInMin: null, filedTaxiOutMin: null, filedTaxiInMin: null,
 	};
 }
-async function buildStory(query, resumed = null) {
+async function buildStory(query, resumed = null, progressResume = null) {
 	const parsed = parseFlightQuery(query);
 	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
 	const identKey = parsed.callsign.toUpperCase();
@@ -2537,7 +2548,13 @@ async function buildStory(query, resumed = null) {
 		)
 	);
 	const flyingAway = Boolean(live && !live.onGround && ((live.altFt ?? 0) > 2500 || (live.gsKt ?? 0) > 160) && dLiveDest > 25);
-	const landKey = aware ? origKey(aware) : `${parsed.callsign}|${origin.iata}|${dest.iata}`;
+	const landKey = flightInstanceKey(aware, `${parsed.callsign}|${origin.iata}|${dest.iata}`);
+	if (progressResume && progressResume.originIcao === origin.icao && progressResume.destIcao === dest.icao) {
+		if (progressResume.detectedPushUnix && !pushLatch.has(landKey)) {
+			pushLatch.set(landKey, { unix: progressResume.detectedPushUnix, source: "live_detected", live: true, at: progressResume.detectedPushUnix });
+		}
+		if (progressResume.departureStage === "taxi") taxiOutLatch.set(landKey, { at: Date.now() / 1e3 });
+	}
 	if ((faLanded && !flyingAway) || onFieldNow) landedLatch.set(landKey, Date.now() / 1e3);
 	let ourLanded = Boolean(landedLatch.get(landKey));
 	if (ourLanded && live && !live.onGround) {
@@ -3042,10 +3059,10 @@ async function buildStory(query, resumed = null) {
 	// A recent stationary surface fix is stronger evidence than a provider's
 	// prematurely stamped gate-out or takeoff time.
 	if (stationaryAtStand && !motion.pushed && !motion.taxiing && !leftGate) {
-		taxiOutLatch.delete(landKey);
 		const nextPush = aware?.gateOut?.estimated ?? aware?.gateOut?.scheduled ?? null;
 		times = { ...times, pushed: false, airborne: false,
-			pushUnix: nextPush, push: clockAt(nextPush, tzOf(origin)), pushKind: nextPush ? "estimated" : null };
+			pushUnix: nextPush, push: clockAt(nextPush, tzOf(origin)), pushKind: nextPush ? "estimated" : null,
+			pushSource: null };
 	}
 	if (surfaceFixAtOrigin) {
 		const nextTakeoff = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? null;
@@ -3060,13 +3077,17 @@ async function buildStory(query, resumed = null) {
 	if (leftGate && !times.pushed) {
 		const now = Date.now() / 1e3;
 		const otz = tzOf(origin);
-		const pushUnix = now;
+		const priorPush = pushLatch.get(landKey);
+		const pushUnix = priorPush && typeof priorPush === "object" && priorPush.live && priorPush.unix
+			? priorPush.unix
+			: now;
 		const origPush = times.origPushUnix ?? pushUnix;
 		const delayMin = slipMin(pushUnix, origPush);
 		times = {
 			...times,
 			pushed: true,
 			pushKind: "estimated",
+			pushSource: "live_detected",
 			pushUnix,
 			push: clockAt(pushUnix, otz),
 			delayMin,
@@ -3075,7 +3096,7 @@ async function buildStory(query, resumed = null) {
 	}
 	if (leftGate || times.airborne || (live && !live.onGround)) {
 		const unix = times.pushUnix ?? Date.now() / 1e3;
-		pushLatch.set(landKey, { unix, live: true, at: Date.now() / 1e3 });
+		pushLatch.set(landKey, { unix, source: times.pushSource ?? "live_detected", live: true, at: Date.now() / 1e3 });
 	} else if (!live && !times.airborne) {
 		const prev = pushLatch.get(landKey);
 		if (!prev || typeof prev !== "object" || !prev.live) pushLatch.delete(landKey);
@@ -3095,6 +3116,8 @@ async function buildStory(query, resumed = null) {
 			times = {
 				...times,
 				pushed: true,
+				pushKind: "estimated",
+				pushSource: latched.source ?? "live_detected",
 				pushUnix: latchUnix,
 				push: clockAt(latchUnix, otz),
 				delayMin,
@@ -3242,6 +3265,23 @@ async function buildStory(query, resumed = null) {
 		flightawareToAdsb: providerDistance(faPosition, adsbPosition),
 		fr24ToAdsb: providerDistance(fr24Position, adsbPosition)
 	};
+	if (atOrigLive || ["origin_gate", "push", "taxi"].includes(current)) {
+		console.log("[departure-telemetry]", {
+			callsignRequested: query,
+			flightInstance: landKey,
+			currentStage: current,
+			pushLatched: pushLatch.has(landKey),
+			taxiOutLatched,
+			pushTimestamp: times.pushed ? times.pushUnix : null,
+			pushTimestampSource: times.pushed ? times.pushSource ?? null : null,
+			providerGateOut: aware?.gateOut ?? null,
+			groundspeedKt: live?.gsKt ?? null,
+			onGround: live?.onGround ?? null,
+			distanceFromParkedNm: park && live ? distPark : null,
+			positionAgeSec: finalPositionAgeSec,
+			positionSource: finalPositionSource
+		});
+	}
 	if ((directToDestNm != null && directToDestNm <= 40) || landingSoon) {
 		console.log("[flight-telemetry]", {
 			callsignRequested: query,
@@ -3369,10 +3409,19 @@ async function buildStory(query, resumed = null) {
 	} catch {
 		wx = null;
 	}
+	const baseResume = resumed?.resume ?? resumeFromAware(aware, query);
+	const detectedPush = pushLatch.get(landKey);
+	const storyResume = baseResume ? {
+		...baseResume,
+		departureStage: taxiOutLatched ? "taxi" : pushLatch.has(landKey) ? "push" : null,
+		detectedPushUnix: detectedPush && typeof detectedPush === "object" && detectedPush.source === "live_detected"
+			? detectedPush.unix
+			: baseResume.detectedPushUnix ?? null
+	} : undefined;
 	return {
 		fetchedAt: Date.now(),
 		schedule: aware ? { status: resumed ? "saved" : "current", confirmedAt: aware.confirmedAt ?? Date.now() } : undefined,
-		resume: resumed?.resume ?? resumeFromAware(aware, query),
+		resume: storyResume,
 		flightId: aware?.flightId ?? undefined,
 		diversion: aware?.diversion,
 		inboundDiversion,
@@ -3448,7 +3497,8 @@ export async function loadFlightStory(query, opts) {
 			}
 		}
 		try {
-			return await cached(key, fresh ? 0 : 4e3, () => buildStory(query));
+			const progressResume = readFlightResume(opts?.resume, query);
+			return await cached(key, fresh ? 0 : 4e3, () => buildStory(query, null, progressResume));
 		} catch (error) {
 			// A schedule outage must not disable independent position/weather feeds.
 			// Only a recent, leg-specific record can bridge it. New searches still
@@ -3464,7 +3514,7 @@ export async function loadFlightStory(query, opts) {
 			const scope = `resume:${createHash("sha256").update(JSON.stringify(resume)).digest("hex")}:`;
 			const resumeKey = `${scope}story`;
 			if (fresh) cache.delete(resumeKey);
-			return await cached(resumeKey, fresh ? 0 : 4e3, () => buildStory(query, { resume, scope }));
+			return await cached(resumeKey, fresh ? 0 : 4e3, () => buildStory(query, { resume, scope }, resume));
 		}
 	} catch (err) {
 		const msg = err instanceof Error && err.message && err.name !== "AbortError" ? err.message : "Could not load that flight. Try again.";
