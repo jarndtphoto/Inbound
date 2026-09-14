@@ -518,7 +518,8 @@ describe('on the move evidence', () => {
     const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
     record.ident = 'UAL9219'; record.iataIdent = 'UA9219'; record.flightId = 'UAL9219-20260914-test';
     record.inboundFlight = null; record.flightStatus = 'scheduled';
-    record.gateDepartureTimes = { scheduled: 1789230300, estimated: 1789230300, actual: null };
+    // Public bootstrap regression: an estimate copied into the nominal actual slot.
+    record.gateDepartureTimes = { scheduled: 1789230300, estimated: 1789230300, actual: 1789230300 };
     record.takeoffTimes = { scheduled: 1789231800, estimated: 1789232400, actual: null };
     let now = 1789230600000; // 9:30: estimate passed five minutes ago.
     let lat = 41.9786; let lon = -87.9048; let gs = 0;

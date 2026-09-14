@@ -858,6 +858,15 @@ function asTimes(v) {
 		actual
 	};
 }
+function gateOutTimes(v, flightStatus, takeoff) {
+	const gateOut = asTimes(v);
+	const ambiguousPublicActual = Boolean(
+		gateOut.actual && !takeoff.actual &&
+		(gateOut.actual === gateOut.estimated || gateOut.actual === gateOut.scheduled) &&
+		/scheduled|estimated|unknown/i.test(String(flightStatus ?? ""))
+	);
+	return ambiguousPublicActual ? { ...gateOut, actual: null } : gateOut;
+}
 function bestUnix(t) {
 	return t.actual ?? t.estimated ?? t.scheduled;
 }
@@ -1121,6 +1130,7 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 		out: null,
 		inn: null
 	};
+	const takeoffTimes = asTimes(f.takeoffTimes);
 	return {
 		ident: String(f.ident ?? fallbackIdent),
 		iataIdent: typeof f.iataIdent === "string" ? f.iataIdent : null,
@@ -1144,9 +1154,9 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 		destLon: dc?.lon ?? null,
 		destGate: typeof dest.gate === "string" ? dest.gate : null,
 		destTz: faAirportTz(dest),
-		takeoff: asTimes(f.takeoffTimes),
+		takeoff: takeoffTimes,
 		landing: asTimes(f.landingTimes),
-		gateOut: asTimes(f.gateDepartureTimes),
+		gateOut: gateOutTimes(f.gateDepartureTimes, f.flightStatus, takeoffTimes),
 		gateIn: asTimes(f.gateArrivalTimes),
 		inboundIdent,
 		inbound,
