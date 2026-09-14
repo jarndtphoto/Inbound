@@ -49,7 +49,7 @@ export async function loadAeroFlight(ident:string,exact=false) {
   const task=(async()=>{
     try {
       const params=new URLSearchParams({max_pages:'1'});
-      if(!exact){params.set('start',new Date(now-36*3600000).toISOString());params.set('end',new Date(now+24*3600000).toISOString());}
+      // Use the documented default date window; personal plans may reject historical windows.
       const response=await fetch('https://aeroapi.flightaware.com/aeroapi/flights/'+encodeURIComponent(ident)+'?'+params,{headers:{'x-apikey':key,Accept:'application/json'},signal:AbortSignal.timeout(8000),redirect:'error'});
       if(!response.ok){blockedUntil=Date.now()+([401,402,403].includes(response.status)?15*60000:60000);console.warn('[aeroapi] request failed HTTP '+response.status);return null;}
       const body=await response.json();
