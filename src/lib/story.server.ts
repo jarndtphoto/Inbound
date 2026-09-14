@@ -628,7 +628,9 @@ function toLive(raw) {
 }
 function fieldElev(origin) {
 	if (!origin) return 0;
-	return airportByIcao(origin.icao)?.elevationFt ?? airportByIata(origin.iata)?.elevationFt ?? origin.elevationFt ?? 0;
+	return (origin.icao ? airportByIcao(origin.icao)?.elevationFt : null)
+		?? (origin.iata ? airportByIata(origin.iata)?.elevationFt : null)
+		?? origin.elevationFt ?? 0;
 }
 function asOnGround(live, origin) {
 	if (!live) return live;
@@ -689,6 +691,49 @@ export function motionFromTrace(points, origin) {
 	const taxiing = lastGround && (maxDist > 0.10 || (lastGs >= 8 && maxDist > 0.05));
 	const pushed = lastGround && (maxDist > 0.05 || (lastGs >= 4 && maxDist > 0.03));
 	return { pushed, taxiing, flying };
+}
+export function pushEvidenceFromTrack(points, origin, parked = null, minUnix = 0) {
+	if (!Array.isArray(points) || !origin) return null;
+	const surfaceCeilingFt = fieldElev(origin) + 250;
+	const surface = points
+		.map((p) => ({ ...p, t: Number(p.t ?? p.seenAt), gs: p.gs ?? p.gsKt ?? null, alt: p.alt ?? p.altFt ?? null }))
+		.filter((p) => Number.isFinite(p.t) && p.t >= minUnix && Number.isFinite(p.lat) && Number.isFinite(p.lon)
+			&& haversineNm(p, origin) < 8 && (p.ground === true || (p.alt ?? 9999) <= surfaceCeilingFt))
+		.sort((a, b) => a.t - b.t);
+	if (surface.length < 2) return null;
+	const base = parked ?? surface.find((p) => (p.gs ?? 0) < 1.2) ?? null;
+	if (!base) return null;
+	const baseUnix = Number(base.t ?? base.seenAt ?? (base.at ? base.at / 1000 : minUnix));
+	const firstMoving = surface.find((p) => p.t >= baseUnix && (p.gs ?? 0) >= 2) ?? null;
+	for (let i = 0; i < surface.length; i++) {
+		const p = surface[i];
+		if (p.t < baseUnix) continue;
+		const distanceNm = haversineNm(base, p);
+		if (!(distanceNm >= 0.05 || ((p.gs ?? 0) >= 4 && distanceNm >= 0.03))) continue;
+		const confirming = surface.slice(i + 1).find((q) => q.t - p.t <= 5 * 60
+			&& (haversineNm(base, q) >= 0.05 || (q.gs ?? 0) >= 4));
+		if (!confirming) continue;
+		return {
+			unix: p.t,
+			lat: p.lat,
+			lon: p.lon,
+			gsKt: p.gs ?? null,
+			distanceNm,
+			parked: { lat: base.lat, lon: base.lon, at: baseUnix * 1000 },
+			firstGroundMovementUnix: firstMoving?.t ?? null
+		};
+	}
+	return null;
+}
+export function choosePushEvidence(providerActual, evidence) {
+	const tracks = (evidence ?? []).filter((e) => e && Number.isFinite(e.unix)).sort((a, b) => a.unix - b.unix);
+	const earliest = tracks[0] ?? null;
+	// Preserve the earliest actual evidence. A later provider OUT value can
+	// confirm the event, but must not replace an earlier physical stand exit.
+	if (Number.isFinite(providerActual) && (!earliest || providerActual <= earliest.unix)) {
+		return { unix: providerActual, source: "provider_actual", evidence: earliest };
+	}
+	return earliest ? { unix: earliest.unix, source: "track_detected", evidence: earliest } : null;
 }
 function callsignVariants(callsign) {
 	const u = String(callsign || "").replace(/\s/g, "").toUpperCase();
@@ -1071,7 +1116,7 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 	const wps = [];
 	if (Array.isArray(f.waypoints)) for (const w of f.waypoints) {
 		const c = coordPair(w);
-		if (c) wps.push(c);
+		if (c) wps.push({ ...c, label: typeof w?.name === "string" ? w.name : typeof w?.ident === "string" ? w.ident : null });
 	}
 	const faTrack = [];
 	if (Array.isArray(f.track)) {
@@ -3048,9 +3093,25 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	let motion = { pushed: false, taxiing: false, flying: false };
 	const hexNow = String(live?.hex || hexByIdent.get(stateIdent) || aware?.hex || "").toLowerCase();
 	const needsGroundTrace = !live || (live.onGround && (live.gsKt ?? 0) < 1.2 && distPark < 0.025 && !pushLatch.has(landKey));
-	if (hexNow && origin && !ourLanded && needsGroundTrace) {
-		motion = motionFromTrace(await safe(fetchTrace(hexNow, "trace_recent"), []), origin);
+	const takeoffForHistory = aware?.takeoff?.actual ?? null;
+	const historyStillUseful = !takeoffForHistory || Date.now() / 1e3 - takeoffForHistory < 2 * 3600;
+	let openTrace = [];
+	if (hexNow && origin && !ourLanded && (needsGroundTrace || historyStillUseful)) {
+		const [full, recent] = await Promise.all([
+			safe(fetchTrace(hexNow, "trace_full"), []),
+			safe(fetchTrace(hexNow, "trace_recent"), [])
+		]);
+		openTrace = mergeTraces(full, recent);
+		motion = motionFromTrace(openTrace, origin);
 	}
+	const historyStart = (aware?.gateOut?.scheduled ?? aware?.gateOut?.estimated ?? aware?.takeoff?.scheduled ?? Date.now() / 1e3) - 6 * 3600;
+	const faHistory = official.flightaware?.track?.length
+		? official.flightaware.track.map((p) => ({ ...p, t: p.seenAt, gs: p.gsKt, alt: p.altFt, ground: p.altFt === 0 }))
+		: aware?.faTrack ?? [];
+	const fr24History = official.fr24?.track?.map((p) => ({ ...p, t: p.seenAt, gs: p.gsKt, alt: p.altFt, ground: p.altFt === 0 })) ?? [];
+	const flightAwarePush = pushEvidenceFromTrack(faHistory, origin, park, historyStart);
+	const fr24Push = pushEvidenceFromTrack(fr24History, origin, park, historyStart);
+	const adsbPush = pushEvidenceFromTrack(openTrace, origin, park, historyStart);
 	const freshSurface = Boolean(live && live.onGround && atOrigLive && !live.extrapolated && (live.seenSec ?? 999) <= 30);
 	const leftGate = Boolean(
 		!ourLanded &&
@@ -3088,6 +3149,24 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	}
 	if (ourAirborne && !times.airborne) {
 		times = { ...times, airborne: true };
+	}
+	const providerPushActual = confirmedGateOutActual(aware?.gateOut);
+	const selectedPush = choosePushEvidence(providerPushActual, [
+		flightAwarePush && { ...flightAwarePush, provider: "flightaware" },
+		fr24Push && { ...fr24Push, provider: "fr24" },
+		adsbPush && { ...adsbPush, provider: "adsb" }
+	]);
+	if (selectedPush && !stationaryAtStand && (leftGate || taxiHint || times.pushed || times.airborne)) {
+		const prior = pushLatch.get(landKey);
+		const priorUnix = prior && typeof prior === "object" ? prior.unix : null;
+		const useUnix = priorUnix && priorUnix < selectedPush.unix ? priorUnix : selectedPush.unix;
+		const useSource = priorUnix && priorUnix < selectedPush.unix ? prior.source : selectedPush.source;
+		const origPush = times.origPushUnix ?? useUnix;
+		const delayMin = slipMin(useUnix, origPush);
+		times = { ...times, pushed: true, pushKind: useSource === "provider_actual" ? "actual" : "estimated",
+			pushSource: useSource, pushUnix: useUnix, push: clockAt(useUnix, tzOf(origin)), delayMin,
+			pushWas: delayMin != null && delayMin >= 5 ? clockAt(origPush, tzOf(origin)) : times.pushWas };
+		pushLatch.set(landKey, { unix: useUnix, source: useSource, live: true, at: Date.now() / 1e3 });
 	}
 	// A taxi hold can look stationary near the departure stand. Preserve the
 	// observed pushback until this flight's identity changes.
@@ -3282,7 +3361,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		flightawareToAdsb: providerDistance(faPosition, adsbPosition),
 		fr24ToAdsb: providerDistance(fr24Position, adsbPosition)
 	};
-	if (atOrigLive || ["origin_gate", "push", "taxi"].includes(current)) {
+	if (atOrigLive || ["origin_gate", "push", "taxi"].includes(current) || flightAwarePush || fr24Push || adsbPush) {
 		console.log("[departure-telemetry]", {
 			callsignRequested: query,
 			flightInstance: landKey,
@@ -3298,6 +3377,36 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			positionAgeSec: finalPositionAgeSec,
 			positionSource: finalPositionSource
 		});
+		console.log("[push-evidence] " + JSON.stringify({
+			callsignRequested: query,
+			flightInstance: landKey,
+			flightaware: {
+				flightId: official.flightaware?.flightId ?? aware?.flightId ?? null,
+				publicGateOut: aware?.gateOut ?? null,
+				aeroApiOut: official.flightaware?.push ?? null,
+				firstTrackMovement: flightAwarePush
+			},
+			fr24: {
+				flightId: official.fr24?.flightId ?? null,
+				status: official.status.fr24,
+				firstTrackMovement: fr24Push,
+				summaryOut: official.fr24?.push ?? null
+			},
+			adsb: {
+				firstTrackMovement: adsbPush,
+				positionAgeSec: finalPositionAgeSec,
+				groundspeedKt: live?.gsKt ?? null,
+				distanceFromParkedNm: park && live ? distPark : null
+			},
+			inbound: {
+				parkedPosition: park ?? null,
+				selectedPush,
+				pushLatch: pushLatch.get(landKey) ?? null,
+				taxiOutLatch: taxiOutLatch.get(landKey) ?? null,
+				finalPushUnix: times.pushed ? times.pushUnix : null,
+				finalPushSource: times.pushed ? times.pushSource ?? null : null
+			}
+		}));
 	}
 	if ((directToDestNm != null && directToDestNm <= 40) || landingSoon) {
 		console.log("[flight-telemetry]", {
@@ -3479,7 +3588,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			progress,
 			heading,
 			source: pathSource,
-			samples
+			samples,
+			filedFixes: (aware?.waypoints ?? []).map((p) => ({ lat: p.lat, lon: p.lon, label: p.label ?? null }))
 		},
 		hazards: uniqHazards.slice(0, 12),
 		weatherCoverage: { failedSources: [...(hazardsPack.failedSources ?? []), ...(pirepPacks.some(pack => pack == null) ? ["Pilot reports"] : [])] },

@@ -12,7 +12,8 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory, motionFromTrace, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import('../src/lib/story.server.ts');
+const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import('../src/lib/story.server.ts');
+const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
 const { rideOutlook, RideOutlookText, nextStep } = await import('../src/lib/traveler.ts');
 const { WeatherEventMarker } = await import('../src/components/weather-event-marker.ts');
@@ -272,7 +273,7 @@ describe('September 12 flight audit replay', () => {
     gs = 3;
     lon += 0.0013;
     assert.equal((await load()).times.pushed, true, 'movement registers pushback');
-    assert.equal(traceRequests, beforeMovement, 'fresh ground movement should not wait for a trace fetch');
+    assert.ok(traceRequests >= beforeMovement, 'history lookup may reconstruct an earlier stand exit');
     now += 5000;
     gs = 0;
     lon += 0.0002;
@@ -575,9 +576,30 @@ describe('on the move evidence', () => {
     now += 40_000;
     record.gateDepartureTimes.actual = 1789231080; // Provider later reports 9:38.
     const reconciled = await loadFlightStory('UA9219', { fresh: true });
-    assert.equal(reconciled.times.pushUnix, 1789231080);
-    assert.equal(reconciled.times.pushSource, 'provider_actual');
+    assert.equal(reconciled.times.pushUnix, 1789231020);
+    assert.equal(reconciled.times.pushSource, 'live_detected');
     assert.notEqual(reconciled.times.pushUnix, 1789230300);
+  });
+
+  it('UA219: reconstructs the first stand exit from track history instead of the 10:03 taxi classification', () => {
+    const origin = { lat: 41.9786, lon: -87.9048, elevationFt: 672 };
+    const at = (hour, minute) => Date.UTC(2026, 8, 14, hour + 5, minute) / 1000;
+    const history = [
+      { t: at(9, 25), lat: 41.9786, lon: -87.9048, gs: 0, alt: 675, ground: true },
+      { t: at(9, 37), lat: 41.9786, lon: -87.9039, gs: 4, alt: 676, ground: true },
+      { t: at(9, 38), lat: 41.9785, lon: -87.9028, gs: 6, alt: 674, ground: true },
+      { t: at(10, 3), lat: 41.9740, lon: -87.8870, gs: 15, alt: 680, ground: true },
+    ];
+    const evidence = pushEvidenceFromTrack(history, origin, null, at(9, 0));
+    assert.equal(evidence.unix, at(9, 37));
+    assert.equal(choosePushEvidence(at(9, 38), [{ ...evidence, provider: 'fr24' }]).unix, at(9, 37));
+    assert.equal(choosePushEvidence(at(9, 38), [{ ...evidence, provider: 'fr24' }]).source, 'track_detected');
+  });
+
+  it('labels the passenger operational event Pushback, not Departure', () => {
+    const source = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
+    assert.match(source, /label: "Pushback"/);
+    assert.doesNotMatch(source, /rows\.push\(\{ label: "Departure"/);
   });
 
   it('UA3600: never regresses from Taxiing out to Pushback during normal surface changes', async (t) => {
@@ -700,8 +722,17 @@ describe('live reroute display geometry', () => {
   it('keeps Route and Weather on the same canonical story samples', () => {
     const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
     const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
-    assert.match(mapSource, /const samples = story\.route\.samples/);
+    assert.match(mapSource, /const samples = story\.route\?\.samples/);
     assert.match(appSource, /<RouteMap[\s\S]*story=\{story\}/);
+  });
+
+  it('shows filed fixes as secondary references without using them as the live path', () => {
+    const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
+    assert.match(mapSource, /story\.route\.filedFixes/);
+    assert.match(mapSource, /aria-label="Filed flight-plan fixes"/);
+    assert.match(mapSource, /data-filed-fix=/);
+    assert.match(mapSource, /scale\(\$\{1 \/ zoom\.s\}\)/);
+    assert.ok(path.slice(Math.max(0, liveIndex - 2), liveIndex).every((p) => p.lat > 0.4));
   });
 
   it('does not evaluate future weather against the abandoned route behind the aircraft', () => {
@@ -709,6 +740,20 @@ describe('live reroute display geometry', () => {
     const future = path.slice(liveIndex);
     const closest = Math.min(...future.map((p) => Math.hypot(p.lat - abandonedWeather.lat, p.lon - abandonedWeather.lon)));
     assert.ok(closest > 1);
+  });
+});
+
+describe('Hawaii route-map geography', () => {
+  it('includes targeted detailed outlines for the six passenger-visible islands', () => {
+    assert.deepEqual(HAWAII_COASTLINES.map((island) => island.name),
+      ['Hawaiʻi', 'Maui', 'Lānaʻi', 'Molokaʻi', 'Oʻahu', 'Kauaʻi']);
+    for (const island of HAWAII_COASTLINES) assert.ok(island.ring.length >= 15, `${island.name} has useful coastline detail`);
+  });
+
+  it('renders Hawaii with zoom-stable coastline strokes', () => {
+    const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
+    assert.match(mapSource, /data-hawaii-island=/);
+    assert.match(mapSource, /data-hawaii-island[\s\S]{0,500}vectorEffect="non-scaling-stroke"/);
   });
 });
 

@@ -43,7 +43,7 @@ export type NormalizedFlight = {
   type: string | null;
   hex: string | null;
   route: string | null;
-  waypoints: Array<{ lat: number; lon: number }>;
+  waypoints: Array<{ lat: number; lon: number; label?: string | null }>;
   track: Array<{ lat: number; lon: number; altFt: number | null; gsKt: number | null; track: number | null; seenAt: number }>;
   providerEta: number | null;
   runway: { takeoff: string | null; landing: string | null };

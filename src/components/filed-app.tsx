@@ -1007,7 +1007,7 @@ function ClockCell({
   hint?: string | null;
   source?: FlightStory["times"]["pushSource"];
 }) {
-  const sourceLabel = source === "live_detected" ? "Detected" : source === "provider_actual" ? "Reported" : kindLabel(kind);
+  const sourceLabel = source === "live_detected" || source === "track_detected" ? "Detected" : source === "provider_actual" ? "Actual" : kindLabel(kind);
   const sub = [sourceLabel, hint].filter(Boolean).join(" · ");
   return (
     <div className="min-w-0">
@@ -1101,7 +1101,7 @@ function TimesStrip({
         ) : (
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
             <ClockCell
-              title={t?.pushed ? "Departure" : "Est. push"}
+              title={t?.pushed ? "Pushback" : "Est. pushback"}
               time={t?.push}
               kind={t?.pushKind ?? (t?.pushed ? "actual" : t?.push ? "scheduled" : null)}
               source={t?.pushSource}
@@ -1225,7 +1225,7 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
     if (inbound) rows.push({ label: "Inbound flight", value: [inbound.iata, inbound.from ? `from ${inbound.from}` : null].filter(Boolean).join(" · ") });
   }
   if (t.originGate) rows.push({ label: "Departure gate", value: t.originGate });
-  if (t.pushed && t.push) rows.push({ label: "Departure", value: `${t.push} · ${t.pushKind === "actual" ? "Reported" : "First observed; approximate"}` });
+  if (t.pushed && t.push) rows.push({ label: "Pushback", value: `${t.push} · ${t.pushKind === "actual" ? "Reported" : "First observed; approximate"}` });
 
   if ((t?.delayMin ?? 0) >= 5) {
     rows.push({
@@ -1584,10 +1584,10 @@ function extraFor(story: FlightStory, stage: StageId) {
       <>
         <dl className="mt-4 grid grid-cols-1 gap-2">
           <TimeChip
-            label="Departure"
+            label="Pushback"
             value={times.pushed ? times.push ?? "Awaiting confirmation" : "Awaiting departure"}
             sub={times.pushSource === "provider_actual" ? "Gate departure reported"
-              : times.pushSource === "live_detected" ? "Pushback detected from live movement"
+              : times.pushSource === "live_detected" || times.pushSource === "track_detected" ? "Pushback detected from live movement"
               : times.pushed ? "Earlier pushback time unavailable" : "Awaiting movement"}
           />
           <TimeChip

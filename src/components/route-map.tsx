@@ -8,6 +8,7 @@ import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
 import { GREAT_LAKES } from "@/lib/great-lakes";
+import { HAWAII_COASTLINES } from "@/lib/hawaii-coastlines";
 import { latToTileY, pickRadarTiles, tileXToLon, tileYToLat } from "@/lib/radar-tiles";
 import { WORLD_COUNTRY_RINGS } from "@/lib/world-country-lines";
 import { cn } from "@/lib/utils";
@@ -490,9 +491,13 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           : plannedMinutes == null ? null : event.startFrac * plannedMinutes
       }));
   const fixes = samples.filter((s) => s.fix);
+  const allFiledFixes = (story.route.filedFixes ?? []).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  const filedStep = Math.max(1, Math.ceil(allFiledFixes.length / (zoom.s >= 2 ? 36 : 16)));
+  const filedFixes = allFiledFixes.filter((_, index) => index % filedStep === 0);
   const runs = pathRuns(samples, progress).build(sx, sy);
   const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
   const admin1 = ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const hawaii = HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
   const lakes = GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
   const hazards = upcomingStorms(story.hazards ?? []);
 
@@ -560,6 +565,30 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
               className="fill-bg/95 stroke-fg/35"
               strokeWidth="1.25"
             />
+          ))}
+          {hawaii.map((island) => (
+            <polygon
+              key={`hawaii-${island.name}`}
+              data-hawaii-island={island.name}
+              points={island.ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ")}
+              className="fill-fg/10 stroke-fg/45"
+              strokeWidth="1.25"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        </g>
+
+        <g aria-label="Filed flight-plan fixes" opacity="0.58">
+          {filedFixes.map((fix, index) => (
+            <g key={`filed-${index}-${fix.lat}-${fix.lon}`} data-filed-fix={fix.label ?? "filed fix"}
+              transform={`translate(${sx(fix.lon)} ${sy(fix.lat)}) scale(${1 / zoom.s}) rotate(45)`}>
+              <rect x="-2.2" y="-2.2" width="4.4" height="4.4" className="fill-bg stroke-muted"
+                strokeWidth="1" vectorEffect="non-scaling-stroke" />
+              {zoom.s >= 2 && fix.label ? (
+                <text x="7" y="3" transform="rotate(-45)" className="fill-muted" fontSize="9"
+                  fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.08em">{fix.label}</text>
+              ) : null}
+            </g>
           ))}
         </g>
 

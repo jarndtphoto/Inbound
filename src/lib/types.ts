@@ -194,7 +194,7 @@ export type FlightTimes = {
   origLandUnix?: number | null;
   pushKind?: "scheduled" | "estimated" | "actual" | null;
   /** Provenance for an operational push timestamp. Null while push is only scheduled/estimated. */
-  pushSource?: "provider_actual" | "live_detected" | null;
+  pushSource?: "provider_actual" | "track_detected" | "live_detected" | null;
   takeoffKind?: "scheduled" | "estimated" | "actual" | null;
   landKind?: "scheduled" | "estimated" | "actual" | null;
   gateKind?: "scheduled" | "estimated" | "actual" | null;
@@ -257,6 +257,8 @@ export type FlightStory = {
     heading: number;
     source: "track" | "direct" | "filed";
     samples: RouteSample[];
+    /** Original filed fixes, retained as secondary map reference markers. */
+    filedFixes?: Array<{ lat: number; lon: number; label?: string | null }>;
   };
   hazards: Hazard[];
   comfort: Comfort;
