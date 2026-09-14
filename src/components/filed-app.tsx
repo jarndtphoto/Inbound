@@ -1803,11 +1803,12 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
     {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="space-y-3">
       {visibleGroups.map((g, i) => <li key={i} className="rounded-xl border border-border bg-surface p-4">
+        <h4 className="mb-2 font-semibold">Weather event {i + 1}</h4>
         <p className="flex items-center gap-2 text-sm text-muted"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
         <p className="mt-2 font-semibold">{g.label}</p>{g.gaps && <p className="mt-1 text-sm text-muted">Nearby areas grouped together; brief gaps may occur.</p>}
         {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
-          <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={`Route preview: ${g.label}`}>
-            <RouteMap story={story} fixedViewport weatherPreview={{ from: g.start.frac, to: g.end.frac, ranges: g.ranges }} />
+          <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={`Weather event ${i + 1}: ${g.label}`}>
+            <RouteMap story={story} fixedViewport weatherPreview={{ eventNumber: i + 1, label: g.label, from: g.start.frac, to: g.end.frac, ranges: g.ranges }} />
           </div>
           <figcaption className="mt-2 text-xs text-muted">Highlighted: the forecast area along your route. Radar colors show recent precipitation, not turbulence or the weather guaranteed at your arrival time. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
         </figure>}
