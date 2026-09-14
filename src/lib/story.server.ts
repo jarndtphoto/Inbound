@@ -2030,6 +2030,18 @@ export function currentStageOf(args) {
 	if (inboundStatus === "complete") return "push";
 	return "inbound";
 }
+
+export function postLandingState(args) {
+	const { ourLanded, gateInActual, parkedAtGate, live, dest } = args;
+	if (!ourLanded) return "airborne";
+	if (gateInActual || parkedAtGate) return "gate";
+	const atDestination = Boolean(live && dest && live.onGround &&
+		(live.seenSec ?? 999) <= 60 && haversineNm(live, dest) < 10);
+	if (!atDestination) return "landed";
+	// Keep the high-speed runway rollout as the immediate Landed transition;
+	// normal surface movement after that is passenger-facing taxi-in.
+	return (live.gsKt ?? 0) >= 1.2 && (live.gsKt ?? 0) < 40 ? "taxi_in" : "landed";
+}
 async function hydrateField(base) {
 	const [{ metar }, nas, taf] = await Promise.all([loadMetar(base.icao), loadNas(base.iata), loadTaf(base.icao)]);
 	const decoded = metar ? decodeMetar(metar) : null;
@@ -3097,6 +3109,13 @@ async function buildStory(query, resumed = null) {
 		distPark,
 		parkedAtGate
 	});
+	const arrivalStatus = postLandingState({
+		ourLanded,
+		gateInActual: aware?.gateIn?.actual ?? null,
+		parkedAtGate,
+		live,
+		dest
+	});
 	const finalPositionAgeSec = liveAgeSec(live);
 	const finalPositionSource = live?.source ?? (live?.extrapolated ? "estimated" : "fallback");
 	const faPosition = official.flightaware?.position ?? null;
@@ -3124,6 +3143,7 @@ async function buildStory(query, resumed = null) {
 			remainingNm,
 			etaMin,
 			currentStage: current,
+			arrivalStatus,
 			ourLanded,
 			positionProvider: finalPositionSource,
 			positionSeenAt: live?.seenAt ?? (finalPositionAgeSec != null ? Date.now() / 1000 - finalPositionAgeSec : null),
@@ -3240,6 +3260,7 @@ async function buildStory(query, resumed = null) {
 		airline,
 		live: Boolean(live),
 		currentStage: current,
+		arrivalStatus,
 		providers: {
 			configured: official.configured,
 			status: official.status,

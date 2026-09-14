@@ -237,6 +237,7 @@ export type FlightStory = {
   airline: string | null;
   live: boolean;
   currentStage: StageId;
+  arrivalStatus?: "airborne" | "landed" | "taxi_in" | "gate";
   providers?: {
     chosenPosition?: string | null;
     chosenPositionAgeSec?: number | null;

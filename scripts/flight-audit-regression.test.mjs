@@ -10,7 +10,29 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory, motionFromTrace, currentStageOf, fetchAwarePage, pickTaxi } = await import('../src/lib/story.server.ts');
+const { loadFlightStory, motionFromTrace, currentStageOf, postLandingState, fetchAwarePage, pickTaxi } = await import('../src/lib/story.server.ts');
+
+describe('post-landing passenger stage', () => {
+  const dest = { lat: 40.6925, lon: -74.1687 };
+  const surface = { lat: 40.691, lon: -74.167, onGround: true, seenSec: 4 };
+
+  it('keeps touchdown and runway rollout as Landed', () => {
+    assert.equal(postLandingState({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live: { ...surface, gsKt: 72 } }), 'landed');
+  });
+
+  it('shows Taxiing in for on-ground movement after landing', () => {
+    assert.equal(postLandingState({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live: { ...surface, gsKt: 14 } }), 'taxi_in');
+  });
+
+  it('shows At gate for a parked aircraft or confirmed gate-in', () => {
+    assert.equal(postLandingState({ ourLanded: true, gateInActual: null, parkedAtGate: true, dest, live: { ...surface, gsKt: 0 } }), 'gate');
+    assert.equal(postLandingState({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live: { ...surface, gsKt: 8 } }), 'gate');
+  });
+
+  it('never marks a moving aircraft At gate', () => {
+    assert.notEqual(postLandingState({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live: { ...surface, gsKt: 9 } }), 'gate');
+  });
+});
 
 describe('September 12 flight audit replay', () => {
   for (const [ident, query, destination, pushed] of [

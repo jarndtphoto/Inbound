@@ -859,6 +859,7 @@ function wheelsDown(story: FlightStory) {
 
 function stageHeadline(story: FlightStory) {
   if (story.currentStage === "gate") return "At the gate";
+  if (story.arrivalStatus === "taxi_in") return "Taxiing in";
   if (story.currentStage === "arrival" && wheelsDown(story)) return "Landed";
   if (story.currentStage === "push") return story.times?.pushed ? "On the move" : "Gate";
   return STAGES.find((s) => s.id === story.currentStage)?.label ?? story.currentStage;
@@ -898,6 +899,7 @@ function headStatus(story: FlightStory) {
   const live = liveFix(story);
   const inAirLive = Boolean(live && story.aircraft && !story.aircraft.onGround);
   if (story.currentStage === "gate") return airline ?? "Parked";
+  if (story.arrivalStatus === "taxi_in") return airline ? `Taxiing in · ${airline}` : "Taxiing in";
   if (wheelsDown(story)) return airline ? `Landed · ${airline}` : "Landed";
   if (air && inAirLive) return airline ? `In the air · ${airline}` : "In the air";
   if (air) return "In the air — live position unavailable right now";
@@ -1020,7 +1022,7 @@ function TimesStrip({
   const late = (delay ?? 0) >= 5;
   const phrase = delayPhrase(delay);
   const landHint = down && !parked
-    ? "Taxiing in"
+    ? story.arrivalStatus === "taxi_in" ? "Taxiing in" : "Rollout"
     : t?.landWas && t.landWas !== t.land
       ? `Was ${t.landWas}`
       : null;
