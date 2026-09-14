@@ -2,6 +2,8 @@ import { formatDuration, formatMiles, haversineNm } from "@/lib/geo";
 import { upcomingStorms } from "@/lib/route-hazards";
 import { routeWeatherEvents } from "@/lib/weather-events";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
+import { WeatherPreviewLabel } from "@/components/weather-event-copy";
+import { passengerWeatherCopy } from "@/lib/weather-card-copy";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
@@ -21,13 +23,6 @@ function chopClass(c: Chop, past: boolean) {
   if (past) return "stroke-muted/40";
   if (c === "severe" || c === "moderate" || c === "light") return "stroke-ifr";
   return "stroke-accent";
-}
-
-function turbLabel(c: Chop) {
-  if (c === "light") return "light turbulence";
-  if (c === "moderate") return "moderate turbulence";
-  if (c === "severe") return "severe turbulence";
-  return "";
 }
 
 function mercX(lon: number) {
@@ -337,10 +332,10 @@ function pathRuns(samples: RouteSample[], progress: number) {
         } else {
           // Weather begins at the first affected sample and ends at the last
           // affected sample. Share that exact boundary with the adjacent run.
-          const enteringWeather = cur.chop === "smooth" && chop !== "smooth" && cur.past === past;
+          const enteringWeather: boolean = cur.chop === "smooth" && chop !== "smooth" && cur.past === past;
           if (!crossesSeam && enteringWeather) cur.pts.push(pt);
           if (cur.pts.length >= 2) out.push(cur);
-          const boundary = enteringWeather ? pt : cur.pts[cur.pts.length - 1]!;
+          const boundary: { x: number; y: number } = enteringWeather ? pt : cur.pts[cur.pts.length - 1]!;
           cur = { chop, past, pts: !crossesSeam ? [boundary, pt] : [pt] };
         }
       }
@@ -460,9 +455,12 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       ? sy(ac!.lat)
       : sy(origin.lat);
   const rot = landed ? 0 : story.route.heading;
-  const weatherLabel = (sample: RouteSample) => [sample.convective ? "Thunderstorms possible" : "",
-    sample.chop !== "smooth" ? turbLabel(sample.chop) : "",
-    sample.cloud ? "Cloudy stretch" : ""].filter(Boolean).join(" · ");
+  const weatherLabel = (sample: RouteSample, eventKey?: string) => passengerWeatherCopy(
+    sample,
+    sample.frac >= 0.85,
+    story.dest.city || story.dest.iata,
+    eventKey,
+  ).mapLabel;
   const takeoffAt = story.times.takeoffUnix;
   const airborneNow = story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach";
   const elapsedMin = airborneNow && story.times.takeoffKind === "actual" && takeoffAt != null
@@ -485,7 +483,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     : mapEvents.map((event, index) => ({
         eventNumber: index + 1,
         ...event.start,
-        alertLabel: weatherLabel(event.start),
+        alertLabel: weatherLabel(event.start, event.key),
         durationMin: airborneNow ? event.endEtaMin - event.startEtaMin
           : plannedMinutes == null ? null : (event.endFrac - event.startFrac) * plannedMinutes,
         intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + event.startEtaMin
@@ -576,7 +574,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           );
         })}
 
-        {weatherPreview && (weatherPreview.ranges ?? [weatherPreview]).map((range, index) => {
+        {weatherPreview && (weatherPreview.ranges ?? [{ from: weatherPreview.startFrac, to: weatherPreview.endFrac }]).map((range, index) => {
           const section = samples.filter(s => s.frac >= range.from && s.frac <= range.to);
           return <g key={index} aria-label="Weather area for this forecast">
             <polyline points={section.map(s => `${sx(s.lon)},${sy(s.lat)}`).join(" ")} fill="none" className="stroke-ifr" strokeWidth="18" opacity="0.55" />
@@ -651,7 +649,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {weatherPreview ? weatherPreview.label : story.route.source === "track" ? "TRACK + PROJECTED ROUTE" : "PROJECTED ROUTE"}
+          {weatherPreview ? <WeatherPreviewLabel label={weatherPreview.label} /> : story.route.source === "track" ? "TRACK + PROJECTED ROUTE" : "PROJECTED ROUTE"}
         </p>
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
           {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : Date.now() - story.fetchedAt > 15_000 || (story.providers?.chosenPositionAgeSec ?? Infinity) > 60 ? "Updating live position…" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}

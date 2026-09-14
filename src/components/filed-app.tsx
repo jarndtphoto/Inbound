@@ -9,10 +9,12 @@ import { parseFlightQuery, storyMatchesQuery } from "@/lib/flight-parse";
 import { RESUME_MAX_AGE_MS, resumeFromStory, savedScheduleNote } from "@/lib/flight-resume";
 import { useFiled } from "@/lib/store";
 import { routeWeatherEvents, type RouteWeatherEvent } from "@/lib/weather-events";
+import { passengerWeatherCopy } from "@/lib/weather-card-copy";
 import { getFlightStory } from "@/lib/story";
 import type { Comfort, FlightStory, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
+import { WeatherEventBody, WeatherEventHeadline } from "@/components/weather-event-copy";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Clock, Gauge, Plane, Radio, Search, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
@@ -1762,35 +1764,6 @@ function Skeleton({ query }: { query: string }) {
 }
 
 
-function passengerWeatherTitle(sample: FlightStory["route"]["samples"][number], nearArrival: boolean, destination: string, eventKey?: string) {
-  const place = nearArrival ? ` near ${destination}` : "";
-  if (eventKey?.startsWith("turbulence:")) {
-    if (sample.chop === "severe") return nearArrival ? `Quite bumpy air possible${place}` : "Quite bumpy stretch ahead";
-    if (sample.chop === "moderate") return nearArrival ? `Bumpy air possible${place}` : "Bumpy stretch ahead";
-    return nearArrival ? `A few light bumps possible${place}` : "Possible light bumps";
-  }
-  if (sample.convective) return nearArrival ? `Storms near ${destination}` : "Thunderstorms near the route";
-  if (sample.chop === "severe") return nearArrival ? `Quite bumpy air possible${place}` : "Quite bumpy stretch ahead";
-  if (sample.chop === "moderate") return nearArrival ? `Bumpy air possible${place}` : "Bumpy stretch ahead";
-  if (sample.chop === "light") return nearArrival ? `A few light bumps possible${place}` : "Possible light bumps";
-  if (sample.cloud) return nearArrival ? `Cloudy stretch near ${destination}` : "Cloudy stretch";
-  return "Weather along the route";
-}
-
-function passengerWeatherImpact(sample: FlightStory["route"]["samples"][number]) {
-  const bump = sample.chop === "severe"
-    ? "The ride may feel quite bumpy for part of this stretch."
-    : sample.chop === "moderate"
-      ? "You may notice a bumpy stretch."
-      : sample.chop === "light"
-        ? "You may notice a few light bumps."
-        : "";
-  if (sample.convective) return `Storms are being monitored near our path. The flight may route around the roughest weather.${bump ? ` ${bump}` : ""}`;
-  if (sample.cloud && bump) return `${bump} Clouds may also limit the view outside.`;
-  if (sample.cloud) return "Clouds may limit the view outside for this part of the flight.";
-  return bump || "Conditions may change as the flight progresses.";
-}
-
 function technicalWeatherProducts(text: string | null | undefined) {
   const matches = String(text || "").toUpperCase().match(/G-AIRMET|AIRMET|SIGMET|PIREP|CWA|TCF|METAR|TAF/g) || [];
   return [...new Set(matches)].join(" · ");
@@ -1850,18 +1823,19 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
     {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="space-y-3">
       {visibleGroups.map((g, i) => {
-        const title = passengerWeatherTitle(g.start, g.endFrac >= 0.85, story.dest.city || story.dest.iata, g.key);
+        const copy = passengerWeatherCopy(g.start, g.endFrac >= 0.85, story.dest.city || story.dest.iata, g.key);
+        const title = copy.headline;
         const source = passengerWeatherSource(g.note);
         const technical = technicalWeatherProducts(g.note);
         return <li key={i} className="rounded-xl border border-border bg-surface p-4">
-          <h4 className="text-lg font-semibold">{title}</h4>
+          <WeatherEventHeadline copy={copy} />
           <p className="mt-2 flex items-center gap-2 text-sm font-medium"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
-          <p className="mt-3 text-sm leading-relaxed text-muted">{passengerWeatherImpact(g.start)}</p>
+          <WeatherEventBody copy={copy} />
           {g.gaps && <p className="mt-2 text-sm text-muted">This may come and go briefly along the highlighted stretch.</p>}
           <p className="mt-3 text-sm font-medium">{source}{technical ? <span className="ml-1 text-xs font-normal text-muted">· {technical}</span> : null}</p>
           {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
             <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={title}>
-              <RouteMap story={story} fixedViewport weatherPreview={{ eventNumber: i + 1, label: title, startFrac: g.startFrac, endFrac: g.endFrac, startEtaMin: g.startEtaMin, endEtaMin: g.endEtaMin, ranges: g.ranges }} />
+              <RouteMap story={story} fixedViewport weatherPreview={{ eventNumber: i + 1, label: copy.mapLabel, startFrac: g.startFrac, endFrac: g.endFrac, startEtaMin: g.startEtaMin, endEtaMin: g.endEtaMin, ranges: g.ranges }} />
             </div>
             <figcaption className="mt-2 text-xs text-muted">Highlighted: where these conditions overlap the route. Radar colors show recent precipitation; conditions may change before the flight reaches this area. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
           </figure>}

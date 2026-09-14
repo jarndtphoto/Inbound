@@ -16,6 +16,8 @@ const { loadFlightStory, motionFromTrace, currentStageOf, finalApproachEvidence,
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
 const { rideOutlook, RideOutlookText } = await import('../src/lib/traveler.ts');
 const { WeatherEventMarker } = await import('../src/components/weather-event-marker.ts');
+const { passengerWeatherCopy } = await import('../src/lib/weather-card-copy.ts');
+const { WeatherEventHeadline, WeatherEventBody, WeatherPreviewLabel } = await import('../src/components/weather-event-copy.ts');
 
 describe('passenger weather presentation', () => {
   const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
@@ -27,10 +29,11 @@ describe('passenger weather presentation', () => {
   });
 
   it('uses experience-based weather titles and impact copy', () => {
-    assert.match(appSource, /Bumpy stretch ahead/);
-    assert.match(appSource, /Thunderstorms near the route/);
-    assert.match(appSource, /Possible light bumps/);
-    assert.match(appSource, /Clouds may limit the view outside/);
+    const copySource = readFileSync(new URL('../src/lib/weather-card-copy.ts', import.meta.url), 'utf8');
+    assert.match(copySource, /Bumpy stretch ahead/);
+    assert.match(copySource, /Thunderstorms near the route/);
+    assert.match(copySource, /Possible light bumps/);
+    assert.match(copySource, /Clouds may limit the view outside/);
   });
 
   it('translates aviation products into passenger source labels', () => {
@@ -46,6 +49,31 @@ describe('passenger weather presentation', () => {
   it('retains internal marker numbering for map association', () => {
     assert.match(appSource, /eventNumber: i \+ 1/);
     assert.match(mapSource, /eventNumber: number/);
+  });
+});
+
+describe('weather card copy hierarchy', () => {
+  const sample = { lat: 41.8, lon: -87.7, frac: 0.9, distNm: 900, remainingNm: 100,
+    etaMin: 47, chop: 'light', cloud: false, convective: false, note: 'Turbulence AIRMET', fix: false };
+
+  it('renders the full passenger headline once and uses a compact preview-map label', () => {
+    const copy = passengerWeatherCopy(sample, true, 'Chicago', 'turbulence:light');
+    const html = renderToStaticMarkup(createElement('article', null,
+      createElement(WeatherEventHeadline, { copy }),
+      createElement(WeatherEventBody, { copy }),
+      createElement(WeatherPreviewLabel, { label: copy.mapLabel })
+    ));
+    assert.equal(copy.headline, 'A few light bumps possible near Chicago');
+    assert.equal(copy.body, null);
+    assert.equal(copy.mapLabel, 'Light bumps near Chicago');
+    assert.equal((html.match(/A few light bumps possible near Chicago/g) || []).length, 1);
+    assert.match(html, /Light bumps near Chicago/);
+  });
+
+  it('keeps compact labels across turbulence, storms, and clouds', () => {
+    assert.equal(passengerWeatherCopy({ ...sample, chop: 'moderate' }, false, 'Chicago', 'turbulence:moderate').mapLabel, 'Moderate bumps');
+    assert.equal(passengerWeatherCopy({ ...sample, chop: 'smooth', convective: true }, false, 'Chicago', 'convective').mapLabel, 'Thunderstorms');
+    assert.equal(passengerWeatherCopy({ ...sample, chop: 'smooth', cloud: true }, true, 'Chicago', 'cloud').mapLabel, 'Low clouds near Chicago');
   });
 });
 
