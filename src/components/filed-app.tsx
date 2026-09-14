@@ -962,10 +962,6 @@ function FlightHead({
   failed?: boolean;
   onRefresh: () => void;
 }) {
-  const ac = story.aircraft;
-  const airborne = flightAirborne(story);
-  const live = liveFix(story);
-  const showAlt = Boolean(live && airborne && ac && !ac.onGround && (ac.altFt || ac.gsKt));
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2">
@@ -984,16 +980,6 @@ function FlightHead({
         </p>
       </div>
       <TimesStrip failed={failed} story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
-      {showAlt ? (
-        <dl className="mt-4 grid grid-cols-1 gap-3">
-          <Stat
-            icon={Gauge}
-            label="Live flight"
-            value={ac?.altFt ? feetPretty(ac.altFt) : "—"}
-            sub={ac?.gsKt ? `${Math.round(ac.gsKt)} kt` : ""}
-          />
-        </dl>
-      ) : null}
     </div>
   );
 }
@@ -1155,6 +1141,8 @@ function TimesStrip({
   const t = story.times;
   const down = wheelsDown(story);
   const airborne = flightAirborne(story) && !down;
+  const ac = story.aircraft;
+  const showLiveFlight = Boolean(liveFix(story) && flightAirborne(story) && ac && !ac.onGround && (ac.altFt || ac.gsKt));
   const elapsed = airborne ? elapsedFlight(story) : null;
   const liveFresh = cachedStorySafeDuringRefreshFailure(story);
   const parked = story.currentStage === "gate";
@@ -1242,6 +1230,16 @@ function TimesStrip({
             />
           </div>
         )}
+        {showLiveFlight ? (
+          <dl className="grid grid-cols-1 gap-3">
+            <Stat
+              icon={Gauge}
+              label="Live flight"
+              value={ac?.altFt ? feetPretty(ac.altFt) : "—"}
+              sub={ac?.gsKt ? `${Math.round(ac.gsKt)} kt` : ""}
+            />
+          </dl>
+        ) : null}
         <Freshness failed={failed} partial={story.schedule?.status === "saved"} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       </div>
       {!down ? (

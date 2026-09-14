@@ -378,6 +378,14 @@ describe("Overview record migration", () => {
     const traveler = readFileSync(new URL("../components/traveler-companion.tsx", import.meta.url), "utf8");
     assert.doesNotMatch(traveler, /BaggageStatus|Baggage carousel/);
   });
+
+  it("groups the unchanged live altitude and speed bar above Refresh", () => {
+    const source = readFileSync(new URL("../components/filed-app.tsx", import.meta.url), "utf8");
+    const strip = source.slice(source.indexOf("function TimesStrip"), source.indexOf("function Freshness"));
+    assert.ok(strip.indexOf('label="Live flight"') > strip.indexOf("{airborne ? ("));
+    assert.ok(strip.indexOf('label="Live flight"') < strip.indexOf("<Freshness"));
+    assert.match(strip, /liveFix\(story\).*flightAirborne\(story\).*ac.*!ac\.onGround.*ac\.altFt \|\| ac\.gsKt/);
+  });
 });
 
 describe("Briefing refresh feedback", () => {
