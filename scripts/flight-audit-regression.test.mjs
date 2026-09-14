@@ -88,7 +88,7 @@ describe('September 12 flight audit replay', () => {
       if (pushed) {
         assert.equal(story.times.pushUnix, 1789231380);
         assert.equal(story.times.pushKind, 'actual');
-        assert.equal(story.currentStage, 'taxi');
+        assert.equal(story.currentStage, 'push');
       }
       const pireps = requests.filter(u => u.includes('/api/data/pirep?'));
       assert.ok(pireps.length > 0);
@@ -231,7 +231,7 @@ describe('September 12 flight audit replay', () => {
 describe('MDW departure surface-stage replays', () => {
   const now = 1789231976;
   for (const [flight, speed, status, gateActual, takeoffActual, expectedStage, expectedPush] of [
-    ['WN363', 0, 'scheduled', now - 90, null, 'taxi', true],
+    ['WN363', 0, 'scheduled', now - 90, null, 'push', true],
     ['WN1035', 14, 'airborne', now - 180, now - 30, 'taxi', true],
     ['WN102', 65, 'airborne', now - 580, now - 480, 'taxi', true],
   ]) {
@@ -300,8 +300,8 @@ describe('AA2554 inbound/main-stage consistency', () => {
     for (const fix of [live, null, live]) {
       assert.equal(currentStageOf({ ...args, live: fix }), 'inbound');
     }
-    assert.equal(currentStageOf({ ...args, live, inboundStatus: 'complete' }), 'push');
-    assert.equal(currentStageOf({ ...args, live, pushed: true }), 'taxi');
+    assert.equal(currentStageOf({ ...args, live, inboundStatus: 'complete' }), 'origin_gate');
+    assert.equal(currentStageOf({ ...args, live, pushed: true }), 'push');
     assert.equal(currentStageOf({ ...args, live, pushed: true, taxiHint: true }), 'taxi');
   });
 });
@@ -336,18 +336,50 @@ describe('taxi duration consistency', () => {
 });
 
 
-describe('AA3177 pushback to taxi transition', () => {
-  it('advances on fresh taxi speed without waiting for distance from airport center', () => {
-    const origin = { lat: 41.9786, lon: -87.9048 };
-    const args = { origin, inboundStatus: 'complete', pushed: true, faAirborne: false, taxiHint: false };
-    const live = { ...origin, onGround: true, gsKt: 8, seenSec: 1 };
-    assert.equal(currentStageOf({ ...args, live }), 'taxi');
-    assert.equal(currentStageOf({ ...args, live: { ...live, gsKt: 3 } }), 'taxi');
-    assert.equal(currentStageOf({ ...args, live: { ...live, seenSec: 60 } }), 'taxi');
-    assert.equal(currentStageOf({ ...args, live: null }), 'taxi');
+describe('first-class pushback and taxi-out stages', () => {
+  const origin = { lat: 41.9786, lon: -87.9048 };
+  const base = { origin, dest: { lat: 33.43, lon: -112.01 }, remainingNm: 1300,
+    inboundStatus: 'complete', faAirborne: false, taxiHint: false, distPark: 0 };
+
+  it('keeps a parked 0 kt aircraft At gate', () => {
+    const live = { ...origin, onGround: true, gsKt: 0, seenSec: 1 };
+    assert.equal(currentStageOf({ ...base, live, pushed: false }), 'origin_gate');
+  });
+
+  it('shows first 2–5 kt movement as Pushback', () => {
+    const live = { ...origin, onGround: true, gsKt: 3, seenSec: 1 };
+    assert.equal(currentStageOf({ ...base, live, pushed: true, distPark: 0.04 }), 'push');
+  });
+
+  it('shows sustained 8–20 kt movement as Taxiing out', () => {
+    const live = { ...origin, onGround: true, gsKt: 14, seenSec: 1 };
+    assert.equal(currentStageOf({ ...base, live, pushed: true, distPark: 0.12 }), 'taxi');
+  });
+
+  it('does not return to At gate through a stale surface gap', () => {
+    const stale = { ...origin, onGround: true, gsKt: 3, seenSec: 120 };
+    assert.equal(currentStageOf({ ...base, live: stale, pushed: true }), 'push');
+    assert.equal(currentStageOf({ ...base, live: null, pushed: true, taxiOutLatched: true }), 'taxi');
+  });
+
+  it('keeps Taxiing out monotonic once its latch is established', () => {
+    const slow = { ...origin, onGround: true, gsKt: 2, seenSec: 5 };
+    assert.equal(currentStageOf({ ...base, live: slow, pushed: true, taxiOutLatched: true }), 'taxi');
+  });
+
+  it('preserves the existing takeoff transition', () => {
+    const live = { lat: 42.02, lon: -87.80, onGround: false, gsKt: 155, altFt: 1800, seenSec: 1 };
+    assert.equal(currentStageOf({ ...base, live, pushed: true, taxiOutLatched: true, ourTakeoffActual: 1_000 }), 'ride');
+  });
+
+  it('renders Pushback and Taxiing out as separate passenger stages', () => {
+    const source = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
+    assert.match(source, /\{ id: "push", label: "Pushback" \}/);
+    assert.match(source, /\{ id: "taxi", label: "Taxiing out" \}/);
+    assert.match(source, /story\.currentStage === "push"/);
+    assert.match(source, /story\.currentStage === "taxi"/);
   });
 });
-
 
 describe('on the move evidence', () => {
   it('does not advance a stationary aircraft just because scheduled departure passed', async (t) => {

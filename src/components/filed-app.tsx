@@ -21,8 +21,9 @@ const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
 
 const STAGES: { id: StageId; label: string }[] = [
   { id: "inbound", label: "Inbound" },
-  { id: "push", label: "Gate" },
-  { id: "taxi", label: "On the move" },
+  { id: "origin_gate", label: "At gate" },
+  { id: "push", label: "Pushback" },
+  { id: "taxi", label: "Taxiing out" },
   { id: "ride", label: "Flight" },
   { id: "arrival", label: "Arrival" },
   { id: "taxi_in", label: "Taxiing in" },
@@ -217,7 +218,7 @@ function rideLabelOf(story: FlightStory) {
 }
 
 function takeoffEstimateExpired(story: FlightStory) {
-  return ["inbound", "push", "taxi"].includes(story.currentStage)
+  return ["inbound", "origin_gate", "push", "taxi"].includes(story.currentStage)
     && story.times.takeoffKind !== "actual"
     && story.times.takeoffUnix != null
     && story.times.takeoffUnix <= story.fetchedAt / 1000;
@@ -522,7 +523,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   }, [query, story?.times.origPushUnix, story?.times.pushUnix, Boolean(story)]);
   const rawStage = String(stagePref === "auto" ? (story?.currentStage ?? "inbound") : stagePref);
   const active: StageId = rawStage === "ground"
-    ? "push"
+    ? "origin_gate"
     : STAGES.some((s) => s.id === rawStage)
       ? (rawStage as StageId)
       : "inbound";
@@ -862,7 +863,9 @@ function stageHeadline(story: FlightStory) {
   if (story.currentStage === "gate") return "At the gate";
   if (story.currentStage === "taxi_in") return "Taxiing in";
   if (story.currentStage === "arrival" && wheelsDown(story)) return "Landed";
-  if (story.currentStage === "push") return story.times?.pushed ? "On the move" : "Gate";
+  if (story.currentStage === "origin_gate") return "At the gate";
+  if (story.currentStage === "push") return "Pushback";
+  if (story.currentStage === "taxi") return "Taxiing out";
   return STAGES.find((s) => s.id === story.currentStage)?.label ?? story.currentStage;
 }
 
@@ -874,6 +877,7 @@ function liveFix(story: FlightStory) {
 function flightAirborne(story: FlightStory) {
   if (story.currentStage === "ride" || story.currentStage === "arrival") return true;
   if (
+    story.currentStage === "origin_gate" ||
     story.currentStage === "push" ||
     story.currentStage === "taxi" ||
     story.currentStage === "inbound" ||
@@ -903,6 +907,9 @@ function headStatus(story: FlightStory) {
   if (story.currentStage === "gate") return airline ?? "Parked";
   if (story.currentStage === "taxi_in") return airline ? `Taxiing in · ${airline}` : "Taxiing in";
   if (wheelsDown(story)) return airline ? `Landed · ${airline}` : "Landed";
+  if (story.currentStage === "origin_gate") return airline ? `At the gate · ${airline}` : "At the gate";
+  if (story.currentStage === "push") return airline ? `Pushback · ${airline}` : "Pushback";
+  if (story.currentStage === "taxi") return airline ? `Taxiing out · ${airline}` : "Taxiing out";
   if (air && inAirLive) return airline ? `In the air · ${airline}` : "In the air";
   if (air) return "In the air — live position unavailable right now";
   if (live) return airline ? `On the ground · ${airline}` : "On the ground";
@@ -1199,7 +1206,7 @@ function recordRows(story: FlightStory): { label: string; value: string }[] {
     story.currentStage === "gate" ||
     story.route.remainingNm < 40;
   const rows: { label: string; value: string }[] = [];
-  const beforeDeparture = story.currentStage === "inbound" || story.currentStage === "push";
+  const beforeDeparture = story.currentStage === "inbound" || story.currentStage === "origin_gate" || story.currentStage === "push";
   if (beforeDeparture) {
     rows.push({ label: "Inbound aircraft", value: story.inbound.headline });
     const inbound = story.inbound.watch[0];
@@ -1541,7 +1548,7 @@ function extraFor(story: FlightStory, stage: StageId) {
     originGate: null,
     destGate: null,
   };
-  if (stage === "push") {
+  if (stage === "origin_gate" || stage === "push") {
     return (
       <>
         <dl className="mt-4 grid grid-cols-1 gap-2">
