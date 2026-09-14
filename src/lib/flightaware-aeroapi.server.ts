@@ -39,13 +39,17 @@ export function normalizeAeroApiFlight(f: any): NormalizedFlight {
 }
 
 export function normalizeAeroApiRoute(data: any) {
-  const points = Array.isArray(data?.route) ? data.route
+  // AeroAPI's filed-route endpoint returns authoritative named RouteFix
+  // objects in `fixes`. Keep the older shapes as compatibility fallbacks.
+  const points = Array.isArray(data?.fixes) ? data.fixes
+    : Array.isArray(data?.route) ? data.route
     : Array.isArray(data?.waypoints) ? data.waypoints : [];
   return points.map((p: any) => ({
     lat: p.latitude ?? p.lat,
     lon: p.longitude ?? p.lon,
     label: p.name ?? p.ident ?? p.fix ?? null,
-  })).filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  })).filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon)
+    && typeof p.label === "string" && p.label.trim().length > 0);
 }
 
 export async function loadAeroApiFlight(ident: string): Promise<NormalizedFlight | null> {

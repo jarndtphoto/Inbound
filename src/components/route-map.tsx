@@ -490,7 +490,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + event.startEtaMin
           : plannedMinutes == null ? null : event.startFrac * plannedMinutes
       }));
-  const allFiledFixes = (story.route.filedFixes ?? []).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  const allFiledFixes = (story.route.filedFixes ?? []).filter((p) =>
+    Number.isFinite(p.lat) && Number.isFinite(p.lon) && typeof p.label === "string" && p.label.trim().length > 0);
   // Marker count is derived only from the published plan and remains stable
   // while zooming. Route samples still drive geometry, ETA, and weather.
   const filedStep = Math.max(1, Math.ceil(allFiledFixes.length / 24));
@@ -583,7 +584,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           {filedFixes.map((fix, index) => (
             <g key={`filed-${index}-${fix.lat}-${fix.lon}`} data-filed-fix={fix.label ?? "filed fix"}
               transform={`translate(${sx(fix.lon)} ${sy(fix.lat)}) scale(${1 / zoom.s}) rotate(45)`}>
-              <rect x="-2.2" y="-2.2" width="4.4" height="4.4" className="fill-bg stroke-muted"
+              <rect x="-2.2" y="-2.2" width="4.4" height="4.4" className="fill-white stroke-fg/35"
                 strokeWidth="1" vectorEffect="non-scaling-stroke" />
               {zoom.s >= 2 && fix.label ? (
                 <text x="7" y="3" transform="rotate(-45)" className="fill-muted" fontSize="9"

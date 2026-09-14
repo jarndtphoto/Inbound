@@ -788,14 +788,24 @@ describe('Hawaii route-map geography', () => {
 });
 
 describe('FlightAware filed route references', () => {
-  it('retains route fixes when AeroAPI returns route_distance alongside a route array', () => {
-    assert.deepEqual(normalizeAeroApiRoute({ route_distance: 3700, route: [
+  it('reads only named published fixes from the AeroAPI route response', () => {
+    assert.deepEqual(normalizeAeroApiRoute({ route_distance: 3700, fixes: [
       { name: 'DBQ', latitude: 42.401, longitude: -90.71 },
       { ident: 'BDF', latitude: 41.16, longitude: -89.59 },
+      { latitude: 40.5, longitude: -92.1 },
     ] }), [
       { label: 'DBQ', lat: 42.401, lon: -90.71 },
       { label: 'BDF', lat: 41.16, lon: -89.59 },
     ]);
+  });
+
+  it('renders filed fixes as zoom-stable white markers without sample markers', () => {
+    const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
+    assert.match(mapSource, /story\.route\.filedFixes/);
+    assert.match(mapSource, /data-filed-fix=/);
+    assert.match(mapSource, /scale\(\$\{1 \/ zoom\.s\}\)/);
+    assert.match(mapSource, /className="fill-white stroke-fg\/35"/);
+    assert.doesNotMatch(mapSource, /samples\.filter\(\(s\) => s\.fix\)/);
   });
 });
 

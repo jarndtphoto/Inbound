@@ -3599,7 +3599,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			heading,
 			source: pathSource,
 			samples,
-			filedFixes: (aware?.waypoints ?? []).map((p) => ({ lat: p.lat, lon: p.lon, label: p.label ?? null }))
+			filedFixes: (aware?.waypoints ?? [])
+				.filter((p) => typeof p.label === "string" && p.label.trim().length > 0)
+				.map((p) => ({ lat: p.lat, lon: p.lon, label: p.label }))
 		},
 		hazards: uniqHazards.slice(0, 12),
 		weatherCoverage: { failedSources: [...(hazardsPack.failedSources ?? []), ...(pirepPacks.some(pack => pack == null) ? ["Pilot reports"] : [])] },
