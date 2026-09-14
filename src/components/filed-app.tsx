@@ -1133,19 +1133,19 @@ function TimesStrip({
       <div className="flex min-w-0 flex-col gap-3">
         {airborne ? (
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
-            <div className="flex aspect-square min-w-0 flex-col justify-center rounded-md border border-border bg-bg p-3 sm:aspect-auto sm:min-h-32">
+            <div className="flex min-h-28 min-w-0 flex-col justify-center rounded-md border border-border bg-bg px-3 py-2">
               <p className="flex items-center gap-1.5 font-mono text-xs tracking-wide text-subtle uppercase">
                 <Clock className="size-3 shrink-0" /> Remaining
               </p>
-              <p className="mt-1 break-words font-display text-2xl font-semibold leading-none">{liveFresh ? formatDuration(story.route.etaMin) : "Updating…"}</p>
-              <p className="mt-1 break-words text-xs text-muted">{liveFresh ? formatMiles(story.route.remainingNm) : "Live position is stale"}</p>
+              <p className="mt-0.5 break-words font-display text-2xl font-semibold leading-none">{liveFresh ? formatDuration(story.route.etaMin) : "Updating…"}</p>
+              <p className="mt-0.5 break-words text-xs text-muted">{liveFresh ? formatMiles(story.route.remainingNm) : "Live position is stale"}</p>
             </div>
-            <div className="flex aspect-square min-w-0 flex-col justify-center rounded-md border border-border bg-bg p-3 sm:aspect-auto sm:min-h-32">
+            <div className="flex min-h-28 min-w-0 flex-col justify-center rounded-md border border-border bg-bg px-3 py-2">
               <p className="flex items-center gap-1.5 font-mono text-xs tracking-wide text-subtle uppercase">
                 <Clock className="size-3 shrink-0" /> Flown
               </p>
-              <p className="mt-1 break-words font-display text-2xl font-semibold leading-none">{elapsed ? formatDuration(elapsed.minutes) : "—"}</p>
-              <p className="mt-1 break-words text-xs text-muted">
+              <p className="mt-0.5 break-words font-display text-2xl font-semibold leading-none">{elapsed ? formatDuration(elapsed.minutes) : "—"}</p>
+              <p className="mt-0.5 break-words text-xs text-muted">
                 {elapsed?.estimated || !liveFix(story) ? "Est. " : "Approx. "}
                 {formatMiles(story.route.flownNm)}
               </p>
@@ -1263,16 +1263,16 @@ function Stat({
   trend?: Comfort["trend"];
 }) {
   return (
-    <div className="rounded-md border border-border bg-bg px-3 py-2">
+    <div className="rounded-md border border-border bg-bg px-3 py-1.5">
       <p className="flex items-center gap-1.5 font-mono text-xs tracking-widest text-subtle uppercase">
         <Icon className="size-3" />
         {label}
       </p>
-      <p className="mt-1 flex items-center gap-1 font-display text-lg font-semibold leading-tight">
+      <p className="mt-0.5 flex items-center gap-1 font-display text-lg font-semibold leading-tight">
         {value}
         <TrendArrow trend={trend} />
       </p>
-      {sub ? <p className="text-xs text-muted">{sub}</p> : null}
+      {sub ? <p className="text-xs leading-tight text-muted">{sub}</p> : null}
     </div>
   );
 }
