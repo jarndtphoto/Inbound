@@ -1,5 +1,5 @@
 import { TravelerCompanion } from "@/components/traveler-companion";
-import { isLanded } from "@/lib/traveler";
+import { isLanded, nextStep } from "@/lib/traveler";
 import { briefRide } from "@/lib/brief";
 import { briefLogText, composeBrief, logManualRefresh, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
@@ -1838,7 +1838,7 @@ function FlightWelcome({ open, onClose, story, brief }: { open: boolean; onClose
     </div>
     <p className="mt-2 text-sm text-muted">{story.iata || story.callsign} · {story.origin.iata} → {story.dest.iata}</p>
     <div className="mt-4 space-y-3 text-sm leading-relaxed">
-      <p>{brief?.lead || "The briefing is being prepared. Current flight information is below."}</p>
+      <p>{story.diversion ? nextStep(story, story.fetchedAt).title + ". " + nextStep(story, story.fetchedAt).body : brief?.lead || "The briefing is being prepared. Current flight information is below."}</p>
       {(story.times.delayMin ?? 0) >= 5 && <p><strong>Departure delay:</strong> {story.times.delayMin} minutes.</p>}
       {(story.currentStage === "inbound" || story.currentStage === "push") && <p><strong>Inbound aircraft:</strong> {story.inbound.detail || story.inbound.headline}</p>}
       {!isLanded(story) && story.hazards.some(h => h.remaining) && <p><strong>Route weather:</strong> {[...new Set(story.hazards.filter(h => h.remaining).map(h => h.label))].join(" · ")}</p>}

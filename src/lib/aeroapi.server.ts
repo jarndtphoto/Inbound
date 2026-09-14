@@ -2,7 +2,34 @@
 type Row = Record<string, any>;
 const stamp = (v:unknown):number|null => typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v)/1000 : null;
 const text = (v:unknown):string|null => typeof v==='string' && v.trim() ? v.trim() : null;
+
+const airportCode = (airport:Row|undefined):string|null => text(airport?.code_iata) ?? text(airport?.code_icao) ?? text(airport?.code);
+const diversionReported = (f:Row) => f.diverted === true || /^diverted\b/i.test(text(f.status) ?? '');
+/** Join only an unambiguous diversion pair for the same dated provider instance. */
+export function mergeAeroDiversions(rows:Row[]):Row[] {
+  const grouped=new Map<string,Row[]>();
+  const key=(f:Row) => {
+    const departure=stamp(f.actual_off) ?? stamp(f.scheduled_off) ?? stamp(f.actual_out) ?? stamp(f.scheduled_out);
+    return text(f.fa_flight_id) && airportCode(f.origin) && departure != null
+      ? JSON.stringify([f.fa_flight_id,airportCode(f.origin),departure]) : null;
+  };
+  for(const f of rows) { if(!f)continue; const k=key(f); if(k)grouped.set(k,[...(grouped.get(k)??[]),f]); }
+  const replaced=new Map<Row,Row>(), removed=new Set<Row>();
+  for(const group of grouped.values()) {
+    const originals=group.filter(diversionReported);
+    const revised=group.filter(f=>!diversionReported(f));
+    if(originals.length!==1 || revised.length!==1)continue;
+    const original=originals[0], update=revised[0];
+    const from=airportCode(original.destination), to=airportCode(update.destination);
+    if(!from || !to || from===to || (original.registration && update.registration && original.registration!==update.registration))continue;
+    removed.add(original);
+    replaced.set(update,{...update,diverted:true,_diversion:{originalDestination:from,destination:to}});
+  }
+  return rows.filter(f=>f&&!removed.has(f)).map(f=>replaced.get(f)??f);
+}
+
 export function selectAeroFlight(rows:Row[], ident:string, now=Date.now()/1000, exact=false):Row|null {
+  rows=mergeAeroDiversions(rows);
   const matching=rows.filter(f=>f && f.origin && f.destination && (exact ? f.fa_flight_id===ident : [f.ident,f.ident_icao,f.ident_iata,...(Array.isArray(f.codeshares)?f.codeshares:[]),...(Array.isArray(f.codeshares_iata)?f.codeshares_iata:[])].includes(ident)));
   if(exact)return matching.length===1?matching[0]:null;
   const dep=(f:Row)=>stamp(f.actual_out)??stamp(f.estimated_out)??stamp(f.scheduled_out)??stamp(f.scheduled_off)??Infinity;
@@ -18,6 +45,8 @@ export function mapAeroFlight(f:Row, confirmedAt=Date.now()) {
   const o=f.origin??{},d=f.destination??{};
   const times=(event:string)=>({scheduled:stamp(f['scheduled_'+event]),estimated:stamp(f['estimated_'+event]),actual:stamp(f['actual_'+event])});
   return {
+    flightId:text(f.fa_flight_id),
+    diversion:diversionReported(f) ? {source:'flightaware' as const,reportedAt:confirmedAt,originalDestination:f._diversion?.originalDestination ?? null,destination:f._diversion?.destination ?? null} : undefined,
     ident:text(f.ident_icao)??text(f.ident),iataIdent:text(f.ident_iata),status:text(f.status)??'',confirmedAt,
     originIata:text(o.code_iata),originIcao:text(o.code_icao)??text(o.code),originName:text(o.name),originCity:text(o.city),originTz:text(o.timezone),originLat:null,originLon:null,originGate:text(f.gate_origin),
     destIata:text(d.code_iata),destIcao:text(d.code_icao)??text(d.code),destName:text(d.name),destCity:text(d.city),destTz:text(d.timezone),destLat:null,destLon:null,destGate:text(f.gate_destination),

@@ -100,7 +100,7 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
 }
 
 export function resumeFromStory(story: FlightStory | undefined, q: string, now = Date.now()): FlightResume | undefined {
-  if (!story || !storyMatchesQuery(story, q)) return;
+  if (!story || story.diversion || !storyMatchesQuery(story, q)) return;
   // Never extend the schedule's lifetime when only ADS-B/weather refreshed.
   if (story.resume) return readFlightResume(story.resume, q, now);
   if (story.schedule?.status === "saved") return;

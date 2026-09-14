@@ -1076,6 +1076,9 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 		ident: String(f.ident ?? fallbackIdent),
 		iataIdent: typeof f.iataIdent === "string" ? f.iataIdent : null,
 		status: String(f.flightStatus ?? ""),
+		flightId: typeof f.flightId === "string" ? f.flightId : undefined,
+		diversion: f.diverted === true || /^diverted\b/i.test(String(f.flightStatus ?? ""))
+			? { source: "flightaware", reportedAt: Date.now(), originalDestination: null, destination: null } : undefined,
 		originIata: typeof origin.iata === "string" ? origin.iata : null,
 		originIcao: typeof origin.icao === "string" ? origin.icao : null,
 		originName: typeof origin.friendlyName === "string" ? origin.friendlyName : null,
@@ -2191,7 +2194,7 @@ function pointAtFrac(path, frac) {
 	};
 }
 function resumeFromAware(aware, query) {
-	if (!aware) return undefined;
+	if (!aware || aware.diversion) return undefined;
 	return readFlightResume({ ...aware, version: 1, callsign: parseFlightQuery(query)?.callsign }, query);
 }
 function awareFromResume(resume, scope) {
@@ -3085,6 +3088,8 @@ async function buildStory(query, resumed = null) {
 		fetchedAt: Date.now(),
 		schedule: aware ? { status: resumed ? "saved" : "current", confirmedAt: aware.confirmedAt ?? Date.now() } : undefined,
 		resume: resumed?.resume ?? resumeFromAware(aware, query),
+		flightId: aware?.flightId ?? undefined,
+		diversion: aware?.diversion,
 		query,
 		callsign: liveCs,
 		iata: displayIata(liveCs, parsed.iata ?? aware?.iataIdent ?? route?.callsign_iata ?? null),

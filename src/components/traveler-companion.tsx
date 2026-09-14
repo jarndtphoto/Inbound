@@ -1,11 +1,16 @@
 import { parseFlightQuery } from "@/lib/flight-parse";
 import { BaggageStatus } from "./baggage-status";
 import { airlineStatusLink, flightDepartureDate } from "@/lib/airline-status";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useId } from "react";
 import type { FlightStory } from "@/lib/types";
 import { isLanded, nextStep } from "@/lib/traveler";
 export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:FlightStory;failed?:boolean;onTrackInbound?:(flight:string)=>void}) {
   const [now,setNow]=useState(story.fetchedAt);
+  const [onward,setOnward]=useState("");
+  const onwardId=useId();
+  const onwardFlight=parseFlightQuery(onward);
+  const validOnward=Boolean(onwardFlight && !onwardFlight.registration && onwardFlight.callsign!==parseFlightQuery(story.callsign)?.callsign);
+  useEffect(()=>setOnward(""),[story.callsign,story.flightId]);
   useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),15000);setNow(Date.now());return()=>clearInterval(t)},[]);
   const step=nextStep(story,now,failed);
   const inbound=story.inbound.watch[0];
@@ -20,14 +25,22 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
   return <div className="mt-5 space-y-4">
     <section className="rounded-xl border border-border bg-surface p-5" aria-label="What happens next">
       <h2 className="text-xl font-semibold">{step.title}</h2><p className="mt-2 text-sm leading-relaxed">{step.body}</p>
+      {story.diversion && onTrackInbound && <form className="mt-4 border-t border-border pt-4" onSubmit={event=>{event.preventDefault();if(validOnward && onwardFlight)onTrackInbound(onwardFlight.callsign);}}>
+        <label htmlFor={onwardId} className="text-sm font-semibold">Track your onward flight</label>
+        <p className="mt-1 text-sm text-muted">Enter the flight number supplied by your airline. A flight search does not confirm a booking or connection.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <input id={onwardId} value={onward} onChange={event=>setOnward(event.target.value)} maxLength={16} placeholder="Flight number" className="min-h-11 min-w-0 flex-1 rounded-md border border-border bg-bg px-3 text-fg" />
+          <button type="submit" disabled={!validOnward} className="min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-fg disabled:opacity-50">Track onward flight</button>
+        </div>
+      </form>}
       {canTrackInbound && inboundFlight && <div className="mt-3">
         <p className="text-sm text-muted">Incoming flight: {inbound?.iata}{inbound?.from ? ` · From ${inbound.from}` : ""}</p>
         <button type="button" className="mt-2 min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-fg" onClick={()=>onTrackInbound?.(inboundFlight.callsign)}>Take me to inbound</button>
       </div>}
       <p className="mt-3 text-xs text-muted">{step.confidence} · Updated {new Date(story.fetchedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</p>
     </section>
-    <section className="rounded-xl border border-border bg-surface p-5" aria-label="Arrival help">
-      <h2 className="text-lg font-semibold">Arriving in {story.dest.city}</h2><p className="mt-1 text-sm text-muted">{localTime}</p>
+    {(!story.diversion || story.diversion.destination) && <section className="rounded-xl border border-border bg-surface p-5" aria-label="Arrival help">
+      <h2 className="text-lg font-semibold">{story.diversion ? "Diversion airport: " : "Arriving in "}{story.dest.city}</h2><p className="mt-1 text-sm text-muted">{localTime}</p>
       <dl className="mt-3 grid grid-cols-2 gap-4 text-sm"><div><dt className="text-muted">Arrival gate</dt><dd className="mt-1 font-semibold">{story.times.destGate||"Not assigned"}</dd></div><div><dt className="text-muted">{story.times.gateKind==="actual"?"Reported gate arrival":"Estimated gate arrival"}</dt><dd className="mt-1 font-semibold">{story.times.gate||"Awaiting update"}</dd></div></dl>
       <div className="mt-4 border-t border-border pt-4">
         <p className="text-sm text-muted">Baggage carousel</p>
@@ -38,6 +51,6 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
         </> : <p className="mt-2 text-xs text-muted">Check your airline app for {story.iata} · {story.origin.iata} → {story.dest.iata}. An official status link is not available here yet.</p>}
       </div>
       {isLanded(story)&&story.currentStage!=="gate"&&<p className="mt-3 text-sm">Landed; waiting for gate confirmation.</p>}
-    </section>
+    </section>}
   </div>;
 }

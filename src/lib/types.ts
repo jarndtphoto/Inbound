@@ -224,6 +224,8 @@ export type WxBrief = {
 };
 
 export type FlightStory = {
+  flightId?: string;
+  diversion?: { source: "flightaware"; reportedAt: number; originalDestination: string | null; destination: string | null };
   schedule?: { status: "current" | "saved"; confirmedAt: number };
   resume?: import("./flight-resume").FlightResume;
   weatherCoverage?: { failedSources: string[] };

@@ -43,6 +43,16 @@ export function nextStep(s: FlightStory, now = Date.now(), failed = false) {
   const fixAge = (s.aircraft?.seenSec ?? Infinity) + age;
   const freshFix = s.live && !!s.aircraft && !s.aircraft.extrapolated && fixAge <= 30;
   const confidence = failed || age > 60 ? "Update delayed" : freshFix ? "Recent position available" : "Position not confirmed";
+  if (s.diversion) {
+    const destination=s.diversion.destination;
+    const title=destination ? "Diverted to "+destination : "Diversion reported";
+    const body=(destination ? "This flight diverted to "+destination+". " : "The updated arrival airport has not yet been confirmed by the flight feed. ")
+      +(s.diversion.originalDestination ? "Originally bound for "+s.diversion.originalDestination+". " : "")
+      +(isLanded(s) ? "Landing here does not confirm arrival at your intended destination. " : "")
+      +"Check your airline for continuation or rebooking details. "
+      +(failed || age > 60 || s.schedule?.status === "saved" ? "This is the last reported diversion; updates are delayed." : "");
+    return {title,body:body.trim(),confidence};
+  }
   if (failed || age > 60) return {title:"Waiting for a fresh update",body:"The information below is saved. Position, flight stage, and times may have changed.",confidence};
   if (s.currentStage === "gate") return {title:s.times.gateKind === "actual" ? "You’ve reached your destination gate" : "Aircraft appears parked",body:s.times.gateKind === "actual" ? "Gate arrival has been reported. Check airport displays for baggage and onward travel." : "The app indicates the aircraft is parked. An actual gate-arrival time is not yet confirmed.",confidence};
   if (isLanded(s)) return {title:"Awaiting gate confirmation",body:"Your flight has landed. We’re waiting for confirmation that you’ve arrived at the gate.",confidence};
@@ -52,10 +62,17 @@ export function nextStep(s: FlightStory, now = Date.now(), failed = false) {
   if (s.inbound.status !== "complete") return {title:"Watching your inbound aircraft",body:s.inbound.detail || "We’re waiting for a reliable update on the aircraft assigned to your flight.",confidence};
   return {title:"Waiting for pushback",body:`Your aircraft is reported at the departure airport. ${s.times.push ? "Pushback is estimated around "+s.times.push+"." : "A pushback estimate is not available yet."} Scheduled times do not confirm movement.`,confidence};
 }
-export type AlertKind = "delay" | "gate" | "stage";
+export type AlertKind = "delay" | "gate" | "stage" | "diversion";
 export type JourneyAlert = {kind: AlertKind; text: string; at: number};
 export function journeyChanges(prev: FlightStory, next: FlightStory): JourneyAlert[] {
-  if(journeyKey(prev)!==journeyKey(next) || next.fetchedAt<=prev.fetchedAt) return [];
+  if(next.fetchedAt<=prev.fetchedAt) return [];
+  const sameInstance=prev.flightId && next.flightId ? prev.flightId===next.flightId
+    : prev.callsign===next.callsign && prev.origin.icao===next.origin.icao
+      && prev.times.origPushUnix!=null && prev.times.origPushUnix===next.times.origPushUnix;
+  if(next.diversion && sameInstance && (!prev.diversion || prev.diversion.destination!==next.diversion.destination)) {
+    return [{kind:"diversion",text:nextStep(next,next.fetchedAt).title+". Check your airline for onward travel.",at:next.fetchedAt}];
+  }
+  if(journeyKey(prev)!==journeyKey(next)) return [];
   const out: JourneyAlert[]=[]; const add=(kind:AlertKind,text:string)=>out.push({kind,text,at:next.fetchedAt});
   const pd=prev.times.delayMin, nd=next.times.delayMin;
   if(!isLanded(next) && pd!=null && nd!=null && Math.abs(nd-pd)>=5) add("delay",`Departure delay ${nd>pd?"increased":"decreased"} by ${Math.abs(nd-pd)} minutes; now ${Math.max(0,nd)} minutes behind the original schedule. The specific cause is not confirmed.`);
