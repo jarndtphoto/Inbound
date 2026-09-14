@@ -1990,13 +1990,38 @@ function buildInbound(args) {
 		watch
 	};
 }
-export function isFinalApproach(live, dest) {
-	if (!live || !dest || live.onGround) return false;
+function bearingToDestination(from, dest) {
+	if (!from || !dest) return null;
+	const lat1 = from.lat * Math.PI / 180;
+	const lat2 = dest.lat * Math.PI / 180;
+	const dLon = (dest.lon - from.lon) * Math.PI / 180;
+	const y = Math.sin(dLon) * Math.cos(lat2);
+	const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+	return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+export function finalApproachEvidence(live, dest) {
+	if (!live || !dest || live.onGround) return { directNm: null, headingDelta: null, result: false };
 	const directNm = haversineNm({ lat: live.lat, lon: live.lon }, dest);
-	const altitudeOk = live.altFt != null && live.altFt <= 8000;
-	const descending = (live.vertFpm ?? 0) <= -250 || live.phase === "approach";
-	const landingSpeed = live.gsKt == null || live.gsKt >= 70;
-	return directNm <= 10.5 && altitudeOk && descending && landingSpeed;
+	const bearing = bearingToDestination(live, dest);
+	const headingDelta = Number.isFinite(live.track) && bearing != null
+		? Math.abs(((live.track - bearing + 540) % 360) - 180)
+		: null;
+	const obviouslyHigh = Number.isFinite(live.altFt) && live.altFt > 10000;
+	const implausibleSpeed = Number.isFinite(live.gsKt) && (live.gsKt < 45 || live.gsKt > 350);
+	const closeIn = directNm <= 7.5;
+	const outerFinal = directNm <= 12;
+	const plausibleAltitude = !Number.isFinite(live.altFt) || live.altFt <= 9000;
+	const descending = Number.isFinite(live.vertFpm) && live.vertFpm <= -150;
+	const approachPhase = live.phase === "approach";
+	const trackingToward = headingDelta != null && headingDelta <= 60;
+	const result = !obviouslyHigh && !implausibleSpeed &&
+		(closeIn || (outerFinal && plausibleAltitude && (descending || approachPhase || trackingToward)));
+	return { directNm, headingDelta, result };
+}
+
+export function isFinalApproach(live, dest) {
+	return finalApproachEvidence(live, dest).result;
 }
 
 export function currentStageOf(args) {
@@ -3172,6 +3197,10 @@ async function buildStory(query, resumed = null) {
 			groundspeedKt: live?.gsKt ?? null,
 			onGround: live?.onGround ?? null,
 			track: live?.track ?? null,
+			verticalRateFpm: live?.vertFpm ?? null,
+			phase: live?.phase ?? null,
+			headingToDestinationDelta: finalApproachEvidence(live, dest).headingDelta,
+			isFinalApproach: isFinalApproach(live, dest),
 			routeRemainingNm,
 			directToDestNm,
 			remainingNm,

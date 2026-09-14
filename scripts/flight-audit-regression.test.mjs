@@ -10,7 +10,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory, motionFromTrace, currentStageOf, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi } = await import('../src/lib/story.server.ts');
+const { loadFlightStory, motionFromTrace, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi } = await import('../src/lib/story.server.ts');
 
 describe('final approach passenger stage', () => {
   const dest = { lat: 0, lon: 0 };
@@ -34,6 +34,23 @@ describe('final approach passenger stage', () => {
     assert.equal(currentStageOf({ live, origin, dest, remainingNm: 5, pushed: true, faAirborne: true }), 'final_approach');
   });
 
+  it('allows close-in geometry when vertical rate and phase are missing', () => {
+    const live = { lat: 0, lon: -0.10, onGround: false, gsKt: 135, altFt: 2200, vertFpm: null, phase: null, seenSec: 2 };
+    assert.equal(isFinalApproach(live, dest), true);
+  });
+
+  it('uses heading toward destination as supporting evidence farther out', () => {
+    const live = { lat: 0, lon: -0.18, onGround: false, gsKt: 140, altFt: 4500, vertFpm: null, phase: null, track: 90, seenSec: 2 };
+    const evidence = finalApproachEvidence(live, dest);
+    assert.ok(evidence.headingDelta <= 1);
+    assert.equal(evidence.result, true);
+  });
+
+  it('rejects obviously high or implausibly slow close-in aircraft', () => {
+    assert.equal(isFinalApproach({ lat: 0, lon: -0.08, onGround: false, gsKt: 140, altFt: 12000 }, dest), false);
+    assert.equal(isFinalApproach({ lat: 0, lon: -0.08, onGround: false, gsKt: 20, altFt: 1800 }, dest), false);
+  });
+
   it('transitions touchdown to Landed/rollout', () => {
     const live = { lat: 0, lon: -0.005, onGround: true, gsKt: 120, altFt: 0, seenSec: 1 };
     assert.equal(currentStageOf({ live, origin, dest, remainingNm: 0, ourLanded: true, parkedAtGate: false }), 'arrival');
@@ -42,6 +59,13 @@ describe('final approach passenger stage', () => {
   it('does not show Final approach while high or far away', () => {
     assert.equal(isFinalApproach({ ...airborne, lon: -0.10, altFt: 14000 }, dest), false);
     assert.equal(isFinalApproach({ ...airborne, lon: -0.30, altFt: 2500 }, dest), false);
+  });
+
+  it('logs final-approach evidence for live validation', () => {
+    const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(source, /headingToDestinationDelta/);
+    assert.match(source, /isFinalApproach: isFinalApproach/);
+    assert.match(source, /verticalRateFpm/);
   });
 
   it('renders Final approach as a first-class passenger stage', () => {
