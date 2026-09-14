@@ -38,3 +38,10 @@ test('briefing uses the page scroller and the welcome dialog keeps symmetric saf
   assert.match(dialog,/safe-area-inset-top/);
   assert.match(dialog,/safe-area-inset-bottom/);
 });
+
+test('tracked-flight polling pauses while hidden and refreshes stale state on return',()=>{
+  assert.match(flightPages,/document\\.visibilityState !== "visible"\\) return false/);
+  assert.match(flightPages,/addEventListener\\("visibilitychange", refreshWhenVisible\\)/);
+  assert.match(flightPages,/Date\\.now\\(\\) - storyQ\\.dataUpdatedAt > 2_500/);
+  assert.match(flightPages,/void storyQ\\.refetch\\(\\)/);
+});
