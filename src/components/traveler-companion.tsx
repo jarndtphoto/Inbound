@@ -1,9 +1,10 @@
 import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { parseFlightQuery } from "@/lib/flight-parse";
-import { airlineStatusLink, flightDepartureDate } from "@/lib/airline-status";
+import { airlineStatusLink } from "@/lib/airline-status";
 import { useEffect, useState, useId } from "react";
 import type { FlightStory } from "@/lib/types";
 import { isLanded, nextStep, RideOutlookText } from "@/lib/traveler";
+import { destinationGateTime } from "@/lib/passenger-time";
 export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:FlightStory;failed?:boolean;onTrackInbound?:(flight:string)=>void}) {
   const [now,setNow]=useState(story.fetchedAt);
   const [onward,setOnward]=useState("");
@@ -20,8 +21,7 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
     && !inbound?.locked && ["airborne","watching","at_field"].includes(story.inbound.status)
     && ["inbound","push"].includes(story.currentStage) && !story.times.pushed);
   const airlineLink=airlineStatusLink(story);
-  let localTime="Local time unavailable";
-  if(story.dest.tz)try{localTime=new Intl.DateTimeFormat(undefined,{timeZone:story.dest.tz,hour:"numeric",minute:"2-digit",timeZoneName:"short"}).format(now)}catch{}
+  const gateArrivalTime=destinationGateTime(story.times.gateUnix,story.times.gate,story.dest.tz);
   return <div className="mt-5 space-y-4">
     {story.inboundDiversion && <section role="status" className="rounded-xl border border-accent bg-surface p-5" aria-label="Inbound aircraft diversion">
       <h2 className="text-xl font-semibold">Inbound aircraft was diverted</h2>
@@ -46,8 +46,8 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
       <p className="mt-3 text-xs text-muted">{step.confidence} · Updated {new Date(story.fetchedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</p>
     </section>
     {(!story.diversion || story.diversion.destination) && <section className="rounded-xl border border-border bg-surface p-5" aria-label="Arrival help">
-      <h2 className="text-lg font-semibold">{story.diversion ? "Diversion airport: " : "Arriving in "}{story.dest.city}</h2><p className="mt-1 text-sm text-muted">{localTime}</p>
-      <dl className="mt-3 grid grid-cols-2 gap-4 text-sm"><div><dt className="text-muted">Arrival gate</dt><dd className="mt-1 font-semibold">{story.times.destGate||"Not assigned"}</dd></div><div><dt className="text-muted">{story.times.gateKind==="actual"?"Reported gate arrival":"Estimated gate arrival"}</dt><dd className="mt-1 font-semibold">{story.times.gate||"Awaiting update"}</dd></div></dl>
+      <h2 className="text-lg font-semibold">{story.diversion ? "Diversion airport: " : "Arriving in "}{story.dest.city}</h2><p className="mt-1 text-sm text-muted">{gateArrivalTime}</p>
+      <dl className="mt-3 grid grid-cols-2 gap-4 text-sm"><div><dt className="text-muted">Arrival gate</dt><dd className="mt-1 font-semibold">{story.times.destGate||"Not assigned"}</dd></div><div><dt className="text-muted">{story.times.gateKind==="actual"?"Reported gate arrival":"Estimated gate arrival"}</dt><dd className="mt-1 font-semibold">{gateArrivalTime}</dd></div></dl>
       <div className="mt-4 border-t border-border pt-4">
         {airlineLink ? <>
           <a className="mt-3 inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm font-semibold underline" href={airlineLink.url} target="_blank" rel="noopener noreferrer">{airlineLink.direct ? "Check airline status for " + story.iata : "Search airline flight status"} ↗</a>

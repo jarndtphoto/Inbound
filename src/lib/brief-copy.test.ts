@@ -270,6 +270,32 @@ it("refreshes current text even for changes below the history thresholds", () =>
 });
 
 describe("UAL219 curated briefing regression", () => {
+  it("keeps one canonical pushback event when better evidence corrects its time", () => {
+    const previous = composeBrief(facts({
+      now: "ride", stage: "ride", fromIata: "ORD", toIata: "HNL",
+      push: "9:46 AM CDT", pushKind: "actual", pushSource: "track_detected", pushUnix: 1_000_000,
+    }));
+    previous.log.push(
+      { at: 2_000_000_000, kind: "stage", text: "Pushed back from ORD at 9:25 AM CDT" },
+      { at: 2_000_000_001, kind: "stage", text: "Plane is at the gate" },
+    );
+    const corrected = composeBrief(facts({
+      now: "ride", stage: "ride", fromIata: "ORD", toIata: "HNL",
+      push: "9:37 AM CDT", pushKind: "actual", pushSource: "track_detected", pushUnix: 999_460,
+      takeoff: "10:08 AM CDT", takeoffKind: "actual", takeoffUnix: 1_001_320,
+    }), previous);
+    const pushes = corrected.log.filter((entry) => briefLogLabel(entry) === "Pushback");
+    assert.equal(pushes.length, 1);
+    assert.match(pushes[0].text, /9:37 AM CDT/);
+    assert.doesNotMatch(corrected.log.map((entry) => entry.text).join(" | "), /9:25|9:46|Plane is at the gate/);
+  });
+
+  it("does not describe the previous inbound leg as the current aircraft during final approach", () => {
+    const brief = composeBrief(facts({ now: "final_approach", stage: "final_approach", inboundStatus: "complete" }));
+    assert.match(brief.lead, /final approach/i);
+    assert.doesNotMatch(brief.lead, /Inbound is already at the gate|Plane is at the gate/i);
+  });
+
   it("supersedes obsolete departure estimates after actual pushback and takeoff", () => {
     const before = composeBrief(facts({
       now: "taxi", stage: "taxi", push: "9:25 AM CDT", pushKind: "estimated",

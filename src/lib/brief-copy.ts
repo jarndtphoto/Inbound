@@ -78,6 +78,7 @@ export type RideFacts = {
   pushUnix?: number | null;
   takeoffUnix?: number | null;
   landUnix?: number | null;
+  gateUnix?: number | null;
   arriveDelayMin?: number | null;
   convective?: boolean;
   destCat?: string | null;
@@ -402,8 +403,9 @@ function whyChanged(prev: BriefSnap | undefined, next: BriefSnap, d?: RideFacts)
 }
 
 function inboundClause(d: RideFacts) {
+  if (["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(d.now)) return "";
   const st = d.inboundStatus ?? "";
-  if (st === "complete") return "Inbound is already at the gate.";
+  if (st === "complete") return "The aircraft’s previous inbound leg has reached the departure gate.";
   if (st === "at_field") return d.inboundDetail || "Inbound is taxiing in.";
   if (st === "airborne") return d.inboundDetail || d.inboundHeadline || "The inbound aircraft is still in the air.";
   if (d.inboundDetail && !/this is the flight|already happened/i.test(d.inboundDetail)) return d.inboundDetail;
@@ -480,7 +482,7 @@ function composeLead(d: RideFacts) {
     return joinSentences([open, destClause(d), taxiInClause(d) || "You're at the gate."]);
   }
 
-  if (stage === "arrival") {
+  if (stage === "arrival" || stage === "final_approach") {
     const landed = d.landKind === "actual";
     if (landed) {
       return joinSentences([
@@ -495,7 +497,7 @@ function composeLead(d: RideFacts) {
     }
     return joinSentences([
       open,
-      `On the arrival into ${d.toIata}.`,
+      stage === "final_approach" ? `On final approach into ${d.toIata}.` : `On the arrival into ${d.toIata}.`,
       destClause(d),
       taxiInClause(d),
     ]);
@@ -559,11 +561,20 @@ function transientKey(entry: Pick<BriefLogEntry, "kind" | "text">): string | nul
   return null;
 }
 
+export function physicalEventKey(entry: Pick<BriefLogEntry, "kind" | "text">): "pushback" | "takeoff" | "landing" | "gate" | null {
+  if (entry.kind !== "stage") return null;
+  if (/^(?:Pushed back|Pushback\b)/i.test(entry.text)) return "pushback";
+  if (/^(?:Took off|Takeoff\b)/i.test(entry.text)) return "takeoff";
+  if (/^Landed\b/i.test(entry.text)) return "landing";
+  if (/^(?:Arrived at|At the gate\b)/i.test(entry.text)) return "gate";
+  return null;
+}
+
 function curateBriefLog(log: BriefLogEntry[], next: BriefSnap): BriefLogEntry[] {
   const pushed = Boolean(next.pushSource || next.pushKind === "actual");
   const airborne = ["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(next.stage);
   const landed = next.landKind === "actual" || ["taxi_in", "gate"].includes(next.stage);
-  let kept = log.map((entry) => entry.kind === "stage" && entry.text === "On the move — pushback and taxi"
+  const kept = log.map((entry) => entry.kind === "stage" && entry.text === "On the move — pushback and taxi"
     ? { ...entry, text: "Taxiing out" }
     : entry).filter((entry) => {
     const text = entry.text;
@@ -573,6 +584,7 @@ function curateBriefLog(log: BriefLogEntry[], next: BriefSnap): BriefLogEntry[] 
     if (pushed && /Departure time moved|estimated push|push time moved/i.test(text)) return false;
     if (airborne && entry.kind === "delay" && /Delay at the airport|Delay is now|departure delay/i.test(text)) return false;
     if (airborne && /Takeoff now looks|Estimated taxi out/i.test(text)) return false;
+    if (airborne && /^(?:Plane|Aircraft|Inbound) is at the gate\.?$/i.test(text)) return false;
     if (next.takeoffKind === "actual" && entry.kind === "stage" && text === "In flight") return false;
     if (landed && /Arrival now looks|Estimated taxi in/i.test(text)) return false;
     return true;
@@ -600,18 +612,22 @@ function curateBriefLog(log: BriefLogEntry[], next: BriefSnap): BriefLogEntry[] 
   return collapsed.slice(-LOG_CAP);
 }
 
-function actualEventEntries(d: RideFacts, log: BriefLogEntry[], at: number): BriefLogEntry[] {
+function actualEventEntries(d: RideFacts, at: number): BriefLogEntry[] {
   const entries: BriefLogEntry[] = [];
-  const add = (text: string, label: string, unix?: number | null) => {
-    if (![...log, ...entries].some((entry) => entry.kind === "stage" && briefLogLabel(entry) === label)) {
-      entries.push({ at: unix != null ? unix * 1000 : at, kind: "stage", text });
-    }
-  };
-  if (d.push && (d.pushSource || d.pushKind === "actual")) add(`Pushed back from ${d.fromIata} at ${d.push}`, "Pushback", d.pushUnix);
-  if (d.takeoff && d.takeoffKind === "actual") add(`Took off from ${d.fromIata} at ${d.takeoff}`, "Takeoff", d.takeoffUnix);
-  if (d.land && d.landKind === "actual") add(`Landed at ${d.toIata} at ${d.land}`, "Landed", d.landUnix);
-  if (d.gate && d.gateKind === "actual") add(`Arrived at ${d.destGate ? `Gate ${d.destGate}` : "the gate"} at ${d.gate}`, "At the gate");
+  const add = (text: string, unix?: number | null) => entries.push({ at: unix != null ? unix * 1000 : at, kind: "stage", text });
+  if (d.push && (d.pushSource || d.pushKind === "actual")) add(`Pushed back from ${d.fromIata} at ${d.push}`, d.pushUnix);
+  if (d.takeoff && d.takeoffKind === "actual") add(`Took off from ${d.fromIata} at ${d.takeoff}`, d.takeoffUnix);
+  if (d.land && d.landKind === "actual") add(`Landed at ${d.toIata} at ${d.land}`, d.landUnix);
+  if (d.gate && d.gateKind === "actual") add(`Arrived at ${d.destGate ? `Gate ${d.destGate}` : "the gate"} at ${d.gate}`, d.gateUnix);
   return entries;
+}
+
+function mergeCanonicalEvents(log: BriefLogEntry[], canonical: BriefLogEntry[]): BriefLogEntry[] {
+  const keys = new Set(canonical.map(physicalEventKey).filter(Boolean));
+  return [...log.filter((entry) => {
+    const key = physicalEventKey(entry);
+    return !key || !keys.has(key);
+  }), ...canonical].sort((a, b) => a.at - b.at);
 }
 
 function appendLog(log: BriefLogEntry[], added: Omit<BriefLogEntry, "at">[], at: number): BriefLogEntry[] {
@@ -642,7 +658,7 @@ export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): Com
   const lead = joinSentences([composeLead(d), d.scheduleNote ?? ""]);
   const at = Date.now();
   let seed = curateBriefLog(previous?.log ?? [], snap);
-  seed = [...seed, ...actualEventEntries(d, seed, at)].sort((a, b) => a.at - b.at);
+  seed = mergeCanonicalEvents(seed, actualEventEntries(d, at));
   const added = previous?.snap ? diffBriefLog(previous.snap, snap, d) : [];
   const log = curateBriefLog(appendLog(seed, added, at), snap);
   if (previous && added.length === 0 && lead === previous.lead && ac === previous.aircraft

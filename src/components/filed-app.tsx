@@ -13,6 +13,7 @@ import { RESUME_MAX_AGE_MS, resumeFromStory, savedScheduleNote } from "@/lib/fli
 import { useFiled } from "@/lib/store";
 import { routeWeatherEvents, type RouteWeatherEvent } from "@/lib/weather-events";
 import { passengerWeatherCopy } from "@/lib/weather-card-copy";
+import { passengerAirportWeather } from "@/lib/passenger-airport-weather";
 import { getFlightStory } from "@/lib/story";
 import type { Comfort, FlightStory, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -20,7 +21,7 @@ import { RouteMap } from "@/components/route-map";
 import { WeatherEventBody, WeatherEventHeadline } from "@/components/weather-event-copy";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Clock, Gauge, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { Clock, Gauge, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, House, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type ReactNode } from "react";
 
 const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
@@ -287,6 +288,7 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     pushUnix: story.times?.pushUnix ?? null,
     takeoffUnix: story.times?.takeoffUnix ?? null,
     landUnix: story.times?.landUnix ?? null,
+    gateUnix: story.times?.gateUnix ?? null,
     arriveDelayMin: story.times?.arriveDelayMin ?? null,
     convective: Boolean(story.wx?.live?.convective),
     destCat: story.dest.decoded?.category ?? story.wx?.live?.destCat ?? null,
@@ -736,18 +738,11 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
   return (
     <div className="pwa-flight-shell flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg" style={shellStyle}>
-      <header className="shrink-0 bg-bg px-2 py-1 lg:px-6">
-        <div className="mx-auto max-w-6xl">
-          <button type="button" onClick={onHome} aria-label="Back to flight search" className="flex size-11 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-            <ChevronLeft className="size-6" aria-hidden="true" />
-          </button>
-        </div>
-      </header>
       {story && <FlightWelcome open={briefPopupOpen} onClose={() => setBriefPopupOpen(false)} story={story} brief={shownBrief} />}
       <ScreenErrorBoundary>
       <main
         ref={mainRef}
-        className={cn("min-h-0 min-w-0 flex-1 overflow-x-hidden overscroll-y-contain px-4 pt-2 lg:px-8 lg:pt-6", flightTab === "Route" ? "overflow-y-hidden" : "overflow-y-auto")}
+        className={cn("min-h-0 min-w-0 flex-1 overflow-x-hidden overscroll-y-contain px-4 pt-1 lg:px-8 lg:pt-4", flightTab === "Route" ? "overflow-y-hidden" : "overflow-y-auto")}
       >
         <div className={cn("mx-auto min-w-0 max-w-6xl overflow-x-hidden", flightTab === "Route" ? "flex h-full flex-col pb-2" : "pb-6")}>
         {story ? (
@@ -809,21 +804,25 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         )}
         </div>
       </main>
-      {story ? <nav aria-label="Flight pages" className="pwa-bottom-nav shrink-0 border-t border-border bg-bg/95 px-2 pt-1 backdrop-blur lg:px-6">
-        <div role="tablist" aria-label="Flight pages" className="mx-auto grid max-w-2xl grid-cols-4 gap-1">
+      {story ? <nav aria-label="Flight pages" className="pwa-bottom-nav shrink-0 border-t border-border bg-bg/95 px-2 pt-0.5 backdrop-blur lg:px-6">
+        <div className="mx-auto grid max-w-2xl grid-cols-5 gap-0.5">
+          <button type="button" aria-label="Home — flight search" onClick={onHome}
+            className="flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md px-1 py-0.5 text-[11px] font-semibold text-muted transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+            <House className="size-4.5" aria-hidden="true" /><span>Home</span>
+          </button>
           {FLIGHT_TABS.map((tab, index) => {
             const Icon = tab === "Overview" ? PanelsTopLeft : tab === "Route" ? MapIcon : tab === "Weather" ? CloudSun : NotebookText;
             const label = tab === "Route" ? "Map" : tab;
-            return <button key={tab} id={`tab-${tab}`} type="button" role="tab"
-              aria-selected={flightTab === tab} aria-controls={`panel-${tab}`} tabIndex={flightTab === tab ? 0 : -1}
-              className={cn("flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1 text-[11px] font-semibold transition-colors", flightTab === tab ? "bg-surface-2 text-fg" : "text-muted")}
+            return <button key={tab} id={`tab-${tab}`} type="button"
+              aria-current={flightTab === tab ? "page" : undefined} aria-controls={`panel-${tab}`}
+              className={cn("flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md px-1 py-0.5 text-[11px] font-semibold transition-colors", flightTab === tab ? "bg-surface-2 text-fg" : "text-muted")}
               onClick={() => { setFlightTab(tab); mainRef.current?.scrollTo(0, 0); }}
               onKeyDown={(e) => {
                 const next = e.key === "ArrowRight" ? (index + 1) % 4 : e.key === "ArrowLeft" ? (index + 3) % 4 : e.key === "Home" ? 0 : e.key === "End" ? 3 : -1;
                 if (next < 0) return;
                 e.preventDefault(); setFlightTab(FLIGHT_TABS[next]);
                 document.getElementById(`tab-${FLIGHT_TABS[next]}`)?.focus(); mainRef.current?.scrollTo(0, 0);
-              }}><Icon className="size-5" aria-hidden="true" /><span>{label}</span></button>;
+              }}><Icon className="size-4.5" aria-hidden="true" /><span>{label}</span></button>;
           })}
         </div>
       </nav> : null}
@@ -1012,13 +1011,27 @@ function OverviewDetails({ story }: { story: FlightStory }) {
   const destStop = [story.dest.iata, story.times.destGate ? `Gate ${story.times.destGate}` : null].filter(Boolean).join(" ");
   const baggage = useBaggageStatus({flight:story.iata.replace(/\s/g, ""),origin:story.origin.iata,destination:story.dest.iata,date:flightDepartureDate(story)});
   const baggageProminent = wheelsDown(story);
+  const scheduledPush = formatLocalUnix(story.times.origPushUnix, story.origin.tz) ?? story.times.pushWas;
+  const scheduledTakeoff = formatLocalUnix(story.times.origTakeoffUnix, story.origin.tz) ?? story.times.takeoffWas;
+  const pushActualLabel = story.times.pushSource === "provider_actual" ? "Actual"
+    : story.times.pushSource === "live_detected" || story.times.pushSource === "track_detected" ? "Detected"
+      : story.times.pushKind === "estimated" ? "Estimated" : null;
+  const takeoffActualLabel = story.times.takeoffKind === "actual" ? "Actual"
+    : story.times.takeoffKind === "estimated" ? "Estimated" : null;
   return <section className="mt-4 rounded-xl border border-border bg-surface px-4" aria-label="More flight information">
     <OverviewDisclosure id="flight" title="Flight details" summary={`${story.iata} · ${story.origin.iata} → ${story.dest.iata}`} open={open.flight} onToggle={toggle}>
       <dl>
         <DetailRow label="Airline" value={story.airline} />
         <DetailRow label="Flight" value={story.iata} />
         <DetailRow label="Route" value={`${story.origin.city} (${story.origin.iata}) → ${story.dest.city} (${story.dest.iata})`} />
-        <DetailRow label="Scheduled pushback" value={formatLocalUnix(story.times.origPushUnix, story.origin.tz) ?? story.times.pushWas} />
+        <div className="mt-2 border-t border-border pt-2"><h3 className="font-semibold">Pushback</h3>
+          <DetailRow label="Scheduled" value={scheduledPush} />
+          {pushActualLabel ? <DetailRow label={pushActualLabel} value={story.times.push} /> : null}
+        </div>
+        <div className="mt-2 border-t border-border pt-2"><h3 className="font-semibold">Takeoff</h3>
+          <DetailRow label="Scheduled" value={scheduledTakeoff} />
+          {takeoffActualLabel ? <DetailRow label={takeoffActualLabel} value={story.times.takeoff} /> : null}
+        </div>
         <DetailRow label="Scheduled landing" value={formatLocalUnix(story.times.origLandUnix, story.dest.tz) ?? story.times.landWas} />
         <DetailRow label="Planned flight time" value={plannedDuration(story)} />
       </dl>
@@ -1033,8 +1046,8 @@ function OverviewDetails({ story }: { story: FlightStory }) {
     </OverviewDisclosure>
     <OverviewDisclosure id="airports" title="Airport details" summary={`${originStop} → ${destStop}`} open={open.airports} onToggle={toggle}>
       <div className="grid gap-4 sm:grid-cols-2">
-        <section aria-label="Departure airport details"><h3 className="font-semibold">Departure · {story.origin.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.originGate ?? "Not assigned"} /><DetailRow label="Pushback" value={story.times.push} /><DetailRow label="Weather" value={story.origin.category} /></dl></section>
-        <section aria-label="Arrival airport details"><h3 className="font-semibold">Arrival · {story.dest.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.destGate ?? "Not assigned"} /><DetailRow label="Gate arrival" value={story.times.gate} /><DetailRow label="Weather" value={story.dest.category} /></dl></section>
+        <section aria-label="Departure airport details"><h3 className="font-semibold">Departure · {story.origin.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.originGate ?? "Not assigned"} /><DetailRow label="Pushback" value={story.times.push} /><DetailRow label="Weather" value={passengerAirportWeather(story.origin.decoded, story.origin.rawMetar)} /></dl></section>
+        <section aria-label="Arrival airport details"><h3 className="font-semibold">Arrival · {story.dest.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.destGate ?? "Not assigned"} /><DetailRow label="Gate arrival" value={story.times.gate} /><DetailRow label="Weather" value={passengerAirportWeather(story.dest.decoded, story.dest.rawMetar)} /></dl></section>
       </div>
     </OverviewDisclosure>
     <OverviewDisclosure id="baggage" title="Baggage" summary={baggageSummary(baggage.result)} open={open.baggage} onToggle={toggle} prominent={baggageProminent}>
@@ -1312,7 +1325,7 @@ function BreakdownCard({
           {log.length > 0 ? (
             <div className="border-t border-border pt-3">
               <p className="font-mono text-xs tracking-widest text-subtle uppercase">Updates</p>
-              <ol className="mt-2 max-h-56 space-y-2 overflow-y-auto">
+              <ol className="mt-2 space-y-2">
                 {log.map((entry, i) => (
                   <li key={`${entry.at}-${i}`} className="text-sm leading-snug">
                     <p className="font-mono text-[11px] tracking-wide text-subtle uppercase">
@@ -1856,7 +1869,8 @@ function FlightWelcome({ open, onClose, story, brief }: { open: boolean; onClose
     if (!open && ref.current?.open) ref.current?.close();
   }, [open]);
   return <dialog aria-labelledby="flight-welcome-title" ref={ref} onCancel={onClose} onClose={onClose}
-    className="fixed inset-0 m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-xl border border-border bg-surface p-5 text-fg backdrop:bg-black/70">
+    className="fixed left-1/2 top-1/2 m-0 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-5 text-fg backdrop:bg-black/70"
+    style={{ maxHeight: "calc(100dvh - max(2rem, env(safe-area-inset-top, 0px)) - max(2rem, env(safe-area-inset-bottom, 0px)))" }}>
     <div className="flex items-start justify-between gap-3">
       <h2 className="text-xl font-semibold" id="flight-welcome-title">Important information about your flight</h2>
       <button type="button" autoFocus aria-label="Close flight briefing" onClick={onClose} className="flex size-11 shrink-0 items-center justify-center rounded-md border border-border text-xl">×</button>

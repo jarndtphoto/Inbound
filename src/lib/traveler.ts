@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { FlightStory } from "./types";
 import { routeWeatherEvents } from "./weather-events";
+import { passengerNextEvent } from "./next-event";
 
 export const isLanded = (s: FlightStory) => s.currentStage === "gate" || s.times.landKind === "actual" || (s.currentStage === "arrival" && s.aircraft?.onGround === true);
 export function journeyKey(s: FlightStory) {
@@ -65,13 +66,14 @@ export function nextStep(s: FlightStory, now = Date.now(), failed = false) {
     return {title,body:body.trim(),confidence};
   }
   if (failed || age > 60) return {title:"Waiting for a fresh update",body:"The information below is saved. Position, flight stage, and times may have changed.",confidence};
-  if (s.currentStage === "gate") return {title:s.times.gateKind === "actual" ? "You’ve reached your destination gate" : "Aircraft appears parked",body:s.times.gateKind === "actual" ? "Gate arrival has been reported. Check airport displays for baggage and onward travel." : "The app indicates the aircraft is parked. An actual gate-arrival time is not yet confirmed.",confidence};
-  if (isLanded(s)) return {title:"Awaiting gate confirmation",body:"Your flight has landed. We’re waiting for confirmation that you’ve arrived at the gate.",confidence};
-  if (s.currentStage === "arrival") return {title:"Landing is next",body:`Landing ${s.times.land ? "is estimated around "+s.times.land : "time is not yet available"}. Gate arrival follows taxi-in.`,confidence};
-  if (s.currentStage === "ride") return {title:"En route to "+s.dest.city,body:rideOutlook(s),confidence};
-  if (s.currentStage === "taxi" || s.times.pushed) return {title:"Takeoff is next",body:s.times.pushSource === "provider_actual" ? `Pushback was reported${s.times.push ? " at "+s.times.push : ""}. Takeoff time remains an estimate until confirmed.` : (s.times.pushSource === "live_detected" || s.times.pushSource === "track_detected") && s.times.push ? `Pushback was detected from live movement around ${s.times.push}. Takeoff time remains an estimate until confirmed.` : s.currentStage === "taxi" ? "The aircraft was already taxiing when tracking began, so the earlier pushback time isn't available." : "Ground movement has been detected; the exact time isn't available.",confidence};
+  const event = passengerNextEvent(s);
+  if (s.currentStage === "ride") return {...event, body:rideOutlook(s), confidence};
+  if (s.currentStage === "taxi") return {...event, body:s.times.pushSource === "provider_actual" ? `Pushback was reported${s.times.push ? " at "+s.times.push : ""}. Takeoff time remains an estimate until confirmed.` : (s.times.pushSource === "live_detected" || s.times.pushSource === "track_detected") && s.times.push ? `Pushback was detected from live movement around ${s.times.push}. Takeoff time remains an estimate until confirmed.` : "The aircraft was already taxiing when tracking began, so the earlier pushback time isn't available.", confidence};
+  if (s.currentStage === "push") return {...event, body:s.times.push ? `Pushback ${s.times.pushSource === "provider_actual" ? "was reported" : "was detected"} around ${s.times.push}. Taxiing out follows.` : "The aircraft has begun leaving the stand. Taxiing out follows.", confidence};
+  if (s.currentStage === "origin_gate") return {...event, body:`Your aircraft is at the departure airport. ${s.times.push ? "Pushback is estimated around "+s.times.push+"." : "A pushback estimate is not available yet."} Scheduled times do not confirm movement.`, confidence};
+  if (["gate", "taxi_in", "final_approach", "arrival"].includes(s.currentStage) || isLanded(s)) return {...event, confidence};
   if (s.inbound.status !== "complete") return {title:"Watching your inbound aircraft",body:s.inbound.detail || "We’re waiting for a reliable update on the aircraft assigned to your flight.",confidence};
-  return {title:"Waiting for pushback",body:`Your aircraft is reported at the departure airport. ${s.times.push ? "Pushback is estimated around "+s.times.push+"." : "A pushback estimate is not available yet."} Scheduled times do not confirm movement.`,confidence};
+  return {...event, body:`Your aircraft is reported at the departure airport. ${s.times.push ? "Pushback is estimated around "+s.times.push+"." : "A pushback estimate is not available yet."} Scheduled times do not confirm movement.`,confidence};
 }
 export type AlertKind = "delay" | "gate" | "stage" | "diversion";
 export type JourneyAlert = {kind: AlertKind; text: string; at: number};
