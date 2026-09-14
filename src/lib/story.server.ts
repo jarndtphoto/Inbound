@@ -33,6 +33,8 @@ import {
 	wxDeltas,
 } from "./wx-brief";
 import { faAltFt, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
+import { choosePosition, finalApproachEtaMin, normalizedToLive, type NormalizedFlight, type NormalizedPosition } from "./flight-data";
+import { loadOfficialFlightData } from "./official-flight-data.server";
 import {
 	fetchAround,
 	fetchByCallsign,
@@ -759,7 +761,7 @@ export function remainingEtaMin(remainingNm, directDestinationNm, live, aware) {
 		? gs
 		: Math.max(420, gs > 300 ? gs : 0) || 440;
 	const kin = remainingNm / speed * 60;
-	if (onFinalApproach) return remainingNm < 0.15 ? 0 : Math.min(60, kin);
+	if (onFinalApproach) return finalApproachEtaMin(remainingNm, gs);
 	if (nearDest && gs > 120) return Math.max(1, kin);
 	if (faMin != null && faMin > 1) return faMin;
 	return Math.max(1, kin);
@@ -2046,6 +2048,55 @@ function liveFromAware(aware) {
 		vertFpm: null,
 	};
 }
+function normalizedAdsb(live): NormalizedPosition | null {
+	if (!live || !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) return null;
+	return {
+		provider: "adsb",
+		flightId: null,
+		callsign: live.callsign ?? null,
+		lat: live.lat,
+		lon: live.lon,
+		altFt: live.altFt ?? null,
+		gsKt: live.gsKt ?? null,
+		track: live.track ?? null,
+		onGround: Boolean(live.onGround),
+		seenAt: Date.now() / 1000 - Math.max(0, live.seenSec ?? 0),
+		registration: live.registration ?? null,
+		type: live.type ?? null,
+		hex: live.hex ?? null,
+		confidence: live.extrapolated ? "low" : "high"
+	};
+}
+function mergeOfficialAware(base, official: NormalizedFlight | null) {
+	if (!official) return base;
+	const out = base ? { ...base } : {};
+	const mergeTimes = (current, next) => ({
+		scheduled: next?.scheduled ?? current?.scheduled ?? null,
+		estimated: next?.estimated ?? current?.estimated ?? null,
+		actual: next?.actual ?? current?.actual ?? null
+	});
+	return {
+		...out,
+		ident: official.callsign ?? out.ident,
+		status: official.status ?? out.status,
+		originIata: official.origin?.iata ?? out.originIata,
+		originIcao: official.origin?.icao ?? out.originIcao,
+		originGate: official.origin?.gate ?? out.originGate,
+		destIata: official.destination?.iata ?? out.destIata,
+		destIcao: official.destination?.icao ?? out.destIcao,
+		destGate: official.destination?.gate ?? out.destGate,
+		gateOut: mergeTimes(out.gateOut, official.push),
+		takeoff: mergeTimes(out.takeoff, official.takeoff),
+		landing: mergeTimes(out.landing, official.landing),
+		gateIn: mergeTimes(out.gateIn, official.gateIn),
+		tail: official.registration ?? out.tail,
+		type: official.type ?? out.type,
+		hex: official.hex ?? out.hex,
+		waypoints: official.waypoints.length ? official.waypoints : out.waypoints ?? [],
+		faTrack: official.track.length ? official.track.map((p) => ({ t: p.seenAt, lat: p.lat, lon: p.lon, alt: p.altFt, gs: p.gsKt, track: p.track, ground: p.altFt === 0 })) : out.faTrack ?? [],
+		providerEta: official.providerEta
+	};
+}
 function pointAtFrac(path, frac) {
 	if (!path?.length) return null;
 	const t = Math.max(0, Math.min(1, frac));
@@ -2065,15 +2116,17 @@ async function buildStory(query) {
 	const identKey = parsed.callsign.toUpperCase();
 	let knownHex = hexByIdent.get(identKey) || null;
 	const hazardsP = loadHazards();
-	const [rawAc0, aware, route] = await Promise.all([
+	const [rawAc0, publicAware, route, official] = await Promise.all([
 		knownHex
 			? safe(adsbByHex(knownHex), null)
 			: parsed.registration
 				? safe(adsbByReg(parsed.registration), null)
 				: safe(adsbByCallsign(parsed.callsign), null),
 		safe(loadAware(parsed.callsign), null),
-		safe(loadRoute(parsed.callsign), null)
+		safe(loadRoute(parsed.callsign), null),
+		loadOfficialFlightData(parsed.callsign)
 	]);
+	const aware = mergeOfficialAware(publicAware, official.flightaware);
 	let rawAc = rawAc0;
 	if (rawAc && !rawMatchesQuery(rawAc, parsed, aware)) {
 		rawAc = null;
@@ -2091,7 +2144,12 @@ async function buildStory(query) {
 		? await safe(adsbByReg(parsed.registration), null)
 		: await safe(adsbByCallsign(parsed.callsign), null);
 	const liveCs = parsed.callsign;
-	let live = rawAc ? toLive(rawAc) : liveFromAware(aware);
+	const adsbLive = rawAc ? toLive(rawAc) : null;
+	const positionChoice = choosePosition(
+		[normalizedAdsb(adsbLive), official.fr24?.position, official.flightaware?.position],
+		{ callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean), registration: aware?.tail ?? null, hex: knownHex ?? aware?.hex ?? null }
+	);
+	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen) : adsbLive ?? liveFromAware(aware);
 	let origin = fieldFromKnown(aware?.originIata ?? null, aware?.originIcao ?? null, aware?.originLat ?? null, aware?.originLon ?? null, aware?.originName ?? null, aware?.originCity ?? null, aware?.originTz ?? null) ?? fieldFromAdsbdb(route?.origin);
 	let dest = fieldFromKnown(aware?.destIata ?? null, aware?.destIcao ?? null, aware?.destLat ?? null, aware?.destLon ?? null, aware?.destName ?? null, aware?.destCity ?? null, aware?.destTz ?? null) ?? fieldFromAdsbdb(route?.destination);
 	if (!origin && live) origin = nearestKnown(live);
@@ -2858,7 +2916,11 @@ async function buildStory(query) {
 			remainingNm,
 			etaMin,
 			currentStage: current,
-			landed: ourLanded
+			landed: ourLanded,
+			positionProvider: positionChoice.chosen?.provider ?? live?.source ?? "fallback",
+			positionAgeSec: positionChoice.chosen ? Math.max(0, Date.now() / 1000 - positionChoice.chosen.seenAt) : live?.seenSec ?? null,
+			providerEta: { flightaware: official.flightaware?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
+			disagreementNm: positionChoice.disagreementNm
 		});
 	}
 	const airline = airlineOf(liveCs) ?? route?.airline?.name ?? null;
@@ -2957,6 +3019,19 @@ async function buildStory(query) {
 		airline,
 		live: Boolean(live),
 		currentStage: current,
+		providers: {
+			configured: official.configured,
+			chosenPosition: positionChoice.chosen?.provider ?? live?.source ?? "fallback",
+			chosenPositionAgeSec: positionChoice.chosen ? Math.max(0, Date.now() / 1000 - positionChoice.chosen.seenAt) : live?.seenSec ?? null,
+			fr24Position: positionChoice.candidates.fr24 ?? official.fr24?.position ?? null,
+			flightawarePosition: positionChoice.candidates.flightaware ?? official.flightaware?.position ?? null,
+			adsbPosition: positionChoice.candidates.adsb ?? normalizedAdsb(adsbLive),
+			disagreementNm: positionChoice.disagreementNm,
+			providerEta: { flightaware: official.flightaware?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
+			remainingNm,
+			etaMin,
+			landed: ourLanded
+		},
 		aircraft,
 		origin,
 		dest,
