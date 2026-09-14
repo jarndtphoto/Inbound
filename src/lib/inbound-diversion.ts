@@ -28,8 +28,10 @@ export async function findInboundDiversion(
     let earlier:RecordLike|null;
     try { earlier=depth===0 && immediate?.flightId===id ? immediate : await loadById(id); }
     catch { return undefined; }
+    console.info("[inbound-diversion] history check", {depth, found:Boolean(earlier), instanceMatches:earlier?.flightId===id, aircraftMatches:Boolean(earlier && tailOf(earlier)===tailOf(current)), diversionReported:Boolean(earlier?.diversion)});
     if(!earlier || earlier.flightId!==id || tailOf(earlier)!==tailOf(current))return undefined;
     const before=departure(earlier), after=departure(later);
+    console.info("[inbound-diversion] departure order", {depth, before, after});
     if(before==null || after==null || !Number.isFinite(before) || !Number.isFinite(after)
       || before>=after || after-before>36*3600)return undefined;
     chain.unshift(label(earlier));
