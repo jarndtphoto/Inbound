@@ -193,3 +193,11 @@ html[data-theme="sunrise"] {
 .inbound-welcome-button { width: 100%; min-height: 56px; margin-top: 28px; padding: 16px 24px; border-radius: 16px; background: var(--welcome-gold); color: var(--welcome-bg); font-weight: 600; cursor: pointer; }
 .inbound-welcome-button:focus-visible { outline: 3px solid var(--welcome-fg); outline-offset: 5px; }
 .inbound-welcome-button:disabled { opacity: .65; cursor: wait; }
+
+/* Keep route fixes visible across terrain and radar in Sunrise. */
+html[data-theme="sunrise"] .route-fix-marker {
+  fill: #fff;
+  fill-opacity: 1;
+  stroke: #26323d;
+  stroke-width: 1.25px;
+}

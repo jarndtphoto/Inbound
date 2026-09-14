@@ -578,7 +578,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
             width="5.2"
             height="5.2"
             transform={`rotate(45 ${sx(s.lon)} ${sy(s.lat)})`}
-            className="fill-fg/55"
+            className="route-fix-marker fill-fg/55"
           />
         ))}
 
