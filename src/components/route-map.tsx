@@ -1,5 +1,6 @@
 import { formatDuration, formatMiles, haversineNm } from "@/lib/geo";
 import { upcomingStorms } from "@/lib/route-hazards";
+import { routeWeatherEvents } from "@/lib/weather-events";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
@@ -333,8 +334,13 @@ function pathRuns(samples: RouteSample[], progress: number) {
         if (cur.chop === chop && cur.past === past && !crossesSeam) {
           cur.pts.push(pt);
         } else {
+          // Weather begins at the first affected sample and ends at the last
+          // affected sample. Share that exact boundary with the adjacent run.
+          const enteringWeather = cur.chop === "smooth" && chop !== "smooth" && cur.past === past;
+          if (!crossesSeam && enteringWeather) cur.pts.push(pt);
           if (cur.pts.length >= 2) out.push(cur);
-          cur = { chop, past, pts: !crossesSeam ? [cur.pts[cur.pts.length - 1]!, pt] : [pt] };
+          const boundary = enteringWeather ? pt : cur.pts[cur.pts.length - 1]!;
+          cur = { chop, past, pts: !crossesSeam ? [boundary, pt] : [pt] };
         }
       }
       if (cur && cur.pts.length >= 2) out.push(cur);
@@ -380,7 +386,7 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { eventNumber: number; label: string; from: number; to: number; ranges?: {from: number; to: number}[] } }) {
+export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] } }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [mapHeight, setMapHeight] = useState(800);
   useEffect(() => {
@@ -401,7 +407,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
 
   // Forecast previews frame the affected segment, rather than the entire trip.
   const focusSamples = weatherPreview
-    ? samples.filter(s => s.frac >= weatherPreview.from - 0.015 && s.frac <= weatherPreview.to + 0.015)
+    ? samples.filter(s => s.frac >= weatherPreview.startFrac - 0.015 && s.frac <= weatherPreview.endFrac + 0.015)
     : samples;
   const boundsSamples = focusSamples.length ? focusSamples : samples;
   const lats = boundsSamples.map(s => s.lat).filter(Number.isFinite);
@@ -453,36 +459,37 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       ? sy(ac!.lat)
       : sy(origin.lat);
   const rot = landed ? 0 : story.route.heading;
-  const future = samples.filter(s => weatherPreview
-    ? s.frac >= weatherPreview.from && s.frac <= weatherPreview.to
-    : s.frac >= progress);
-  const areas: { start: RouteSample; end: RouteSample; label: string }[] = [];
-  for (const sample of future) {
-    const label = [sample.convective ? "Thunderstorms possible" : "",
-      sample.chop !== "smooth" ? turbLabel(sample.chop) : ""].filter(Boolean).join(" · ");
-    const previous = areas[areas.length - 1];
-    if (previous && previous.label === label) previous.end = sample;
-    else areas.push({start: sample, end: sample, label});
-  }
+  const weatherLabel = (sample: RouteSample) => [sample.convective ? "Thunderstorms possible" : "",
+    sample.chop !== "smooth" ? turbLabel(sample.chop) : "",
+    sample.cloud ? "Cloudy stretch" : ""].filter(Boolean).join(" · ");
   const takeoffAt = story.times.takeoffUnix;
   const airborneNow = story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach";
   const elapsedMin = airborneNow && story.times.takeoffKind === "actual" && takeoffAt != null
     ? Math.max(0, (story.fetchedAt / 1000 - takeoffAt) / 60) : null;
   const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
     ? (story.times.landUnix - takeoffAt) / 60 : null;
-  // A preview represents one timeline event, including any grouped ranges.
-  const alertAreas = weatherPreview
-    ? future.length ? [{ start: future[0], end: future[future.length - 1], label: weatherPreview.label }] : []
-    : areas.filter(area => area.label);
-  const ticks = alertAreas.map((area, index) => ({
-    eventNumber: weatherPreview?.eventNumber ?? index + 1,
-    ...area.start,
-    alertLabel: area.label,
-    durationMin: airborneNow ? area.end.etaMin - area.start.etaMin
-      : plannedMinutes == null ? null : (area.end.frac - area.start.frac) * plannedMinutes,
-    intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + area.start.etaMin
-      : plannedMinutes == null ? null : area.start.frac * plannedMinutes,
-  }));
+  const mapEvents = routeWeatherEvents(samples.filter(s => s.frac >= progress));
+  // Both the full map and preview pin the event's entry point. The affected
+  // route line still spans every range through the event's exit.
+  const ticks = weatherPreview
+    ? [{
+        eventNumber: weatherPreview.eventNumber,
+        ...samples.reduce((best, sample) =>
+          Math.abs(sample.frac - weatherPreview.startFrac) < Math.abs(best.frac - weatherPreview.startFrac) ? sample : best, samples[0]),
+        alertLabel: weatherPreview.label,
+        durationMin: weatherPreview.endEtaMin - weatherPreview.startEtaMin,
+        intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + weatherPreview.startEtaMin
+          : plannedMinutes == null ? null : weatherPreview.startFrac * plannedMinutes
+      }]
+    : mapEvents.map((event, index) => ({
+        eventNumber: index + 1,
+        ...event.start,
+        alertLabel: weatherLabel(event.start),
+        durationMin: airborneNow ? event.endEtaMin - event.startEtaMin
+          : plannedMinutes == null ? null : (event.endFrac - event.startFrac) * plannedMinutes,
+        intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + event.startEtaMin
+          : plannedMinutes == null ? null : event.startFrac * plannedMinutes
+      }));
   const fixes = samples.filter((s) => s.fix);
   const runs = pathRuns(samples, progress).build(sx, sy);
   const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));

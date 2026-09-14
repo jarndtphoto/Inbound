@@ -4,6 +4,7 @@ import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
 import { readFlightResume } from "./flight-resume";
 import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
+import { routeWeatherEvents } from "./weather-events";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
 import { AIRPORT_BY_ICAO, airportByIata, airportByIcao } from "./airports";
 import { IATA_TO_ICAO, displayIata, parseFlightQuery } from "./flight-parse";
@@ -1560,10 +1561,12 @@ function comfortOf(samples, hazards, dest, origin, progress, times, inboundStatu
 	score = Math.max(22, Math.min(99, Math.round(score)));
 	const grade = letterOf(score);
 	const label = "";
-	const bump = arriving ? null : ahead.find((s) => s.chop !== "smooth" && s.etaMin > 4);
+	const weatherEvents = arriving ? [] : routeWeatherEvents(ahead);
+	const bumpEvent = weatherEvents.find((event) => event.start.chop !== "smooth" && event.startEtaMin > 4);
+	const bump = bumpEvent?.start ?? null;
 	const reasons = [];
 	if (inboundOpen && (originDelayed || originLow)) reasons.push(`Inbound isn’t at the gate yet, and ${origin.iata} weather/delays are already in the trip grade.`);
-	if (bump) reasons.push(`${bump.chop === "light" ? "Light chop" : bump.chop === "moderate" ? "Moderate chop" : "Rough air"} shows up in about ${formatDuration(bump.etaMin)}${bump.note ? ` — ${bump.note}` : ""}.`);
+	if (bumpEvent) reasons.push(`${bumpEvent.start.chop === "light" ? "Light turbulence" : bumpEvent.start.chop === "moderate" ? "Moderate turbulence" : "Quite bumpy air"} is possible in about ${formatDuration(bumpEvent.startEtaMin)}${bumpEvent.note ? ` — ${bumpEvent.note}` : ""}.`);
 	if (convAny) reasons.push("Storms clip part of this corridor. The rest can still be a sitting-still ride.");
 	if (originLow) reasons.push(`Low weather at ${origin.iata} — inbound and the taxi both feel that.`);
 	if (destLow) reasons.push(`Low weather into ${dest.iata} — arrival and the ramp.`);
@@ -1579,9 +1582,13 @@ function comfortOf(samples, hazards, dest, origin, progress, times, inboundStatu
 	else if (originDelayed) ground.push(`Ground delay at ${origin.iata}`);
 	if (taxiOut != null && taxiOut >= 18) ground.push(`${taxiOut} min taxi out`);
 	let ride = "Smooth ride";
-	if (lateWorst === "severe" || worstAhead === "severe") ride = "Severe chop";
-	else if (lateWorst === "moderate" || worstAhead === "moderate") ride = "Moderate chop";
-	else if (bump?.chop === "light" || worstAhead === "light") ride = "Light chop";
+	const strongest = lateWorst === "severe" || worstAhead === "severe" ? "severe"
+		: lateWorst === "moderate" || worstAhead === "moderate" ? "moderate"
+			: bump?.chop === "light" || worstAhead === "light" ? "light" : "smooth";
+	const timedSentenceCarriesStrongest = Boolean(bumpEvent && bumpEvent.start.chop === strongest);
+	if (strongest === "severe") ride = timedSentenceCarriesStrongest ? "Choppy ride" : "Severe chop";
+	else if (strongest === "moderate") ride = timedSentenceCarriesStrongest ? "Choppy ride" : "Moderate chop";
+	else if (strongest === "light") ride = timedSentenceCarriesStrongest ? "Mostly smooth ride" : "Light chop";
 	if (convAhead) ride = `${ride}. Storms on the path`;
 	const arrival = [];
 	if (destLow) arrival.push(`Low weather into ${dest.iata}`);

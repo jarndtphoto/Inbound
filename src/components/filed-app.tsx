@@ -8,6 +8,7 @@ import { formatDuration, formatMiles, feetPretty } from "@/lib/geo";
 import { parseFlightQuery, storyMatchesQuery } from "@/lib/flight-parse";
 import { RESUME_MAX_AGE_MS, resumeFromStory, savedScheduleNote } from "@/lib/flight-resume";
 import { useFiled } from "@/lib/store";
+import { routeWeatherEvents, type RouteWeatherEvent } from "@/lib/weather-events";
 import { getFlightStory } from "@/lib/story";
 import type { Comfort, FlightStory, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -1809,38 +1810,11 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
   const landing = story.times.landUnix;
   const duration = takeoff && landing && landing > takeoff ? (landing - takeoff) / 60 : null;
   const samples = story.route.samples.filter(s => !airborne || s.frac >= story.route.progress);
-  const groups: { label: string; note: string | null; start: typeof samples[number]; end: typeof samples[number]; ranges: {from: number; to: number}[]; gaps?: boolean }[] = [];
-  for (const sample of samples) {
-    const label = [sample.convective ? "Storms possible near the route" : null,
-      sample.chop !== "smooth" ? sample.chop === "light" ? "Light turbulence possible" : sample.chop === "moderate" ? "Moderate turbulence possible" : "Severe turbulence possible" : null,
-      sample.cloud ? "Clouds may limit the view" : null].filter(Boolean).join(" · ") || "No conditions flagged in available data";
-    const prev = groups[groups.length - 1];
-    if (prev && prev.label === label) {
-      prev.end = sample;
-      prev.ranges[prev.ranges.length - 1].to = sample.frac;
-      prev.note = [...new Set([prev.note, sample.note].filter(Boolean))].join("\n") || null;
-    } else groups.push({ label, note: sample.note, start: sample, end: sample, ranges: [{from: sample.frac, to: sample.frac}] });
-  }
-  // Combine equal-severity areas separated by no more than five minutes.
-  for (let i = 0; i + 2 < groups.length;) {
-    const first = groups[i], gap = groups[i + 1], next = groups[i + 2];
-    const gapMinutes = airborne ? next.start.etaMin - first.end.etaMin
-      : duration == null ? Infinity : (next.start.frac - first.end.frac) * duration;
-    if (first.start.chop !== "smooth" && first.label === next.label
-      && gap.label === "No conditions flagged in available data" && gapMinutes >= 0 && gapMinutes <= 5) {
-      first.end = next.end;
-      first.ranges.push(...next.ranges);
-      first.gaps = true;
-      first.note = [...new Set([first.note, next.note].filter(Boolean))].join("\n") || null;
-      groups.splice(i + 1, 2);
-    } else i++;
-  }
-  const noConditions = "No conditions flagged in available data";
-  
-  const visibleGroups = groups.filter(group => group.label !== noConditions);
-  const timeLabel = (group: typeof groups[number]) => {
-    const from = airborne ? group.start.etaMin : duration == null ? null : group.start.frac * duration;
-    const to = airborne ? group.end.etaMin : duration == null ? null : group.end.frac * duration;
+  const visibleGroups = routeWeatherEvents(samples);
+
+  const timeLabel = (group: RouteWeatherEvent) => {
+    const from = airborne ? group.startEtaMin : duration == null ? null : group.startFrac * duration;
+    const to = airborne ? group.endEtaMin : duration == null ? null : group.endFrac * duration;
     if (from == null || to == null) return "Timing unavailable";
     const formatMinutes = (value: number) => {
       const minutes = Math.max(0, Math.round(value));
@@ -1871,7 +1845,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
     {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="space-y-3">
       {visibleGroups.map((g, i) => {
-        const title = passengerWeatherTitle(g.start, g.end.frac >= 0.85, story.dest.city || story.dest.iata);
+        const title = passengerWeatherTitle(g.start, g.endFrac >= 0.85, story.dest.city || story.dest.iata);
         const source = passengerWeatherSource(g.note);
         const technical = technicalWeatherProducts(g.note);
         return <li key={i} className="rounded-xl border border-border bg-surface p-4">
@@ -1882,7 +1856,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
           <p className="mt-3 text-sm font-medium">{source}{technical ? <span className="ml-1 text-xs font-normal text-muted">· {technical}</span> : null}</p>
           {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
             <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={title}>
-              <RouteMap story={story} fixedViewport weatherPreview={{ eventNumber: i + 1, label: title, from: g.start.frac, to: g.end.frac, ranges: g.ranges }} />
+              <RouteMap story={story} fixedViewport weatherPreview={{ eventNumber: i + 1, label: title, startFrac: g.startFrac, endFrac: g.endFrac, startEtaMin: g.startEtaMin, endEtaMin: g.endEtaMin, ranges: g.ranges }} />
             </div>
             <figcaption className="mt-2 text-xs text-muted">Highlighted: where these conditions overlap the route. Radar colors show recent precipitation; conditions may change before the flight reaches this area. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
           </figure>}

@@ -11,6 +11,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context);
 }});
 const { loadFlightStory, motionFromTrace, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import('../src/lib/story.server.ts');
+const { routeWeatherEvents } = await import('../src/lib/weather-events.ts');
 
 describe('passenger weather presentation', () => {
   const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
@@ -556,5 +557,51 @@ describe('live reroute display geometry', () => {
     const future = path.slice(liveIndex);
     const closest = Math.min(...future.map((p) => Math.hypot(p.lat - abandonedWeather.lat, p.lon - abandonedWeather.lon)));
     assert.ok(closest > 1);
+  });
+});
+
+
+describe('weather event entry timing', () => {
+  const sample = (frac, etaMin, chop = 'smooth') => ({
+    lat: 40 + frac, lon: -90 + frac, frac, distNm: frac * 1000,
+    remainingNm: (1 - frac) * 1000, etaMin, chop, cloud: false,
+    convective: false, note: chop === 'smooth' ? null : 'Turbulence AIRMET', fix: false
+  });
+  const samples = [
+    sample(0.55, 55),
+    sample(0.60, 46, 'moderate'),
+    sample(0.66, 40, 'moderate'),
+    sample(0.72, 34, 'moderate'),
+    sample(0.78, 28)
+  ];
+  const [event] = routeWeatherEvents(samples);
+
+  it('tracks the affected segment from entry through exit', () => {
+    assert.equal(event.startFrac, 0.60);
+    assert.equal(event.endFrac, 0.72);
+    assert.deepEqual(event.ranges, [{ from: 0.60, to: 0.72 }]);
+  });
+
+  it('derives passenger timing from entry, not midpoint or exit', () => {
+    assert.equal(event.startEtaMin, 46);
+    assert.equal(event.endEtaMin, 34);
+  });
+
+  it('uses the same entry fields for cards, preview maps, full maps, and Overview', () => {
+    const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
+    const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
+    const storySource = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(appSource, /const from = airborne \? group\.startEtaMin/);
+    assert.match(appSource, /startFrac: g\.startFrac/);
+    assert.match(mapSource, /\.\.\.event\.start/);
+    assert.match(mapSource, /weatherPreview\.startFrac/);
+    assert.match(storySource, /formatDuration\(bumpEvent\.startEtaMin\)/);
+  });
+
+  it('does not repeat moderate severity before the timed sentence', () => {
+    const storySource = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(storySource, /timedSentenceCarriesStrongest/);
+    assert.match(storySource, /Moderate turbulence.*is possible in about/);
+    assert.doesNotMatch(storySource, /Moderate chop.*Moderate turbulence.*possible/);
   });
 });
