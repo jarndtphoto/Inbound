@@ -159,7 +159,7 @@ export function progressAlongPath(
       along = segs[i]!.start + proj;
     }
   }
-  const frac = Math.max(0, Math.min(0.98, along / total));
+  const frac = Math.max(0, Math.min(1, along / total));
   return { frac, remainingNm: total * (1 - frac), totalNm: total };
 }
 

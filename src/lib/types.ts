@@ -237,6 +237,11 @@ export type FlightStory = {
   airline: string | null;
   live: boolean;
   currentStage: StageId;
+  providers?: {
+    chosenPosition?: string | null;
+    chosenPositionAgeSec?: number | null;
+    [key: string]: unknown;
+  };
   aircraft: LiveAircraft | null;
   origin: FieldBrief;
   dest: FieldBrief;

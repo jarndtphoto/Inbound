@@ -51,6 +51,13 @@ function readCachedStory(q: string): FlightStory | undefined {
   }
 }
 
+export function cachedStorySafeDuringRefreshFailure(story: FlightStory, now = Date.now()) {
+  const moving = story.live || story.currentStage === "ride" || story.currentStage === "arrival";
+  const positionAge = story.providers?.chosenPositionAgeSec;
+  const positionFresh = !moving || (typeof positionAge === "number" && positionAge <= 60);
+  return positionFresh && now - story.fetchedAt <= (moving ? 15_000 : 45 * 60_000);
+}
+
 function writeCachedStory(q: string, story: FlightStory) {
   try {
     const samples = story.route.samples;
@@ -1007,6 +1014,7 @@ function TimesStrip({
   const down = wheelsDown(story);
   const airborne = flightAirborne(story) && !down;
   const elapsed = airborne ? elapsedFlight(story) : null;
+  const liveFresh = cachedStorySafeDuringRefreshFailure(story);
   const parked = story.currentStage === "gate";
   const delay = t?.delayMin ?? null;
   const late = (delay ?? 0) >= 5;
@@ -1050,8 +1058,8 @@ function TimesStrip({
               <p className="flex items-center gap-1.5 font-mono text-xs tracking-wide text-subtle uppercase">
                 <Clock className="size-3 shrink-0" /> Remaining
               </p>
-              <p className="mt-1 break-words font-display text-2xl font-semibold leading-none">{formatDuration(story.route.etaMin)}</p>
-              <p className="mt-1 break-words text-xs text-muted">{formatMiles(story.route.remainingNm)}</p>
+              <p className="mt-1 break-words font-display text-2xl font-semibold leading-none">{liveFresh ? formatDuration(story.route.etaMin) : "Updating…"}</p>
+              <p className="mt-1 break-words text-xs text-muted">{liveFresh ? formatMiles(story.route.remainingNm) : "Live position is stale"}</p>
             </div>
             <div className="flex aspect-square min-w-0 flex-col justify-center rounded-md border border-border bg-bg p-3 sm:aspect-auto sm:min-h-32">
               <p className="flex items-center gap-1.5 font-mono text-xs tracking-wide text-subtle uppercase">
