@@ -10,7 +10,46 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory, motionFromTrace, currentStageOf, postLandingState, fetchAwarePage, pickTaxi } = await import('../src/lib/story.server.ts');
+const { loadFlightStory, motionFromTrace, currentStageOf, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi } = await import('../src/lib/story.server.ts');
+
+describe('final approach passenger stage', () => {
+  const dest = { lat: 0, lon: 0 };
+  const origin = { lat: 0, lon: -10 };
+  const airborne = { lat: 0, onGround: false, gsKt: 145, altFt: 3000, vertFpm: -700, phase: 'approach', seenSec: 2 };
+
+  it('keeps a descending aircraft 25 NM out in Arrival', () => {
+    const live = { ...airborne, lon: -0.4167, altFt: 6500 };
+    assert.equal(isFinalApproach(live, dest), false);
+    assert.equal(currentStageOf({ live, origin, dest, remainingNm: 25, pushed: true, faAirborne: true }), 'arrival');
+  });
+
+  it('shows Final approach at 10 NM when low and descending', () => {
+    const live = { ...airborne, lon: -0.1667, altFt: 2800 };
+    assert.equal(isFinalApproach(live, dest), true);
+    assert.equal(currentStageOf({ live, origin, dest, remainingNm: 10, pushed: true, faAirborne: true }), 'final_approach');
+  });
+
+  it('keeps an established aircraft 5 NM out in Final approach', () => {
+    const live = { ...airborne, lon: -0.0833, altFt: 1600, vertFpm: -500 };
+    assert.equal(currentStageOf({ live, origin, dest, remainingNm: 5, pushed: true, faAirborne: true }), 'final_approach');
+  });
+
+  it('transitions touchdown to Landed/rollout', () => {
+    const live = { lat: 0, lon: -0.005, onGround: true, gsKt: 120, altFt: 0, seenSec: 1 };
+    assert.equal(currentStageOf({ live, origin, dest, remainingNm: 0, ourLanded: true, parkedAtGate: false }), 'arrival');
+  });
+
+  it('does not show Final approach while high or far away', () => {
+    assert.equal(isFinalApproach({ ...airborne, lon: -0.10, altFt: 14000 }, dest), false);
+    assert.equal(isFinalApproach({ ...airborne, lon: -0.30, altFt: 2500 }, dest), false);
+  });
+
+  it('renders Final approach as a first-class passenger stage', () => {
+    const source = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
+    assert.match(source, /\{ id: "final_approach", label: "Final approach" \}/);
+    assert.match(source, /story\.currentStage === "final_approach"/);
+  });
+});
 
 describe('post-landing passenger stage', () => {
   const dest = { lat: 40.6925, lon: -74.1687 };

@@ -60,7 +60,7 @@ export type LogEntry = {
 
 export type TabId = "sky" | "field" | "seat" | "log";
 
-export type StageId = "inbound" | "origin_gate" | "push" | "taxi" | "ride" | "arrival" | "taxi_in" | "gate";
+export type StageId = "inbound" | "origin_gate" | "push" | "taxi" | "ride" | "arrival" | "final_approach" | "taxi_in" | "gate";
 
 export type Chop = "smooth" | "light" | "moderate" | "severe";
 

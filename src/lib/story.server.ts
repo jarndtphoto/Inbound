@@ -1990,6 +1990,15 @@ function buildInbound(args) {
 		watch
 	};
 }
+export function isFinalApproach(live, dest) {
+	if (!live || !dest || live.onGround) return false;
+	const directNm = haversineNm({ lat: live.lat, lon: live.lon }, dest);
+	const altitudeOk = live.altFt != null && live.altFt <= 8000;
+	const descending = (live.vertFpm ?? 0) <= -250 || live.phase === "approach";
+	const landingSpeed = live.gsKt == null || live.gsKt >= 70;
+	return directNm <= 10.5 && altitudeOk && descending && landingSpeed;
+}
+
 export function currentStageOf(args) {
 	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed, faAirborne, taxiHint, taxiOutLatched, distPark, parkedAtGate, gateInActual } = args;
 	const postLanding = postLandingState({ ourLanded, ourLandingActual, gateInActual, parkedAtGate, live, dest });
@@ -2017,6 +2026,7 @@ export function currentStageOf(args) {
 	}
 	if (begun || faAirborne || Boolean(ourTakeoffActual)) {
 		if (live && !live.onGround) {
+			if (isFinalApproach(live, dest)) return "final_approach";
 			if (live.phase === "approach" || remainingNm < 40 || live.altFt != null && live.altFt < 8e3 && (live.vertFpm ?? 0) < 0) return "arrival";
 			return "ride";
 		}
@@ -2079,6 +2089,7 @@ function buildStages(args) {
 		"taxi",
 		"ride",
 		"arrival",
+		"final_approach",
 		"taxi_in",
 		"gate"
 	];
@@ -2106,7 +2117,7 @@ function buildStages(args) {
 	const gateWatch = [];
 	const ramp = rampWx(dest.decoded);
 	if (ramp) gateWatch.push(ramp);
-	const pushed = Boolean(times.pushed || times.airborne || current === "push" || current === "taxi" || current === "ride" || current === "arrival" || current === "taxi_in" || current === "gate");
+	const pushed = Boolean(times.pushed || times.airborne || current === "push" || current === "taxi" || current === "ride" || current === "arrival" || current === "final_approach" || current === "taxi_in" || current === "gate");
 	const taxiingNow = Boolean(taxiHint || (live?.onGround && (live.gsKt ?? 0) >= 2));
 	const inboundTitle = inbound.status === "complete" ? "Inbound is at the gate" : inbound.status === "at_field" ? "Inbound is taxiing in" : inbound.status === "airborne" ? "Inbound to the field" : "The inbound aircraft";
 	const arrivalBody = (() => {
@@ -2130,12 +2141,12 @@ function buildStages(args) {
 		return `Into ${dest.city}.`;
 	})();
 	const gateBody = "";
-	const inAir = current === "ride" || current === "arrival";
+	const inAir = current === "ride" || current === "arrival" || current === "final_approach";
 	const rideBody = live
 		? `${formatMiles(remainingNm)} still to run, about ${formatDuration(etaMin)}.`
 		: inAir
 			? `${formatMiles(remainingNm)} still to run, about ${formatDuration(etaMin)}. Live position unavailable right now.`
-			: current === "gate" || current === "taxi_in" || current === "arrival"
+			: current === "gate" || current === "taxi_in" || current === "final_approach" || current === "arrival"
 				? ""
 				: `Once you’re up, ${formatMiles(remainingNm)} on the filed path.`;
 	return {
@@ -2177,6 +2188,12 @@ function buildStages(args) {
 				? `Landed · ${dest.iata}`
 				: `Into ${dest.iata}`,
 			body: arrivalBody,
+			watchouts: arrivalWatch.slice(0, 3)
+		},
+		final_approach: {
+			state: state("final_approach"),
+			title: "Final approach",
+			body: `Descending toward ${dest.iata} for landing.`,
 			watchouts: arrivalWatch.slice(0, 3)
 		},
 		taxi_in: {
