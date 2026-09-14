@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { loadFlightStory } from "@/lib/story.server";
+import { getFlightStory } from "@/lib/story";
 import { routeWeatherEvents } from "@/lib/weather-events";
 import { rideOutlook } from "@/lib/traveler";
 
 export const Route = createFileRoute("/diag-weather")({
   loader: async () => {
-    const story = await loadFlightStory("AA3197", { fresh: true });
+    const story = await getFlightStory({ data: { q: "AA3197", fresh: true } });
     const ahead = story.route.samples.filter((sample) => sample.frac >= story.route.progress);
     const events = routeWeatherEvents(ahead);
     return {
