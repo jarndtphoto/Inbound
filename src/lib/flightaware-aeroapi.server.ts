@@ -2,11 +2,12 @@ import { type FlightTimes, type NormalizedFlight, type NormalizedPosition } from
 
 const BASE = "https://aeroapi.flightaware.com/aeroapi";
 const cache = new Map<string, { at: number; value: unknown }>();
+const aeroApiKey = () => process.env.FLIGHTAWARE_AEROAPI_KEY?.trim() || process.env.FLIGHTAWARE_API_KEY?.trim() || "";
 const unix = (v: unknown) => typeof v === "string" || typeof v === "number" ? Math.floor(new Date(v).getTime() / 1000) || null : null;
 const times = (f: any, name: string): FlightTimes => ({ scheduled: unix(f[`scheduled_${name}`]), estimated: unix(f[`estimated_${name}`]), actual: unix(f[`actual_${name}`]) });
 
 async function get(path: string, ttlMs: number) {
-  const key = process.env.FLIGHTAWARE_AEROAPI_KEY?.trim();
+  const key = aeroApiKey();
   if (!key) return null;
   const hit = cache.get(path);
   if (hit && Date.now() - hit.at < ttlMs) return hit.value;
@@ -48,7 +49,7 @@ export function normalizeAeroApiRoute(data: any) {
 }
 
 export async function loadAeroApiFlight(ident: string): Promise<NormalizedFlight | null> {
-  if (!process.env.FLIGHTAWARE_AEROAPI_KEY?.trim()) return null;
+  if (!aeroApiKey()) return null;
   const data: any = await get(`/flights/${encodeURIComponent(ident)}?max_pages=1`, 45_000);
   const flights = Array.isArray(data?.flights) ? data.flights : [];
   if (!flights.length) return null;
@@ -66,4 +67,4 @@ export async function loadAeroApiFlight(ident: string): Promise<NormalizedFlight
   return normalized;
 }
 
-export const aeroApiConfigured = () => Boolean(process.env.FLIGHTAWARE_AEROAPI_KEY?.trim());
+export const aeroApiConfigured = () => Boolean(aeroApiKey());
