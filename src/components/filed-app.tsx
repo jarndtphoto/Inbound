@@ -2,7 +2,7 @@ import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { TravelerCompanion } from "@/components/traveler-companion";
 import { isLanded, nextStep } from "@/lib/traveler";
 import { briefRide } from "@/lib/brief";
-import { briefLogText, composeBrief, logManualRefresh, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
+import { briefLogLabel, briefLogText, composeBrief, logManualRefresh, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
 import { formatDuration, formatMiles, feetPretty } from "@/lib/geo";
 import { parseFlightQuery, storyMatchesQuery } from "@/lib/flight-parse";
@@ -800,7 +800,6 @@ function FlightPages({ onHome }: { onHome: () => void }) {
             <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
               <TravelerCompanion story={story} failed={storyQ.isError || Boolean(refreshErr)} onTrackInbound={openFlight} />
-              <div className="mt-5"><RecordCard story={story} /></div>
             </section>
             <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
               <RouteMap story={story} fixedViewport />
@@ -1210,91 +1209,6 @@ function Stat({
   );
 }
 
-function recordRows(story: FlightStory): { label: string; value: string }[] {
-  const t = story.times;
-  const arriving =
-    story.currentStage === "arrival" ||
-    story.currentStage === "final_approach" ||
-    story.currentStage === "taxi_in" ||
-    story.currentStage === "gate" ||
-    story.route.remainingNm < 40;
-  const rows: { label: string; value: string }[] = [];
-  const beforeDeparture = story.currentStage === "inbound" || story.currentStage === "origin_gate" || story.currentStage === "push";
-  if (beforeDeparture) {
-    rows.push({ label: "Inbound aircraft", value: story.inbound.headline });
-    const inbound = story.inbound.watch[0];
-    if (inbound) rows.push({ label: "Inbound flight", value: [inbound.iata, inbound.from ? `from ${inbound.from}` : null].filter(Boolean).join(" · ") });
-  }
-  if (t.originGate) rows.push({ label: "Departure gate", value: t.originGate });
-  if (t.pushed && t.push) rows.push({ label: "Pushback", value: `${t.push} · ${t.pushKind === "actual" ? "Reported" : "First observed; approximate"}` });
-
-  if ((t?.delayMin ?? 0) >= 5) {
-    rows.push({
-      label: "Delay",
-      value: `${t!.delayMin} min`,
-    });
-  } else if (story.origin.nas?.delayed) {
-    rows.push({ label: "Delay", value: story.origin.nas.reason });
-  }
-  if (t?.taxiOutMin != null) {
-    const up =
-      story.currentStage === "ride" ||
-      story.currentStage === "arrival" ||
-      story.currentStage === "final_approach" ||
-      story.currentStage === "taxi_in" ||
-      story.currentStage === "gate";
-    rows.push({
-      label: "Taxi out",
-      value: up && t.taxiOutKind === "measured" ? `${t.taxiOutMin} min` : `Est. ${t.taxiOutMin} min`,
-    });
-  }
-  if (!arriving) {
-    const ahead = story.route.samples.filter((s) => s.frac >= story.route.progress);
-    let ride = rideLabelOf(story);
-    if (ahead.some((s) => s.chop === "severe")) ride = "Severe turbulence";
-    else if (ahead.some((s) => s.chop === "moderate")) ride = "Moderate turbulence";
-    else if (ahead.some((s) => s.chop === "light")) ride = "Light turbulence";
-    if (ahead.some((s) => s.convective)) ride = `${ride} · thunderstorms`;
-    rows.push({ label: "Ride", value: ride });
-  }
-  if (story.dest.nas?.delayed) {
-    rows.push({ label: "Arrival delay", value: story.dest.nas.reason });
-  }
-  if (story.dest.category === "IFR" || story.dest.category === "LIFR") {
-    rows.push({ label: "Arrival", value: `Low weather into ${story.dest.iata}` });
-  }
-  if (t.land) rows.push({ label: "Landing", value: `${t.land} · ${t.landKind === "actual" ? "Actual" : t.landKind === "scheduled" ? "Scheduled" : "Estimated"}` });
-  if (t?.taxiInMin != null) {
-    rows.push({
-      label: "Taxi in",
-      value: t.taxiInKind === "measured" ? `${t.taxiInMin} min` : `Est. ${t.taxiInMin} min`,
-    });
-  }
-  if (story.origin.category === "IFR" || story.origin.category === "LIFR") {
-    rows.push({ label: "Origin", value: `Low weather at ${story.origin.iata}` });
-  }
-  if (t.destGate) rows.push({ label: "Arrival gate", value: t.destGate });
-  if (!rows.length) rows.push({ label: "Notes", value: "No delay or turbulence flagged." });
-  return rows;
-}
-
-function RecordCard({ story }: { story: FlightStory }) {
-  const rows = recordRows(story);
-  return (
-    <div className="rounded-md border border-border bg-surface px-3 py-3">
-      <p className="font-mono text-xs tracking-widest text-subtle uppercase">Record</p>
-      <dl className="mt-2 space-y-1.5">
-        {rows.map((r) => (
-          <div key={r.label} className="flex items-baseline justify-between gap-3">
-            <dt className="shrink-0 font-mono text-xs tracking-wide text-muted uppercase">{r.label}</dt>
-            <dd className="min-w-0 text-right text-sm leading-snug text-fg">{r.value}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-}
-
 function BreakdownCard({
   briefing,
   pending,
@@ -1334,7 +1248,7 @@ function BreakdownCard({
                     <p className="font-mono text-[11px] tracking-wide text-subtle uppercase">
                       {new Date(entry.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                       {" · "}
-                      {BRIEF_LOG_LABEL[entry.kind]}
+                      {briefLogLabel(entry)}
                     </p>
                     <p className="text-muted">{briefLogText(entry)}.</p>
                   </li>

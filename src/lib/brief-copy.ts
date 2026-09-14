@@ -114,6 +114,7 @@ export type BriefSnap = {
   landKind?: string | null;
   gateKind?: string | null;
   gate?: string | null;
+  originGate?: string | null;
   destGate: string | null;
   wx: string;
   worstChop: string | null;
@@ -222,6 +223,7 @@ function snapOf(d: RideFacts): BriefSnap {
     push: d.push,
     pushKind: d.pushKind ?? null,
     pushSource: d.pushSource ?? null,
+    originGate: d.originGate,
     destGate: d.destGate,
     wx: d.wxHash ?? "",
     worstChop: d.worstChop ?? null,
@@ -244,6 +246,20 @@ export function briefLogText(entry: BriefLogEntry): string {
   if (entry.text === "Landing") return "Arrival status update";
   if (entry.text === "Arriving at the gate") return "At the destination gate";
   return entry.text;
+}
+
+export function briefLogLabel(entry: BriefLogEntry): string {
+  if (entry.kind === "stage") {
+    if (/^Pushed back|^Pushback$/.test(entry.text)) return "Pushback";
+    if (/^Took off|^In flight$/.test(entry.text)) return "Takeoff";
+    if (/^Final approach$/.test(entry.text)) return "Final approach";
+    if (/^Landed/.test(entry.text)) return "Landed";
+    if (/^Taxiing out$/.test(entry.text)) return "Taxiing out";
+    if (/^Taxiing in$/.test(entry.text)) return "Taxiing in";
+    if (/^Arrived at|^At the gate(?: at .+)?$/.test(entry.text)) return "At the gate";
+  }
+  if (entry.kind === "schedule" && /gate changed/i.test(entry.text)) return "Gate change";
+  return BRIEF_LOG_LABEL[entry.kind];
 }
 
 function stageLine(stage: string): string | null {
@@ -269,10 +285,10 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
   const landingBecameActual = next.landKind === "actual" && (prev.landKind !== "actual" || prev.land !== next.land);
   const gateBecameActual = next.gateKind === "actual" && (prev.gateKind !== "actual" || prev.gate !== next.gate);
 
-  if (pushBecameActual) out.push({ kind: "stage", text: `Pushed back at ${next.push}` });
-  if (takeoffBecameActual && next.takeoff) out.push({ kind: "stage", text: `Took off at ${next.takeoff}` });
-  if (landingBecameActual && next.land) out.push({ kind: "stage", text: `Landed at ${next.land}` });
-  if (gateBecameActual && next.gate) out.push({ kind: "stage", text: `At the gate at ${next.gate}` });
+  if (pushBecameActual) out.push({ kind: "stage", text: `Pushed back from ${d?.fromIata ?? "the gate"} at ${next.push}` });
+  if (takeoffBecameActual && next.takeoff) out.push({ kind: "stage", text: `Took off from ${d?.fromIata ?? "the origin"} at ${next.takeoff}` });
+  if (landingBecameActual && next.land) out.push({ kind: "stage", text: `Landed at ${d?.toIata ?? "the destination"} at ${next.land}` });
+  if (gateBecameActual && next.gate) out.push({ kind: "stage", text: `Arrived at ${next.destGate ? `Gate ${next.destGate}` : "the gate"} at ${next.gate}` });
 
   if (prev.stage !== next.stage && !(prev.stage === "arrival" && next.stage === "ride")) {
     const line = stageLine(next.stage);
@@ -303,6 +319,13 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
     } else if (prev.destNas) {
       out.push({ kind: "delay", text: "The arrival delay has lifted" });
     }
+  }
+
+  if (beforeTakeoff && prev.originGate && next.originGate && prev.originGate !== next.originGate) {
+    out.push({ kind: "schedule", text: `Departure gate changed to ${next.originGate}` });
+  }
+  if (prev.destGate && next.destGate && prev.destGate !== next.destGate) {
+    out.push({ kind: "schedule", text: `Arrival gate changed to ${next.destGate}` });
   }
 
   const landed = next.landKind === "actual" || next.stage === "taxi_in" || next.stage === "gate";
@@ -531,6 +554,8 @@ function transientKey(entry: Pick<BriefLogEntry, "kind" | "text">): string | nul
     if (/airport|departure delay/i.test(entry.text)) return "delay:departure";
   }
   if (entry.kind === "schedule" && /Arrival now looks/i.test(entry.text)) return "schedule:arrival";
+  if (entry.kind === "schedule" && /Departure gate changed/i.test(entry.text)) return "schedule:departure-gate";
+  if (entry.kind === "schedule" && /Arrival gate changed/i.test(entry.text)) return "schedule:arrival-gate";
   return null;
 }
 
@@ -577,15 +602,15 @@ function curateBriefLog(log: BriefLogEntry[], next: BriefSnap): BriefLogEntry[] 
 
 function actualEventEntries(d: RideFacts, log: BriefLogEntry[], at: number): BriefLogEntry[] {
   const entries: BriefLogEntry[] = [];
-  const add = (text: string, unix?: number | null) => {
-    if (!log.some((entry) => entry.kind === "stage" && entry.text === text)) {
+  const add = (text: string, label: string, unix?: number | null) => {
+    if (![...log, ...entries].some((entry) => entry.kind === "stage" && briefLogLabel(entry) === label)) {
       entries.push({ at: unix != null ? unix * 1000 : at, kind: "stage", text });
     }
   };
-  if (d.push && (d.pushSource || d.pushKind === "actual")) add(`Pushed back at ${d.push}`, d.pushUnix);
-  if (d.takeoff && d.takeoffKind === "actual") add(`Took off at ${d.takeoff}`, d.takeoffUnix);
-  if (d.land && d.landKind === "actual") add(`Landed at ${d.land}`, d.landUnix);
-  if (d.gate && d.gateKind === "actual") add(`At the gate at ${d.gate}`);
+  if (d.push && (d.pushSource || d.pushKind === "actual")) add(`Pushed back from ${d.fromIata} at ${d.push}`, "Pushback", d.pushUnix);
+  if (d.takeoff && d.takeoffKind === "actual") add(`Took off from ${d.fromIata} at ${d.takeoff}`, "Takeoff", d.takeoffUnix);
+  if (d.land && d.landKind === "actual") add(`Landed at ${d.toIata} at ${d.land}`, "Landed", d.landUnix);
+  if (d.gate && d.gateKind === "actual") add(`Arrived at ${d.destGate ? `Gate ${d.destGate}` : "the gate"} at ${d.gate}`, "At the gate");
   return entries;
 }
 

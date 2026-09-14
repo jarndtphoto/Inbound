@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { briefLogText, composeBrief, diffBriefLog, logManualRefresh, type RideFacts } from "./brief-copy.ts";
+import { readFileSync } from "node:fs";
+import { briefLogLabel, briefLogText, composeBrief, diffBriefLog, logManualRefresh, type RideFacts } from "./brief-copy.ts";
 
 function facts(over: Partial<RideFacts> = {}): RideFacts {
   return {
@@ -292,9 +293,9 @@ describe("UAL219 curated briefing regression", () => {
       takeoff: "10:50 AM CDT", takeoffKind: "actual", takeoffUnix: 1_003_840,
     }), legacy);
     const text = after.log.map((entry) => entry.text).join(" | ");
-    assert.match(text, /Pushed back at 9:46 AM CDT/);
+    assert.match(text, /Pushed back from HNL at 9:46 AM CDT/);
     assert.match(text, /Taxiing out/);
-    assert.match(text, /Took off at 10:50 AM CDT/);
+    assert.match(text, /Took off from HNL at 10:50 AM CDT/);
     assert.doesNotMatch(text, /9:25|10:03|Takeoff now looks|Estimated taxi out|Delay at the airport|Filed briefing/);
   });
 
@@ -313,6 +314,51 @@ describe("UAL219 curated briefing regression", () => {
     brief = composeBrief(facts({ now: "taxi_in", stage: "taxi_in", landKind: "actual", land: "11:04 AM" }), brief);
     assert.equal(brief.log.some((entry) => /Arrival now looks|Estimated taxi in/.test(entry.text)), false);
     assert.match(brief.log.map((entry) => entry.text).join(" | "), /Landed at 11:04 AM|Taxiing in/);
+  });
+});
+
+describe("Overview record migration", () => {
+  it("keeps completed trip events in the Briefing chronology with passenger labels", () => {
+    let brief = composeBrief(facts({
+      now: "push", stage: "push", fromIata: "ORD", toIata: "HNL",
+      push: "9:37 AM CDT", pushKind: "actual", pushSource: "track_detected", pushUnix: 1_000_000,
+    }));
+    brief = composeBrief(facts({ now: "taxi", stage: "taxi", fromIata: "ORD", toIata: "HNL",
+      push: "9:37 AM CDT", pushKind: "actual", pushSource: "track_detected", pushUnix: 1_000_000 }), brief);
+    brief = composeBrief(facts({ now: "ride", stage: "ride", fromIata: "ORD", toIata: "HNL",
+      push: "9:37 AM CDT", pushKind: "actual", pushSource: "track_detected", pushUnix: 1_000_000,
+      takeoff: "10:08 AM CDT", takeoffKind: "actual", takeoffUnix: 1_001_860 }), brief);
+    brief = composeBrief(facts({ now: "final_approach", stage: "final_approach", fromIata: "ORD", toIata: "HNL",
+      push: "9:37 AM CDT", pushKind: "actual", pushSource: "track_detected", pushUnix: 1_000_000,
+      takeoff: "10:08 AM CDT", takeoffKind: "actual", takeoffUnix: 1_001_860 }), brief);
+    brief = composeBrief(facts({ now: "taxi_in", stage: "taxi_in", fromIata: "ORD", toIata: "HNL",
+      push: "9:37 AM CDT", pushKind: "actual", pushSource: "track_detected", pushUnix: 1_000_000,
+      takeoff: "10:08 AM CDT", takeoffKind: "actual", takeoffUnix: 1_001_860,
+      land: "2:14 PM HST", landKind: "actual", landUnix: 1_025_000 }), brief);
+    brief = composeBrief(facts({ now: "gate", stage: "gate", fromIata: "ORD", toIata: "HNL",
+      push: "9:37 AM CDT", pushKind: "actual", pushSource: "track_detected", pushUnix: 1_000_000,
+      takeoff: "10:08 AM CDT", takeoffKind: "actual", takeoffUnix: 1_001_860,
+      land: "2:14 PM HST", landKind: "actual", landUnix: 1_025_000,
+      gate: "2:26 PM HST", gateKind: "actual", destGate: "G4" }), brief);
+    const labels = brief.log.map(briefLogLabel);
+    const text = brief.log.map((entry) => entry.text).join(" | ");
+    for (const label of ["Pushback", "Taxiing out", "Takeoff", "Final approach", "Landed", "Taxiing in", "At the gate"]) {
+      assert.equal(labels.filter((candidate) => candidate === label).length, 1, `${label} appears once`);
+    }
+    assert.match(text, /Pushed back from ORD at 9:37 AM CDT/);
+    assert.match(text, /Took off from ORD at 10:08 AM CDT/);
+    assert.match(text, /Landed at HNL at 2:14 PM HST/);
+    assert.match(text, /Arrived at Gate G4 at 2:26 PM HST/);
+  });
+
+  it("logs meaningful gate changes and removes the standalone Overview Records card", () => {
+    const before = composeBrief(facts({ now: "origin_gate", originGate: "B16", destGate: "G2" }));
+    const after = composeBrief(facts({ now: "origin_gate", originGate: "B18", destGate: "G4" }), before);
+    const text = after.log.map((entry) => entry.text).join(" | ");
+    assert.match(text, /Departure gate changed to B18/);
+    assert.match(text, /Arrival gate changed to G4/);
+    const source = readFileSync(new URL("../components/filed-app.tsx", import.meta.url), "utf8");
+    assert.doesNotMatch(source, /function RecordCard|function recordRows|<RecordCard/);
   });
 });
 
