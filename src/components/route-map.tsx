@@ -1,6 +1,7 @@
 import { formatDuration, formatMiles, haversineNm } from "@/lib/geo";
 import { upcomingStorms } from "@/lib/route-hazards";
 import { routeWeatherEvents } from "@/lib/weather-events";
+import { WeatherEventMarker } from "@/components/weather-event-marker";
 import { useFiled } from "@/lib/store";
 import type { Chop, FlightStory, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
@@ -468,7 +469,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     ? Math.max(0, (story.fetchedAt / 1000 - takeoffAt) / 60) : null;
   const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
     ? (story.times.landUnix - takeoffAt) / 60 : null;
-  const mapEvents = routeWeatherEvents(samples.filter(s => s.frac >= progress));
+  const mapEvents = routeWeatherEvents(samples, progress);
   // Both the full map and preview pin the event's entry point. The affected
   // route line still spans every range through the event's exit.
   const ticks = weatherPreview
@@ -615,10 +616,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         })}
 
         {ticks.map((s) => (
-          <g key={s.frac} aria-label={`Weather marker ${s.eventNumber}`}>
-            <circle cx={sx(s.lon)} cy={sy(s.lat)} r="10" className="fill-bg stroke-fg" strokeWidth="2" />
-            <text x={sx(s.lon)} y={sy(s.lat) + 4} textAnchor="middle" className="fill-fg" fontSize="12" fontWeight="700">{s.eventNumber}</text>
-          </g>
+          <WeatherEventMarker key={s.frac} eventNumber={s.eventNumber}
+            entry={{ lat: s.lat, lon: s.lon }} x={sx(s.lon)} y={sy(s.lat)} />
         ))}
 
         {hasFix && <g transform={`translate(${ax} ${ay}) rotate(${rot})`}>

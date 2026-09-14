@@ -14,8 +14,13 @@ export type RouteWeatherEvent = {
 };
 
 function conditionKey(sample: RouteSample): string | null {
-  if (!sample.convective && sample.chop === "smooth" && !sample.cloud) return null;
-  return [sample.convective ? "storm" : "", sample.chop, sample.cloud ? "cloud" : ""].join(":");
+  // Passenger ranges follow the condition that controls the visible route
+  // treatment. Storm/cloud detail may change inside one continuous turbulence
+  // stretch without creating a false new "bumpy" entry near its end.
+  if (sample.chop !== "smooth") return `turbulence:${sample.chop}`;
+  if (sample.convective) return "storms";
+  if (sample.cloud) return "clouds";
+  return null;
 }
 
 function mergeNotes(a: string | null, b: string | null): string | null {
@@ -26,9 +31,15 @@ function mergeNotes(a: string | null, b: string | null): string | null {
  * Build passenger weather ranges once. start/startFrac/startEtaMin always mean
  * entry into the affected area; end fields always mean exit.
  */
-export function routeWeatherEvents(samples: RouteSample[], mergeGapMin = 5): RouteWeatherEvent[] {
+export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity, mergeGapMin = 5): RouteWeatherEvent[] {
+  // Real story.route.samples were verified origin → destination: both frac and
+  // ETA-from-now increase in direction of travel. Never trust caller array order.
+  const ordered = samples
+    .filter((sample) => Number.isFinite(sample.frac) && sample.frac >= progress)
+    .slice()
+    .sort((a, b) => a.frac - b.frac);
   const runs: Array<RouteWeatherEvent | { key: null; start: RouteSample; end: RouteSample }> = [];
-  for (const sample of samples) {
+  for (const sample of ordered) {
     const key = conditionKey(sample);
     const previous = runs[runs.length - 1];
     if (previous && previous.key === key) {
@@ -80,4 +91,9 @@ export function routeWeatherEvents(samples: RouteSample[], mergeGapMin = 5): Rou
     }
   }
   return runs.filter((run): run is RouteWeatherEvent => run.key !== null);
+}
+
+
+export function weatherEventMarker(event: RouteWeatherEvent) {
+  return { lat: event.start.lat, lon: event.start.lon, frac: event.startFrac, etaMin: event.startEtaMin };
 }

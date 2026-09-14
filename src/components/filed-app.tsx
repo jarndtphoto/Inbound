@@ -1762,8 +1762,13 @@ function Skeleton({ query }: { query: string }) {
 }
 
 
-function passengerWeatherTitle(sample: FlightStory["route"]["samples"][number], nearArrival: boolean, destination: string) {
+function passengerWeatherTitle(sample: FlightStory["route"]["samples"][number], nearArrival: boolean, destination: string, eventKey?: string) {
   const place = nearArrival ? ` near ${destination}` : "";
+  if (eventKey?.startsWith("turbulence:")) {
+    if (sample.chop === "severe") return nearArrival ? `Quite bumpy air possible${place}` : "Quite bumpy stretch ahead";
+    if (sample.chop === "moderate") return nearArrival ? `Bumpy air possible${place}` : "Bumpy stretch ahead";
+    return nearArrival ? `A few light bumps possible${place}` : "Possible light bumps";
+  }
   if (sample.convective) return nearArrival ? `Storms near ${destination}` : "Thunderstorms near the route";
   if (sample.chop === "severe") return nearArrival ? `Quite bumpy air possible${place}` : "Quite bumpy stretch ahead";
   if (sample.chop === "moderate") return nearArrival ? `Bumpy air possible${place}` : "Bumpy stretch ahead";
@@ -1810,7 +1815,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
   const landing = story.times.landUnix;
   const duration = takeoff && landing && landing > takeoff ? (landing - takeoff) / 60 : null;
   const samples = story.route.samples.filter(s => !airborne || s.frac >= story.route.progress);
-  const visibleGroups = routeWeatherEvents(samples);
+  const visibleGroups = routeWeatherEvents(samples, story.route.progress);
 
   const timeLabel = (group: RouteWeatherEvent) => {
     const from = airborne ? group.startEtaMin : duration == null ? null : group.startFrac * duration;
@@ -1845,7 +1850,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
     {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="space-y-3">
       {visibleGroups.map((g, i) => {
-        const title = passengerWeatherTitle(g.start, g.endFrac >= 0.85, story.dest.city || story.dest.iata);
+        const title = passengerWeatherTitle(g.start, g.endFrac >= 0.85, story.dest.city || story.dest.iata, g.key);
         const source = passengerWeatherSource(g.note);
         const technical = technicalWeatherProducts(g.note);
         return <li key={i} className="rounded-xl border border-border bg-surface p-4">

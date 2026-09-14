@@ -4,7 +4,7 @@ import { BaggageStatus } from "./baggage-status";
 import { airlineStatusLink, flightDepartureDate } from "@/lib/airline-status";
 import { useEffect, useState, useId } from "react";
 import type { FlightStory } from "@/lib/types";
-import { isLanded, nextStep } from "@/lib/traveler";
+import { isLanded, nextStep, RideOutlookText } from "@/lib/traveler";
 export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:FlightStory;failed?:boolean;onTrackInbound?:(flight:string)=>void}) {
   const [now,setNow]=useState(story.fetchedAt);
   const [onward,setOnward]=useState("");
@@ -31,7 +31,7 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
       <p className="mt-2 text-xs text-muted">FlightAware history checked {new Date(story.inboundDiversion.reportedAt).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}.{failed || now-story.fetchedAt>60000 ? " Updates are delayed; this is the last confirmed history." : ""}</p>
     </section>}
     <section className="rounded-xl border border-border bg-surface p-5" aria-label="What happens next">
-      <h2 className="text-xl font-semibold">{step.title}</h2><p className="mt-2 text-sm leading-relaxed">{step.body}</p>
+      <h2 className="text-xl font-semibold">{step.title}</h2><p className="mt-2 text-sm leading-relaxed">{story.currentStage === "ride" ? <RideOutlookText story={story} /> : step.body}</p>
       {story.diversion && onTrackInbound && <form className="mt-4 border-t border-border pt-4" onSubmit={event=>{event.preventDefault();if(validOnward && onwardFlight)onTrackInbound(onwardFlight.callsign);}}>
         <label htmlFor={onwardId} className="text-sm font-semibold">Track your onward flight</label>
         <p className="mt-1 text-sm text-muted">Enter the flight number supplied by your airline. A flight search does not confirm a booking or connection.</p>

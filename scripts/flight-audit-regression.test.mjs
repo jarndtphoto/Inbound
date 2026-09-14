@@ -2,6 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 // Match the app's extensionless TypeScript imports in the Node test runner.
 registerHooks({ resolve(specifier, context, nextResolve) {
@@ -11,7 +13,9 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context);
 }});
 const { loadFlightStory, motionFromTrace, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import('../src/lib/story.server.ts');
-const { routeWeatherEvents } = await import('../src/lib/weather-events.ts');
+const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
+const { rideOutlook, RideOutlookText } = await import('../src/lib/traveler.ts');
+const { WeatherEventMarker } = await import('../src/components/weather-event-marker.ts');
 
 describe('passenger weather presentation', () => {
   const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
@@ -561,47 +565,68 @@ describe('live reroute display geometry', () => {
 });
 
 
-describe('weather event entry timing', () => {
-  const sample = (frac, etaMin, chop = 'smooth') => ({
+describe('AAL3197 weather entry rendering', () => {
+  const sample = (frac, etaMin, chop = 'smooth', extra = {}) => ({
     lat: 40 + frac, lon: -90 + frac, frac, distNm: frac * 1000,
     remainingNm: (1 - frac) * 1000, etaMin, chop, cloud: false,
-    convective: false, note: chop === 'smooth' ? null : 'Turbulence AIRMET', fix: false
+    convective: false, note: chop === 'smooth' ? null : 'Turbulence AIRMET', fix: false,
+    ...extra
   });
+  // Deliberately shuffled. Real story samples were verified to have ETA increase
+  // from current progress toward destination.
   const samples = [
-    sample(0.55, 55),
-    sample(0.60, 46, 'moderate'),
-    sample(0.66, 40, 'moderate'),
-    sample(0.72, 34, 'moderate'),
-    sample(0.78, 28)
+    sample(0.72, 59, 'moderate'),
+    sample(0.40, 0),
+    sample(0.60, 47, 'moderate'),
+    sample(0.50, 0, 'light'),
+    sample(0.78, 65),
+    sample(0.66, 53, 'moderate'),
+    sample(0.55, 12)
   ];
-  const [event] = routeWeatherEvents(samples);
+  const events = routeWeatherEvents(samples, 0.50);
+  const event = events.find((candidate) => candidate.key === 'turbulence:moderate');
 
-  it('tracks the affected segment from entry through exit', () => {
+  it('orders samples in direction of travel and discards points behind progress', () => {
+    assert.ok(event);
     assert.equal(event.startFrac, 0.60);
     assert.equal(event.endFrac, 0.72);
+    assert.equal(event.startEtaMin, 47);
+    assert.equal(event.endEtaMin, 59);
     assert.deepEqual(event.ranges, [{ from: 0.60, to: 0.72 }]);
   });
 
-  it('derives passenger timing from entry, not midpoint or exit', () => {
-    assert.equal(event.startEtaMin, 46);
-    assert.equal(event.endEtaMin, 34);
+  it('renders the numbered marker at the affected-range entry coordinate', () => {
+    const marker = weatherEventMarker(event);
+    assert.deepEqual({ lat: marker.lat, lon: marker.lon }, { lat: event.start.lat, lon: event.start.lon });
+    const html = renderToStaticMarkup(createElement(WeatherEventMarker, {
+      eventNumber: 2, entry: marker, x: marker.lon, y: marker.lat
+    }));
+    assert.match(html, new RegExp(`data-entry-lat="${event.start.lat}"`));
+    assert.match(html, new RegExp(`data-entry-lon="${event.start.lon}"`));
+    assert.match(html, />2<\/text>/);
   });
 
-  it('uses the same entry fields for cards, preview maps, full maps, and Overview', () => {
-    const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
-    const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
-    const storySource = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
-    assert.match(appSource, /const from = airborne \? group\.startEtaMin/);
-    assert.match(appSource, /startFrac: g\.startFrac/);
-    assert.match(mapSource, /\.\.\.event\.start/);
-    assert.match(mapSource, /weatherPreview\.startFrac/);
-    assert.match(storySource, /formatDuration\(bumpEvent\.startEtaMin\)/);
+  it('renders moderate turbulence exactly once and keeps the entry timing', () => {
+    const story = {
+      route: { progress: 0.50, samples },
+      weatherCoverage: { failedSources: [] }
+    };
+    const text = rideOutlook(story);
+    const html = renderToStaticMarkup(createElement(RideOutlookText, { story }));
+    assert.equal((text.match(/moderate turbulence/gi) || []).length, 1);
+    assert.match(text, /Moderate turbulence is possible in about 47 minutes\./);
+    assert.match(text, /^Projected ride is currently choppy\./);
+    assert.match(html, /Moderate turbulence is possible in about 47 minutes\./);
   });
 
-  it('does not repeat moderate severity before the timed sentence', () => {
-    const storySource = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
-    assert.match(storySource, /timedSentenceCarriesStrongest/);
-    assert.match(storySource, /Moderate turbulence.*is possible in about/);
-    assert.doesNotMatch(storySource, /Moderate chop.*Moderate turbulence.*possible/);
+  it('does not split one continuous moderate range when storm detail changes', () => {
+    const continuous = [
+      sample(0.60, 47, 'moderate', { convective: true }),
+      sample(0.66, 53, 'moderate', { convective: true }),
+      sample(0.72, 59, 'moderate', { convective: false })
+    ];
+    const [range] = routeWeatherEvents(continuous, 0.50);
+    assert.equal(range.startFrac, 0.60);
+    assert.equal(range.endFrac, 0.72);
   });
 });

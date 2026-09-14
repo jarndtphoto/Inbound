@@ -1,4 +1,6 @@
+import { createElement } from "react";
 import type { FlightStory } from "./types";
+import { routeWeatherEvents } from "./weather-events";
 
 export const isLanded = (s: FlightStory) => s.currentStage === "gate" || s.times.landKind === "actual" || (s.currentStage === "arrival" && s.aircraft?.onGround === true);
 export function journeyKey(s: FlightStory) {
@@ -10,32 +12,41 @@ export function rideOutlook(s: FlightStory): string {
   if (!samples.length) return "The projected ride is currently unavailable. We’re waiting for route weather data.";
   const current = samples.reduce((best, sample) =>
     Math.abs(sample.frac - s.route.progress) < Math.abs(best.frac - s.route.progress) ? sample : best, samples[0]);
-  const describe = (sample: typeof current) => [
-    sample.convective ? "Storms near the route" : "",
-    sample.chop !== "smooth" ? sample.chop + " turbulence" : "",
-  ].filter(Boolean).join(" and ");
-  const conditions = describe(current);
   const incomplete = !s.weatherCoverage || s.weatherCoverage.failedSources.length > 0;
   let text = current.chop !== "smooth"
-    ? "Projected ride is currently choppy, with " + current.chop + " turbulence possible."
+    ? "Projected ride is currently choppy."
     : current.convective
       ? "Storms are possible near the current route; the ride may be unsettled."
       : incomplete
         ? "Weather coverage is incomplete, so the current ride is uncertain."
         : "Projected ride is currently smooth, based on available forecasts.";
-  const upcoming = samples.find(sample => sample.frac > s.route.progress
-    && Number.isFinite(sample.etaMin) && sample.etaMin > 0
-    && describe(sample) && describe(sample) !== conditions);
-  if (upcoming) {
-    const words = describe(upcoming);
-    const minutes = Math.max(1, Math.round(upcoming.etaMin));
-    text += " " + words.charAt(0).toUpperCase() + words.slice(1)
-      + " possible in about " + minutes + (minutes === 1 ? " minute." : " minutes.");
-  } else if (!conditions && !incomplete) {
+
+  const rank = { smooth: 0, light: 1, moderate: 2, severe: 3 } as const;
+  const events = routeWeatherEvents(samples, s.route.progress);
+  const strongest = events.reduce<(typeof events)[number] | null>((best, event) => {
+    if (!best) return event;
+    const eventRank = rank[event.start.chop] + (event.start.convective ? 0.5 : 0);
+    const bestRank = rank[best.start.chop] + (best.start.convective ? 0.5 : 0);
+    return eventRank > bestRank || (eventRank === bestRank && event.startEtaMin < best.startEtaMin) ? event : best;
+  }, null);
+  if (strongest) {
+    const severity = strongest.start.chop === "severe" ? "Quite bumpy air"
+      : strongest.start.chop === "moderate" ? "Moderate turbulence"
+        : strongest.start.chop === "light" ? "Light turbulence"
+          : "Storms near the route";
+    const minutes = Math.max(0, Math.round(strongest.startEtaMin));
+    text += minutes <= 1
+      ? ` ${severity} is possible now.`
+      : ` ${severity} is possible in about ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+  } else if (!incomplete) {
     text += " No significant conditions are currently flagged ahead.";
   }
-  if (incomplete && conditions) text += " Weather coverage is incomplete.";
+  if (incomplete && (current.chop !== "smooth" || current.convective)) text += " Weather coverage is incomplete.";
   return text;
+}
+
+export function RideOutlookText({ story }: { story: FlightStory }) {
+  return createElement("span", null, rideOutlook(story));
 }
 
 export function nextStep(s: FlightStory, now = Date.now(), failed = false) {
