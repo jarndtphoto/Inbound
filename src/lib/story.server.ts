@@ -862,9 +862,15 @@ function gateOutTimes(v) {
 	const gateOut = asTimes(v);
 	const ambiguousPublicActual = Boolean(
 		gateOut.actual &&
-		(gateOut.actual === gateOut.estimated || gateOut.actual === gateOut.scheduled)
+		(
+			(gateOut.estimated != null && Math.abs(gateOut.actual - gateOut.estimated) <= 60) ||
+			(gateOut.scheduled != null && Math.abs(gateOut.actual - gateOut.scheduled) <= 60)
+		)
 	);
 	return ambiguousPublicActual ? { ...gateOut, actual: null } : gateOut;
+}
+function confirmedGateOutActual(v) {
+	return gateOutTimes(v).actual;
 }
 function bestUnix(t) {
 	return t.actual ?? t.estimated ?? t.scheduled;
@@ -1782,7 +1788,8 @@ function timesOf(aware, origin, dest) {
 	const otz = tzOf(origin);
 	const dtz = tzOf(dest);
 	const orig = rememberOrig(aware);
-	const go = bestUnix(aware.gateOut);
+	const gateOut = { ...aware.gateOut, actual: confirmedGateOutActual(aware.gateOut) };
+	const go = bestUnix(gateOut);
 	const to = bestUnix(aware.takeoff);
 	const ld = bestUnix(aware.landing);
 	const gi = bestUnix(aware.gateIn);
@@ -1795,7 +1802,7 @@ function timesOf(aware, origin, dest) {
 	const typicalDelayMin = typicalSec != null && typicalSec >= 1200 ? Math.round(typicalSec / 60) : null;
 	const late = (delayMin ?? 0) >= 5;
 	const arriveLate = (arriveDelayMin ?? 0) >= 5;
-	const taxiOut = pickTaxi(aware.gateOut, aware.takeoff, aware.filedTaxiOutMin, aware.typicalTaxiOutMin);
+	const taxiOut = pickTaxi(gateOut, aware.takeoff, aware.filedTaxiOutMin, aware.typicalTaxiOutMin);
 	const taxiIn = pickTaxi(aware.landing, aware.gateIn, aware.filedTaxiInMin, aware.typicalTaxiInMin);
 	const gateEta = !aware.gateIn.actual && ld && gi != null && gi <= ld
 		? ld + Math.max(1, taxiIn.min ?? 10) * 60
@@ -1816,7 +1823,7 @@ function timesOf(aware, origin, dest) {
 		delayMin,
 		arriveDelayMin,
 		typicalDelayMin,
-		pushed: Boolean(aware.gateOut.actual),
+		pushed: Boolean(gateOut.actual),
 		airborne: Boolean(aware.takeoff.actual),
 		pushUnix: go,
 		takeoffUnix: to,
@@ -1824,8 +1831,8 @@ function timesOf(aware, origin, dest) {
 		origPushUnix: origGo,
 		origTakeoffUnix: origTo,
 		origLandUnix: origLd,
-		pushKind: stampKind(aware.gateOut) ?? (go ? "scheduled" : null),
-		pushSource: aware.gateOut.actual ? "provider_actual" : null,
+		pushKind: stampKind(gateOut) ?? (go ? "scheduled" : null),
+		pushSource: gateOut.actual ? "provider_actual" : null,
 		takeoffKind: stampKind(aware.takeoff) ?? (to ? "scheduled" : null),
 		landKind: stampKind(aware.landing) ?? (ld ? "scheduled" : null),
 		gateKind: gateEta !== gi ? "estimated" : stampKind(aware.gateIn) ?? (gi ? "scheduled" : null),
@@ -2726,7 +2733,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		});
 		const landAt = inboundSnapByFlight.get(snapKey)?.landUnix;
 		const parkedLong = (inboundLive.gsKt ?? 0) < 5 && landAt && nowUnix - landAt > 4 * 60;
-		if (parkedLong || atGateFa || aware?.gateOut?.actual) {
+		if (parkedLong || atGateFa || confirmedGateOutActual(aware?.gateOut)) {
 			const gateUnix = inboundAware?.gateIn?.actual ?? (parkedLong ? nowUnix : null);
 			rememberInboundSnap(snapKey, {
 				gateUnix,
@@ -2735,7 +2742,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				taxiing: false
 			});
 		}
-	} else if (!inboundLocked && (atGateFa || aware?.gateOut?.actual && landed)) {
+	} else if (!inboundLocked && (atGateFa || confirmedGateOutActual(aware?.gateOut) && landed)) {
 		const gateUnix = inboundAware?.gateIn?.actual ?? null;
 		rememberInboundSnap(snapKey, {
 			...snapFromAware(inboundAware, originTz),
@@ -3061,7 +3068,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// observed before departure can contradict a reported gate-out, and the
 	// position itself must be fresh and newer than that report.
 	const fixUnix = live ? Date.now() / 1e3 - (live.seenSec ?? 999) : 0;
-	const gateOutUnix = aware?.gateOut?.actual;
+	const gateOutUnix = confirmedGateOutActual(aware?.gateOut);
 	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && park
 		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) < 1.2
 		&& distPark < 0.025 && !pushLatch.has(landKey)
@@ -3151,7 +3158,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	if (times.taxiOutKind !== "measured") {
 		const wheelsUp = Boolean(live && !live.onGround) || (Boolean(aware?.takeoff?.actual) && !(live && live.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 12));
 		if (wheelsUp) {
-			const pushU = aware?.gateOut?.actual;
+			const pushU = confirmedGateOutActual(aware?.gateOut);
 			const toU = aware?.takeoff?.actual;
 			if (pushU && toU && toU > pushU) {
 				const m = Math.round((toU - pushU) / 60);
@@ -3174,7 +3181,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		const prev = gateLatch.get(landKey) ?? {};
 		const landUnix = aware?.landing?.actual ?? prev.landUnix ?? times.landUnix ?? landedLatch.get(landKey) ?? now;
 		const gateUnix = aware?.gateIn?.actual ?? prev.gateUnix ?? now;
-		const pushUnix = aware?.gateOut?.actual ?? prev.pushUnix ?? times.pushUnix;
+		const pushUnix = confirmedGateOutActual(aware?.gateOut) ?? prev.pushUnix ?? times.pushUnix;
 		const takeoffUnix = aware?.takeoff?.actual ?? prev.takeoffUnix ?? times.takeoffUnix;
 		gateLatch.set(landKey, { landUnix, gateUnix, pushUnix, takeoffUnix });
 	}
@@ -3217,7 +3224,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const inbound = buildInbound({
 		live,
 		ourTakeoffActual: aware?.takeoff.actual ?? null,
-		ourGateOutActual: aware?.gateOut.actual ?? null,
+		ourGateOutActual: confirmedGateOutActual(aware?.gateOut),
 		origin,
 		inboundIdent: inboundAware?.ident ?? inboundIdent,
 		inboundAware,
