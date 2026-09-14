@@ -14,6 +14,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
 }});
 const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import('../src/lib/story.server.ts');
 const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
+const { normalizeAeroApiRoute } = await import('../src/lib/flightaware-aeroapi.server.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
 const { rideOutlook, RideOutlookText, nextStep } = await import('../src/lib/traveler.ts');
 const { WeatherEventMarker } = await import('../src/components/weather-event-marker.ts');
@@ -770,6 +771,18 @@ describe('Hawaii route-map geography', () => {
     const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
     assert.match(mapSource, /data-hawaii-island=/);
     assert.match(mapSource, /data-hawaii-island[\s\S]{0,500}vectorEffect="non-scaling-stroke"/);
+  });
+});
+
+describe('FlightAware filed route references', () => {
+  it('retains route fixes when AeroAPI returns route_distance alongside a route array', () => {
+    assert.deepEqual(normalizeAeroApiRoute({ route_distance: 3700, route: [
+      { name: 'DBQ', latitude: 42.401, longitude: -90.71 },
+      { ident: 'BDF', latitude: 41.16, longitude: -89.59 },
+    ] }), [
+      { label: 'DBQ', lat: 42.401, lon: -90.71 },
+      { label: 'BDF', lat: 41.16, lon: -89.59 },
+    ]);
   });
 });
 

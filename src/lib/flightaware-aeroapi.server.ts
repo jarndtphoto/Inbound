@@ -37,6 +37,16 @@ export function normalizeAeroApiFlight(f: any): NormalizedFlight {
     runway: { takeoff: f?.runway_off ?? null, landing: f?.runway_on ?? null } };
 }
 
+export function normalizeAeroApiRoute(data: any) {
+  const points = Array.isArray(data?.route) ? data.route
+    : Array.isArray(data?.waypoints) ? data.waypoints : [];
+  return points.map((p: any) => ({
+    lat: p.latitude ?? p.lat,
+    lon: p.longitude ?? p.lon,
+    label: p.name ?? p.ident ?? p.fix ?? null,
+  })).filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+}
+
 export async function loadAeroApiFlight(ident: string): Promise<NormalizedFlight | null> {
   if (!process.env.FLIGHTAWARE_AEROAPI_KEY?.trim()) return null;
   const data: any = await get(`/flights/${encodeURIComponent(ident)}?max_pages=1`, 45_000);
@@ -51,7 +61,7 @@ export async function loadAeroApiFlight(ident: string): Promise<NormalizedFlight
       get(`/flights/${encodeURIComponent(normalized.flightId)}/route`, 30 * 60_000).catch(() => null),
     ]);
     normalized.track = (trackData?.positions ?? []).map((p: any) => ({ lat: p.latitude, lon: p.longitude, altFt: Number.isFinite(p.altitude) ? p.altitude * 100 : null, gsKt: p.groundspeed ?? null, track: p.heading ?? null, seenAt: unix(p.timestamp) ?? 0 })).filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
-    normalized.waypoints = (routeData?.route_distance != null ? routeData?.waypoints : routeData?.route)?.map?.((p: any) => ({ lat: p.latitude, lon: p.longitude, label: p.name ?? p.ident ?? p.fix ?? null })).filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon)) ?? [];
+    normalized.waypoints = normalizeAeroApiRoute(routeData);
   }
   return normalized;
 }

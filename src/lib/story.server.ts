@@ -3114,9 +3114,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		motion = motionFromTrace(openTrace, origin);
 	}
 	const historyStart = (aware?.gateOut?.scheduled ?? aware?.gateOut?.estimated ?? aware?.takeoff?.scheduled ?? Date.now() / 1e3) - 6 * 3600;
-	const faHistory = official.flightaware?.track?.length
-		? official.flightaware.track.map((p) => ({ ...p, t: p.seenAt, gs: p.gsKt, alt: p.altFt, ground: p.altFt === 0 }))
-		: aware?.faTrack ?? [];
+	const faHistory = mergeTraces(
+		official.flightaware?.track?.map((p) => ({ ...p, t: p.seenAt, gs: p.gsKt, alt: p.altFt, ground: p.altFt === 0 })) ?? [],
+		aware?.faTrack ?? []
+	);
 	const fr24History = official.fr24?.track?.map((p) => ({ ...p, t: p.seenAt, gs: p.gsKt, alt: p.altFt, ground: p.altFt === 0 })) ?? [];
 	const flightAwarePush = pushEvidenceFromTrack(faHistory, origin, park, historyStart);
 	const fr24Push = pushEvidenceFromTrack(fr24History, origin, park, historyStart);
