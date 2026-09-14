@@ -9,6 +9,7 @@ async function get(path: string, ttlMs: number) {
   if (!token) return null;
   const hit = cache.get(path);
   if (hit && Date.now() - hit.at < ttlMs) return hit.value;
+  console.info(JSON.stringify({ event: "fr24_upstream_request", timestamp: new Date().toISOString(), callsign: new URLSearchParams(path.split("?")[1] ?? "").get("callsigns"), endpoint: path.split("?")[0], cache: "miss" }));
   const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, "Accept-Version": "v1", Accept: "application/json" }, signal: AbortSignal.timeout(5500) });
   if (!res.ok) throw new Error(`FR24 API ${res.status}`);
   const value = await res.json(); cache.set(path, { at: Date.now(), value }); return value;
