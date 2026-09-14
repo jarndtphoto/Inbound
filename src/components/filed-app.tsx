@@ -489,6 +489,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     initialDataUpdatedAt: 0,
     enabled: cacheOk && query.length > 0,
     refetchInterval: (q) => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return false;
       if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
       if (q.state.status === "error") return /HTTP 402\b/.test(String(q.state.error?.message ?? "")) ? 60_000 : 15_000;
@@ -514,6 +515,15 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       return storyForQuery(readCachedStory(query), query);
     },
   });
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "visible" || !query) return;
+      if (Date.now() - storyQ.dataUpdatedAt > 2_500) void storyQ.refetch();
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => document.removeEventListener("visibilitychange", refreshWhenVisible);
+  }, [query, storyQ.dataUpdatedAt, storyQ.refetch]);
 
   useEffect(() => {
     if (storyQ.dataUpdatedAt > 0) setRefreshErr(null);
