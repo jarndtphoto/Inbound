@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { getBaggage } from "@/lib/baggage";
 import type { BaggageResult } from "@/lib/baggage.server";
-export function BaggageStatus({flight,origin,destination,date}:{flight:string;origin:string;destination:string;date:string|null}) {
+
+export type BaggageStatusState = {
+  result: BaggageResult | null;
+  supported: boolean;
+  loading: boolean;
+};
+
+export function useBaggageStatus({flight,origin,destination,date}:{flight:string;origin:string;destination:string;date:string|null}): BaggageStatusState {
   const key=[flight,origin,destination,date].join("/");
   const [result,setResult]=useState<{key:string;value:BaggageResult}|null>(null);
   const supported=destination==="HNL" && Boolean(date);
@@ -20,8 +27,13 @@ export function BaggageStatus({flight,origin,destination,date}:{flight:string;or
     return()=>{cancelled=true;clearTimeout(timer)};
   },[key,flight,origin,destination,date,supported]);
   const value=result?.key===key?result.value:null;
+  return {result:value,supported,loading:supported&&!value};
+}
+
+export function BaggageStatus({state}:{state:BaggageStatusState}) {
+  const {result:value,supported,loading}=state;
   return <>
-    <p className="mt-1 font-semibold">{value?.status==="posted"?`Carousel ${value.carousel}${value.terminal?` · Terminal ${value.terminal}`:""}`:value?.status==="not-posted"?"Not posted yet":supported&&!value?"Checking baggage carousel…":"Check airline for carousel"}</p>
-    {value && value.status!=="unavailable" ? <p className="mt-1 text-xs text-muted"><a className="underline" href="https://airports.hawaii.gov/hnl/flights/" target="_blank" rel="noopener noreferrer">Honolulu airport arrivals board ↗</a> · Checked {new Date(value.checkedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}. Confirm on arrival; assignments can change.</p> : <p className="mt-1 text-xs text-muted">{supported?"Use the airline link below if the airport update is unavailable.":"Automatic carousel updates aren’t available for this airport yet."}</p>}
+    <p className="font-semibold">{value?.status==="posted"?`Carousel ${value.carousel}${value.terminal?` · Terminal ${value.terminal}`:""}`:loading?"Checking baggage claim…":"Baggage claim hasn't been assigned yet."}</p>
+    {value && value.status!=="unavailable" ? <p className="mt-1 text-xs text-muted"><a className="underline" href="https://airports.hawaii.gov/hnl/flights/" target="_blank" rel="noopener noreferrer">Honolulu airport arrivals board ↗</a> · Checked {new Date(value.checkedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}. Confirm on arrival; assignments can change.</p> : <p className="mt-1 text-xs text-muted">{supported?"Check airport displays after arrival if an assignment is not available here yet.":"Automatic baggage assignments aren’t available for this airport yet. Check airport displays after arrival."}</p>}
   </>;
 }

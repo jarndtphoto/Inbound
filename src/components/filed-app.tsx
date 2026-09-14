@@ -1,8 +1,11 @@
 import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { TravelerCompanion } from "@/components/traveler-companion";
+import { BaggageStatus, useBaggageStatus } from "@/components/baggage-status";
+import { baggageSummary } from "@/lib/baggage-copy";
+import { flightDepartureDate } from "@/lib/airline-status";
 import { isLanded, nextStep } from "@/lib/traveler";
 import { briefRide } from "@/lib/brief";
-import { briefLogLabel, briefLogText, composeBrief, logManualRefresh, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
+import { briefLogLabel, briefLogText, briefingRefreshOutcome, composeBrief, logManualRefresh, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
 import { formatDuration, formatMiles, feetPretty } from "@/lib/geo";
 import { parseFlightQuery, storyMatchesQuery } from "@/lib/flight-parse";
@@ -417,6 +420,8 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   const briefGen = useRef(0);
   const lastBriefKey = useRef("");
   const briefingRef = useRef<CompiledBrief | null>(null);
+  const manualBriefBase = useRef<CompiledBrief | null>(null);
+  const [briefFeedback, setBriefFeedback] = useState<"no_change" | "failed" | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const flightKey = normFlight(query);
   const shellStyle = {
@@ -550,8 +555,9 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         }
       } catch {
         /* local is the brief */
+        return { ok: true as const, text: local.lead, local, gen, flight, remoteFailed: true as const };
       }
-      return { ok: true as const, text: local.lead, local, gen, flight };
+      return { ok: true as const, text: local.lead, local, gen, flight, remoteFailed: false as const };
     },
     onMutate: () => {
       if (!story) return;
@@ -583,7 +589,17 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         };
         briefingRef.current = next;
         setBriefing(next);
+        const base = manualBriefBase.current;
+        if (base) {
+          const outcome = briefingRefreshOutcome(base, next, Boolean(data.remoteFailed));
+          setBriefFeedback(outcome === "updated" ? null : outcome);
+          manualBriefBase.current = null;
+        }
       }
+    },
+    onError: () => {
+      if (manualBriefBase.current) setBriefFeedback("failed");
+      manualBriefBase.current = null;
     },
   });
 
@@ -593,6 +609,8 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     setBriefingFor("");
     lastBriefKey.current = "";
     briefingRef.current = null;
+    manualBriefBase.current = null;
+    setBriefFeedback(null);
     briefM.reset();
     setStage("auto");
     setRefreshErr(null);
@@ -613,10 +631,17 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     lastBriefKey.current = key;
     const next = composeBrief(rideFacts(story, query, active), briefing);
     if (next !== briefing) {
+      if (briefingRefreshOutcome(briefing, next) === "updated") setBriefFeedback(null);
       briefingRef.current = next;
       setBriefing(next);
     }
   }, [story, briefing, briefingFor, flightKey, query, active]);
+
+  function updateBriefing() {
+    if (shownBrief) manualBriefBase.current = shownBrief;
+    setBriefFeedback(null);
+    briefM.mutate();
+  }
 
   useEffect(() => {
     if (story && briefing && briefingFor === flightKey) saveBrief(story, briefing);
@@ -809,7 +834,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
               <WeatherTimeline story={story} />
             </section>
             <section id="panel-Briefing" role="tabpanel" aria-labelledby="tab-Briefing" hidden={flightTab !== "Briefing"}>
-              <BreakdownCard briefing={shownBrief} pending={briefM.isPending} onCompile={() => briefM.mutate()} />
+              <BreakdownCard briefing={shownBrief} pending={briefM.isPending} feedback={briefFeedback} onCompile={updateBriefing} />
             </section>
           </div>
         )}
@@ -973,7 +998,8 @@ function FlightHead({
   );
 }
 
-type OverviewDetailKey = "flight" | "aircraft" | "airports";
+type OverviewDetailKey = "flight" | "aircraft" | "airports" | "baggage";
+const CLOSED_OVERVIEW_DETAILS: Record<OverviewDetailKey, boolean> = { flight: false, aircraft: false, airports: false, baggage: false };
 
 function formatLocalUnix(unix: number | null | undefined, timeZone?: string) {
   if (unix == null || !Number.isFinite(unix)) return null;
@@ -1001,6 +1027,7 @@ function OverviewDisclosure({
   summary,
   open,
   onToggle,
+  prominent = false,
   children,
 }: {
   id: OverviewDetailKey;
@@ -1008,10 +1035,11 @@ function OverviewDisclosure({
   summary: string;
   open: boolean;
   onToggle: (id: OverviewDetailKey) => void;
+  prominent?: boolean;
   children: ReactNode;
 }) {
   const panelId = `overview-${id}-details`;
-  return <div className="border-b border-border last:border-b-0">
+  return <div className={cn("border-b border-border last:border-b-0", prominent && "-mx-2 rounded-lg bg-accent/8 px-2")}>
     <button
       type="button"
       className="flex min-h-16 w-full items-center justify-between gap-3 py-3 text-left"
@@ -1030,12 +1058,12 @@ function OverviewDisclosure({
 
 function OverviewDetails({ story }: { story: FlightStory }) {
   const storageKey = `inbound-overview-details:${origMemKey(story)}`;
-  const [open, setOpen] = useState<Record<OverviewDetailKey, boolean>>({ flight: false, aircraft: false, airports: false });
+  const [open, setOpen] = useState<Record<OverviewDetailKey, boolean>>(CLOSED_OVERVIEW_DETAILS);
   useEffect(() => {
-    setOpen({ flight: false, aircraft: false, airports: false });
+    setOpen(CLOSED_OVERVIEW_DETAILS);
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) || "null");
-      if (saved) setOpen({ flight: Boolean(saved.flight), aircraft: Boolean(saved.aircraft), airports: Boolean(saved.airports) });
+      if (saved) setOpen({ flight: Boolean(saved.flight), aircraft: Boolean(saved.aircraft), airports: Boolean(saved.airports), baggage: Boolean(saved.baggage) });
     } catch { /* Secondary detail state is optional. */ }
   }, [storageKey]);
   const toggle = (key: OverviewDetailKey) => setOpen((current) => {
@@ -1047,6 +1075,8 @@ function OverviewDetails({ story }: { story: FlightStory }) {
   const aircraftSummary = [ac?.typeName ?? ac?.type ?? "Aircraft details unavailable", ac?.registration].filter(Boolean).join(" · ");
   const originStop = [story.origin.iata, story.times.originGate ? `Gate ${story.times.originGate}` : null].filter(Boolean).join(" ");
   const destStop = [story.dest.iata, story.times.destGate ? `Gate ${story.times.destGate}` : null].filter(Boolean).join(" ");
+  const baggage = useBaggageStatus({flight:story.iata.replace(/\s/g, ""),origin:story.origin.iata,destination:story.dest.iata,date:flightDepartureDate(story)});
+  const baggageProminent = wheelsDown(story);
   return <section className="mt-4 rounded-xl border border-border bg-surface px-4" aria-label="More flight information">
     <OverviewDisclosure id="flight" title="Flight details" summary={`${story.iata} · ${story.origin.iata} → ${story.dest.iata}`} open={open.flight} onToggle={toggle}>
       <dl>
@@ -1071,6 +1101,9 @@ function OverviewDetails({ story }: { story: FlightStory }) {
         <section aria-label="Departure airport details"><h3 className="font-semibold">Departure · {story.origin.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.originGate ?? "Not assigned"} /><DetailRow label="Pushback" value={story.times.push} /><DetailRow label="Weather" value={story.origin.category} /></dl></section>
         <section aria-label="Arrival airport details"><h3 className="font-semibold">Arrival · {story.dest.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.destGate ?? "Not assigned"} /><DetailRow label="Gate arrival" value={story.times.gate} /><DetailRow label="Weather" value={story.dest.category} /></dl></section>
       </div>
+    </OverviewDisclosure>
+    <OverviewDisclosure id="baggage" title="Baggage" summary={baggageSummary(baggage.result)} open={open.baggage} onToggle={toggle} prominent={baggageProminent}>
+      <BaggageStatus state={baggage} />
     </OverviewDisclosure>
   </section>;
 }
@@ -1300,10 +1333,12 @@ function Stat({
 function BreakdownCard({
   briefing,
   pending,
+  feedback,
   onCompile,
 }: {
   briefing: CompiledBrief | null;
   pending: boolean;
+  feedback: "no_change" | "failed" | null;
   onCompile: () => void;
 }) {
   const asOf = briefing?.liveAt
@@ -1349,6 +1384,8 @@ function BreakdownCard({
       <Button type="button" className="mt-4 w-full" disabled={pending} onClick={onCompile}>
         {pending ? "Updating…" : briefing ? "Update briefing" : "Compile briefing"}
       </Button>
+      {feedback === "no_change" ? <p role="status" className="mt-2 text-center text-sm text-muted">No new updates right now.</p> : null}
+      {feedback === "failed" ? <p role="alert" className="mt-2 text-center text-sm text-ifr">We couldn’t refresh the briefing. Try again.</p> : null}
     </div>
   );
 }

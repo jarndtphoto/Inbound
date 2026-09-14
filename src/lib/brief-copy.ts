@@ -665,6 +665,12 @@ export function logManualRefresh(prev: CompiledBrief | null | undefined): Compil
   return { ...prev, liveAt: Date.now() };
 }
 
+export function briefingRefreshOutcome(previous: CompiledBrief, next: CompiledBrief, failed = false) {
+  const prior = new Set(previous.log.map((entry) => `${entry.at}|${entry.kind}|${entry.text}`));
+  if (next.log.some((entry) => !prior.has(`${entry.at}|${entry.kind}|${entry.text}`))) return "updated" as const;
+  return failed ? "failed" as const : "no_change" as const;
+}
+
 export function briefAsText(b: CompiledBrief): string {
   return [b.lead, b.why].filter(Boolean).join(" ").trim();
 }

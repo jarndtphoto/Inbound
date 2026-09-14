@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { briefLogLabel, briefLogText, composeBrief, diffBriefLog, logManualRefresh, type RideFacts } from "./brief-copy.ts";
+import { briefLogLabel, briefLogText, briefingRefreshOutcome, composeBrief, diffBriefLog, logManualRefresh, type RideFacts } from "./brief-copy.ts";
 
 function facts(over: Partial<RideFacts> = {}): RideFacts {
   return {
@@ -366,14 +366,46 @@ describe("Overview record migration", () => {
     const overview = source.slice(source.indexOf('id="panel-Overview"'), source.indexOf('id="panel-Route"'));
     assert.ok(overview.indexOf("<FlightHead") < overview.indexOf("<OverviewDetails"));
     assert.ok(overview.indexOf("<TravelerCompanion") < overview.indexOf("<OverviewDetails"));
-    for (const title of ["Flight details", "Aircraft", "Airport details"]) {
+    for (const title of ["Flight details", "Aircraft", "Airport details", "Baggage"]) {
       assert.match(source, new RegExp(`title="${title}"`));
     }
     assert.match(source, /summary={`\$\{story\.iata\} · \$\{story\.origin\.iata\} → \$\{story\.dest\.iata\}`}/);
     assert.match(source, /summary=\{aircraftSummary\}/);
     assert.match(source, /summary={`\$\{originStop\} → \$\{destStop\}`}/);
+    assert.match(source, /summary=\{baggageSummary\(baggage\.result\)\}/);
     const details = source.slice(source.indexOf("function OverviewDetails"), source.indexOf("function kindLabel"));
     assert.doesNotMatch(details, /callsign|chosenPosition|seenSec|hex/i);
+    const traveler = readFileSync(new URL("../components/traveler-companion.tsx", import.meta.url), "utf8");
+    assert.doesNotMatch(traveler, /BaggageStatus|Baggage carousel/);
+  });
+});
+
+describe("Briefing refresh feedback", () => {
+  it("reports no change without adding a timeline entry", () => {
+    const before = composeBrief(facts({ now: "ride", stage: "ride" }));
+    const after = composeBrief(facts({ now: "ride", stage: "ride" }), before);
+    assert.equal(briefingRefreshOutcome(before, after), "no_change");
+    assert.deepEqual(after.log, before.log);
+    const source = readFileSync(new URL("../components/filed-app.tsx", import.meta.url), "utf8");
+    assert.match(source, /No new updates right now\./);
+  });
+
+  it("recognizes a meaningful new update and keeps feedback out of history", () => {
+    const before = composeBrief(facts({ now: "push", stage: "push" }));
+    const after = composeBrief(facts({ now: "taxi", stage: "taxi" }), before);
+    assert.equal(briefingRefreshOutcome(before, after), "updated");
+    assert.doesNotMatch(after.log.map((entry) => entry.text).join(" | "), /No new updates/i);
+  });
+
+  it("keeps a failed refresh distinct from no-change feedback", () => {
+    const brief = composeBrief(facts());
+    assert.equal(briefingRefreshOutcome(brief, brief, true), "failed");
+  });
+
+  it("shows a meaningful local update even if optional remote copy fails", () => {
+    const before = composeBrief(facts({ now: "push", stage: "push" }));
+    const after = composeBrief(facts({ now: "taxi", stage: "taxi" }), before);
+    assert.equal(briefingRefreshOutcome(before, after, true), "updated");
   });
 });
 
