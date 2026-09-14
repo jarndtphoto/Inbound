@@ -2963,6 +2963,25 @@ async function buildStory(query, resumed = null) {
 			fix: isFix
 		};
 	});
+	if (String(query).replace(/\s/g, "").toUpperCase() === "AA3197" || String(query).replace(/\s/g, "").toUpperCase() === "AAL3197") {
+		const weatherEvents = routeWeatherEvents(samples.filter((sample) => sample.frac >= progress));
+		console.log("[weather-entry-telemetry]", {
+			callsign: "AAL3197",
+			progress,
+			events: weatherEvents.map((event) => ({
+				key: event.key,
+				affectedSamples: samples.filter((sample) => event.ranges.some((range) => sample.frac >= range.from && sample.frac <= range.to))
+					.map((sample) => ({ frac: sample.frac, etaMin: sample.etaMin, lat: sample.lat, lon: sample.lon })),
+				startFrac: event.startFrac,
+				endFrac: event.endFrac,
+				startEtaMin: event.startEtaMin,
+				endEtaMin: event.endEtaMin,
+				start: { lat: event.start.lat, lon: event.start.lon },
+				end: { lat: event.end.lat, lon: event.end.lon },
+				marker: { lat: event.start.lat, lon: event.start.lon }
+			}))
+		});
+	}
 	const corridorAps = corridorStations(path, origin.iata, dest.iata, Object.values(AIRPORT_BY_ICAO), haversineNm);
 	const corridorMetsP = Promise.all(corridorAps.map((ap) => safe(loadMetar(ap.icao), { metar: null })));
 	const pirepPacks = await Promise.all(pirepRouteBounds(path).map((bbox) =>
