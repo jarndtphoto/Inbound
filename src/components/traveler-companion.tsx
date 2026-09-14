@@ -1,18 +1,29 @@
+import { parseFlightQuery } from "@/lib/flight-parse";
 import { BaggageStatus } from "./baggage-status";
 import { airlineStatusLink, flightDepartureDate } from "@/lib/airline-status";
 import { useEffect, useState } from "react";
 import type { FlightStory } from "@/lib/types";
 import { isLanded, nextStep } from "@/lib/traveler";
-export function TravelerCompanion({story, failed=false}:{story:FlightStory;failed?:boolean}) {
+export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:FlightStory;failed?:boolean;onTrackInbound?:(flight:string)=>void}) {
   const [now,setNow]=useState(story.fetchedAt);
   useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),15000);setNow(Date.now());return()=>clearInterval(t)},[]);
   const step=nextStep(story,now,failed);
+  const inbound=story.inbound.watch[0];
+  const inboundFlight=inbound?.callsign ? parseFlightQuery(inbound.callsign) : null;
+  const canTrackInbound=Boolean(onTrackInbound && inboundFlight && !inboundFlight.registration
+    && inboundFlight.callsign!==parseFlightQuery(story.callsign)?.callsign
+    && !inbound?.locked && ["airborne","watching","at_field"].includes(story.inbound.status)
+    && ["inbound","push"].includes(story.currentStage) && !story.times.pushed);
   const airlineLink=airlineStatusLink(story);
   let localTime="Local time unavailable";
   if(story.dest.tz)try{localTime=new Intl.DateTimeFormat(undefined,{timeZone:story.dest.tz,hour:"numeric",minute:"2-digit",timeZoneName:"short"}).format(now)}catch{}
   return <div className="mt-5 space-y-4">
     <section className="rounded-xl border border-border bg-surface p-5" aria-label="What happens next">
       <h2 className="text-xl font-semibold">{step.title}</h2><p className="mt-2 text-sm leading-relaxed">{step.body}</p>
+      {canTrackInbound && inboundFlight && <div className="mt-3">
+        <p className="text-sm text-muted">Incoming flight: {inbound?.iata}{inbound?.from ? ` · From ${inbound.from}` : ""}</p>
+        <button type="button" className="mt-2 min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-fg" onClick={()=>onTrackInbound?.(inboundFlight.callsign)}>Take me to inbound</button>
+      </div>}
       <p className="mt-3 text-xs text-muted">{step.confidence} · Updated {new Date(story.fetchedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</p>
     </section>
     <section className="rounded-xl border border-border bg-surface p-5" aria-label="Arrival help">
