@@ -1761,6 +1761,47 @@ function Skeleton({ query }: { query: string }) {
 }
 
 
+function passengerWeatherTitle(sample: FlightStory["route"]["samples"][number], nearArrival: boolean, destination: string) {
+  const place = nearArrival ? ` near ${destination}` : "";
+  if (sample.convective) return nearArrival ? `Storms near ${destination}` : "Thunderstorms near the route";
+  if (sample.chop === "severe") return nearArrival ? `Quite bumpy air possible${place}` : "Quite bumpy stretch ahead";
+  if (sample.chop === "moderate") return nearArrival ? `Bumpy air possible${place}` : "Bumpy stretch ahead";
+  if (sample.chop === "light") return nearArrival ? `A few light bumps possible${place}` : "Possible light bumps";
+  if (sample.cloud) return nearArrival ? `Cloudy stretch near ${destination}` : "Cloudy stretch";
+  return "Weather along the route";
+}
+
+function passengerWeatherImpact(sample: FlightStory["route"]["samples"][number]) {
+  const bump = sample.chop === "severe"
+    ? "The ride may feel quite bumpy for part of this stretch."
+    : sample.chop === "moderate"
+      ? "You may notice a bumpy stretch."
+      : sample.chop === "light"
+        ? "You may notice a few light bumps."
+        : "";
+  if (sample.convective) return `Storms are being monitored near our path. The flight may route around the roughest weather.${bump ? ` ${bump}` : ""}`;
+  if (sample.cloud && bump) return `${bump} Clouds may also limit the view outside.`;
+  if (sample.cloud) return "Clouds may limit the view outside for this part of the flight.";
+  return bump || "Conditions may change as the flight progresses.";
+}
+
+function technicalWeatherProducts(text: string | null | undefined) {
+  const matches = String(text || "").toUpperCase().match(/G-AIRMET|AIRMET|SIGMET|PIREP|CWA|TCF|METAR|TAF/g) || [];
+  return [...new Set(matches)].join(" · ");
+}
+
+function passengerWeatherSource(text: string | null | undefined, kind?: FlightStory["hazards"][number]["kind"]) {
+  const value = String(text || "").toUpperCase();
+  if (kind === "pirep" || value.includes("PIREP") || value.includes("REPORTED")) return "Reported by another aircraft";
+  if (value.includes("CWA")) return "Air traffic weather advisory";
+  if (value.includes("TCF")) return "Thunderstorm forecast";
+  if (value.includes("SIGMET")) return "Official aviation weather alert";
+  if (value.includes("AIRMET")) return "Aviation weather advisory";
+  if (value.includes("TAF")) return "Airport forecast";
+  if (value.includes("METAR")) return "Current airport weather";
+  return "Route weather forecast";
+}
+
 function WeatherTimeline({ story }: { story: FlightStory }) {
   const airborne = story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach";
   const landed = story.times.landKind === "actual" || story.currentStage === "gate";
@@ -1807,8 +1848,8 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       return hours ? `${hours} ${hours === 1 ? "hour" : "hours"}${minutes % 60 ? ` ${minutes % 60} ${minutes % 60 === 1 ? "minute" : "minutes"}` : ""}` : `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
     };
     const start = airborne
-      ? from < 1 ? "Around now" : `Starts in about ${formatMinutes(from)}`
-      : from < 1 ? "Around takeoff" : `Starts about ${formatMinutes(from)} after takeoff`;
+      ? from < 1 ? "Around now" : `About ${formatMinutes(from)} ahead`
+      : from < 1 ? "Around takeoff" : `About ${formatMinutes(from)} after takeoff`;
     const span = Math.round(to - from);
     const intoFlight = airborne && story.times.airborne && takeoff ? Math.max(0, (story.fetchedAt / 1000 - takeoff) / 60) + from : from;
     return <span>{start}{airborne && <span className="block">Around {formatMinutes(intoFlight)} into flight</span>}{span > 0 && <span className="block">{group.gaps ? "Intermittent areas over about " : "Continues for about "}{formatMinutes(span)}</span>}</span>;
@@ -1818,7 +1859,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     <h3 className="mt-1 text-lg font-semibold">{field.iata}</h3>
     <p className="mt-3 text-sm leading-relaxed">{field.decoded?.summary || "Current observation unavailable."}</p>
     <p className="mt-3 text-sm leading-relaxed">Forecast: {field.taf || "Unavailable."}</p>
-    <details className="mt-3 text-sm"><summary className="cursor-pointer py-2">Observation source · METAR</summary><p className="break-words font-mono text-muted">{field.rawMetar || "Observation unavailable."}</p></details>
+    <details className="mt-3 text-sm"><summary className="cursor-pointer py-2">Current airport weather <span className="text-xs text-muted">· METAR</span></summary><p className="break-words font-mono text-muted">{field.rawMetar || "Observation unavailable."}</p></details>
   </article>;
   return <div className="space-y-4">
     <div><h2 className="text-xl font-semibold">Weather through your flight</h2>
@@ -1829,22 +1870,32 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     {(!story.weatherCoverage || story.weatherCoverage.failedSources.length > 0) && <p role="status" className="rounded-xl border border-border p-4 text-sm">Weather coverage is incomplete. Missing feeds do not mean smooth conditions. {story.weatherCoverage?.failedSources.join(" · ")}</p>}
     <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
     {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="space-y-3">
-      {visibleGroups.map((g, i) => <li key={i} className="rounded-xl border border-border bg-surface p-4">
-        <h4 className="mb-2 font-semibold">Weather event {i + 1}</h4>
-        <p className="flex items-center gap-2 text-sm text-muted"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
-        <p className="mt-2 font-semibold">{g.label}</p>{g.gaps && <p className="mt-1 text-sm text-muted">Nearby areas grouped together; brief gaps may occur.</p>}
-        {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
-          <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={`Weather event ${i + 1}: ${g.label}`}>
-            <RouteMap story={story} fixedViewport weatherPreview={{ eventNumber: i + 1, label: g.label, from: g.start.frac, to: g.end.frac, ranges: g.ranges }} />
-          </div>
-          <figcaption className="mt-2 text-xs text-muted">Highlighted: the forecast area along your route. Radar colors show recent precipitation, not turbulence or the weather guaranteed at your arrival time. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
-        </figure>}
-        {g.note && <details className="mt-2 text-sm text-muted"><summary className="cursor-pointer py-2">More details</summary><p>{g.note}</p></details>}
-      </li>)}
+      {visibleGroups.map((g, i) => {
+        const title = passengerWeatherTitle(g.start, g.end.frac >= 0.85, story.dest.city || story.dest.iata);
+        const source = passengerWeatherSource(g.note);
+        const technical = technicalWeatherProducts(g.note);
+        return <li key={i} className="rounded-xl border border-border bg-surface p-4">
+          <h4 className="text-lg font-semibold">{title}</h4>
+          <p className="mt-2 flex items-center gap-2 text-sm font-medium"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
+          <p className="mt-3 text-sm leading-relaxed text-muted">{passengerWeatherImpact(g.start)}</p>
+          {g.gaps && <p className="mt-2 text-sm text-muted">This may come and go briefly along the highlighted stretch.</p>}
+          <p className="mt-3 text-sm font-medium">{source}{technical ? <span className="ml-1 text-xs font-normal text-muted">· {technical}</span> : null}</p>
+          {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
+            <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={title}>
+              <RouteMap story={story} fixedViewport weatherPreview={{ eventNumber: i + 1, label: title, from: g.start.frac, to: g.end.frac, ranges: g.ranges }} />
+            </div>
+            <figcaption className="mt-2 text-xs text-muted">Highlighted: where these conditions overlap the route. Radar colors show recent precipitation; conditions may change before the flight reaches this area. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
+          </figure>}
+          {g.note && <details className="mt-2 text-sm text-muted"><summary className="cursor-pointer py-2">Technical details</summary><p>{g.note}</p></details>}
+        </li>;
+      })}
     </ol> : <p className="text-sm text-muted">{samples.length ? "No significant conditions flagged in the available route forecast. This does not guarantee a smooth ride." : "Route weather data unavailable."}</p>}
     {fieldCard(story.dest, "Landing · arrival conditions")}
-    <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer py-2">Advisory sources and valid times</summary>
-      {story.hazards.filter(h => h.remaining).map(h => <div key={h.id} className="mt-3 text-sm"><p className="font-semibold">{h.label}</p><p className="text-muted">{h.validity || "Validity time unavailable"}</p><p className="mt-1 text-muted">{h.detail}</p></div>)}
+    <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer py-2">Weather sources and timing</summary>
+      {story.hazards.filter(h => h.remaining).map(h => {
+        const technical = technicalWeatherProducts(`${h.label} ${h.detail}`);
+        return <div key={h.id} className="mt-3 text-sm"><p className="font-semibold">{passengerWeatherSource(`${h.label} ${h.detail}`, h.kind)}</p>{technical && <p className="text-xs text-muted">{technical}</p>}<p className="text-muted">{h.validity || "Timing unavailable"}</p><p className="mt-1 text-muted">{h.detail}</p></div>;
+      })}
       {!story.hazards.some(h => h.remaining) && <p className="mt-3 text-sm text-muted">No remaining advisories returned. This does not establish complete weather coverage.</p>}
     </details>
   </div>;

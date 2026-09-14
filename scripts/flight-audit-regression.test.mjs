@@ -12,6 +12,38 @@ registerHooks({ resolve(specifier, context, nextResolve) {
 }});
 const { loadFlightStory, motionFromTrace, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi } = await import('../src/lib/story.server.ts');
 
+describe('passenger weather presentation', () => {
+  const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
+  const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
+
+  it('does not use numbered weather events as passenger titles', () => {
+    assert.doesNotMatch(appSource, /Weather event \{i \+ 1\}/);
+    assert.doesNotMatch(mapSource, /WEATHER EVENT/);
+  });
+
+  it('uses experience-based weather titles and impact copy', () => {
+    assert.match(appSource, /Bumpy stretch ahead/);
+    assert.match(appSource, /Thunderstorms near the route/);
+    assert.match(appSource, /Possible light bumps/);
+    assert.match(appSource, /Clouds may limit the view outside/);
+  });
+
+  it('translates aviation products into passenger source labels', () => {
+    assert.match(appSource, /Reported by another aircraft/);
+    assert.match(appSource, /Official aviation weather alert/);
+    assert.match(appSource, /Aviation weather advisory/);
+    assert.match(appSource, /Air traffic weather advisory/);
+    assert.match(appSource, /Thunderstorm forecast/);
+    assert.match(appSource, /Current airport weather/);
+    assert.match(appSource, /Airport forecast/);
+  });
+
+  it('retains internal marker numbering for map association', () => {
+    assert.match(appSource, /eventNumber: i \+ 1/);
+    assert.match(mapSource, /eventNumber: number/);
+  });
+});
+
 describe('final approach passenger stage', () => {
   const dest = { lat: 0, lon: 0 };
   const origin = { lat: 0, lon: -10 };
