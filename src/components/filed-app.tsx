@@ -44,6 +44,13 @@ function readCachedStory(q: string): FlightStory | undefined {
   }
 }
 
+export function cachedStorySafeDuringRefreshFailure(story: FlightStory, now = Date.now()) {
+  const moving = story.live || story.currentStage === "ride" || story.currentStage === "arrival";
+  const positionAge = story.providers?.chosenPositionAgeSec;
+  const positionFresh = !moving || (typeof positionAge === "number" && positionAge <= 60);
+  return positionFresh && now - story.fetchedAt <= (moving ? 15_000 : 45 * 60_000);
+}
+
 function writeCachedStory(q: string, story: FlightStory) {
   try {
     const samples = story.route.samples;
@@ -336,7 +343,7 @@ export function FiledApp() {
         const s = await getFlightStory({ data: { q: query, fresh } });
         if (!storyMatchesQuery(s, query)) {
           const cached = readCachedStory(query);
-          if (!fresh && cached && storyMatchesQuery(cached, query)) return rememberOrigOnClient(cached);
+          if (!fresh && cached && storyMatchesQuery(cached, query) && cachedStorySafeDuringRefreshFailure(cached)) return rememberOrigOnClient(cached);
           throw new Error("Could not load that flight. Try another number.");
         }
         const merged = rememberOrigOnClient(s);
@@ -345,7 +352,7 @@ export function FiledApp() {
       } catch (err) {
         if (fresh) throw err;
         const cached = readCachedStory(query);
-        if (cached && storyMatchesQuery(cached, query)) return rememberOrigOnClient(cached);
+        if (cached && storyMatchesQuery(cached, query) && cachedStorySafeDuringRefreshFailure(cached)) return rememberOrigOnClient(cached);
         throw err;
       }
     },
@@ -824,6 +831,7 @@ function TimesStrip({
   const t = story.times;
   const down = wheelsDown(story);
   const airborne = flightAirborne(story) && !down;
+  const liveFresh = cachedStorySafeDuringRefreshFailure(story);
   const parked = story.currentStage === "gate";
   const delay = t?.delayMin ?? null;
   const late = (delay ?? 0) >= 5;
@@ -868,9 +876,9 @@ function TimesStrip({
               Remaining
             </p>
             <p className="mt-1 font-display text-2xl font-semibold leading-none">
-              {formatDuration(story.route.etaMin)}
+              {liveFresh ? formatDuration(story.route.etaMin) : "Updating…"}
             </p>
-            <p className="mt-1 text-xs text-muted">{formatMiles(story.route.remainingNm)}</p>
+            <p className="mt-1 text-xs text-muted">{liveFresh ? formatMiles(story.route.remainingNm) : "Live position is stale"}</p>
           </div>
         ) : down ? (
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">

@@ -2,6 +2,7 @@ import { haversineNm } from "./geo.ts";
 
 export type FlightProvider = "fr24" | "flightaware" | "adsb";
 export type Confidence = "high" | "medium" | "low";
+export type ProviderState = "ACTIVE" | "DISABLED" | "AUTH_FAILED" | "RATE_LIMITED" | "NO_MATCH" | "ERROR";
 
 export type NormalizedPosition = {
   provider: FlightProvider;
@@ -120,6 +121,7 @@ export function normalizedToLive(position: NormalizedPosition) {
     phase: position.onGround ? ((position.gsKt ?? 0) > 8 ? "taxi" : "parked") : "cruise",
     extrapolated: false,
     seenSec: positionAgeSec(position),
+    seenAt: position.seenAt,
     source: position.provider,
     confidence: position.confidence,
   };
@@ -128,6 +130,23 @@ export function normalizedToLive(position: NormalizedPosition) {
 export function finalApproachEtaMin(remainingNm: number, gsKt: number): number {
   const kin = remainingNm / Math.max(90, gsKt) * 60;
   return remainingNm < 0.15 ? 0 : Math.min(60, kin);
+}
+
+export function passengerEtaMin(input: {
+  remainingNm: number;
+  directToDestNm: number | null;
+  gsKt: number;
+  providerEtaMin: number | null;
+}): number {
+  const { remainingNm, directToDestNm, gsKt, providerEtaMin } = input;
+  const onFinalApproach = directToDestNm != null && directToDestNm <= 25;
+  if (onFinalApproach) return finalApproachEtaMin(remainingNm, gsKt);
+  const nearDest = remainingNm < 80;
+  const speed = gsKt > 120 && nearDest ? gsKt : Math.max(420, gsKt > 300 ? gsKt : 0) || 440;
+  const kinetic = remainingNm / speed * 60;
+  if (nearDest && gsKt > 120) return Math.max(1, kinetic);
+  if (providerEtaMin != null && providerEtaMin > 1) return providerEtaMin;
+  return Math.max(1, kinetic);
 }
 
 export function emptyTimes(): FlightTimes { return { scheduled: null, estimated: null, actual: null }; }

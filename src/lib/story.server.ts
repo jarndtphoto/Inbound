@@ -33,7 +33,7 @@ import {
 	wxDeltas,
 } from "./wx-brief";
 import { faAltFt, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
-import { choosePosition, finalApproachEtaMin, normalizedToLive, type NormalizedFlight, type NormalizedPosition } from "./flight-data";
+import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFlight, type NormalizedPosition } from "./flight-data";
 import { loadOfficialFlightData } from "./official-flight-data.server";
 import {
 	fetchAround,
@@ -489,6 +489,9 @@ function rememberKin(identKey, live) {
 function restoreKin(identKey, live, dest, aware) {
 	const prev = lastKinByIdent.get(identKey);
 	if (!prev || Date.now() - prev.at > 20 * 60_000) return live;
+	// A remembered enroute point is useful through a transient outage, but is
+	// unsafe on approach: it can remain miles behind the aircraft at touchdown.
+	if (dest && haversineNm(prev, dest) < 80 && Date.now() - prev.at > 45_000) return live;
 	if (destParkedLeftover(prev, dest, aware)) return live;
 	if (!live) {
 		const age = (Date.now() - prev.at) / 1000;
@@ -526,6 +529,8 @@ function toLive(raw) {
 	const gsKt = typeof raw.gs === "number" ? raw.gs : typeof raw.spd === "number" ? raw.spd : null;
 	const vertFpm = typeof raw.baro_rate === "number" ? raw.baro_rate : null;
 	const type = raw.t?.trim() || null;
+	const fusedSeen = raw._fusion?.ageSec ?? fusionSeen(raw);
+	const seenSec = fusedSeen === 999 ? null : fusedSeen;
 	return {
 		hex,
 		callsign: String(raw.flight ?? "").replace(/\s/g, "").toUpperCase() || null,
@@ -542,7 +547,9 @@ function toLive(raw) {
 		vertFpm,
 		onGround,
 		extrapolated: Boolean(raw.extrapolated ?? raw._fusion?.extrapolated),
-		seenSec: raw._fusion?.ageSec ?? (fusionSeen(raw) === 999 ? null : fusionSeen(raw)),
+		seenSec,
+		seenAt: seenSec == null ? null : Date.now() / 1000 - Math.max(0, seenSec),
+		source: "adsb",
 		phase: phaseOf({
 			onGround,
 			gsKt,
@@ -749,22 +756,7 @@ export function remainingEtaMin(remainingNm, directDestinationNm, live, aware) {
 	const now = Date.now() / 1e3;
 	const fa = aware?.landing?.estimated ?? aware?.landing?.scheduled ?? null;
 	const faMin = typeof fa === "number" && fa > now ? (fa - now) / 60 : null;
-	const gs = live?.gsKt ?? 0;
-	const onFinalApproach = directDestinationNm != null && directDestinationNm <= 25;
-	const nearDest = remainingNm < 80;
-	// Keep the estimate converging through flare and rollout. Groundspeed can
-	// fall rapidly at touchdown, but a stale provider ETA must never take over
-	// again once live position has entered the final-approach zone.
-	const speed = onFinalApproach
-		? Math.max(90, gs)
-		: gs > 120 && nearDest
-		? gs
-		: Math.max(420, gs > 300 ? gs : 0) || 440;
-	const kin = remainingNm / speed * 60;
-	if (onFinalApproach) return finalApproachEtaMin(remainingNm, gs);
-	if (nearDest && gs > 120) return Math.max(1, kin);
-	if (faMin != null && faMin > 1) return faMin;
-	return Math.max(1, kin);
+	return passengerEtaMin({ remainingNm, directToDestNm: directDestinationNm, gsKt: live?.gsKt ?? 0, providerEtaMin: faMin });
 }
 async function loadRoute(callsign) {
 	return cached(`route:${callsign}`, 18e5, async () => {
@@ -2041,12 +2033,24 @@ function liveFromAware(aware) {
 	const type = live.type ?? aware?.type ?? null;
 	return {
 		...live,
+		seenAt: Date.now() / 1000 - Math.max(0, live.seenSec ?? 0),
+		source: "flightaware-public",
 		type,
 		typeName: airframeOf(type)?.name ?? type,
 		year: null,
 		operator: null,
 		vertFpm: null,
 	};
+}
+
+function liveAgeSec(live) {
+	if (!live) return null;
+	if (Number.isFinite(live.seenAt)) return Math.max(0, Date.now() / 1000 - live.seenAt);
+	return Number.isFinite(live.seenSec) ? Math.max(0, live.seenSec) : null;
+}
+
+function providerDistance(a, b) {
+	return a && b ? haversineNm(a, b) : null;
 }
 function normalizedAdsb(live): NormalizedPosition | null {
 	if (!live || !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) return null;
@@ -2248,6 +2252,22 @@ async function buildStory(query) {
 					if (cand) live = asOnGround(cand, dest);
 				}
 			}
+		}
+	}
+	// Reacquire around the destination before evaluating touchdown. The normal
+	// identity lookup can return a remembered/track point that is valid enroute
+	// but much too old for final approach.
+	const preLandingAgeSec = liveAgeSec(live);
+	const preLandingDistanceNm = live && dest ? haversineNm(live, dest) : null;
+	const providerLanding = aware?.landing?.estimated ?? aware?.landing?.scheduled ?? null;
+	const landingSoon = providerLanding != null && providerLanding - Date.now() / 1000 < 75 * 60;
+	if (!Boolean(aware?.landing?.actual) && dest && (live?.extrapolated || (preLandingAgeSec ?? 999) > 15) &&
+		((preLandingDistanceNm ?? 999) < 80 || landingSoon)) {
+		const nearDest = await safe(adsbAround(dest.lat, dest.lon, 45), []);
+		const match = pickAroundAircraft(nearDest, parsed, aware, dest, origin, 45, knownHex || live?.hex);
+		if (match) {
+			const cand = asOnGround(toLive(match), dest);
+			if (cand) live = cand;
 		}
 	}
 	const faLanded = Boolean(aware?.landing?.actual) || /arrived|landed/i.test(aware?.status ?? "");
@@ -2484,7 +2504,9 @@ async function buildStory(query) {
 					onGround: false,
 					phase: (aware?.altFt ?? 0) < 10000 ? "climb" : "cruise",
 					extrapolated: true,
-					seenSec: 0
+					seenSec: null,
+					seenAt: null,
+					source: "estimated"
 				};
 			}
 		}
@@ -2905,22 +2927,44 @@ async function buildStory(query) {
 		distPark,
 		parkedAtGate
 	});
-	if (directToDestNm != null && directToDestNm <= 25) {
-		console.log("[final-approach]", {
+	const finalPositionAgeSec = liveAgeSec(live);
+	const finalPositionSource = live?.source ?? (live?.extrapolated ? "estimated" : "fallback");
+	const faPosition = official.flightaware?.position ?? null;
+	const fr24Position = official.fr24?.position ?? null;
+	const adsbPosition = normalizedAdsb(adsbLive);
+	const providerDistancesNm = {
+		flightawareToFr24: providerDistance(faPosition, fr24Position),
+		flightawareToAdsb: providerDistance(faPosition, adsbPosition),
+		fr24ToAdsb: providerDistance(fr24Position, adsbPosition)
+	};
+	if ((directToDestNm != null && directToDestNm <= 40) || landingSoon) {
+		console.log("[flight-telemetry]", {
+			callsignRequested: query,
 			callsign: liveCs,
+			registration: live?.registration ?? aware?.tail ?? null,
+			hex: live?.hex ?? aware?.hex ?? null,
+			destination: { iata: dest.iata, icao: dest.icao, lat: dest.lat, lon: dest.lon },
 			livePosition: live ? { lat: live.lat, lon: live.lon } : null,
 			altitudeFt: live?.altFt ?? null,
 			groundspeedKt: live?.gsKt ?? null,
+			onGround: live?.onGround ?? null,
+			track: live?.track ?? null,
 			routeRemainingNm,
 			directToDestNm,
 			remainingNm,
 			etaMin,
 			currentStage: current,
-			landed: ourLanded,
-			positionProvider: positionChoice.chosen?.provider ?? live?.source ?? "fallback",
-			positionAgeSec: positionChoice.chosen ? Math.max(0, Date.now() / 1000 - positionChoice.chosen.seenAt) : live?.seenSec ?? null,
+			ourLanded,
+			positionProvider: finalPositionSource,
+			positionSeenAt: live?.seenAt ?? (finalPositionAgeSec != null ? Date.now() / 1000 - finalPositionAgeSec : null),
+			positionAgeSec: finalPositionAgeSec,
+			flightawarePosition: faPosition,
+			fr24Position,
+			adsbPosition,
+			providerStatus: official.status,
 			providerEta: { flightaware: official.flightaware?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
-			disagreementNm: positionChoice.disagreementNm
+			providerDistancesNm,
+			fusionDisagreementNm: positionChoice.disagreementNm
 		});
 	}
 	const airline = airlineOf(liveCs) ?? route?.airline?.name ?? null;
@@ -2972,7 +3016,9 @@ async function buildStory(query) {
 		}
 	}
 	let wx = null;
-	try {
+	// Final-approach position must reach the client inside the story deadline.
+	// Corridor weather is non-critical here and can involve several slow feeds.
+	if (directToDestNm == null || directToDestNm > 40) try {
 		if (times.landUnix || times.pushUnix) {
 			origin.taf = decodeTafPassenger(origin.tafRaw, times.pushUnix ?? Date.now() / 1e3) ?? origin.taf;
 			dest.taf = decodeTafPassenger(dest.tafRaw, times.landUnix ?? Date.now() / 1e3) ?? dest.taf;
@@ -3021,12 +3067,15 @@ async function buildStory(query) {
 		currentStage: current,
 		providers: {
 			configured: official.configured,
-			chosenPosition: positionChoice.chosen?.provider ?? live?.source ?? "fallback",
-			chosenPositionAgeSec: positionChoice.chosen ? Math.max(0, Date.now() / 1000 - positionChoice.chosen.seenAt) : live?.seenSec ?? null,
-			fr24Position: positionChoice.candidates.fr24 ?? official.fr24?.position ?? null,
-			flightawarePosition: positionChoice.candidates.flightaware ?? official.flightaware?.position ?? null,
-			adsbPosition: positionChoice.candidates.adsb ?? normalizedAdsb(adsbLive),
+			status: official.status,
+			chosenPosition: finalPositionSource,
+			chosenPositionSeenAt: live?.seenAt ?? (finalPositionAgeSec != null ? Date.now() / 1000 - finalPositionAgeSec : null),
+			chosenPositionAgeSec: finalPositionAgeSec,
+			fr24Position,
+			flightawarePosition: faPosition,
+			adsbPosition,
 			disagreementNm: positionChoice.disagreementNm,
+			providerDistancesNm,
 			providerEta: { flightaware: official.flightaware?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
 			remainingNm,
 			etaMin,
@@ -3108,7 +3157,10 @@ export async function loadFlightStory(query, opts) {
 		const work = cached(key, fresh ? 0 : 4e3, () => buildStory(query));
 		let timer;
 		const timed = new Promise((_, rej) => {
-			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 12e3);
+			// A cold multi-provider refresh can legitimately take longer than the old
+			// 12-second deadline. Timing it out discarded an already-correct final
+			// approach result and made the client retain an older story.
+			timer = setTimeout(() => rej(new Error("Could not load that flight. Try again.")), 20e3);
 		});
 		try {
 			return await Promise.race([work, timed]);

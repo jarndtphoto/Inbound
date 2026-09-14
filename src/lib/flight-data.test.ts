@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { choosePosition, finalApproachEtaMin, type NormalizedPosition } from "./flight-data.ts";
+import { choosePosition, finalApproachEtaMin, passengerEtaMin, type NormalizedPosition } from "./flight-data.ts";
 import { normalizeAeroApiFlight } from "./flightaware-aeroapi.server.ts";
 import { normalizeFr24Position } from "./fr24.server.ts";
 
@@ -40,5 +40,9 @@ describe("AA2668 touchdown ETA regression", () => {
   it("collapses from live geometry despite a stale provider ETA", () => {
     const values = [[15, 160], [10, 150], [5, 140], [2, 120], [0.8, 90], [0.1, 25]].map(([nm, gs]) => finalApproachEtaMin(nm!, gs!));
     assert.deepEqual(values.map((v) => Math.round(v * 10) / 10), [5.6, 4, 2.1, 1, 0.5, 0]);
+  });
+  it("cannot expose a stale provider ETA at fresh touchdown geometry", () => {
+    const eta = passengerEtaMin({ remainingNm: 0.7, directToDestNm: 0.7, gsKt: 32, providerEtaMin: 20 });
+    assert.ok(eta <= 1, `expected <= 1 minute, got ${eta}`);
   });
 });

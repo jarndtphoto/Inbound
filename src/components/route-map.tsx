@@ -584,7 +584,7 @@ export function RouteMap({ story }: { story: FlightStory }) {
           {story.route.source === "track" ? "ACTUAL TRACK · FIXES" : "PLANNED PATH"}
         </p>
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {atGate ? "At the gate" : landed ? "Landed" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
+          {atGate ? "At the gate" : landed ? "Landed" : Date.now() - story.fetchedAt > 15_000 || (story.providers?.chosenPositionAgeSec ?? Infinity) > 60 ? "Updating live position…" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
         </p>
       </div>
         {zoom.s > 1.02 ? (
