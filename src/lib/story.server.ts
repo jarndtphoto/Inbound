@@ -2726,7 +2726,6 @@ async function buildStory(query, resumed = null) {
 		const c = pirepChop(String(f.properties?.tbInt1 ?? f.properties?.turbulence ?? f.properties?.tb ?? raw));
 		if (!c) continue;
 		const pAlt = pirepAltFt(f.properties, raw);
-		if (remainingNm < 50 && (pAlt == null || pAlt > 14_000)) continue;
 		let hit = false;
 		for (const s of samples) {
 			const d = haversineNm({ lat, lon }, s);

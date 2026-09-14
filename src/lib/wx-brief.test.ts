@@ -210,3 +210,22 @@ describe("worseChop", () => {
     assert.equal(worseChop("light", "severe"), "severe");
   });
 });
+
+
+describe("airport-leg turbulence evidence", () => {
+  it("rejects missing or high layers below 10,000 feet", () => {
+    assert.equal(gairmetApplies("TURB-LO", {}, 6000), false);
+    assert.equal(gairmetApplies("TURB-LO", {base:"100",top:"180"}, 9000), false);
+    assert.equal(gairmetApplies("TURB-HI", {base:"180",top:"350"}, 5000), false);
+    assert.equal(gairmetApplies("TURB-LO", {base:"SFC",top:"080"}, 6000), true);
+    assert.equal(gairmetApplies("TURB-LO", {base:"020",top:"040"}, 6000), false);
+    assert.equal(gairmetApplies("LLWS", {}, 2000), true);
+  });
+  it("requires a nearby low-level PIREP, preserving cruise reports", () => {
+    const sample={lat:41,lon:-87,altFt:6000};
+    for (const altFt of [null,10000,14000,35000]) assert.equal(pirepMatchesSample({...sample,altFt},sample,10),false);
+    assert.equal(pirepMatchesSample({...sample,altFt:7000},sample,10),true);
+    assert.equal(pirepMatchesSample({...sample,altFt:7000},sample,35),false);
+    assert.equal(pirepMatchesSample({...sample,altFt:35000},{...sample,altFt:34000},20),true);
+  });
+});

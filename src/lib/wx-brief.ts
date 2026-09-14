@@ -126,6 +126,14 @@ export function gairmetApplies(hazard: string, props: { base?: unknown; top?: un
   if (h === "LLWS") return sampleAlt <= 4_000;
   if (h === "IFR" || h === "MT_OBSC") return sampleAlt <= 12_000;
   const { lo, hi } = bandFt(props?.base, props?.top);
+  // Airport legs require an explicit layer below 10,000 ft. Do not let
+  // altitude padding or an unspecified regional advisory paint the approach.
+  if (h.startsWith("TURB") && sampleAlt < 10_000) {
+    const base = props?.base;
+    if (base == null || String(base).trim() === "") return false;
+    if (!/^(?:SFC|GND|SURFACE|(?:FL)?\s*\d+(?:\s*FT)?)$/i.test(String(base).trim())) return false;
+    return lo < 10_000 && hi >= lo && altOverlaps(sampleAlt, lo, hi, 0);
+  }
   if (h === "TURB-HI" && (lo > 0 || hi < 45_000)) return altOverlaps(sampleAlt, lo || 18_000, hi);
   if (h === "TURB-LO" && (lo > 0 || hi < 45_000 || String(props?.base || "").toUpperCase() === "SFC")) {
     return altOverlaps(sampleAlt, lo, hi || 18_000);
@@ -169,6 +177,11 @@ export function pirepMatchesSample(
   altPad = 8_000,
 ): boolean {
   if (distNm > maxNm) return false;
+  // A cruising report must not spill onto a lower-altitude airport leg.
+  if (sample.altFt < 10_000) {
+    return pirep.altFt != null && pirep.altFt < 10_000 &&
+      distNm <= Math.min(25, maxNm) && Math.abs(pirep.altFt - sample.altFt) <= 2_000;
+  }
   if (pirep.altFt == null) return distNm <= Math.min(28, maxNm);
   return Math.abs(pirep.altFt - sample.altFt) <= altPad;
 }
