@@ -380,7 +380,7 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { from: number; to: number; ranges?: {from: number; to: number}[] } }) {
+export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { eventNumber: number; label: string; from: number; to: number; ranges?: {from: number; to: number}[] } }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [mapHeight, setMapHeight] = useState(800);
   useEffect(() => {
@@ -470,7 +470,12 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     ? Math.max(0, (story.fetchedAt / 1000 - takeoffAt) / 60) : null;
   const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
     ? (story.times.landUnix - takeoffAt) / 60 : null;
-  const ticks = areas.filter(area => area.label).map(area => ({
+  // A preview represents one timeline event, including any grouped ranges.
+  const alertAreas = weatherPreview
+    ? future.length ? [{ start: future[0], end: future[future.length - 1], label: weatherPreview.label }] : []
+    : areas.filter(area => area.label);
+  const ticks = alertAreas.map((area, index) => ({
+    eventNumber: weatherPreview?.eventNumber ?? index + 1,
     ...area.start,
     alertLabel: area.label,
     durationMin: airborneNow ? area.end.etaMin - area.start.etaMin
@@ -578,7 +583,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
             width="5.2"
             height="5.2"
             transform={`rotate(45 ${sx(s.lon)} ${sy(s.lat)})`}
-            className="fill-fg/55"
+            className="route-fix-marker fill-fg/55"
           />
         ))}
 
@@ -602,10 +607,10 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           );
         })}
 
-        {ticks.map((s, i) => (
-          <g key={s.frac} aria-label={`Weather marker ${i + 1}`}>
+        {ticks.map((s) => (
+          <g key={s.frac} aria-label={`Weather marker ${s.eventNumber}`}>
             <circle cx={sx(s.lon)} cy={sy(s.lat)} r="10" className="fill-bg stroke-fg" strokeWidth="2" />
-            <text x={sx(s.lon)} y={sy(s.lat) + 4} textAnchor="middle" className="fill-fg" fontSize="12" fontWeight="700">{i + 1}</text>
+            <text x={sx(s.lon)} y={sy(s.lat) + 4} textAnchor="middle" className="fill-fg" fontSize="12" fontWeight="700">{s.eventNumber}</text>
           </g>
         ))}
 
@@ -640,7 +645,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {weatherPreview ? "FORECAST AREA" : story.route.source === "track" ? "ACTUAL TRACK · FIXES" : "PLANNED PATH"}
+          {weatherPreview ? `WEATHER EVENT ${weatherPreview.eventNumber}` : story.route.source === "track" ? "TRACK + PROJECTED ROUTE" : "PROJECTED ROUTE"}
         </p>
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
           {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
@@ -683,7 +688,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         <details className="group">
           <summary className="cursor-pointer py-3 font-semibold">Weather alerts</summary>
           <div className="absolute inset-x-0 bottom-full max-h-48 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
-            {ticks.map((s, i) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{i + 1}</span><div><p className="font-semibold">{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
+            {ticks.map((s) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{s.eventNumber}</span><div><p className="font-semibold">{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
             
             {!ticks.length && <p>No map alerts shown. Coverage may be incomplete.</p>}
           </div>

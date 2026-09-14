@@ -1,8 +1,12 @@
+import { inboundDiversionText } from "@/lib/inbound-diversion";
+import { TravelerCompanion } from "@/components/traveler-companion";
+import { isLanded, nextStep } from "@/lib/traveler";
 import { briefRide } from "@/lib/brief";
 import { briefLogText, composeBrief, logManualRefresh, BRIEF_LOG_LABEL, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
 import { formatDuration, formatMiles, feetPretty } from "@/lib/geo";
-import { storyMatchesQuery } from "@/lib/flight-parse";
+import { parseFlightQuery, storyMatchesQuery } from "@/lib/flight-parse";
+import { RESUME_MAX_AGE_MS, resumeFromStory, savedScheduleNote } from "@/lib/flight-resume";
 import { useFiled } from "@/lib/store";
 import { getFlightStory } from "@/lib/story";
 import type { Comfort, FlightStory, StageId } from "@/lib/types";
@@ -24,7 +28,8 @@ const STAGES: { id: StageId; label: string }[] = [
   { id: "gate", label: "At the gate" },
 ];
 
-const STORY_CACHE_KEY = "filed-story-cache-v8";
+const STORY_CACHE_KEY = "filed-story-cache-v9";
+const LEGACY_STORY_CACHE_KEY = "filed-story-cache-v8";
 const ORIG_MEM_KEY = "filed-orig-sched-v2";
 
 function normFlight(q: string) {
@@ -34,13 +39,13 @@ function normFlight(q: string) {
 function readCachedStory(q: string): FlightStory | undefined {
   if (typeof window === "undefined") return undefined;
   try {
-    const raw = localStorage.getItem(STORY_CACHE_KEY);
-    if (!raw) return undefined;
-    const parsed = JSON.parse(raw) as { k: string; story: FlightStory; at: number };
-    if (parsed.k !== normFlight(q)) return undefined;
-    if (Date.now() - parsed.at > 45 * 60_000) return undefined;
-    if (!parsed.story?.iata) return undefined;
-    return parsed.story;
+    const key = parseFlightQuery(q)?.callsign ?? normFlight(q);
+    const records = JSON.parse(localStorage.getItem(STORY_CACHE_KEY) || "{}");
+    const legacy = JSON.parse(localStorage.getItem(LEGACY_STORY_CACHE_KEY) || "null");
+    const entry = records[key] ?? (legacy && storyMatchesQuery(legacy.story ?? {}, q) ? legacy : undefined);
+    if (!entry || !Number.isFinite(entry.at) || Date.now() - entry.at > RESUME_MAX_AGE_MS) return undefined;
+    if (!entry.story?.iata || !storyMatchesQuery(entry.story, q)) return undefined;
+    return entry.story;
   } catch {
     return undefined;
   }
@@ -61,7 +66,13 @@ function writeCachedStory(q: string, story: FlightStory) {
       ...story,
       route: { ...story.route, samples: slimSamples },
     };
-    localStorage.setItem(STORY_CACHE_KEY, JSON.stringify({ k: normFlight(q), story: slim, at: Date.now() }));
+    const key = parseFlightQuery(q)?.callsign ?? normFlight(q);
+    const records = JSON.parse(localStorage.getItem(STORY_CACHE_KEY) || "{}");
+    records[key] = { story: slim, at: Date.now() };
+    const recent = Object.entries(records).filter(([, value]) =>
+      Date.now() - (value as { at: number }).at <= RESUME_MAX_AGE_MS
+    ).sort((a, b) => (b[1] as { at: number }).at - (a[1] as { at: number }).at).slice(0, 8);
+    localStorage.setItem(STORY_CACHE_KEY, JSON.stringify(Object.fromEntries(recent)));
   } catch {
     /* quota */
   }
@@ -206,6 +217,7 @@ function takeoffEstimateExpired(story: FlightStory) {
 
 function rideFacts(story: FlightStory, query: string, active: StageId): RideFacts {
   return {
+    scheduleNote: story.schedule?.status === "saved" ? savedScheduleNote(story.schedule.confirmedAt) : undefined,
     q: query,
     iata: story.iata,
     airline: story.airline,
@@ -302,16 +314,17 @@ class ScreenErrorBoundary extends Component<{ children: ReactNode }, { err: Erro
 
 export function FiledApp() {
   const [ready, setReady] = useState(false);
+  const [entered, setEntered] = useState(false);
   const [page, setPage] = useState<"home" | "flight">("home");
-  const [theme, setTheme] = useState<"sunset" | "sunrise">("sunset");
+  const [theme, setTheme] = useState<"sunset" | "sunrise">("sunrise");
   const [flight, setFlight] = useState("");
   const recents = useFiled(s => s.recents);
   const hydrate = useFiled(s => s.hydrate);
   const setQuery = useFiled(s => s.setQuery);
   useEffect(() => {
     hydrate();
-    let saved: "sunset" | "sunrise" = "sunset";
-    try { if (localStorage.getItem("inbound-theme") === "sunrise") saved = "sunrise"; } catch { /* storage optional */ }
+    let saved: "sunset" | "sunrise" = "sunrise";
+    try { if (localStorage.getItem("inbound-theme") === "sunset") saved = "sunset"; } catch { /* storage optional */ }
     setTheme(saved);
     document.documentElement.dataset.theme = saved;
     setReady(true);
@@ -327,9 +340,16 @@ export function FiledApp() {
     setQuery(q);
     setPage("flight");
   };
-  if (!ready) return <main className="flex h-dvh flex-col items-center justify-center gap-4 bg-bg text-fg" role="status">
-    <Plane className="h-10 w-10 text-accent motion-safe:animate-pulse" aria-hidden="true" />
-    <h1 className="font-display text-5xl">Inbound</h1><p className="text-muted">Preparing your journey…</p>
+  if (!entered) return <main className="inbound-welcome">
+    <div className="inbound-welcome-content">
+      <img className="inbound-welcome-art" src="/inbound-welcome.svg" alt="An aircraft approaching a runway through a glowing gold halo" width={768} height={768} fetchPriority="high" />
+      <h1 className="font-display text-6xl">Inbound</h1>
+      <p className="inbound-welcome-tagline">Your all in one flight information app</p>
+      <p className="inbound-welcome-description">From your gate to your destination.</p>
+      <button type="button" className="inbound-welcome-button" disabled={!ready} onClick={() => setEntered(true)}>
+        {ready ? "Track my flight" : "Preparing your journey…"}
+      </button>
+    </div>
   </main>;
   if (page === "flight") return <FlightPages onHome={() => setPage("home")} />;
   return <main className="h-dvh overflow-y-auto bg-bg px-5 py-8 text-fg sm:px-8">
@@ -422,16 +442,21 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
   const storyQ = useQuery({
     queryKey: ["story", query],
-    queryFn: async () => {
+    queryFn: async ({ client }) => {
       const fresh = freshRef.current;
       freshRef.current = false;
+      const saved = storyForQuery(client.getQueryData<FlightStory>(["story", query]), query) ?? readCachedStory(query);
+      const resume = resumeFromStory(saved, query);
       let requestTimer: ReturnType<typeof setTimeout> | undefined;
       const s = await Promise.race([
-        getFlightStory({ data: { q: query, fresh } }),
+        getFlightStory({ data: { q: query, fresh, resume } }),
         new Promise<never>((_, reject) => {
           requestTimer = setTimeout(() => reject(new Error("Flight data request timed out. Please try again.")), 35_000);
         }),
-      ]).finally(() => clearTimeout(requestTimer));
+      ]).catch((error) => {
+        console.error("[Inbound flight request]", error instanceof Error ? error.message : String(error));
+        throw error;
+      }).finally(() => clearTimeout(requestTimer));
       if (!storyMatchesQuery(s, query)) {
         throw new Error("Could not load that flight. Try another number.");
       }
@@ -450,7 +475,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     refetchInterval: (q) => {
       if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
-      if (q.state.status === "error") return 15_000;
+      if (q.state.status === "error") return /HTTP 402\b/.test(String(q.state.error?.message ?? "")) ? 60_000 : 15_000;
       if (!s) return 5_000;
       if (s.live || s.currentStage === "push" || s.currentStage === "taxi") return 3_000;
       if (s.currentStage === "ride" || s.currentStage === "arrival") return 4_000;
@@ -460,7 +485,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     staleTime: 2_500,
     gcTime: 10 * 60_000,
     retry: (count, err) => {
-      if (count >= 2) return false;
+      if (count >= 2 || /HTTP 402\b/.test(err instanceof Error ? err.message : "")) return false;
       const msg = err instanceof Error ? err.message : "";
       if (/Try another number|Enter a flight number|Flight number is too long/i.test(msg)) return false;
       return true;
@@ -473,6 +498,10 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       return storyForQuery(readCachedStory(query), query);
     },
   });
+
+  useEffect(() => {
+    if (storyQ.dataUpdatedAt > 0) setRefreshErr(null);
+  }, [query, storyQ.dataUpdatedAt]);
 
   const story = storyForQuery(storyQ.data, query);
   useEffect(() => {
@@ -733,6 +762,11 @@ function FlightPages({ onHome }: { onHome: () => void }) {
             </p>
           </div>
         ) : null}
+        {story?.schedule?.status === "saved" && !storyQ.isError && !refreshErr ? (
+          <div role="status" className="mb-3 rounded-md border border-border bg-surface px-4 py-2 text-sm text-fg">
+            {savedScheduleNote(story.schedule.confirmedAt)}
+          </div>
+        ) : null}
         {storyQ.isError && !story && (
           <div className="mb-4 rounded-md border border-ifr/40 bg-surface px-4 py-3">
             <p className="text-sm text-ifr">
@@ -749,7 +783,8 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         {story && (
           <div key={normFlight(query)} className={cn("min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
             <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
-              <FlightHead story={story} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
+              <FlightHead story={story} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
+              <TravelerCompanion story={story} failed={storyQ.isError || Boolean(refreshErr)} onTrackInbound={openFlight} />
               <div className="mt-5"><RecordCard story={story} /></div>
             </section>
             <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
@@ -867,11 +902,13 @@ function FlightHead({
   story,
   fetching,
   refreshing,
+  failed = false,
   onRefresh,
 }: {
   story: FlightStory;
   fetching: boolean;
   refreshing: boolean;
+  failed?: boolean;
   onRefresh: () => void;
 }) {
   const ac = story.aircraft;
@@ -897,7 +934,7 @@ function FlightHead({
           {story.dest.city} <span className="text-muted">{story.dest.iata}</span>
         </p>
       </div>
-      <TimesStrip story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
+      <TimesStrip failed={failed} story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       <dl className={cn("mt-4 grid gap-3", showAlt || showRemaining ? "grid-cols-2" : "grid-cols-1")}>
         <Stat
           icon={Plane}
@@ -957,11 +994,13 @@ function TimesStrip({
   story,
   fetching,
   refreshing,
+  failed = false,
   onRefresh,
 }: {
   story: FlightStory;
   fetching: boolean;
   refreshing: boolean;
+  failed?: boolean;
   onRefresh: () => void;
 }) {
   const t = story.times;
@@ -1052,7 +1091,7 @@ function TimesStrip({
             />
           </div>
         )}
-        <Freshness at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
+        <Freshness failed={failed} partial={story.schedule?.status === "saved"} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       </div>
       {!down ? (
         <div className="mt-3 grid grid-cols-2 gap-3">
@@ -1068,11 +1107,15 @@ function Freshness({
   at,
   fetching,
   refreshing,
+  failed = false,
+  partial = false,
   onRefresh,
 }: {
   at: number;
   fetching: boolean;
   refreshing: boolean;
+  failed?: boolean;
+  partial?: boolean;
   onRefresh: () => void;
 }) {
   const [, setTick] = useState(0);
@@ -1092,7 +1135,7 @@ function Freshness({
         {refreshing ? "Updating…" : "Refresh"}
       </button>
       <p className="font-mono text-xs tracking-widest text-muted uppercase">
-        {refreshing ? "Updating…" : agoLabel(at, false)}
+        {refreshing ? "Updating…" : failed ? "Update delayed · showing saved data" : partial ? "Schedule delayed · " + (Date.now() - at < 8000 ? "other feeds just checked" : agoLabel(at, false)) : agoLabel(at, false)}
       </p>
     </div>
   );
@@ -1726,13 +1769,8 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     } else i++;
   }
   const noConditions = "No conditions flagged in available data";
-  const coverageComplete = Boolean(story.weatherCoverage && story.weatherCoverage.failedSources.length === 0);
-  const visibleGroups = groups.filter(group => {
-    if (group.label !== noConditions) return true;
-    const minutes = airborne ? group.end.etaMin - group.start.etaMin
-      : duration == null ? null : (group.end.frac - group.start.frac) * duration;
-    return minutes == null || minutes >= 10 || groups.length === 1;
-  });
+  
+  const visibleGroups = groups.filter(group => group.label !== noConditions);
   const timeLabel = (group: typeof groups[number]) => {
     const from = airborne ? group.start.etaMin : duration == null ? null : group.start.frac * duration;
     const to = airborne ? group.end.etaMin : duration == null ? null : group.end.frac * duration;
@@ -1746,7 +1784,8 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       ? from < 1 ? "Around now" : `Starts in about ${formatMinutes(from)}`
       : from < 1 ? "Around takeoff" : `Starts about ${formatMinutes(from)} after takeoff`;
     const span = Math.round(to - from);
-    return <span>{start}{span > 0 && <span className="block">{group.gaps ? "Intermittent areas over about " : "Continues for about "}{formatMinutes(span)}</span>}</span>;
+    const intoFlight = airborne && story.times.airborne && takeoff ? Math.max(0, (story.fetchedAt / 1000 - takeoff) / 60) + from : from;
+    return <span>{start}{airborne && <span className="block">Around {formatMinutes(intoFlight)} into flight</span>}{span > 0 && <span className="block">{group.gaps ? "Intermittent areas over about " : "Continues for about "}{formatMinutes(span)}</span>}</span>;
   };
   const fieldCard = (field: FlightStory["origin"], title: string) => <article className="rounded-xl border border-border bg-surface p-4">
     <p className="text-sm text-muted">{title}</p>
@@ -1760,22 +1799,23 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       <p className="mt-2 text-sm leading-relaxed text-muted">Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters. Unflagged areas may have incomplete coverage.</p>
       <p className="mt-2 text-xs text-muted">Flight data fetched {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Weather observation and advisory times are shown in their source details.</p>
     </div>
-    {fieldCard(story.origin, "Takeoff · departure conditions")}
+    {!landed && fieldCard(story.origin, "Takeoff · departure conditions")}
     {(!story.weatherCoverage || story.weatherCoverage.failedSources.length > 0) && <p role="status" className="rounded-xl border border-border p-4 text-sm">Weather coverage is incomplete. Missing feeds do not mean smooth conditions. {story.weatherCoverage?.failedSources.join(" · ")}</p>}
     <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
     {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="space-y-3">
       {visibleGroups.map((g, i) => <li key={i} className="rounded-xl border border-border bg-surface p-4">
+        <h4 className="mb-2 font-semibold">Weather event {i + 1}</h4>
         <p className="flex items-center gap-2 text-sm text-muted"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
-        <p className="mt-2 font-semibold">{g.label === noConditions ? coverageComplete ? "Projected smooth ride" : "Weather coverage incomplete" : g.label}</p>{g.label === noConditions && <p className="mt-1 text-sm text-muted">{coverageComplete ? "Based on available forecasts; conditions can change." : "Not enough weather data to assess the ride along this section."}</p>}{g.gaps && <p className="mt-1 text-sm text-muted">Nearby areas grouped together; brief gaps may occur.</p>}
+        <p className="mt-2 font-semibold">{g.label}</p>{g.gaps && <p className="mt-1 text-sm text-muted">Nearby areas grouped together; brief gaps may occur.</p>}
         {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
-          <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={`Route preview: ${g.label}`}>
-            <RouteMap story={story} fixedViewport weatherPreview={{ from: g.start.frac, to: g.end.frac, ranges: g.ranges }} />
+          <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={`Weather event ${i + 1}: ${g.label}`}>
+            <RouteMap story={story} fixedViewport weatherPreview={{ eventNumber: i + 1, label: g.label, from: g.start.frac, to: g.end.frac, ranges: g.ranges }} />
           </div>
           <figcaption className="mt-2 text-xs text-muted">Highlighted: the forecast area along your route. Radar colors show recent precipitation, not turbulence or the weather guaranteed at your arrival time. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
         </figure>}
         {g.note && <details className="mt-2 text-sm text-muted"><summary className="cursor-pointer py-2">More details</summary><p>{g.note}</p></details>}
       </li>)}
-    </ol> : <p className="text-sm text-muted">Route weather data unavailable.</p>}
+    </ol> : <p className="text-sm text-muted">{samples.length ? "No significant conditions flagged in the available route forecast. This does not guarantee a smooth ride." : "Route weather data unavailable."}</p>}
     {fieldCard(story.dest, "Landing · arrival conditions")}
     <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer py-2">Advisory sources and valid times</summary>
       {story.hazards.filter(h => h.remaining).map(h => <div key={h.id} className="mt-3 text-sm"><p className="font-semibold">{h.label}</p><p className="text-muted">{h.validity || "Validity time unavailable"}</p><p className="mt-1 text-muted">{h.detail}</p></div>)}
@@ -1799,11 +1839,12 @@ function FlightWelcome({ open, onClose, story, brief }: { open: boolean; onClose
     </div>
     <p className="mt-2 text-sm text-muted">{story.iata || story.callsign} · {story.origin.iata} → {story.dest.iata}</p>
     <div className="mt-4 space-y-3 text-sm leading-relaxed">
-      <p>{brief?.lead || "The briefing is being prepared. Current flight information is below."}</p>
+      {story.inboundDiversion && <p><strong>Inbound aircraft was diverted:</strong> {inboundDiversionText(story.inboundDiversion)}</p>}
+      <p>{story.diversion ? nextStep(story, story.fetchedAt).title + ". " + nextStep(story, story.fetchedAt).body : brief?.lead || "The briefing is being prepared. Current flight information is below."}</p>
       {(story.times.delayMin ?? 0) >= 5 && <p><strong>Departure delay:</strong> {story.times.delayMin} minutes.</p>}
       {(story.currentStage === "inbound" || story.currentStage === "push") && <p><strong>Inbound aircraft:</strong> {story.inbound.detail || story.inbound.headline}</p>}
-      {story.hazards.some(h => h.remaining) && <p><strong>Route weather:</strong> {[...new Set(story.hazards.filter(h => h.remaining).map(h => h.label))].join(" · ")}</p>}
-      {story.origin.nas?.delayed && <p><strong>Departure airport:</strong> {story.origin.nas.reason}</p>}
+      {!isLanded(story) && story.hazards.some(h => h.remaining) && <p><strong>Route weather:</strong> {[...new Set(story.hazards.filter(h => h.remaining).map(h => h.label))].join(" · ")}</p>}
+      {!isLanded(story) && story.origin.nas?.delayed && <p><strong>Departure airport:</strong> {story.origin.nas.reason}</p>}
       {story.dest.nas?.delayed && <p><strong>Arrival airport:</strong> {story.dest.nas.reason}</p>}
     </div>
     <p className="mt-4 text-xs text-muted">Data as of {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Estimates may change. Full details remain in Briefing and Weather.</p>

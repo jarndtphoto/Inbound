@@ -29,6 +29,8 @@ export const briefRide = createServerFn({ method: "POST" })
       /* keep fallback sentence */
     }
 
+    // Preserve the explicit saved-schedule warning during partial updates.
+    if (data.scheduleNote) return { ok: true as const, text: local };
     const cacheKey = `${data.iata}:${data.now}:${data.delayMin}:${data.rideLabel}:${data.destNas}:${data.taxiInKind}:${data.land}:${data.wxHash ?? ""}`;
     const hit = briefCache.get(cacheKey);
     if (hit && Date.now() - hit.at < 10 * 60_000) {
