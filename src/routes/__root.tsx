@@ -38,21 +38,6 @@ export const Route = createRootRoute({
       },
       { rel: "manifest", href: "/inbound.webmanifest" },
       { rel: "apple-touch-icon", href: "/inbound-icon-180.png" },
-      {
-        rel: "apple-touch-startup-image",
-        href: "/startup-1170x2532.png",
-        media: "(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)",
-      },
-      {
-        rel: "apple-touch-startup-image",
-        href: "/startup-1125x2436.png",
-        media: "(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)",
-      },
-      {
-        rel: "apple-touch-startup-image",
-        href: "/startup-1290x2796.png",
-        media: "(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)",
-      },
     ],
   }),
   component: () => (

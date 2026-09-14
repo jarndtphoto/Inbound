@@ -28,6 +28,7 @@ describe("Inbound iPhone Home Screen app", () => {
     assert.match(root, /apple-mobile-web-app-status-bar-style.*default/);
     assert.match(root, /viewport-fit=cover/);
     assert.match(root, /apple-touch-icon.*inbound-icon-180\.png/);
+    assert.doesNotMatch(root, /apple-touch-startup-image/, "legacy black launch images must not override the light app background");
     assert.match(css, /@media \(display-mode: standalone\)/);
     assert.match(css, /safe-area-inset-top/);
     assert.match(css, /safe-area-inset-bottom/);
