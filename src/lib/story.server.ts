@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { loadAeroFlight } from "./aeroapi.server.ts";
 import { createHash } from "node:crypto";
 import { readFlightResume } from "./flight-resume";
 import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
@@ -1231,6 +1232,8 @@ function stubAwareFromHistory(loc, fallbackIdent) {
 }
 const awareRejections = new Map();
 async function loadAware(callsign) {
+	const apiRecord = await loadAeroFlight(callsign);
+	if (apiRecord) return apiRecord;
 	const rejected = awareRejections.get(callsign);
 	if (rejected && Date.now() < rejected.until) throw rejected.error;
 	awareRejections.delete(callsign);
@@ -1256,6 +1259,8 @@ async function loadAwareById(flightId) {
 	const id = faInstanceId(flightId);
 	if (!id) return null;
 	const ident = identFromFa(id) || id;
+	const apiRecord = await loadAeroFlight(id, true);
+	if (apiRecord) return apiRecord;
 	return cached(`awareid2:${id}`, 12e3, async () => {
 		return fetchAwarePage(`https://www.flightaware.com/live/flight/id/${encodeURIComponent(id)}`, ident, false, "manual");
 	});
