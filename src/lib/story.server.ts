@@ -735,6 +735,15 @@ export function choosePushEvidence(providerActual, evidence) {
 	}
 	return earliest ? { unix: earliest.unix, source: "track_detected", evidence: earliest } : null;
 }
+export function reconcilePushLatch(prior, selected, gateOut) {
+	if (!prior || typeof prior !== "object" || !Number.isFinite(prior.unix)) return selected;
+	if (!selected || !Number.isFinite(selected.unix)) return prior;
+	const copiedEstimate = prior.source === "live_detected"
+		&& [gateOut?.scheduled, gateOut?.estimated].some((unix) => Number.isFinite(unix) && Math.abs(prior.unix - unix) <= 60)
+		&& selected.unix > prior.unix + 60;
+	if (copiedEstimate) return selected;
+	return prior.unix <= selected.unix ? prior : selected;
+}
 function callsignVariants(callsign) {
 	const u = String(callsign || "").replace(/\s/g, "").toUpperCase();
 	if (!u) return [];
@@ -3158,9 +3167,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	]);
 	if (selectedPush && !stationaryAtStand && (leftGate || taxiHint || times.pushed || times.airborne)) {
 		const prior = pushLatch.get(landKey);
-		const priorUnix = prior && typeof prior === "object" ? prior.unix : null;
-		const useUnix = priorUnix && priorUnix < selectedPush.unix ? priorUnix : selectedPush.unix;
-		const useSource = priorUnix && priorUnix < selectedPush.unix ? prior.source : selectedPush.source;
+		const reconciledPush = reconcilePushLatch(prior, selectedPush, aware?.gateOut);
+		const useUnix = reconciledPush.unix;
+		const useSource = reconciledPush.source;
 		const origPush = times.origPushUnix ?? useUnix;
 		const delayMin = slipMin(useUnix, origPush);
 		times = { ...times, pushed: true, pushKind: useSource === "provider_actual" ? "actual" : "estimated",

@@ -12,7 +12,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import('../src/lib/story.server.ts');
+const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import('../src/lib/story.server.ts');
 const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
 const { rideOutlook, RideOutlookText, nextStep } = await import('../src/lib/traveler.ts');
@@ -594,6 +594,22 @@ describe('on the move evidence', () => {
     assert.equal(evidence.unix, at(9, 37));
     assert.equal(choosePushEvidence(at(9, 38), [{ ...evidence, provider: 'fr24' }]).unix, at(9, 37));
     assert.equal(choosePushEvidence(at(9, 38), [{ ...evidence, provider: 'fr24' }]).source, 'track_detected');
+  });
+
+  it('UA219: replaces a persisted detected time copied from the 9:25 estimate', () => {
+    const badResume = { unix: 1789395900, source: 'live_detected', live: true };
+    const track = { unix: 1789397199.332, source: 'track_detected' };
+    const result = reconcilePushLatch(badResume, track,
+      { scheduled: 1789395900, estimated: 1789395900, actual: null });
+    assert.equal(result.unix, 1789397199.332);
+    assert.equal(result.source, 'track_detected');
+  });
+
+  it('preserves a genuine earlier movement latch when it did not copy an estimate', () => {
+    const live = { unix: 1789396620, source: 'live_detected', live: true };
+    const laterTrack = { unix: 1789397199.332, source: 'track_detected' };
+    assert.equal(reconcilePushLatch(live, laterTrack,
+      { scheduled: 1789395900, estimated: 1789395900, actual: null }).unix, 1789396620);
   });
 
   it('labels the passenger operational event Pushback, not Departure', () => {
