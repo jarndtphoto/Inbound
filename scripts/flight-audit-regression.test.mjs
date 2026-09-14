@@ -14,7 +14,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
 }});
 const { loadFlightStory, motionFromTrace, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import('../src/lib/story.server.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
-const { rideOutlook, RideOutlookText } = await import('../src/lib/traveler.ts');
+const { rideOutlook, RideOutlookText, nextStep } = await import('../src/lib/traveler.ts');
 const { WeatherEventMarker } = await import('../src/components/weather-event-marker.ts');
 const { passengerWeatherCopy } = await import('../src/lib/weather-card-copy.ts');
 const { WeatherEventHeadline, WeatherEventBody, WeatherPreviewLabel } = await import('../src/components/weather-event-copy.ts');
@@ -49,6 +49,22 @@ describe('passenger weather presentation', () => {
   it('retains internal marker numbering for map association', () => {
     assert.match(appSource, /eventNumber: i \+ 1/);
     assert.match(mapSource, /eventNumber: number/);
+  });
+});
+
+describe('zoom-stable route presentation', () => {
+  const source = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
+
+  it('keeps every route, flown-track, projected, outline, and weather stroke screen-sized', () => {
+    const strokes = source.split('\n').filter(line => line.includes('data-route-stroke='));
+    assert.ok(strokes.length >= 3, 'route stroke elements are explicitly identified');
+    for (const stroke of strokes) assert.match(stroke, /vectorEffect="non-scaling-stroke"/);
+  });
+
+  it('counter-scales route decorations and the aircraft inside the zoom group', () => {
+    assert.match(source, /route-fix-marker[\s\S]{0,300}scale\(\$\{1 \/ zoom\.s\}\)|scale\(\$\{1 \/ zoom\.s\}\)[\s\S]{0,300}route-fix-marker/);
+    assert.match(source, /WeatherEventMarker[^>]+inverseScale=\{1 \/ zoom\.s\}/);
+    assert.match(source, /hasFix[^>]+scale\(\$\{1 \/ zoom\.s\}\)/);
   });
 });
 
@@ -548,7 +564,15 @@ describe('on the move evidence', () => {
     assert.equal(observed.times.pushUnix, 1789231020);
     assert.equal(observed.times.pushSource, 'live_detected');
 
-    now += 70_000;
+    now += 30_000;
+    lon += 0.0020; gs = 15;
+    const taxiing = await loadFlightStory('UA9219', { fresh: true });
+    assert.equal(taxiing.currentStage, 'taxi');
+    assert.equal(taxiing.times.pushUnix, 1789231020, 'taxi out retains first live-detected push time');
+    assert.equal(taxiing.times.pushSource, 'live_detected');
+    assert.match(nextStep(taxiing, taxiing.fetchedAt).body, /Pushback was detected from live movement around/);
+
+    now += 40_000;
     record.gateDepartureTimes.actual = 1789231080; // Provider later reports 9:38.
     const reconciled = await loadFlightStory('UA9219', { fresh: true });
     assert.equal(reconciled.times.pushUnix, 1789231080);
@@ -586,6 +610,11 @@ describe('on the move evidence', () => {
     assert.equal(taxiing.currentStage, 'taxi');
     assert.equal(taxiing.resume?.departureStage, 'taxi');
     assert.equal(taxiing.resume?.detectedPushUnix, observedPushUnix);
+    assert.equal(taxiing.times.pushSource, 'live_detected');
+    assert.equal(taxiing.times.pushUnix, observedPushUnix);
+    const passenger = nextStep(taxiing, taxiing.fetchedAt);
+    assert.match(passenger.body, /Pushback was detected from live movement around/);
+    assert.doesNotMatch(passenger.body, /not yet confirmed|never confirmed/i);
 
     for (const update of [
       { gs: 2, track: 270, seen_pos: 0 },

@@ -267,6 +267,7 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     rideLabel: rideLabelOf(story),
     push: story.times?.push ?? null,
     pushKind: story.times?.pushKind ?? null,
+    pushSource: story.times?.pushSource ?? null,
     taxiOutMin: story.times?.taxiOutMin ?? null,
     taxiOutKind: story.times?.taxiOutKind ?? null,
     takeoff: takeoffEstimateExpired(story) ? null : story.times?.takeoff ?? null,
@@ -998,13 +999,16 @@ function ClockCell({
   time,
   kind,
   hint,
+  source,
 }: {
   title: string;
   time: string | null | undefined;
   kind?: FlightStory["times"]["pushKind"];
   hint?: string | null;
+  source?: FlightStory["times"]["pushSource"];
 }) {
-  const sub = [kindLabel(kind), hint].filter(Boolean).join(" · ");
+  const sourceLabel = source === "live_detected" ? "Detected" : source === "provider_actual" ? "Reported" : kindLabel(kind);
+  const sub = [sourceLabel, hint].filter(Boolean).join(" · ");
   return (
     <div className="min-w-0">
       <p className="font-mono text-xs tracking-widest text-subtle uppercase">{title}</p>
@@ -1100,6 +1104,7 @@ function TimesStrip({
               title={t?.pushed ? "Departure" : "Est. push"}
               time={t?.push}
               kind={t?.pushKind ?? (t?.pushed ? "actual" : t?.push ? "scheduled" : null)}
+              source={t?.pushSource}
               hint={
                 late
                   ? [phrase, t?.pushWas ? `Was ${t.pushWas}` : null].filter(Boolean).join(" · ")
@@ -1581,7 +1586,9 @@ function extraFor(story: FlightStory, stage: StageId) {
           <TimeChip
             label="Departure"
             value={times.pushed ? times.push ?? "Awaiting confirmation" : "Awaiting departure"}
-            sub={times.pushed && times.pushKind === "actual" ? "Gate departure reported" : "Movement time not confirmed"}
+            sub={times.pushSource === "provider_actual" ? "Gate departure reported"
+              : times.pushSource === "live_detected" ? "Pushback detected from live movement"
+              : times.pushed ? "Earlier pushback time unavailable" : "Awaiting movement"}
           />
           <TimeChip
             label="Taxi out"

@@ -56,6 +56,7 @@ export type RideFacts = {
   rideLabel?: string;
   push: string | null;
   pushKind?: string | null;
+  pushSource?: "provider_actual" | "live_detected" | null;
   taxiOutMin: number | null;
   taxiOutKind?: string | null;
   takeoff: string | null;
@@ -391,7 +392,8 @@ function inboundClause(d: RideFacts) {
 }
 
 function delayClause(d: RideFacts) {
-  if (d.push && d.pushKind === "actual") return `Gate departure reported at ${d.push}.`;
+  if (d.push && d.pushSource === "provider_actual") return `Gate departure reported at ${d.push}.`;
+  if (d.push && d.pushSource === "live_detected") return `Pushback detected around ${d.push}.`;
   const timing = d.pushKind === "scheduled" ? "Scheduled gate departure" : "Estimated gate departure";
   if (d.delayMin != null && d.delayMin >= 5) {
     return d.push ? `${timing}: ${d.push}, ${d.delayMin} minutes later than scheduled.` : `Departure is estimated to be ${d.delayMin} minutes late.`;
@@ -495,8 +497,9 @@ function composeLead(d: RideFacts) {
     return joinSentences([
       open,
       "You're on the move — pushback or taxi before takeoff.",
-      d.push && d.pushKind === "actual" ? `Gate departure reported at ${d.push}.`
-        : d.push && d.pushKind === "estimated" ? `Movement first observed around ${d.push}; this time is approximate.`
+      d.push && d.pushSource === "provider_actual" ? `Gate departure reported at ${d.push}.`
+        : d.push && d.pushSource === "live_detected" ? `Pushback detected around ${d.push}.`
+        : d.stage === "taxi" ? "Pushback was already underway when tracking began; the exact time isn't available."
         : "Departure time is not yet confirmed.",
       d.pushKind === "actual" && d.delayMin != null && d.delayMin >= 5 ? `Departure was ${d.delayMin} minutes later than scheduled.` : "",
       d.takeoffEstimateExpired ? "Awaiting updated takeoff time." : d.takeoff ? `Estimated takeoff around ${d.takeoff}.` : "",

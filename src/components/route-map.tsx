@@ -568,8 +568,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           const w = run.past ? 3.2 : run.chop === "smooth" ? 5.2 : 6.4;
           return (
             <g key={`run-${i}`}>
-              <path d={d} className="fill-none stroke-bg" strokeWidth={w + 3.4} />
-              <path d={d} className={cn("fill-none", chopClass(run.chop, run.past))} strokeWidth={w} />
+              <path d={d} data-route-stroke="outline" className="fill-none stroke-bg" strokeWidth={w + 3.4} vectorEffect="non-scaling-stroke" />
+              <path d={d} data-route-stroke={run.past ? "flown" : "projected"} className={cn("fill-none", chopClass(run.chop, run.past))} strokeWidth={w} vectorEffect="non-scaling-stroke" />
             </g>
           );
         })}
@@ -577,33 +577,37 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         {weatherPreview && (weatherPreview.ranges ?? [{ from: weatherPreview.startFrac, to: weatherPreview.endFrac }]).map((range, index) => {
           const section = samples.filter(s => s.frac >= range.from && s.frac <= range.to);
           return <g key={index} aria-label="Weather area for this forecast">
-            <polyline points={section.map(s => `${sx(s.lon)},${sy(s.lat)}`).join(" ")} fill="none" className="stroke-ifr" strokeWidth="18" opacity="0.55" />
-            {section.length === 1 && <circle cx={sx(section[0].lon)} cy={sy(section[0].lat)} r="12" className="fill-ifr" opacity="0.65" />}
+            <polyline data-route-stroke="weather" points={section.map(s => `${sx(s.lon)},${sy(s.lat)}`).join(" ")} fill="none" className="stroke-ifr" strokeWidth="18" opacity="0.55" vectorEffect="non-scaling-stroke" />
+            {section.length === 1 && <circle cx={sx(section[0].lon)} cy={sy(section[0].lat)} r={12 / zoom.s} className="fill-ifr" opacity="0.65" />}
           </g>;
         })}
         {fixes.map((s) => (
+          <g key={`fix-${s.frac}`} transform={`translate(${sx(s.lon)} ${sy(s.lat)}) scale(${1 / zoom.s}) rotate(45)`}>
           <rect
-            key={`fix-${s.frac}`}
-            x={sx(s.lon) - 2.6}
-            y={sy(s.lat) - 2.6}
+            x={-2.6}
+            y={-2.6}
             width="5.2"
             height="5.2"
-            transform={`rotate(45 ${sx(s.lon)} ${sy(s.lat)})`}
             className="route-fix-marker fill-fg/55"
           />
+          </g>
         ))}
 
-        <circle cx={sx(origin.lon)} cy={sy(origin.lat)} r="5.5" className="fill-accent stroke-bg" strokeWidth="2" />
-        <circle cx={sx(dest.lon)} cy={sy(dest.lat)} r="5.5" className="fill-fg stroke-bg" strokeWidth="2" />
+        <g transform={`translate(${sx(origin.lon)} ${sy(origin.lat)}) scale(${1 / zoom.s})`}>
+          <circle r="5.5" className="fill-accent stroke-bg" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+          <text y="22" textAnchor="middle" className="fill-muted" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.origin.iata}</text>
+        </g>
+        <g transform={`translate(${sx(dest.lon)} ${sy(dest.lat)}) scale(${1 / zoom.s})`}>
+          <circle r="5.5" className="fill-fg stroke-bg" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+          <text y="22" textAnchor="middle" className="fill-fg" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.dest.iata}</text>
+        </g>
 
         {hazards.map((h) => {
           const cx = sx(h.lon!);
           const cy = sy(h.lat!);
           return (
-            <g key={h.id}>
+            <g key={h.id} transform={`translate(${cx} ${cy}) scale(${1 / zoom.s})`}>
               <circle
-                cx={cx}
-                cy={cy}
                 r="10"
                 className="fill-ifr/25 stroke-ifr/70"
                 strokeWidth="1"
@@ -614,36 +618,14 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         })}
 
         {ticks.map((s) => (
-          <WeatherEventMarker key={s.frac} eventNumber={s.eventNumber}
+          <WeatherEventMarker key={s.frac} eventNumber={s.eventNumber} inverseScale={1 / zoom.s}
             entry={{ lat: s.lat, lon: s.lon }} x={sx(s.lon)} y={sy(s.lat)} />
         ))}
 
-        {hasFix && <g transform={`translate(${ax} ${ay}) rotate(${rot})`}>
-          <polygon points="0,-10 8,11 -8,11" className="fill-fg stroke-bg" strokeWidth="1.4" />
+        {hasFix && <g transform={`translate(${ax} ${ay}) scale(${1 / zoom.s}) rotate(${rot})`}>
+          <polygon points="0,-10 8,11 -8,11" className="fill-fg stroke-bg" strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
         </g>}
 
-        <text
-          x={sx(origin.lon)}
-          y={sy(origin.lat) + 22}
-          textAnchor="middle"
-          className="fill-muted"
-          fontSize="13"
-          fontFamily="Barlow Condensed, sans-serif"
-          letterSpacing="0.12em"
-        >
-          {story.origin.iata}
-        </text>
-        <text
-          x={sx(dest.lon)}
-          y={sy(dest.lat) + 22}
-          textAnchor="middle"
-          className="fill-fg"
-          fontSize="13"
-          fontFamily="Barlow Condensed, sans-serif"
-          letterSpacing="0.12em"
-        >
-          {story.dest.iata}
-        </text>
         </g>
       </svg>
 
