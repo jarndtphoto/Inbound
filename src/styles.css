@@ -158,10 +158,14 @@
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
 }
 
+.pwa-bottom-nav {
+  padding-bottom: max(0.25rem, env(safe-area-inset-bottom, 0px));
+}
+
 @media (display-mode: standalone) {
   .pwa-flight-shell {
     padding-top: env(safe-area-inset-top, 0px);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: 0;
   }
 }
 

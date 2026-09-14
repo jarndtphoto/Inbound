@@ -20,8 +20,8 @@ import { RouteMap } from "@/components/route-map";
 import { WeatherEventBody, WeatherEventHeadline } from "@/components/weather-event-copy";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Clock, Gauge, Plane, Search, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type FormEvent, type ReactNode } from "react";
+import { Clock, Gauge, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type ReactNode } from "react";
 
 const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
 
@@ -399,7 +399,6 @@ export function FiledApp() {
 
 function FlightPages({ onHome }: { onHome: () => void }) {
   const query = useFiled((s) => s.query);
-  const recents = useFiled((s) => s.recents);
   const stagePref = useFiled((s) => s.stage);
   const setQuery = useFiled((s) => s.setQuery);
   const setStage = useFiled((s) => s.setStage);
@@ -407,7 +406,6 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   const [briefPopupOpen, setBriefPopupOpen] = useState(false);
   const openedBriefings = useRef(new Set<string>());
   const [flightTab, setFlightTab] = useState<typeof FLIGHT_TABS[number]>("Overview");
-  const [draft, setDraft] = useState("");
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
   const [briefingFor, setBriefingFor] = useState("");
   const [cacheOk, setCacheOk] = useState(false);
@@ -455,10 +453,6 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       "width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no",
     );
   }, []);
-
-  useEffect(() => {
-    if (cacheOk) setDraft(query);
-  }, [cacheOk, query]);
 
   const storyQ = useQuery({
     queryKey: ["story", query],
@@ -740,40 +734,15 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     };
   }, [story, query, flightTab]);
 
-  function onSearch(e: FormEvent) {
-    e.preventDefault();
-    (document.activeElement as HTMLElement | null)?.blur();
-    pinDocument();
-    mainRef.current?.scrollTo(0, 0);
-    if (draft.trim()) openFlight(draft);
-  }
-
   return (
     <div className="pwa-flight-shell flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg" style={shellStyle}>
-      <div className="shrink-0 border-b border-border bg-bg px-4 py-2"><div className="mx-auto max-w-6xl"><button type="button" onClick={onHome} className="min-h-10 text-sm text-muted">← Home & settings</button></div></div>
-      {story && <header className="shrink-0 border-b border-border bg-bg px-4 pt-3 lg:px-8">
+      <header className="shrink-0 bg-bg px-2 py-1 lg:px-6">
         <div className="mx-auto max-w-6xl">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="font-semibold">{story.callsign}</p>
-              <p className="text-sm text-muted">{story.origin.iata} → {story.dest.iata}</p>
-            </div>
-            <p className="text-sm font-semibold">{stageHeadline(story)}</p>
-          </div>
-          <div role="tablist" aria-label="Flight details" className="grid grid-cols-4 gap-1">
-            {FLIGHT_TABS.map((tab, index) => <button key={tab} id={`tab-${tab}`} type="button" role="tab"
-              aria-selected={flightTab === tab} aria-controls={`panel-${tab}`} tabIndex={flightTab === tab ? 0 : -1}
-              className={cn("min-h-11 border-b-2 px-1 py-3 text-sm font-semibold", flightTab === tab ? "border-primary text-fg" : "border-transparent text-muted")}
-              onClick={() => { setFlightTab(tab); mainRef.current?.scrollTo(0, 0); }}
-              onKeyDown={(e) => {
-                const next = e.key === "ArrowRight" ? (index + 1) % 4 : e.key === "ArrowLeft" ? (index + 3) % 4 : e.key === "Home" ? 0 : e.key === "End" ? 3 : -1;
-                if (next < 0) return;
-                e.preventDefault(); setFlightTab(FLIGHT_TABS[next]);
-                document.getElementById(`tab-${FLIGHT_TABS[next]}`)?.focus(); mainRef.current?.scrollTo(0, 0);
-              }}>{tab}</button>)}
-          </div>
+          <button type="button" onClick={onHome} aria-label="Back to flight search" className="flex size-11 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+            <ChevronLeft className="size-6" aria-hidden="true" />
+          </button>
         </div>
-      </header>}
+      </header>
       {story && <FlightWelcome open={briefPopupOpen} onClose={() => setBriefPopupOpen(false)} story={story} brief={shownBrief} />}
       <ScreenErrorBoundary>
       <main
@@ -840,44 +809,24 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         )}
         </div>
       </main>
-      <footer className="shrink-0 border-t border-border bg-bg px-4 pt-2 pb-2 lg:px-8">
-        {recents.length > 0 && (
-          <div className="mx-auto mb-2 flex max-w-6xl gap-2 overflow-x-auto" style={{ touchAction: "pan-x" }}>
-            {recents.map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => openFlight(r)}
-                className="h-9 shrink-0 rounded-full border border-border px-3 text-xs text-muted hover:bg-surface-2 hover:text-fg"
-              >
-                {r}
-              </button>
-            ))}
-          </div>
-        )}
-        <form onSubmit={onSearch} className="mx-auto flex max-w-6xl gap-2">
-          <label className="sr-only" htmlFor="flight-q">
-            Flight number
-          </label>
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle" />
-            <input
-              id="flight-q"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="AA 1, UA 2814, N105NN"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              enterKeyHint="search"
-              suppressHydrationWarning
-              className="h-11 w-full rounded-sm border border-border bg-surface pr-3 pl-10 text-sm text-fg placeholder:text-subtle focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none"
-            />
-          </div>
-          <Button type="submit" size="md">
-            Track
-          </Button>
-        </form>
-      </footer>
+      {story ? <nav aria-label="Flight pages" className="pwa-bottom-nav shrink-0 border-t border-border bg-bg/95 px-2 pt-1 backdrop-blur lg:px-6">
+        <div role="tablist" aria-label="Flight pages" className="mx-auto grid max-w-2xl grid-cols-4 gap-1">
+          {FLIGHT_TABS.map((tab, index) => {
+            const Icon = tab === "Overview" ? PanelsTopLeft : tab === "Route" ? MapIcon : tab === "Weather" ? CloudSun : NotebookText;
+            const label = tab === "Route" ? "Map" : tab;
+            return <button key={tab} id={`tab-${tab}`} type="button" role="tab"
+              aria-selected={flightTab === tab} aria-controls={`panel-${tab}`} tabIndex={flightTab === tab ? 0 : -1}
+              className={cn("flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1 text-[11px] font-semibold transition-colors", flightTab === tab ? "bg-surface-2 text-fg" : "text-muted")}
+              onClick={() => { setFlightTab(tab); mainRef.current?.scrollTo(0, 0); }}
+              onKeyDown={(e) => {
+                const next = e.key === "ArrowRight" ? (index + 1) % 4 : e.key === "ArrowLeft" ? (index + 3) % 4 : e.key === "Home" ? 0 : e.key === "End" ? 3 : -1;
+                if (next < 0) return;
+                e.preventDefault(); setFlightTab(FLIGHT_TABS[next]);
+                document.getElementById(`tab-${FLIGHT_TABS[next]}`)?.focus(); mainRef.current?.scrollTo(0, 0);
+              }}><Icon className="size-5" aria-hidden="true" /><span>{label}</span></button>;
+          })}
+        </div>
+      </nav> : null}
       </ScreenErrorBoundary>
     </div>
   );
