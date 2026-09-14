@@ -376,25 +376,64 @@ function directSpine(origin, dest, live) {
 	return densifyPath(downsampleNm(spine, 18), 55);
 }
 
-// Keep both map views and weather sampling anchored to the same fresh aircraft fix.
-// The connection to remaining waypoints is a projection, not an ATC clearance.
-function anchorRouteAtLive(path, live) {
-	if (path.length < 2 || !live || live.onGround || live.extrapolated
-		|| !Number.isFinite(live.seenSec) || live.seenSec < 0 || live.seenSec > 30
-		|| !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) return path;
+// Build one display geometry for Route, Weather, and route-weather sampling:
+ // trustworthy flown track -> current aircraft -> forward-only projection.
+function distanceToPathNm(point, path) {
+	let best = Infinity;
+	for (let i = 1; i < path.length; i++) best = Math.min(best, distanceToSegmentNm(point, path[i - 1], path[i]));
+	return best;
+}
+
+export function canonicalLiveDisplayPath({ filedPath, flownTrack, live, dest }) {
+	if (!live || live.onGround || live.extrapolated || !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) {
+		return Array.isArray(filedPath) ? filedPath : [];
+	}
 	const here = { lat: live.lat, lon: live.lon };
-	const along = progressAlongPath(path, here);
-	const fracs = pathFracs(path);
-	let next = fracs.findIndex(f => f > along.frac + 0.000001);
-	if (next < 0) next = path.length - 1;
-	// Densify each side separately so resampling cannot erase the live anchor.
-	const before = path.slice(0, next);
-	const after = path.slice(next);
-	if (haversineNm(before[before.length - 1], here) > 0.01) before.push(here);
-	else before[before.length - 1] = here;
-	const left = densifyPath(before, Math.max(2, before.length));
-	const right = densifyPath([here, ...after], Math.max(2, after.length + 1));
-	return [...left, ...right.slice(1)];
+	const destination = { lat: dest.lat, lon: dest.lon };
+	const reference = Array.isArray(filedPath) && filedPath.length >= 2 ? filedPath : [here, destination];
+	let behind = uniqueTrack(Array.isArray(flownTrack) ? flownTrack : [], 1.2);
+	if (behind.length) {
+		let nearest = 0;
+		let nearestNm = Infinity;
+		for (let i = 0; i < behind.length; i++) {
+			const d = haversineNm(behind[i], here);
+			if (d < nearestNm) { nearest = i; nearestNm = d; }
+		}
+		if (nearestNm <= 30) behind = behind.slice(0, nearest + 1);
+		else if (haversineNm(behind[behind.length - 1], here) > 30) behind = [];
+	}
+	if (!behind.length || haversineNm(behind[behind.length - 1], here) > 0.1) behind.push(here);
+	else behind[behind.length - 1] = here;
+
+	const directNm = haversineNm(here, destination);
+	const deviationNm = distanceToPathNm(here, reference);
+	const along = progressAlongPath(reference, here);
+	const fracs = pathFracs(reference);
+	const forwardReference = reference.filter((p, i) =>
+		fracs[i] > along.frac + 0.004 && haversineNm(p, destination) < directNm - 6);
+	let ahead = [];
+	if (deviationNm <= 8 && forwardReference.length) {
+		ahead = forwardReference;
+	} else {
+		const maxConnectorNm = Math.min(140, Math.max(45, directNm * 0.35));
+		ahead = forwardReference.filter((p, i) => {
+			if (i > 0) return true;
+			if (haversineNm(here, p) > maxConnectorNm) return false;
+			if (!Number.isFinite(live.track)) return true;
+			return headingDelta(live.track, initialBearing(here, p)) <= 100;
+		});
+	}
+	if (!ahead.length) {
+		const toward = initialBearing(here, destination);
+		const useTrack = Number.isFinite(live.track) && headingDelta(live.track, toward) <= 115;
+		const holdNm = Math.min(30, Math.max(8, directNm * 0.08));
+		ahead = useTrack && directNm > 35 ? [destPoint(here, live.track, holdNm), destination] : [destination];
+	} else if (haversineNm(ahead[ahead.length - 1], destination) > 2) {
+		ahead.push(destination);
+	}
+	const future = densifyPath([here, ...ahead], Math.max(8, Math.min(70, ahead.length * 3)));
+	const joined = [...behind, ...future.slice(1)];
+	return uniqueTrack(joined, 0.4);
 }
 
 async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, faTrack) {
@@ -407,34 +446,34 @@ async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, fa
 		hexRaw = [];
 	}
 	const faRaw = Array.isArray(faTrack) && faTrack.length >= 2 ? faTrack : [];
-	// FA track is this flight. A hex trace can be another tail's whole day — only
-	// keep it when we have no FA points, or after sector-splitting onto this city pair.
 	let raw = faRaw.length ? faRaw.slice() : [];
-	if (hexRaw.length) {
-		if (!raw.length) raw = hexRaw;
-		else raw = mergeTraces(raw, hexRaw);
-	}
+	if (hexRaw.length) raw = raw.length ? mergeTraces(raw, hexRaw) : hexRaw;
 	const flown = uniqueTrack(legsForThisSector(splitTraceLegs(raw), origin, dest, live, takeoffUnix ?? null), faRaw.length ? 1.6 : 6);
 	if (live && haversineNm({ lat: live.lat, lon: live.lon }, dest) < 68) {
 		const arrival = stitchArrival(flown, live, dest);
-		if (arrival && arrival.length >= 4) return { points: arrival, source: flown.length >= 6 ? "track" : "direct" };
+		if (arrival && arrival.length >= 4) return { points: arrival, spine, flown, source: flown.length >= 6 ? "track" : "direct" };
 	}
 	if (flown.length >= 8) {
 		return {
 			points: densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48),
+			spine,
+			flown,
 			source: "track"
 		};
 	}
 	if (flown.length >= 2) {
 		return {
 			points: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36),
+			spine,
+			flown,
 			source: "track"
 		};
 	}
-	if (Array.isArray(waypoints) && waypoints.length >= 4) return { points: spine, source: "filed" };
-	if (live) return { points: directSpine(origin, dest, live), source: "direct" };
-	return { points: spine, source: "direct" };
+	if (Array.isArray(waypoints) && waypoints.length >= 4) return { points: spine, spine, flown, source: "filed" };
+	if (live) return { points: directSpine(origin, dest, live), spine, flown, source: "direct" };
+	return { points: spine, spine, flown, source: "direct" };
 }
+
 function acList(d) {
 	return d?.ac ?? d?.aircraft ?? [];
 }
@@ -2714,13 +2753,24 @@ async function buildStory(query, resumed = null) {
 			}
 		}
 	}
-	if (!ourLanded && ourAirborne) path = anchorRouteAtLive(path, live);
+	if (!ourLanded && ourAirborne && live) {
+		path = canonicalLiveDisplayPath({
+			filedPath: filed.spine ?? path,
+			flownTrack: filed.flown ?? [],
+			live,
+			dest: end
+		});
+		if ((filed.flown?.length ?? 0) >= 2) pathSource = "track";
+	}
 	const totalNm = Math.max(1, polylineLengthNm(path));
 	let remainingNm;
 	let routeRemainingNm;
 	let progress;
 	const directToDestNm = live && Number.isFinite(live.lat) && Number.isFinite(live.lon)
 		? haversineNm({ lat: live.lat, lon: live.lon }, end)
+		: null;
+	const filedRouteDeviationNm = live && filed.spine?.length >= 2
+		? distanceToPathNm({ lat: live.lat, lon: live.lon }, filed.spine)
 		: null;
 	if (ourLanded) {
 		progress = 1;
@@ -3217,7 +3267,9 @@ async function buildStory(query, resumed = null) {
 			providerStatus: official.status,
 			providerEta: { flightaware: official.flightaware?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
 			providerDistancesNm,
-			fusionDisagreementNm: positionChoice.disagreementNm
+			fusionDisagreementNm: positionChoice.disagreementNm,
+			filedRouteDeviationNm,
+			displayPathSource: pathSource
 		});
 	}
 	const airline = airlineOf(liveCs) ?? route?.airline?.name ?? null;
@@ -3335,6 +3387,7 @@ async function buildStory(query, resumed = null) {
 			adsbPosition,
 			disagreementNm: positionChoice.disagreementNm,
 			providerDistancesNm,
+			filedRouteDeviationNm,
 			providerEta: { flightaware: official.flightaware?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
 			remainingNm,
 			etaMin,

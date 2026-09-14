@@ -465,7 +465,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     else areas.push({start: sample, end: sample, label});
   }
   const takeoffAt = story.times.takeoffUnix;
-  const airborneNow = story.currentStage === "ride" || story.currentStage === "arrival";
+  const airborneNow = story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach";
   const elapsedMin = airborneNow && story.times.takeoffKind === "actual" && takeoffAt != null
     ? Math.max(0, (story.fetchedAt / 1000 - takeoffAt) / 60) : null;
   const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt

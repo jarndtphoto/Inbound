@@ -10,7 +10,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory, motionFromTrace, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi } = await import('../src/lib/story.server.ts');
+const { loadFlightStory, motionFromTrace, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import('../src/lib/story.server.ts');
 
 describe('passenger weather presentation', () => {
   const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
@@ -508,4 +508,53 @@ it('preserves missing weather feeds as unknown while the flight still loads', as
   assert.equal(story.origin.iata, 'ORD');
   assert.ok(story.weatherCoverage.failedSources.includes('Turbulence advisories'));
   assert.ok(story.weatherCoverage.failedSources.includes('Pilot reports'));
+});
+
+
+describe('live reroute display geometry', () => {
+  const dest = { lat: 0, lon: 10 };
+  const filedPath = Array.from({ length: 11 }, (_, lon) => ({ lat: 0, lon }));
+  const flownTrack = [
+    { lat: 0, lon: 0 },
+    { lat: 0.18, lon: 1 },
+    { lat: 0.45, lon: 2 },
+    { lat: 0.72, lon: 3 },
+    { lat: 0.92, lon: 4 },
+    { lat: 1.0, lon: 4.8 }
+  ];
+  const live = { lat: 1.0, lon: 5, track: 90, onGround: false, extrapolated: false };
+  const path = canonicalLiveDisplayPath({ filedPath, flownTrack, live, dest });
+  const liveIndex = path.findIndex((p) => Math.abs(p.lat - live.lat) < 1e-9 && Math.abs(p.lon - live.lon) < 1e-9);
+
+  it('uses the actual deviation for the portion behind the aircraft', () => {
+    assert.ok(liveIndex >= flownTrack.length - 1);
+    assert.ok(path.slice(1, liveIndex).some((p) => p.lat > 0.7));
+    assert.ok(path.slice(Math.max(0, liveIndex - 2), liveIndex).every((p) => p.lat > 0.4));
+  });
+
+  it('joins actual track naturally to the current aircraft without an obsolete filed-route jump', () => {
+    assert.ok(liveIndex > 0);
+    const previous = path[liveIndex - 1];
+    assert.ok(Math.hypot(previous.lat - live.lat, previous.lon - live.lon) < 0.3);
+  });
+
+  it('starts projection at the current aircraft and never selects a segment behind it', () => {
+    assert.ok(liveIndex >= 0 && liveIndex < path.length - 1);
+    assert.ok(path.slice(liveIndex + 1).every((p) => p.lon >= live.lon));
+    assert.deepEqual(path.at(-1), dest);
+  });
+
+  it('keeps Route and Weather on the same canonical story samples', () => {
+    const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
+    const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
+    assert.match(mapSource, /const samples = story\.route\.samples/);
+    assert.match(appSource, /<RouteMap[\s\S]*story=\{story\}/);
+  });
+
+  it('does not evaluate future weather against the abandoned route behind the aircraft', () => {
+    const abandonedWeather = { lat: 0, lon: 4 };
+    const future = path.slice(liveIndex);
+    const closest = Math.min(...future.map((p) => Math.hypot(p.lat - abandonedWeather.lat, p.lon - abandonedWeather.lon)));
+    assert.ok(closest > 1);
+  });
 });
