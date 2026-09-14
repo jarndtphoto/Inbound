@@ -750,11 +750,15 @@ function remainingEtaMin(remainingNm, directDestinationNm, live, aware) {
 	const gs = live?.gsKt ?? 0;
 	const onFinalApproach = directDestinationNm != null && directDestinationNm <= 25;
 	const nearDest = remainingNm < 80;
-	const speed = gs > 120 && nearDest ? gs : Math.max(420, gs > 300 ? gs : 0) || 440;
+	const speed = onFinalApproach && gs > 60
+		? gs
+		: gs > 120 && nearDest
+		? gs
+		: Math.max(420, gs > 300 ? gs : 0) || 440;
 	const kin = remainingNm / speed * 60;
 	// Inside the final-approach handoff, live position and groundspeed are more
 	// trustworthy than a provider ETA that may not update through touchdown.
-	if (onFinalApproach && gs > 120) return Math.max(1, kin);
+	if (onFinalApproach && gs > 60) return Math.max(1, kin);
 	if (nearDest && gs > 120) return Math.max(1, kin);
 	if (faMin != null && faMin > 1) return faMin;
 	return Math.max(1, kin);
