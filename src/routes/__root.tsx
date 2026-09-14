@@ -18,13 +18,16 @@ export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no" },
+      { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" },
       { title: APP_NAME },
       { name: "description", content: "Your flight, stage by stage — inbound aircraft, route weather, turbulence, delays, and the gate." },
-      { name: "theme-color", content: "#08090c" },
-      { name: "color-scheme", content: "dark" },
+      { name: "theme-color", content: "#faf7f1" },
+      { name: "color-scheme", content: "light dark" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-title", content: "Inbound" },
-      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "default" },
+      { name: "format-detection", content: "telephone=no" },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
@@ -55,8 +58,9 @@ export const Route = createRootRoute({
   component: () => (
     <html
       lang="en"
-      className="dark h-full antialiased"
-      style={{ background: "#08090c", color: "#e7eaee", colorScheme: "dark", height: "100%" }}
+      className="h-full antialiased"
+      data-theme="sunrise"
+      style={{ background: "#faf7f1", height: "100%" }}
       suppressHydrationWarning
     >
       <head>
@@ -65,7 +69,7 @@ export const Route = createRootRoute({
           <style id="inbound-css" dangerouslySetInnerHTML={{ __html: appCssInline }} />
         ) : null}
       </head>
-      <body className="h-full bg-bg text-fg" style={{ background: "#08090c", color: "#e7eaee", margin: 0, height: "100%" }} suppressHydrationWarning>
+      <body className="h-full bg-bg text-fg" style={{ background: "#faf7f1", margin: 0, height: "100%" }} suppressHydrationWarning>
         <PreviewHostBridge />
         <AuthProvider>
           <AppProviders>

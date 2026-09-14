@@ -365,7 +365,7 @@ export function FiledApp() {
     </div>
   </main>;
   if (page === "flight") return <FlightPages onHome={() => setPage("home")} />;
-  return <main className="h-dvh overflow-y-auto bg-bg px-5 py-8 text-fg sm:px-8">
+  return <main className="h-dvh overflow-y-auto bg-bg px-5 pt-safe pb-safe text-fg sm:px-8">
     <div className="mx-auto max-w-2xl space-y-7 pb-8">
       <header className="flex items-center justify-between"><span className="flex items-center gap-2 font-semibold"><Plane className="h-5 w-5 text-accent" aria-hidden="true" /> Inbound</span><a href="#home-settings" className="rounded-lg border border-border px-4 py-3 text-sm">Settings</a></header>
       <section className="rounded-2xl border border-border bg-surface p-6 sm:p-8">
@@ -722,7 +722,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg" style={shellStyle}>
+    <div className="pwa-flight-shell flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg" style={shellStyle}>
       <div className="shrink-0 border-b border-border bg-bg px-4 py-2"><div className="mx-auto max-w-6xl"><button type="button" onClick={onHome} className="min-h-10 text-sm text-muted">← Home & settings</button></div></div>
       {story && <header className="shrink-0 border-b border-border bg-bg px-4 pt-3 lg:px-8">
         <div className="mx-auto max-w-6xl">

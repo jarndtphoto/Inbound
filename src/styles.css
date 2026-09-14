@@ -158,6 +158,13 @@
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
 }
 
+@media (display-mode: standalone) {
+  .pwa-flight-shell {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
 /* Sunrise uses the same semantic palette across every flight tab. */
 html[data-theme="sunrise"] {
   color-scheme: light;
