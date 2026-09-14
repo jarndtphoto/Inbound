@@ -64,7 +64,7 @@ describe('zoom-stable route presentation', () => {
   });
 
   it('counter-scales route decorations and the aircraft inside the zoom group', () => {
-    assert.match(source, /route-fix-marker[\s\S]{0,300}scale\(\$\{1 \/ zoom\.s\}\)|scale\(\$\{1 \/ zoom\.s\}\)[\s\S]{0,300}route-fix-marker/);
+    assert.match(source, /data-filed-fix[\s\S]{0,300}scale\(\$\{1 \/ zoom\.s\}\)|scale\(\$\{1 \/ zoom\.s\}\)[\s\S]{0,300}data-filed-fix/);
     assert.match(source, /WeatherEventMarker[^>]+inverseScale=\{1 \/ zoom\.s\}/);
     assert.match(source, /hasFix[^>]+scale\(\$\{1 \/ zoom\.s\}\)/);
   });
@@ -750,6 +750,19 @@ describe('live reroute display geometry', () => {
     assert.match(mapSource, /data-filed-fix=/);
     assert.match(mapSource, /scale\(\$\{1 \/ zoom\.s\}\)/);
     assert.ok(path.slice(Math.max(0, liveIndex - 2), liveIndex).every((p) => p.lat > 0.4));
+  });
+
+  it('never renders interpolated route samples as waypoint markers', () => {
+    const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
+    assert.doesNotMatch(mapSource, /samples\.filter\(\(s\) => s\.fix\)/);
+    assert.doesNotMatch(mapSource, /route-fix-marker/);
+    assert.match(mapSource, /const allFiledFixes = \(story\.route\.filedFixes \?\? \[\]\)/);
+  });
+
+  it('does not add published fix markers as the map zoom changes', () => {
+    const mapSource = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
+    assert.match(mapSource, /Math\.ceil\(allFiledFixes\.length \/ 24\)/);
+    assert.doesNotMatch(mapSource, /allFiledFixes\.length \/ \(zoom\.s/);
   });
 
   it('does not evaluate future weather against the abandoned route behind the aircraft', () => {

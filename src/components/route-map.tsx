@@ -490,9 +490,10 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + event.startEtaMin
           : plannedMinutes == null ? null : event.startFrac * plannedMinutes
       }));
-  const fixes = samples.filter((s) => s.fix);
   const allFiledFixes = (story.route.filedFixes ?? []).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
-  const filedStep = Math.max(1, Math.ceil(allFiledFixes.length / (zoom.s >= 2 ? 36 : 16)));
+  // Marker count is derived only from the published plan and remains stable
+  // while zooming. Route samples still drive geometry, ETA, and weather.
+  const filedStep = Math.max(1, Math.ceil(allFiledFixes.length / 24));
   const filedFixes = allFiledFixes.filter((_, index) => index % filedStep === 0);
   const runs = pathRuns(samples, progress).build(sx, sy);
   const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
@@ -610,18 +611,6 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
             {section.length === 1 && <circle cx={sx(section[0].lon)} cy={sy(section[0].lat)} r={12 / zoom.s} className="fill-ifr" opacity="0.65" />}
           </g>;
         })}
-        {fixes.map((s) => (
-          <g key={`fix-${s.frac}`} transform={`translate(${sx(s.lon)} ${sy(s.lat)}) scale(${1 / zoom.s}) rotate(45)`}>
-          <rect
-            x={-2.6}
-            y={-2.6}
-            width="5.2"
-            height="5.2"
-            className="route-fix-marker fill-fg/55"
-          />
-          </g>
-        ))}
-
         <g transform={`translate(${sx(origin.lon)} ${sy(origin.lat)}) scale(${1 / zoom.s})`}>
           <circle r="5.5" className="fill-accent stroke-bg" strokeWidth="2" vectorEffect="non-scaling-stroke" />
           <text y="22" textAnchor="middle" className="fill-muted" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.origin.iata}</text>
