@@ -743,22 +743,23 @@ function headingDelta(a, b) {
 	const d = Math.abs(wrap360(a) - wrap360(b));
 	return Math.min(d, 360 - d);
 }
-function remainingEtaMin(remainingNm, directDestinationNm, live, aware) {
+export function remainingEtaMin(remainingNm, directDestinationNm, live, aware) {
 	const now = Date.now() / 1e3;
 	const fa = aware?.landing?.estimated ?? aware?.landing?.scheduled ?? null;
 	const faMin = typeof fa === "number" && fa > now ? (fa - now) / 60 : null;
 	const gs = live?.gsKt ?? 0;
 	const onFinalApproach = directDestinationNm != null && directDestinationNm <= 25;
 	const nearDest = remainingNm < 80;
-	const speed = onFinalApproach && gs > 60
-		? gs
+	// Keep the estimate converging through flare and rollout. Groundspeed can
+	// fall rapidly at touchdown, but a stale provider ETA must never take over
+	// again once live position has entered the final-approach zone.
+	const speed = onFinalApproach
+		? Math.max(90, gs)
 		: gs > 120 && nearDest
 		? gs
 		: Math.max(420, gs > 300 ? gs : 0) || 440;
 	const kin = remainingNm / speed * 60;
-	// Inside the final-approach handoff, live position and groundspeed are more
-	// trustworthy than a provider ETA that may not update through touchdown.
-	if (onFinalApproach && gs > 60) return Math.max(1, kin);
+	if (onFinalApproach) return remainingNm < 0.15 ? 0 : Math.min(60, kin);
 	if (nearDest && gs > 120) return Math.max(1, kin);
 	if (faMin != null && faMin > 1) return faMin;
 	return Math.max(1, kin);
@@ -2440,34 +2441,34 @@ async function buildStory(query) {
 	}
 	const totalNm = Math.max(1, polylineLengthNm(path));
 	let remainingNm;
-	let routeProjectedRemainingNm;
+	let routeRemainingNm;
 	let progress;
-	const directDestinationNm = live && Number.isFinite(live.lat) && Number.isFinite(live.lon)
+	const directToDestNm = live && Number.isFinite(live.lat) && Number.isFinite(live.lon)
 		? haversineNm({ lat: live.lat, lon: live.lon }, end)
 		: null;
 	if (ourLanded) {
 		progress = 1;
-		routeProjectedRemainingNm = 0;
+		routeRemainingNm = 0;
 	} else if (live && Number.isFinite(live.lat) && Number.isFinite(live.lon) && !(live.extrapolated && haversineNm({ lat: live.lat, lon: live.lon }, start) < 4)) {
 		const along = progressAlongPath(path, {
 			lat: live.lat,
 			lon: live.lon
 		});
 		progress = along.frac;
-		routeProjectedRemainingNm = along.remainingNm;
+		routeRemainingNm = along.remainingNm;
 	} else if (ourAirborne || aware?.takeoff?.actual) {
 		progress = timeFracOf(aware) || 0.03;
-		routeProjectedRemainingNm = (1 - progress) * totalNm;
+		routeRemainingNm = (1 - progress) * totalNm;
 	} else {
 		progress = 0;
-		routeProjectedRemainingNm = totalNm;
+		routeRemainingNm = totalNm;
 	}
 	remainingNm = ourLanded
 		? 0
-		: directDestinationNm != null && directDestinationNm <= 25
-		? directDestinationNm
-		: routeProjectedRemainingNm;
-	const etaMin = remainingEtaMin(remainingNm, directDestinationNm, live, aware);
+		: directToDestNm != null && directToDestNm <= 25
+		? directToDestNm
+		: routeRemainingNm;
+	const etaMin = remainingEtaMin(remainingNm, directToDestNm, live, aware);
 	const heading = ourLanded
 		? initialBearing(path[Math.max(0, path.length - 2)] ?? start, end)
 		: live?.track ?? initialBearing(start, end);
@@ -2846,6 +2847,20 @@ async function buildStory(query) {
 		distPark,
 		parkedAtGate
 	});
+	if (directToDestNm != null && directToDestNm <= 25) {
+		console.log("[final-approach]", {
+			callsign: liveCs,
+			livePosition: live ? { lat: live.lat, lon: live.lon } : null,
+			altitudeFt: live?.altFt ?? null,
+			groundspeedKt: live?.gsKt ?? null,
+			routeRemainingNm,
+			directToDestNm,
+			remainingNm,
+			etaMin,
+			currentStage: current,
+			landed: ourLanded
+		});
+	}
 	const airline = airlineOf(liveCs) ?? route?.airline?.name ?? null;
 	let aircraft = live;
 	if (ourLanded) {
@@ -2948,8 +2963,8 @@ async function buildStory(query) {
 		route: {
 			totalNm,
 			remainingNm,
-			routeProjectedRemainingNm,
-			directDestinationNm,
+			routeRemainingNm,
+			directToDestNm,
 			flownNm: Math.max(0, totalNm - remainingNm),
 			etaMin,
 			progress,
