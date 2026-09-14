@@ -1,3 +1,4 @@
+import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { parseFlightQuery } from "@/lib/flight-parse";
 import { BaggageStatus } from "./baggage-status";
 import { airlineStatusLink, flightDepartureDate } from "@/lib/airline-status";
@@ -23,6 +24,12 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
   let localTime="Local time unavailable";
   if(story.dest.tz)try{localTime=new Intl.DateTimeFormat(undefined,{timeZone:story.dest.tz,hour:"numeric",minute:"2-digit",timeZoneName:"short"}).format(now)}catch{}
   return <div className="mt-5 space-y-4">
+    {story.inboundDiversion && <section role="status" className="rounded-xl border border-accent bg-surface p-5" aria-label="Inbound aircraft diversion">
+      <h2 className="text-xl font-semibold">Inbound aircraft was diverted</h2>
+      <p className="mt-2 text-sm leading-relaxed">{inboundDiversionText(story.inboundDiversion)}</p>
+      <p className="mt-3 text-sm text-muted">Aircraft {story.inboundDiversion.aircraft} · {story.inboundDiversion.chain.join(" → ")}</p>
+      <p className="mt-2 text-xs text-muted">FlightAware history checked {new Date(story.inboundDiversion.reportedAt).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}.{failed || now-story.fetchedAt>60000 ? " Updates are delayed; this is the last confirmed history." : ""}</p>
+    </section>}
     <section className="rounded-xl border border-border bg-surface p-5" aria-label="What happens next">
       <h2 className="text-xl font-semibold">{step.title}</h2><p className="mt-2 text-sm leading-relaxed">{step.body}</p>
       {story.diversion && onTrackInbound && <form className="mt-4 border-t border-border pt-4" onSubmit={event=>{event.preventDefault();if(validOnward && onwardFlight)onTrackInbound(onwardFlight.callsign);}}>

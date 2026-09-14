@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { loadAeroFlight } from "./aeroapi.server.ts";
+import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
 import { readFlightResume } from "./flight-resume";
 import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
@@ -2454,6 +2455,11 @@ async function buildStory(query, resumed = null) {
 	origin = hydOrigin;
 	dest = hydDest;
 	if (inboundFetched && (!inboundFetched.routeOnly || !inboundAware)) inboundAware = inboundFetched;
+	// Preserve diversion evidence before an off-route inbound is excluded from arrival estimates.
+	const inboundDiversion = !resumed && aware && !inboundAlreadyDone
+		? await safe(cached(`inbound-diversion:${snapKey}:${aware.tail ?? ""}:${aware.inboundFlightId ?? ""}`, 120000,
+			() => findInboundDiversion(aware, inboundAware, loadAwareById)), undefined)
+		: undefined;
 	if (inboundAware && !inboundServesOrigin(inboundAware, origin.iata)) inboundAware = null;
 	const originTz = tzOf(origin);
 	if (inboundAware) rememberInboundSnap(snapKey, {
@@ -3090,6 +3096,7 @@ async function buildStory(query, resumed = null) {
 		resume: resumed?.resume ?? resumeFromAware(aware, query),
 		flightId: aware?.flightId ?? undefined,
 		diversion: aware?.diversion,
+		inboundDiversion,
 		query,
 		callsign: liveCs,
 		iata: displayIata(liveCs, parsed.iata ?? aware?.iataIdent ?? route?.callsign_iata ?? null),
