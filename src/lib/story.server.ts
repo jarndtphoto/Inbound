@@ -858,12 +858,11 @@ function asTimes(v) {
 		actual
 	};
 }
-function gateOutTimes(v, flightStatus, takeoff) {
+function gateOutTimes(v, takeoff) {
 	const gateOut = asTimes(v);
 	const ambiguousPublicActual = Boolean(
 		gateOut.actual && !takeoff.actual &&
-		(gateOut.actual === gateOut.estimated || gateOut.actual === gateOut.scheduled) &&
-		/scheduled|estimated|unknown/i.test(String(flightStatus ?? ""))
+		(gateOut.actual === gateOut.estimated || gateOut.actual === gateOut.scheduled)
 	);
 	return ambiguousPublicActual ? { ...gateOut, actual: null } : gateOut;
 }
@@ -1156,7 +1155,7 @@ function parseAwareRecord(f, fallbackIdent, withInbound) {
 		destTz: faAirportTz(dest),
 		takeoff: takeoffTimes,
 		landing: asTimes(f.landingTimes),
-		gateOut: gateOutTimes(f.gateDepartureTimes, f.flightStatus, takeoffTimes),
+		gateOut: gateOutTimes(f.gateDepartureTimes, takeoffTimes),
 		gateIn: asTimes(f.gateArrivalTimes),
 		inboundIdent,
 		inbound,
@@ -2354,6 +2353,7 @@ function mergeOfficialAware(base, official: NormalizedFlight | null) {
 		estimated: next?.estimated ?? current?.estimated ?? null,
 		actual: next?.actual ?? current?.actual ?? null
 	});
+	const takeoff = mergeTimes(out.takeoff, official.takeoff);
 	return {
 		...out,
 		ident: official.callsign ?? out.ident,
@@ -2364,8 +2364,8 @@ function mergeOfficialAware(base, official: NormalizedFlight | null) {
 		destIata: official.destination?.iata ?? out.destIata,
 		destIcao: official.destination?.icao ?? out.destIcao,
 		destGate: official.destination?.gate ?? out.destGate,
-		gateOut: mergeTimes(out.gateOut, official.push),
-		takeoff: mergeTimes(out.takeoff, official.takeoff),
+		gateOut: gateOutTimes(mergeTimes(out.gateOut, official.push), takeoff),
+		takeoff,
 		landing: mergeTimes(out.landing, official.landing),
 		gateIn: mergeTimes(out.gateIn, official.gateIn),
 		tail: official.registration ?? out.tail,
