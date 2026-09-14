@@ -743,14 +743,18 @@ function headingDelta(a, b) {
 	const d = Math.abs(wrap360(a) - wrap360(b));
 	return Math.min(d, 360 - d);
 }
-function remainingEtaMin(remainingNm, live, aware) {
+function remainingEtaMin(remainingNm, directDestinationNm, live, aware) {
 	const now = Date.now() / 1e3;
 	const fa = aware?.landing?.estimated ?? aware?.landing?.scheduled ?? null;
 	const faMin = typeof fa === "number" && fa > now ? (fa - now) / 60 : null;
 	const gs = live?.gsKt ?? 0;
+	const onFinalApproach = directDestinationNm != null && directDestinationNm <= 25;
 	const nearDest = remainingNm < 80;
 	const speed = gs > 120 && nearDest ? gs : Math.max(420, gs > 300 ? gs : 0) || 440;
 	const kin = remainingNm / speed * 60;
+	// Inside the final-approach handoff, live position and groundspeed are more
+	// trustworthy than a provider ETA that may not update through touchdown.
+	if (onFinalApproach && gs > 120) return Math.max(1, kin);
 	if (nearDest && gs > 120) return Math.max(1, kin);
 	if (faMin != null && faMin > 1) return faMin;
 	return Math.max(1, kin);
@@ -2432,25 +2436,34 @@ async function buildStory(query) {
 	}
 	const totalNm = Math.max(1, polylineLengthNm(path));
 	let remainingNm;
+	let routeProjectedRemainingNm;
 	let progress;
+	const directDestinationNm = live && Number.isFinite(live.lat) && Number.isFinite(live.lon)
+		? haversineNm({ lat: live.lat, lon: live.lon }, end)
+		: null;
 	if (ourLanded) {
 		progress = 1;
-		remainingNm = 0;
+		routeProjectedRemainingNm = 0;
 	} else if (live && Number.isFinite(live.lat) && Number.isFinite(live.lon) && !(live.extrapolated && haversineNm({ lat: live.lat, lon: live.lon }, start) < 4)) {
 		const along = progressAlongPath(path, {
 			lat: live.lat,
 			lon: live.lon
 		});
 		progress = along.frac;
-		remainingNm = along.remainingNm;
+		routeProjectedRemainingNm = along.remainingNm;
 	} else if (ourAirborne || aware?.takeoff?.actual) {
 		progress = timeFracOf(aware) || 0.03;
-		remainingNm = (1 - progress) * totalNm;
+		routeProjectedRemainingNm = (1 - progress) * totalNm;
 	} else {
 		progress = 0;
-		remainingNm = totalNm;
+		routeProjectedRemainingNm = totalNm;
 	}
-	const etaMin = remainingEtaMin(remainingNm, live, aware);
+	remainingNm = ourLanded
+		? 0
+		: directDestinationNm != null && directDestinationNm <= 25
+		? directDestinationNm
+		: routeProjectedRemainingNm;
+	const etaMin = remainingEtaMin(remainingNm, directDestinationNm, live, aware);
 	const heading = ourLanded
 		? initialBearing(path[Math.max(0, path.length - 2)] ?? start, end)
 		: live?.track ?? initialBearing(start, end);
@@ -2931,6 +2944,8 @@ async function buildStory(query) {
 		route: {
 			totalNm,
 			remainingNm,
+			routeProjectedRemainingNm,
+			directDestinationNm,
 			flownNm: Math.max(0, totalNm - remainingNm),
 			etaMin,
 			progress,
@@ -3071,4 +3086,3 @@ export async function loadLiveBoard() {
 		return cards.slice(0, 8);
 	});
 }
-
