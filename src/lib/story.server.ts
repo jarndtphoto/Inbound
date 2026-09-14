@@ -1283,6 +1283,25 @@ function fieldFromKnown(iata, icao, lat, lon, name, city, tzHint) {
 		category: "UNK"
 	};
 }
+/** Resolve coordinates without replacing a current flight's airport identity. */
+async function resolveFlightField(aware, side, fallback) {
+  const prefix = side === "origin" ? "origin" : "dest";
+  const iata = aware?.[prefix + "Iata"] ?? null;
+  const icao = aware?.[prefix + "Icao"] ?? null;
+  const make = (lat, lon) => fieldFromKnown(iata, icao, lat, lon,
+    aware?.[prefix + "Name"], aware?.[prefix + "City"], aware?.[prefix + "Tz"]);
+  const known = make(aware?.[prefix + "Lat"], aware?.[prefix + "Lon"]);
+  if (known) return known;
+  if (icao && /^[A-Z0-9]{4}$/.test(icao)) {
+    const { metar } = await safe(loadMetar(icao), {metar:null});
+    if (Number.isFinite(metar?.lat) && Number.isFinite(metar?.lon)) return make(metar.lat, metar.lon);
+  }
+  const candidate = fieldFromAdsbdb(fallback);
+  if (!candidate) return null;
+  // Route databases can retain a previous city pair for this flight number.
+  if ((iata || icao) && candidate.iata !== iata && candidate.icao !== icao) return null;
+  return candidate;
+}
 function titleNas(reason) {
 	if (!reason) return reason;
 	const cleaned = String(reason)
@@ -2227,8 +2246,10 @@ async function buildStory(query, resumed = null) {
 		: await safe(adsbByCallsign(parsed.callsign), null);
 	const liveCs = parsed.callsign;
 	let live = rawAc ? toLive(rawAc) : liveFromAware(aware);
-	let origin = fieldFromKnown(aware?.originIata ?? null, aware?.originIcao ?? null, aware?.originLat ?? null, aware?.originLon ?? null, aware?.originName ?? null, aware?.originCity ?? null, aware?.originTz ?? null) ?? fieldFromAdsbdb(route?.origin);
-	let dest = fieldFromKnown(aware?.destIata ?? null, aware?.destIcao ?? null, aware?.destLat ?? null, aware?.destLon ?? null, aware?.destName ?? null, aware?.destCity ?? null, aware?.destTz ?? null) ?? fieldFromAdsbdb(route?.destination);
+	let [origin, dest] = await Promise.all([
+    resolveFlightField(aware, "origin", route?.origin),
+    resolveFlightField(aware, "dest", route?.destination),
+  ]);
 	if (!origin || !dest) throw new Error("Flight route unavailable. Try again when the flight feeds respond.");
 	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
