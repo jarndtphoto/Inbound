@@ -11,11 +11,13 @@ export const Route = createFileRoute("/diag-weather")({
     return {
       fetchedAt: story.fetchedAt,
       progress: story.route.progress,
+      current: ahead[0] && { frac: ahead[0].frac, etaMin: ahead[0].etaMin, chop: ahead[0].chop, cloud: ahead[0].cloud, convective: ahead[0].convective },
       overview: rideOutlook(story),
       events: events.map((event) => ({
+        key: event.key,
         affectedSamples: story.route.samples
           .filter((sample) => event.ranges.some((range) => sample.frac >= range.from && sample.frac <= range.to))
-          .map((sample) => ({ frac: sample.frac, etaMin: sample.etaMin, lat: sample.lat, lon: sample.lon })),
+          .map((sample) => ({ frac: sample.frac, etaMin: sample.etaMin, lat: sample.lat, lon: sample.lon, chop: sample.chop, cloud: sample.cloud, convective: sample.convective })),
         startFrac: event.startFrac,
         endFrac: event.endFrac,
         startEtaMin: event.startEtaMin,
