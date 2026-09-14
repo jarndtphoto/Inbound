@@ -360,6 +360,21 @@ describe("Overview record migration", () => {
     const source = readFileSync(new URL("../components/filed-app.tsx", import.meta.url), "utf8");
     assert.doesNotMatch(source, /function RecordCard|function recordRows|<RecordCard/);
   });
+
+  it("keeps live priorities visible and puts only secondary facts in informative disclosures", () => {
+    const source = readFileSync(new URL("../components/filed-app.tsx", import.meta.url), "utf8");
+    const overview = source.slice(source.indexOf('id="panel-Overview"'), source.indexOf('id="panel-Route"'));
+    assert.ok(overview.indexOf("<FlightHead") < overview.indexOf("<OverviewDetails"));
+    assert.ok(overview.indexOf("<TravelerCompanion") < overview.indexOf("<OverviewDetails"));
+    for (const title of ["Flight details", "Aircraft", "Airport details"]) {
+      assert.match(source, new RegExp(`title="${title}"`));
+    }
+    assert.match(source, /summary={`\$\{story\.iata\} · \$\{story\.origin\.iata\} → \$\{story\.dest\.iata\}`}/);
+    assert.match(source, /summary=\{aircraftSummary\}/);
+    assert.match(source, /summary={`\$\{originStop\} → \$\{destStop\}`}/);
+    const details = source.slice(source.indexOf("function OverviewDetails"), source.indexOf("function kindLabel"));
+    assert.doesNotMatch(details, /callsign|chosenPosition|seenSec|hex/i);
+  });
 });
 
 

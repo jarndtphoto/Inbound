@@ -17,7 +17,7 @@ import { RouteMap } from "@/components/route-map";
 import { WeatherEventBody, WeatherEventHeadline } from "@/components/weather-event-copy";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Clock, Gauge, Plane, Radio, Search, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { Clock, Gauge, Plane, Search, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type FormEvent, type ReactNode } from "react";
 
 const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
@@ -800,6 +800,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
             <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
               <TravelerCompanion story={story} failed={storyQ.isError || Boolean(refreshErr)} onTrackInbound={openFlight} />
+              <OverviewDetails story={story} />
             </section>
             <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
               <RouteMap story={story} fixedViewport />
@@ -938,10 +939,8 @@ function FlightHead({
 }) {
   const ac = story.aircraft;
   const airborne = flightAirborne(story);
-  const down = wheelsDown(story);
   const live = liveFix(story);
   const showAlt = Boolean(live && airborne && ac && !ac.onGround && (ac.altFt || ac.gsKt));
-  const showRemaining = !airborne && !down;
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2">
@@ -960,31 +959,120 @@ function FlightHead({
         </p>
       </div>
       <TimesStrip failed={failed} story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
-      <dl className={cn("mt-4 grid gap-3", showAlt || showRemaining ? "grid-cols-2" : "grid-cols-1")}>
-        <Stat
-          icon={Plane}
-          label="Aircraft"
-          value={ac ? `${ac.typeName ?? ac.type ?? "—"}` : "Unknown"}
-          sub={ac?.registration ?? ""}
-        />
-        {showAlt ? (
+      {showAlt ? (
+        <dl className="mt-4 grid grid-cols-1 gap-3">
           <Stat
             icon={Gauge}
-            label="Altitude"
+            label="Live flight"
             value={ac?.altFt ? feetPretty(ac.altFt) : "—"}
             sub={ac?.gsKt ? `${Math.round(ac.gsKt)} kt` : ""}
           />
-        ) : showRemaining ? (
-          <Stat
-            icon={Radio}
-            label="Until landing"
-            value={formatMiles(story.route.remainingNm)}
-            sub={formatDuration(story.route.etaMin)}
-          />
-        ) : null}
-      </dl>
+        </dl>
+      ) : null}
     </div>
   );
+}
+
+type OverviewDetailKey = "flight" | "aircraft" | "airports";
+
+function formatLocalUnix(unix: number | null | undefined, timeZone?: string) {
+  if (unix == null || !Number.isFinite(unix)) return null;
+  try {
+    return new Intl.DateTimeFormat(undefined, { timeZone, hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(unix * 1000);
+  } catch {
+    return new Date(unix * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+}
+
+function plannedDuration(story: FlightStory) {
+  const start = story.times.origTakeoffUnix ?? story.times.takeoffUnix;
+  const end = story.times.origLandUnix ?? story.times.landUnix;
+  return start != null && end != null && end > start ? formatDuration((end - start) / 60) : null;
+}
+
+function DetailRow({ label, value }: { label: string; value: string | null | undefined }) {
+  if (!value) return null;
+  return <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 py-1.5 text-sm"><dt className="text-muted">{label}</dt><dd className="text-right font-medium">{value}</dd></div>;
+}
+
+function OverviewDisclosure({
+  id,
+  title,
+  summary,
+  open,
+  onToggle,
+  children,
+}: {
+  id: OverviewDetailKey;
+  title: string;
+  summary: string;
+  open: boolean;
+  onToggle: (id: OverviewDetailKey) => void;
+  children: ReactNode;
+}) {
+  const panelId = `overview-${id}-details`;
+  return <div className="border-b border-border last:border-b-0">
+    <button
+      type="button"
+      className="flex min-h-16 w-full items-center justify-between gap-3 py-3 text-left"
+      aria-expanded={open}
+      aria-controls={panelId}
+      onClick={() => onToggle(id)}
+    >
+      <span className="min-w-0"><span className="block font-semibold">{title}</span><span className="mt-0.5 block truncate text-sm text-muted">{summary}</span></span>
+      <ChevronDown className={cn("size-5 shrink-0 text-muted transition-transform duration-200", open && "rotate-180")} aria-hidden="true" />
+    </button>
+    <div className={cn("grid transition-[grid-template-rows,opacity] duration-200 ease-out", open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
+      <div className="overflow-hidden"><div id={panelId} aria-hidden={!open} className="pb-4">{children}</div></div>
+    </div>
+  </div>;
+}
+
+function OverviewDetails({ story }: { story: FlightStory }) {
+  const storageKey = `inbound-overview-details:${origMemKey(story)}`;
+  const [open, setOpen] = useState<Record<OverviewDetailKey, boolean>>({ flight: false, aircraft: false, airports: false });
+  useEffect(() => {
+    setOpen({ flight: false, aircraft: false, airports: false });
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey) || "null");
+      if (saved) setOpen({ flight: Boolean(saved.flight), aircraft: Boolean(saved.aircraft), airports: Boolean(saved.airports) });
+    } catch { /* Secondary detail state is optional. */ }
+  }, [storageKey]);
+  const toggle = (key: OverviewDetailKey) => setOpen((current) => {
+    const next = { ...current, [key]: !current[key] };
+    try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Storage can be unavailable. */ }
+    return next;
+  });
+  const ac = story.aircraft;
+  const aircraftSummary = [ac?.typeName ?? ac?.type ?? "Aircraft details unavailable", ac?.registration].filter(Boolean).join(" · ");
+  const originStop = [story.origin.iata, story.times.originGate ? `Gate ${story.times.originGate}` : null].filter(Boolean).join(" ");
+  const destStop = [story.dest.iata, story.times.destGate ? `Gate ${story.times.destGate}` : null].filter(Boolean).join(" ");
+  return <section className="mt-4 rounded-xl border border-border bg-surface px-4" aria-label="More flight information">
+    <OverviewDisclosure id="flight" title="Flight details" summary={`${story.iata} · ${story.origin.iata} → ${story.dest.iata}`} open={open.flight} onToggle={toggle}>
+      <dl>
+        <DetailRow label="Airline" value={story.airline} />
+        <DetailRow label="Flight" value={story.iata} />
+        <DetailRow label="Route" value={`${story.origin.city} (${story.origin.iata}) → ${story.dest.city} (${story.dest.iata})`} />
+        <DetailRow label="Scheduled pushback" value={formatLocalUnix(story.times.origPushUnix, story.origin.tz) ?? story.times.pushWas} />
+        <DetailRow label="Scheduled landing" value={formatLocalUnix(story.times.origLandUnix, story.dest.tz) ?? story.times.landWas} />
+        <DetailRow label="Planned flight time" value={plannedDuration(story)} />
+      </dl>
+    </OverviewDisclosure>
+    <OverviewDisclosure id="aircraft" title="Aircraft" summary={aircraftSummary} open={open.aircraft} onToggle={toggle}>
+      <dl>
+        <DetailRow label="Model" value={ac?.typeName ?? ac?.type} />
+        <DetailRow label="Registration" value={ac?.registration} />
+        <DetailRow label="Aircraft year" value={ac?.year} />
+        <DetailRow label="Operator" value={ac?.operator} />
+      </dl>
+    </OverviewDisclosure>
+    <OverviewDisclosure id="airports" title="Airport details" summary={`${originStop} → ${destStop}`} open={open.airports} onToggle={toggle}>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <section aria-label="Departure airport details"><h3 className="font-semibold">Departure · {story.origin.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.originGate ?? "Not assigned"} /><DetailRow label="Pushback" value={story.times.push} /><DetailRow label="Weather" value={story.origin.category} /></dl></section>
+        <section aria-label="Arrival airport details"><h3 className="font-semibold">Arrival · {story.dest.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.destGate ?? "Not assigned"} /><DetailRow label="Gate arrival" value={story.times.gate} /><DetailRow label="Weather" value={story.dest.category} /></dl></section>
+      </div>
+    </OverviewDisclosure>
+  </section>;
 }
 
 function kindLabel(kind: FlightStory["times"]["pushKind"]) {
