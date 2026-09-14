@@ -56,11 +56,9 @@ function facts(over: Partial<RideFacts> = {}): RideFacts {
 const JARGON = /\b(SIGMET|AIRMET|PIREP|METAR|TAF|NAS|OOOI|FL\d{2,3}|IFR|LIFR|MVFR|VFR)\b/;
 
 describe("briefing update log", () => {
-  it("seeds a filed line and keeps it passenger-plain", () => {
+  it("does not seed the passenger timeline with audit-only entries", () => {
     const b = composeBrief(facts());
-    assert.equal(b.log.length, 1);
-    assert.equal(b.log[0].kind, "update");
-    assert.match(b.log[0].text, /filed briefing/i);
+    assert.equal(b.log.length, 0);
     assert.equal(JARGON.test(b.log.map((e) => e.text).join(" ")), false);
   });
 
@@ -71,22 +69,20 @@ describe("briefing update log", () => {
     b = composeBrief(facts({ now: "arrival" }), b);
     b = composeBrief(facts({ now: "gate" }), b);
     const texts = b.log.map((e) => e.text).join(" | ");
-    assert.match(texts, /On the move/);
+    assert.match(texts, /Taxiing out/);
     assert.match(texts, /In flight/);
-    assert.match(texts, /Approaching destination/);
-    assert.match(texts, /At the destination gate/);
+    assert.match(texts, /Arrival/);
+    assert.match(texts, /At the gate/);
     assert.equal(JARGON.test(texts), false);
   });
 
-  it("logs a delay and a 12-minute later arrival", () => {
+  it("logs a delay but ignores a routine 12-minute arrival adjustment", () => {
     let b = composeBrief(facts({ delayMin: 0, landUnix: 1_200_000 }));
     b = composeBrief(facts({ delayMin: 25, landUnix: 1_200_000 + 12 * 60 }), b);
     const delay = b.log.find((e) => e.kind === "delay");
-    const sched = b.log.find((e) => e.kind === "schedule");
     assert.ok(delay);
     assert.match(delay.text, /25 minutes/);
-    assert.ok(sched);
-    assert.match(sched.text, /12 minutes later/);
+    assert.equal(b.log.some((e) => /Arrival now looks/i.test(e.text)), false);
   });
 
   it("ignores tiny schedule jitter", () => {
@@ -170,16 +166,12 @@ describe("briefing update log", () => {
     assert.equal(b.log.length, n);
   });
 
-  it("logs a manual refresh without jargon", () => {
+  it("does not add manual refreshes to the passenger timeline", () => {
     const b = composeBrief(facts({ now: "ride" }));
     const next = logManualRefresh(b);
     assert.ok(next);
-    assert.match(next.log[next.log.length - 1].text, /Manual refresh/);
-    assert.equal(JARGON.test(next.log.map((e) => e.text).join(" ")), false);
-    const again = logManualRefresh(next);
-    assert.ok(again);
-    const manuals = again.log.filter((e) => e.text === "Manual refresh");
-    assert.ok(manuals.length <= 1);
+    assert.deepEqual(next.log, b.log);
+    assert.ok((next.liveAt ?? 0) >= (b.liveAt ?? 0));
   });
 
   it("caps the log", () => {
@@ -187,7 +179,7 @@ describe("briefing update log", () => {
     for (let i = 1; i <= 90; i++) {
       b = composeBrief(facts({ delayMin: 10 + i * 5, wxHash: `h${i}` }), b);
     }
-    assert.ok(b.log.length <= 80);
+    assert.ok(b.log.length <= 24);
   });
 
   it("maps airport delay programs into plain words", () => {
@@ -253,7 +245,7 @@ describe("briefing update log", () => {
 
 describe("on the move briefing", () => {
   it("describes a recorded departure without obsolete inbound or future push wording", () => {
-    const brief = composeBrief(facts({now:"taxi",stage:"taxi",pushKind:"actual",delayMin:82,push:"9:42 PM CDT",takeoff:"10:33 PM CDT"}));
+    const brief = composeBrief(facts({now:"taxi",stage:"taxi",pushKind:"actual",pushSource:"provider_actual",delayMin:82,push:"9:42 PM CDT",takeoff:"10:33 PM CDT"}));
     assert.match(brief.lead, /on the move/i);
     assert.match(brief.lead, /Gate departure reported at 9:42 PM CDT/);
     assert.doesNotMatch(brief.lead, /Inbound|Push is/);
@@ -263,7 +255,7 @@ describe("on the move briefing", () => {
 
 it("does not call an estimated movement time a reported departure", () => {
  const b = composeBrief(facts({now:"taxi",pushKind:"estimated"}));
- assert.match(b.lead, /first observed around/);
+ assert.match(b.lead, /Departure time is not yet confirmed/);
  assert.doesNotMatch(b.lead, /Gate departure reported/);
 });
 
@@ -274,6 +266,54 @@ it("refreshes current text even for changes below the history thresholds", () =>
  assert.match(after.lead, /taxi in 12 minutes/i);
  assert.equal(after.log.length, before.log.length);
  assert.ok((after.liveAt ?? 0) >= (before.liveAt ?? 0));
+});
+
+describe("UAL219 curated briefing regression", () => {
+  it("supersedes obsolete departure estimates after actual pushback and takeoff", () => {
+    const before = composeBrief(facts({
+      now: "taxi", stage: "taxi", push: "9:25 AM CDT", pushKind: "estimated",
+      pushSource: null, takeoff: "10:34 AM CDT", takeoffKind: "estimated",
+    }));
+    const legacy = {
+      ...before,
+      log: [
+        { at: 1, kind: "update", text: "Filed briefing is up" },
+        { at: 2, kind: "delay", text: "Delay at the airport — about 38 minutes" },
+        { at: 3, kind: "schedule", text: "Departure time moved to 10:03 AM CDT" },
+        { at: 4, kind: "schedule", text: "Departure time moved to 9:25 AM CDT" },
+        { at: 5, kind: "schedule", text: "Takeoff now looks like 10:34 AM CDT" },
+        { at: 6, kind: "schedule", text: "Estimated taxi out is now 69 minutes" },
+        { at: 7, kind: "stage", text: "On the move — pushback and taxi" },
+      ],
+    } as typeof before;
+    const after = composeBrief(facts({
+      now: "ride", stage: "ride", push: "9:46 AM CDT", pushKind: "actual",
+      pushSource: "track_detected", pushUnix: 1_000_000,
+      takeoff: "10:50 AM CDT", takeoffKind: "actual", takeoffUnix: 1_003_840,
+    }), legacy);
+    const text = after.log.map((entry) => entry.text).join(" | ");
+    assert.match(text, /Pushed back at 9:46 AM CDT/);
+    assert.match(text, /Taxiing out/);
+    assert.match(text, /Took off at 10:50 AM CDT/);
+    assert.doesNotMatch(text, /9:25|10:03|Takeoff now looks|Estimated taxi out|Delay at the airport|Filed briefing/);
+  });
+
+  it("does not persist minor arrival or taxi estimate fluctuations", () => {
+    let brief = composeBrief(facts({ now: "ride", stage: "ride", landUnix: 1_200_000, taxiInMin: 10 }));
+    brief = composeBrief(facts({ now: "ride", stage: "ride", landUnix: 1_200_000 + 8 * 60, taxiInMin: 13 }), brief);
+    const text = brief.log.map((entry) => entry.text).join(" | ");
+    assert.doesNotMatch(text, /Arrival now looks|Estimated taxi in/);
+  });
+
+  it("collapses opposite arrival estimates and removes them after landing", () => {
+    let brief = composeBrief(facts({ now: "ride", stage: "ride", landUnix: 1_200_000 }));
+    brief = composeBrief(facts({ now: "ride", stage: "ride", landUnix: 1_200_000 + 30 * 60 }), brief);
+    brief = composeBrief(facts({ now: "ride", stage: "ride", landUnix: 1_200_000, land: "11:04 AM" }), brief);
+    assert.equal(brief.log.some((entry) => /Arrival now looks/.test(entry.text)), false);
+    brief = composeBrief(facts({ now: "taxi_in", stage: "taxi_in", landKind: "actual", land: "11:04 AM" }), brief);
+    assert.equal(brief.log.some((entry) => /Arrival now looks|Estimated taxi in/.test(entry.text)), false);
+    assert.match(brief.log.map((entry) => entry.text).join(" | "), /Landed at 11:04 AM|Taxiing in/);
+  });
 });
 
 

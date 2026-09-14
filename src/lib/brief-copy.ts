@@ -16,10 +16,9 @@ export const BRIEF_LOG_LABEL: Record<BriefLogKind, string> = {
   update: "Update",
 };
 
-const LOG_CAP = 80;
+const LOG_CAP = 24;
 const DELAY_JITTER_MIN = 5;
-const CLOCK_JITTER_SEC = 4 * 60;
-const TAXI_JITTER_MIN = 3;
+const ARRIVAL_CHANGE_SEC = 15 * 60;
 
 const JARGON =
   /\b(SIGMET|AIRMET|PIREP|G-?AIRMET|METAR|TAF|NAS|OOOI|GDP|AFP|FL\d{2,3}|OUT\/OFF|IFR|LIFR|MVFR|VFR)\b/i;
@@ -60,6 +59,7 @@ export type RideFacts = {
   taxiOutMin: number | null;
   taxiOutKind?: string | null;
   takeoff: string | null;
+  takeoffKind?: string | null;
   land: string | null;
   taxiInMin: number | null;
   taxiInKind?: string | null;
@@ -109,6 +109,11 @@ export type BriefSnap = {
   takeoff: string | null;
   push: string | null;
   pushKind?: string | null;
+  pushSource?: "provider_actual" | "track_detected" | "live_detected" | null;
+  takeoffKind?: string | null;
+  landKind?: string | null;
+  gateKind?: string | null;
+  gate?: string | null;
   destGate: string | null;
   wx: string;
   worstChop: string | null;
@@ -193,11 +198,6 @@ function chopPhrase(from: string | null | undefined, to: string | null | undefin
   return `Ride was ${a} → now ${b}`;
 }
 
-function clockMoved(prevUnix: number | null, nextUnix: number | null) {
-  if (prevUnix == null || nextUnix == null) return false;
-  return Math.abs(nextUnix - prevUnix) >= CLOCK_JITTER_SEC;
-}
-
 function minutesLater(prevUnix: number | null, nextUnix: number | null) {
   if (prevUnix == null || nextUnix == null) return null;
   return Math.round((nextUnix - prevUnix) / 60);
@@ -218,7 +218,10 @@ function snapOf(d: RideFacts): BriefSnap {
     inbound: d.inboundStatus ?? d.inboundHeadline,
     land: d.land,
     takeoff: d.takeoff,
+    takeoffKind: d.takeoffKind ?? null,
     push: d.push,
+    pushKind: d.pushKind ?? null,
+    pushSource: d.pushSource ?? null,
     destGate: d.destGate,
     wx: d.wxHash ?? "",
     worstChop: d.worstChop ?? null,
@@ -228,6 +231,9 @@ function snapOf(d: RideFacts): BriefSnap {
     pushUnix: d.pushUnix ?? null,
     takeoffUnix: d.takeoffUnix ?? null,
     landUnix: d.landUnix ?? null,
+    landKind: d.landKind ?? null,
+    gateKind: d.gateKind ?? null,
+    gate: d.gate ?? null,
   };
 }
 
@@ -241,11 +247,14 @@ export function briefLogText(entry: BriefLogEntry): string {
 }
 
 function stageLine(stage: string): string | null {
-  if (stage === "push") return "Plane is at the gate";
-  if (stage === "taxi") return "On the move — pushback and taxi";
+  if (stage === "origin_gate") return "At the origin gate";
+  if (stage === "push") return "Pushback";
+  if (stage === "taxi") return "Taxiing out";
   if (stage === "ride") return "In flight";
-  if (stage === "arrival") return "Approaching destination";
-  if (stage === "gate") return "At the destination gate";
+  if (stage === "arrival") return "Arrival";
+  if (stage === "final_approach") return "Final approach";
+  if (stage === "taxi_in") return "Taxiing in";
+  if (stage === "gate") return "At the gate";
   if (stage === "inbound") return "Still waiting on the inbound plane";
   return null;
 }
@@ -254,18 +263,33 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
   if (!prev) return [];
   const out: Omit<BriefLogEntry, "at">[] = [];
 
+  const pushConfirmed = Boolean(next.push && (next.pushSource || next.pushKind === "actual"));
+  const pushBecameActual = pushConfirmed && (!prev.pushSource || prev.push !== next.push);
+  const takeoffBecameActual = next.takeoffKind === "actual" && (prev.takeoffKind !== "actual" || prev.takeoff !== next.takeoff);
+  const landingBecameActual = next.landKind === "actual" && (prev.landKind !== "actual" || prev.land !== next.land);
+  const gateBecameActual = next.gateKind === "actual" && (prev.gateKind !== "actual" || prev.gate !== next.gate);
+
+  if (pushBecameActual) out.push({ kind: "stage", text: `Pushed back at ${next.push}` });
+  if (takeoffBecameActual && next.takeoff) out.push({ kind: "stage", text: `Took off at ${next.takeoff}` });
+  if (landingBecameActual && next.land) out.push({ kind: "stage", text: `Landed at ${next.land}` });
+  if (gateBecameActual && next.gate) out.push({ kind: "stage", text: `At the gate at ${next.gate}` });
+
   if (prev.stage !== next.stage && !(prev.stage === "arrival" && next.stage === "ride")) {
     const line = stageLine(next.stage);
-    if (line) out.push({ kind: "stage", text: line });
+    const coveredByActual = (next.stage === "push" && pushBecameActual)
+      || (next.stage === "ride" && takeoffBecameActual)
+      || (next.stage === "gate" && gateBecameActual);
+    if (line && !coveredByActual) out.push({ kind: "stage", text: line });
   }
 
   const delayPrev = prev.delay ?? 0;
   const delayNext = next.delay ?? 0;
-  if (delayPrev < DELAY_JITTER_MIN && delayNext >= DELAY_JITTER_MIN) {
+  const beforeTakeoff = ["inbound", "origin_gate", "push", "taxi"].includes(next.stage);
+  if (beforeTakeoff && delayPrev < DELAY_JITTER_MIN && delayNext >= DELAY_JITTER_MIN) {
     out.push({ kind: "delay", text: `Delay at the airport — about ${delayNext} minutes` });
-  } else if (delayNext >= DELAY_JITTER_MIN && Math.abs(delayNext - delayPrev) >= DELAY_JITTER_MIN) {
+  } else if (beforeTakeoff && delayNext >= DELAY_JITTER_MIN && Math.abs(delayNext - delayPrev) >= DELAY_JITTER_MIN) {
     out.push({ kind: "delay", text: `Delay is now about ${delayNext} minutes` });
-  } else if (delayPrev >= DELAY_JITTER_MIN && delayNext < DELAY_JITTER_MIN) {
+  } else if (beforeTakeoff && delayPrev >= DELAY_JITTER_MIN && delayNext < DELAY_JITTER_MIN) {
     out.push({ kind: "delay", text: "The departure delay has lifted" });
   }
 
@@ -281,9 +305,10 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
     }
   }
 
-  if (clockMoved(prev.landUnix, next.landUnix)) {
+  const landed = next.landKind === "actual" || next.stage === "taxi_in" || next.stage === "gate";
+  if (!landed && prev.landUnix != null && next.landUnix != null && Math.abs(next.landUnix - prev.landUnix) >= ARRIVAL_CHANGE_SEC) {
     const later = minutesLater(prev.landUnix, next.landUnix);
-    if (later != null && Math.abs(later) >= 5) {
+    if (later != null) {
       out.push({
         kind: "schedule",
         text:
@@ -294,46 +319,17 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
     } else if (next.land) {
       out.push({ kind: "schedule", text: `Arrival now looks like ${next.land}` });
     }
-  } else if (!prev.landUnix && !next.landUnix && prev.land && next.land && prev.land !== next.land) {
-    out.push({ kind: "schedule", text: `Arrival now looks like ${next.land}` });
-  }
-
-  if (clockMoved(prev.pushUnix, next.pushUnix) && next.push) {
-    out.push({ kind: "schedule", text: `Departure time moved to ${next.push}` });
-  } else if (!prev.pushUnix && !next.pushUnix && prev.push && next.push && prev.push !== next.push) {
-    out.push({ kind: "schedule", text: `Departure time moved to ${next.push}` });
-  }
-
-  if (clockMoved(prev.takeoffUnix, next.takeoffUnix) && next.takeoff && next.stage !== "ride" && next.stage !== "arrival" && next.stage !== "gate") {
-    out.push({ kind: "schedule", text: `Takeoff now looks like ${next.takeoff}` });
   }
 
   if (prev.taxiOutKind !== "measured" && next.taxiOutKind === "measured" && next.taxiOut != null) {
     out.push({ kind: "schedule", text: `Taxi out was ${next.taxiOut} minutes` });
-  } else if (
-    prev.taxiOut != null &&
-    next.taxiOut != null &&
-    Math.abs(next.taxiOut - prev.taxiOut) >= TAXI_JITTER_MIN &&
-    next.stage !== "ride" &&
-    next.stage !== "arrival" &&
-    next.stage !== "gate"
-  ) {
-    out.push({ kind: "schedule", text: `Estimated taxi out is now ${next.taxiOut} minutes` });
   }
 
   if (prev.taxiInKind !== "measured" && next.taxiInKind === "measured" && next.taxiIn != null) {
     out.push({ kind: "schedule", text: `Taxi in was ${next.taxiIn} minutes` });
-  } else if (
-    prev.taxiIn != null &&
-    next.taxiIn != null &&
-    Math.abs(next.taxiIn - prev.taxiIn) >= TAXI_JITTER_MIN &&
-    next.stage !== "gate"
-  ) {
-    out.push({ kind: "schedule", text: `Estimated taxi in is now ${next.taxiIn} minutes` });
   }
 
-  // Touchdown ends en-route and departure weather updates; preserve existing history.
-  const landed = next.stage === "gate" || d?.landKind === "actual";
+  // Touchdown ends en-route weather updates.
   if (!landed) {
   const ridePrev = chopRank(prev.worstChop ?? prev.ride);
   const rideNext = chopRank(next.worstChop ?? next.ride);
@@ -368,7 +364,7 @@ function passengerWxDelta(raw: string): string | null {
   if (/chop|pirep|turb/i.test(s) && /smooth|drop|ease/i.test(s)) return "Turbulence easing — ride looks smooth";
   if (/severe/i.test(s) && /chop|pirep|turb/i.test(s)) return "Severe turbulence ahead";
   if (/moderate/i.test(s) && /chop|pirep|turb/i.test(s)) return "Moderate turbulence ahead";
-  if (/chop|pirep|turb/i.test(s)) return "Light turbulence ahead";
+  if (/chop|pirep|turb/i.test(s)) return null;
   if (/arrival weather|dest cat|forecast|taf/i.test(s)) return null;
   if (JARGON.test(s)) return null;
   const plain = s.replace(/\.+$/, "").trim();
@@ -525,12 +521,90 @@ function composeLead(d: RideFacts) {
   ]);
 }
 
+function transientKey(entry: Pick<BriefLogEntry, "kind" | "text">): string | null {
+  if (entry.kind === "weather") {
+    if (/thunderstorm/i.test(entry.text)) return "weather:storms";
+    if (/turbulence|ride was/i.test(entry.text)) return "weather:ride";
+  }
+  if (entry.kind === "delay") {
+    if (/arrival airport/i.test(entry.text)) return "delay:arrival";
+    if (/airport|departure delay/i.test(entry.text)) return "delay:departure";
+  }
+  if (entry.kind === "schedule" && /Arrival now looks/i.test(entry.text)) return "schedule:arrival";
+  return null;
+}
+
+function curateBriefLog(log: BriefLogEntry[], next: BriefSnap): BriefLogEntry[] {
+  const pushed = Boolean(next.pushSource || next.pushKind === "actual");
+  const airborne = ["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(next.stage);
+  const landed = next.landKind === "actual" || ["taxi_in", "gate"].includes(next.stage);
+  let kept = log.map((entry) => entry.kind === "stage" && entry.text === "On the move — pushback and taxi"
+    ? { ...entry, text: "Taxiing out" }
+    : entry).filter((entry) => {
+    const text = entry.text;
+    if (entry.kind === "update") return false;
+    if (entry.kind === "weather" && /^Light turbulence ahead$/i.test(text)) return false;
+    if (/Estimated taxi (?:out|in) is now/i.test(text)) return false;
+    if (pushed && /Departure time moved|estimated push|push time moved/i.test(text)) return false;
+    if (airborne && entry.kind === "delay" && /Delay at the airport|Delay is now|departure delay/i.test(text)) return false;
+    if (airborne && /Takeoff now looks|Estimated taxi out/i.test(text)) return false;
+    if (next.takeoffKind === "actual" && entry.kind === "stage" && text === "In flight") return false;
+    if (landed && /Arrival now looks|Estimated taxi in/i.test(text)) return false;
+    return true;
+  });
+  const collapsed: BriefLogEntry[] = [];
+  for (const entry of kept) {
+    const key = transientKey(entry);
+    if (!key) {
+      collapsed.push(entry);
+      continue;
+    }
+    let priorIndex = -1;
+    for (let index = collapsed.length - 1; index >= 0; index -= 1) {
+      if (transientKey(collapsed[index]) === key) {
+        priorIndex = index;
+        break;
+      }
+    }
+    const prior = priorIndex >= 0 ? collapsed[priorIndex] : null;
+    const reversed = key === "schedule:arrival" && prior && entry.at - prior.at < 10 * 60_000
+      && ((/earlier/i.test(prior.text) && /later/i.test(entry.text)) || (/later/i.test(prior.text) && /earlier/i.test(entry.text)));
+    if (priorIndex >= 0) collapsed.splice(priorIndex, 1);
+    if (!reversed) collapsed.push(entry);
+  }
+  return collapsed.slice(-LOG_CAP);
+}
+
+function actualEventEntries(d: RideFacts, log: BriefLogEntry[], at: number): BriefLogEntry[] {
+  const entries: BriefLogEntry[] = [];
+  const add = (text: string, unix?: number | null) => {
+    if (!log.some((entry) => entry.kind === "stage" && entry.text === text)) {
+      entries.push({ at: unix != null ? unix * 1000 : at, kind: "stage", text });
+    }
+  };
+  if (d.push && (d.pushSource || d.pushKind === "actual")) add(`Pushed back at ${d.push}`, d.pushUnix);
+  if (d.takeoff && d.takeoffKind === "actual") add(`Took off at ${d.takeoff}`, d.takeoffUnix);
+  if (d.land && d.landKind === "actual") add(`Landed at ${d.land}`, d.landUnix);
+  if (d.gate && d.gateKind === "actual") add(`At the gate at ${d.gate}`);
+  return entries;
+}
+
 function appendLog(log: BriefLogEntry[], added: Omit<BriefLogEntry, "at">[], at: number): BriefLogEntry[] {
   let next = log.slice();
   for (const e of added) {
     const text = clean(e.text).replace(/\.+$/, "");
     if (!text || JARGON.test(text)) continue;
-    if (next.slice(-6).some((x) => x.text === text && at - x.at < 12 * 60_000)) continue;
+    if (next.some((x) => x.text === text && (e.kind === "stage" || at - x.at < 12 * 60_000))) continue;
+    const key = transientKey({ kind: e.kind, text });
+    if (key === "schedule:arrival") {
+      const prior = [...next].reverse().find((entry) => transientKey(entry) === key);
+      const reversed = prior && at - prior.at < 10 * 60_000
+        && ((/earlier/i.test(prior.text) && /later/i.test(text)) || (/later/i.test(prior.text) && /earlier/i.test(text)));
+      next = next.filter((entry) => transientKey(entry) !== key);
+      if (reversed) continue;
+    } else if (key) {
+      next = next.filter((entry) => transientKey(entry) !== key);
+    }
     next.push({ at, kind: e.kind, text });
   }
   if (next.length > LOG_CAP) next = next.slice(-LOG_CAP);
@@ -542,12 +616,12 @@ export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): Com
   const ac = [d.typeName, d.registration].filter(Boolean).join(" · ") || null;
   const lead = joinSentences([composeLead(d), d.scheduleNote ?? ""]);
   const at = Date.now();
-  const seed: BriefLogEntry[] = previous?.log?.length
-    ? previous.log
-    : [{ at, kind: "update", text: "Filed briefing is up" }];
+  let seed = curateBriefLog(previous?.log ?? [], snap);
+  seed = [...seed, ...actualEventEntries(d, seed, at)].sort((a, b) => a.at - b.at);
   const added = previous?.snap ? diffBriefLog(previous.snap, snap, d) : [];
-  if (previous && added.length === 0 && lead === previous.lead && ac === previous.aircraft) return previous;
-  const log = appendLog(seed, added, at);
+  const log = curateBriefLog(appendLog(seed, added, at), snap);
+  if (previous && added.length === 0 && lead === previous.lead && ac === previous.aircraft
+    && JSON.stringify(log) === JSON.stringify(previous.log)) return previous;
   const why = whyChanged(previous?.snap, snap, d);
   return {
     lead,
@@ -563,16 +637,7 @@ export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): Com
 
 export function logManualRefresh(prev: CompiledBrief | null | undefined): CompiledBrief | null {
   if (!prev) return prev ?? null;
-  const at = Date.now();
-  const last = prev.log[prev.log.length - 1];
-  if (last?.kind === "update" && last.text === "Manual refresh" && at - last.at < 20_000) {
-    return { ...prev, liveAt: at };
-  }
-  return {
-    ...prev,
-    liveAt: at,
-    log: appendLog(prev.log, [{ kind: "update", text: "Manual refresh" }], at),
-  };
+  return { ...prev, liveAt: Date.now() };
 }
 
 export function briefAsText(b: CompiledBrief): string {

@@ -271,6 +271,7 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     taxiOutMin: story.times?.taxiOutMin ?? null,
     taxiOutKind: story.times?.taxiOutKind ?? null,
     takeoff: takeoffEstimateExpired(story) ? null : story.times?.takeoff ?? null,
+    takeoffKind: story.times?.takeoffKind ?? null,
     takeoffEstimateExpired: takeoffEstimateExpired(story),
     land: story.times?.land ?? null,
     taxiInMin: story.times?.taxiInMin ?? null,
