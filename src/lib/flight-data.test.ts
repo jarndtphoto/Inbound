@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { choosePosition, finalApproachEtaMin, passengerEtaMin, type NormalizedPosition } from "./flight-data.ts";
-import { normalizeAeroApiFlight } from "./flightaware-aeroapi.server.ts";
+import { normalizeAeroApiFlight, selectCurrentAeroApiFlight } from "./flightaware-aeroapi.server.ts";
 import { normalizeFr24Position } from "./fr24.server.ts";
 
 const pos = (provider: NormalizedPosition["provider"], lat: number, lon: number, age = 1): NormalizedPosition => ({
@@ -33,6 +33,31 @@ describe("position confidence fusion", () => {
     const wrong = { ...pos("fr24", 32.9, -97), registration: "N999ZZ", hex: "999999" };
     const right = pos("adsb", 32.901, -97.001);
     assert.equal(choosePosition([wrong, right], { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "adsb");
+  });
+  it("prefers a fresh identity-compatible FR24 ground fix on the airport surface", () => {
+    const fr24 = { ...pos("fr24", 41.786, -87.752, 8), onGround: true, altFt: 0, gsKt: 3 };
+    const adsb = { ...pos("adsb", 41.784, -87.754, 1), onGround: true, altFt: 0, gsKt: 0 };
+    assert.equal(choosePosition([adsb, fr24], { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "fr24");
+  });
+});
+
+describe("same-number consecutive-leg selection", () => {
+  it("keeps the arrived-but-not-gated leg ahead of the next same-number departure", () => {
+    const now = Date.parse("2026-09-15T22:00:00Z") / 1000;
+    const arriving = {
+      fa_flight_id: "SWA106-arriving", ident: "SWA106",
+      origin: { code_iata: "MCO" }, destination: { code_iata: "MDW" },
+      actual_out: "2026-09-15T18:00:00Z", actual_off: "2026-09-15T18:15:00Z",
+      actual_on: "2026-09-15T21:55:00Z", actual_in: null,
+      scheduled_out: "2026-09-15T18:00:00Z",
+    };
+    const next = {
+      fa_flight_id: "SWA106-next", ident: "SWA106",
+      origin: { code_iata: "MDW" }, destination: { code_iata: "DTW" },
+      scheduled_out: "2026-09-15T22:10:00Z", estimated_out: "2026-09-15T22:05:00Z",
+      actual_out: null, actual_off: null, actual_in: null,
+    };
+    assert.equal(selectCurrentAeroApiFlight([next, arriving], now)?.fa_flight_id, "SWA106-arriving");
   });
 });
 
