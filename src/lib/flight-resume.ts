@@ -36,6 +36,8 @@ export type FlightResume = {
   waypoints: { lat: number; lon: number }[];
   departureStage?: "push" | "taxi" | null;
   detectedPushUnix?: number | null;
+  parkedLat?: number | null;
+  parkedLon?: number | null;
 };
 
 /** Whitelist bounded device context; no supplied URLs, status, or live fixes. */
@@ -95,13 +97,15 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
   const detectedPushUnix = typeof r.detectedPushUnix === "number" && Number.isFinite(r.detectedPushUnix)
     && r.detectedPushUnix * 1000 <= now + 30_000 && now - r.detectedPushUnix * 1000 <= RESUME_MAX_AGE_MS
     ? r.detectedPushUnix : null;
+  const parkedLat = typeof r.parkedLat === "number" && Number.isFinite(r.parkedLat) && Math.abs(r.parkedLat) <= 90 ? r.parkedLat : null;
+  const parkedLon = typeof r.parkedLon === "number" && Number.isFinite(r.parkedLon) && Math.abs(r.parkedLon) <= 180 ? r.parkedLon : null;
   return {
     version: 1, callsign: want.callsign, ident: r.ident, confirmedAt: r.confirmedAt,
     ...fields, originIcao: r.originIcao, destIcao: r.destIcao,
     originGate: token(r.originGate, /^[A-Z0-9 -]{1,12}$/i), destGate: token(r.destGate, /^[A-Z0-9 -]{1,12}$/i),
     gateOut: stamps.gateOut, takeoff: stamps.takeoff, landing: stamps.landing, gateIn: stamps.gateIn,
     tail: token(r.tail, /^[A-Z0-9-]{3,12}$/i), hex: token(r.hex, /^[a-f0-9]{6}$/i),
-    type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, departureStage, detectedPushUnix,
+    type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, departureStage, detectedPushUnix, parkedLat, parkedLon,
   } as FlightResume;
 }
 
