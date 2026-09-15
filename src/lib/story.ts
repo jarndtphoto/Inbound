@@ -5,7 +5,9 @@ import type { FlightStory } from "./types";
 
 /**
  * Preserve confirmed departure progress across refreshes/serverless handoffs.
- * A stop or slower surface fix after pushback/taxi is not a return to the gate.
+ * Departure is a one-way passenger story:
+ * origin_gate -> push -> taxi -> ride.
+ * A stop or slower surface fix after pushback/taxi never moves it backward.
  */
 export function preserveDepartureProgress(story: FlightStory, prior?: FlightResume): FlightStory {
   const priorStage = prior?.departureStage ?? null;
@@ -15,20 +17,29 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   if (["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(current)) return story;
 
   let stage = current;
+
+  // Confirmed taxi is irreversible for this dated flight instance. Pushback is
+  // no longer an available state after taxi has ever been established.
   if (priorStage === "taxi" && (current === "origin_gate" || current === "push" || current === "inbound")) {
     stage = "taxi";
   } else if (priorStage === "push" && (current === "origin_gate" || current === "inbound")) {
+    // Confirmed pushback permanently removes At gate as a departure option.
     stage = "push";
   }
 
-  // A fresh trustworthy surface observation can advance the durable client
-  // checkpoint even if an earlier provider refresh missed the transition.
+  // Fresh trustworthy surface movement can advance the durable checkpoint even
+  // when an upstream refresh missed the exact transition. After confirmed
+  // pushback, use a deliberately lower forward-movement threshold so normal
+  // taxi is recognized well before runway/takeoff-roll speeds.
   const live = story.aircraft;
   const freshSurface = Boolean(live?.onGround && !live.extrapolated && (live.seenSec ?? 999) <= 30);
+  const gsKt = live?.gsKt ?? 0;
   if (freshSurface && stage === "origin_gate") {
-    if ((live?.gsKt ?? 0) >= 8) stage = "taxi";
-    else if ((live?.gsKt ?? 0) >= 2) stage = "push";
-  } else if (freshSurface && stage === "push" && (live?.gsKt ?? 0) >= 8) {
+    if (gsKt >= 8) stage = "taxi";
+    else if (gsKt >= 2) stage = "push";
+  } else if (freshSurface && stage === "push" && priorStage === "push" && gsKt >= 5) {
+    stage = "taxi";
+  } else if (freshSurface && stage === "push" && current === "taxi") {
     stage = "taxi";
   }
 
