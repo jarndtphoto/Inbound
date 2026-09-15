@@ -1,21 +1,26 @@
 import { createServerFn } from "@tanstack/react-start";
 import { loadFlightStory, loadLiveBoard } from "./story.server";
 import { readFlightResume, type FlightResume } from "./flight-resume";
+import { haversineNm } from "./geo";
 import type { FlightStory } from "./types";
 
 /**
  * Preserve confirmed departure progress across refreshes/serverless handoffs.
  * Departure is a one-way passenger story:
  * origin_gate -> push -> taxi -> ride.
- * A stop or slower surface fix after pushback/taxi never moves it backward.
+ * A stop, provider handoff, or slower surface fix never moves it backward.
  */
 export function preserveDepartureProgress(story: FlightStory, prior?: FlightResume): FlightStory {
-  const priorStage = prior?.departureStage ?? null;
   const current = story.currentStage;
 
   // Airborne/arrival states always outrank departure history.
   if (["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(current)) return story;
 
+  // Only carry a departure checkpoint when it belongs to this same route.
+  const sameLeg = Boolean(prior
+    && prior.originIcao === story.origin?.icao
+    && prior.destIcao === story.dest?.icao);
+  const priorStage = sameLeg ? prior?.departureStage ?? null : null;
   let stage = current;
 
   // Confirmed taxi is irreversible for this dated flight instance. Pushback is
@@ -23,29 +28,49 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   if (priorStage === "taxi" && (current === "origin_gate" || current === "push" || current === "inbound")) {
     stage = "taxi";
   } else if (priorStage === "push" && (current === "origin_gate" || current === "inbound")) {
-    // Confirmed pushback permanently removes At gate as a departure option.
     stage = "push";
   }
 
-  // Fresh trustworthy surface movement can advance the durable checkpoint even
-  // when an upstream refresh missed the exact transition. After confirmed
-  // pushback, use a deliberately lower forward-movement threshold so normal
-  // taxi is recognized well before runway/takeoff-roll speeds.
   const live = story.aircraft;
-  const freshSurface = Boolean(live?.onGround && !live.extrapolated && (live.seenSec ?? 999) <= 30);
+  const freshSurface = Boolean(live?.onGround && !live.extrapolated && (live.seenSec ?? 999) <= 30
+    && Number.isFinite(live?.lat) && Number.isFinite(live?.lon));
   const gsKt = live?.gsKt ?? 0;
+
+  // Remember the actual stand position while the airplane is still confirmed at
+  // the gate. This lets a later stationary FR24/ADS-B fix prove pushback by
+  // displacement instead of waiting for taxi speed.
+  let parkedLat = sameLeg ? prior?.parkedLat ?? null : null;
+  let parkedLon = sameLeg ? prior?.parkedLon ?? null : null;
+  if (freshSurface && stage === "origin_gate" && parkedLat == null && parkedLon == null) {
+    parkedLat = live!.lat;
+    parkedLon = live!.lon;
+  }
+  const displacedNm = freshSurface && parkedLat != null && parkedLon != null
+    ? haversineNm({ lat: parkedLat, lon: parkedLon }, { lat: live!.lat, lon: live!.lon })
+    : 0;
+
+  // Pushback is primarily a left-the-stand event. A fresh surface position more
+  // than ~28 m from the recorded stand is enough even if the airplane is stopped.
+  // If the first trustworthy observation is already clearly taxiing, skip the
+  // visible push dwell and advance directly to taxi while still latching progress.
   if (freshSurface && stage === "origin_gate") {
-    if (gsKt >= 8) stage = "taxi";
-    else if (gsKt >= 2) stage = "push";
-  } else if (freshSurface && stage === "push" && priorStage === "push" && gsKt >= 5) {
-    stage = "taxi";
-  } else if (freshSurface && stage === "push" && current === "taxi") {
-    stage = "taxi";
+    if (gsKt >= 8 || displacedNm >= 0.08) stage = "taxi";
+    else if (displacedNm >= 0.015 || gsKt >= 2) stage = "push";
+  }
+
+  // Once pushback has been established, normal taxi movement or meaningful
+  // additional displacement advances to taxi. Stops after that remain taxi.
+  if (freshSurface && stage === "push") {
+    if (current === "taxi" || gsKt >= 5 || displacedNm >= 0.06) stage = "taxi";
   }
 
   const durableStage = stage === "taxi" ? "taxi" : stage === "push" ? "push" : priorStage;
-  const resume = story.resume && durableStage
-    ? { ...story.resume, departureStage: durableStage }
+  const resume = story.resume
+    ? {
+        ...story.resume,
+        ...(durableStage ? { departureStage: durableStage } : {}),
+        ...(parkedLat != null && parkedLon != null ? { parkedLat, parkedLon } : {}),
+      }
     : story.resume;
 
   return stage === current && resume === story.resume ? story : { ...story, currentStage: stage, resume };
