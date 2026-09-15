@@ -52,14 +52,26 @@ export function choosePosition(positions: Array<NormalizedPosition | null | unde
   for (const p of usable) if (!candidates[p.provider] || positionAgeSec(p, now) < positionAgeSec(candidates[p.provider]!, now)) candidates[p.provider] = p;
   let disagreementNm: number | null = null;
   for (let i = 0; i < usable.length; i++) for (let j = i + 1; j < usable.length; j++) { const d = haversineNm(usable[i]!, usable[j]!); disagreementNm = disagreementNm == null ? d : Math.max(disagreementNm, d); }
-  // FR24 is our highest-confidence airport-surface feed. If its identity matches
-  // the selected flight and the fix is fresh and explicitly on the ground, use
-  // that position directly for ground movement/stage detection.
+
+  // Ground-source experiment: FR24 is the only positional source allowed to
+  // represent an aircraft on the airport surface. Public ADS-B and FlightAware
+  // remain available once the aircraft is airborne. A stale/missing FR24 surface
+  // fix intentionally yields no chosen ground position rather than silently
+  // falling back to another provider.
   const frGround = candidates.fr24;
-  if (frGround?.onGround === true && positionAgeSec(frGround, now) <= 30) return { chosen: frGround, disagreementNm, candidates };
+  if (frGround?.onGround === true && positionAgeSec(frGround, now) <= 45) {
+    return { chosen: frGround, disagreementNm, candidates };
+  }
+
+  let scoringPool = usable;
+  if (usable.some((p) => p.onGround === true)) {
+    scoringPool = usable.filter((p) => p.onGround !== true);
+    if (!scoringPool.length) return { chosen: null, disagreementNm, candidates };
+  }
+
   let chosen: NormalizedPosition | null = null, best = -Infinity;
-  for (const p of usable) {
-    const age = positionAgeSec(p, now), consensus = usable.filter((q) => q !== p && haversineNm(p, q) <= 3).length;
+  for (const p of scoringPool) {
+    const age = positionAgeSec(p, now), consensus = scoringPool.filter((q) => q !== p && haversineNm(p, q) <= 3).length;
     const score = PROVIDER_WEIGHT[p.provider] + consensus * 30 - age * 2 + (p.confidence === "high" ? 8 : p.confidence === "medium" ? 3 : 0);
     if (score > best) { best = score; chosen = p; }
   }

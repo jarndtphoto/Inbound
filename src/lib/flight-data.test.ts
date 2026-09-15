@@ -9,6 +9,10 @@ const pos = (provider: NormalizedPosition["provider"], lat: number, lon: number,
   seenAt: 10_000 - age, registration: "N123AA", type: "B738", hex: "abc123", confidence: "high",
 });
 
+const groundPos = (provider: NormalizedPosition["provider"], lat: number, lon: number, age = 1, gsKt = 0): NormalizedPosition => ({
+  ...pos(provider, lat, lon, age), altFt: 0, gsKt, onGround: true,
+});
+
 describe("official provider normalization", () => {
   it("normalizes FR24 live kinematics", () => {
     const p = normalizeFr24Position({ fr24_id: "f1", callsign: "AAL2668", lat: 32.9, lon: -97.0, alt: 800, gspeed: 145, track: 180, on_ground: false, timestamp: 10_000 });
@@ -25,7 +29,7 @@ describe("position confidence fusion", () => {
     const choice = choosePosition([pos("fr24", 32.9, -97), pos("adsb", 32.901, -97.001), pos("flightaware", 35, -90)], { callsigns: ["AA2668"] }, 10_000);
     assert.notEqual(choice.chosen?.provider, "flightaware"); assert.ok((choice.disagreementNm ?? 0) > 100);
   });
-  it("falls back when providers are stale or absent", () => {
+  it("falls back when airborne providers are stale or absent", () => {
     const choice = choosePosition([pos("fr24", 32.9, -97, 90), pos("adsb", 32.9, -97, 2)], {}, 10_000);
     assert.equal(choice.chosen?.provider, "adsb");
   });
@@ -34,10 +38,20 @@ describe("position confidence fusion", () => {
     const right = pos("adsb", 32.901, -97.001);
     assert.equal(choosePosition([wrong, right], { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "adsb");
   });
-  it("prefers a fresh identity-compatible FR24 ground fix on the airport surface", () => {
-    const fr24 = { ...pos("fr24", 41.786, -87.752, 8), onGround: true, altFt: 0, gsKt: 3 };
-    const adsb = { ...pos("adsb", 41.784, -87.754, 1), onGround: true, altFt: 0, gsKt: 0 };
+  it("uses a fresh identity-compatible FR24 ground fix as the only surface source", () => {
+    const fr24 = groundPos("fr24", 41.786, -87.752, 8, 3);
+    const adsb = groundPos("adsb", 41.784, -87.754, 1, 0);
     assert.equal(choosePosition([adsb, fr24], { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "fr24");
+  });
+  it("does not fall back to ADS-B or FlightAware for a ground position when FR24 is missing", () => {
+    const adsb = groundPos("adsb", 41.784, -87.754, 1, 8);
+    const fa = groundPos("flightaware", 41.785, -87.753, 2, 7);
+    assert.equal(choosePosition([adsb, fa], { registration: "N123AA", hex: "abc123" }, 10_000).chosen, null);
+  });
+  it("does not use a stale FR24 surface fix and resumes normal fusion once airborne", () => {
+    const staleFr = groundPos("fr24", 41.786, -87.752, 50, 0);
+    const airborneAdsb = pos("adsb", 41.79, -87.74, 1);
+    assert.equal(choosePosition([staleFr, airborneAdsb], { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "adsb");
   });
 });
 
