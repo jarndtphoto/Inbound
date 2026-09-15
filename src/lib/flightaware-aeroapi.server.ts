@@ -52,13 +52,42 @@ export function normalizeAeroApiRoute(data: any) {
     && typeof p.label === "string" && p.label.trim().length > 0);
 }
 
+/** Keep a departed same-number leg current until it reaches the gate. */
+export function selectCurrentAeroApiFlight(flights: any[], now = Date.now() / 1000) {
+  const valid = flights.filter((f: any) => f && !f.cancelled && f.origin && f.destination);
+  const departed = valid.filter((f: any) => {
+    const out = unix(f.actual_out) ?? unix(f.actual_off);
+    return out != null && out <= now + 120 && unix(f.actual_in) == null && now - out < 36 * 3600;
+  });
+  if (departed.length) {
+    return departed.sort((a: any, b: any) =>
+      (unix(b.actual_out) ?? unix(b.actual_off) ?? 0) - (unix(a.actual_out) ?? unix(a.actual_off) ?? 0))[0];
+  }
+  const upcoming = valid.filter((f: any) => {
+    if (unix(f.actual_in) != null || unix(f.actual_out) != null || unix(f.actual_off) != null) return false;
+    const dep = unix(f.estimated_out) ?? unix(f.scheduled_out) ?? unix(f.scheduled_off);
+    return dep != null && dep >= now - 6 * 3600 && dep <= now + 24 * 3600;
+  }).sort((a: any, b: any) => {
+    const da = unix(a.estimated_out) ?? unix(a.scheduled_out) ?? unix(a.scheduled_off) ?? Infinity;
+    const db = unix(b.estimated_out) ?? unix(b.scheduled_out) ?? unix(b.scheduled_off) ?? Infinity;
+    return Math.abs(da - now) - Math.abs(db - now);
+  });
+  if (upcoming.length) return upcoming[0];
+  const recent = valid.filter((f: any) => {
+    const arrival = unix(f.actual_in) ?? unix(f.actual_on);
+    return arrival != null && arrival <= now && now - arrival < 6 * 3600;
+  }).sort((a: any, b: any) =>
+    (unix(b.actual_in) ?? unix(b.actual_on) ?? 0) - (unix(a.actual_in) ?? unix(a.actual_on) ?? 0));
+  return recent[0] ?? null;
+}
+
 export async function loadAeroApiFlight(ident: string): Promise<NormalizedFlight | null> {
   if (!aeroApiKey()) return null;
   const data: any = await get(`/flights/${encodeURIComponent(ident)}?max_pages=1`, 45_000);
   const flights = Array.isArray(data?.flights) ? data.flights : [];
   if (!flights.length) return null;
-  const now = Date.now() / 1000;
-  const f = flights.slice().sort((a: any, b: any) => Math.abs((unix(a.scheduled_off) ?? now) - now) - Math.abs((unix(b.scheduled_off) ?? now) - now))[0];
+  const f = selectCurrentAeroApiFlight(flights);
+  if (!f) return null;
   const normalized = normalizeAeroApiFlight(f);
   if (normalized.flightId) {
     const [trackData, routeData]: any[] = await Promise.all([
