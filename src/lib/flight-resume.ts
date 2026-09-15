@@ -109,10 +109,28 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
   } as FlightResume;
 }
 
+function observedDepartureStage(story: FlightStory): "push" | "taxi" | null {
+  return story.currentStage === "taxi" ? "taxi" : story.currentStage === "push" ? "push" : null;
+}
+
+function maxDepartureStage(a: "push" | "taxi" | null | undefined, b: "push" | "taxi" | null | undefined) {
+  return a === "taxi" || b === "taxi" ? "taxi" : a === "push" || b === "push" ? "push" : null;
+}
+
 export function resumeFromStory(story: FlightStory | undefined, q: string, now = Date.now()): FlightResume | undefined {
   if (!story || story.diversion || !storyMatchesQuery(story, q)) return;
-  // Never extend the schedule's lifetime when only ADS-B/weather refreshed.
-  if (story.resume) return readFlightResume(story.resume, q, now);
+
+  // The displayed stage is itself trustworthy history. Never let a provider
+  // refresh erase a taxi checkpoint merely because the embedded resume omitted
+  // it. Once taxi has been shown for this leg, all later requests carry taxi.
+  const observed = observedDepartureStage(story);
+  if (story.resume) {
+    const parsed = readFlightResume(story.resume, q, now);
+    if (!parsed) return;
+    const departureStage = maxDepartureStage(parsed.departureStage, observed);
+    return departureStage === parsed.departureStage ? parsed : { ...parsed, departureStage };
+  }
+
   if (story.schedule?.status === "saved") return;
   const callsign = parseFlightQuery(q)?.callsign;
   const t = story.times;
@@ -133,7 +151,7 @@ export function resumeFromStory(story: FlightStory | undefined, q: string, now =
     gateOut: stamp(t.pushUnix, t.origPushUnix), takeoff: stamp(t.takeoffUnix, t.origTakeoffUnix),
     landing: stamp(t.landUnix, t.origLandUnix), gateIn: stamp(t.gateUnix),
     tail: story.aircraft?.registration, hex: story.aircraft?.hex, type: story.aircraft?.type,
-    waypoints: [],
+    waypoints: [], departureStage: observed,
   }, q, now);
 }
 
