@@ -17,25 +17,31 @@ function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
 /**
  * Temporary live experiment: while the aircraft is on the airport surface,
  * FR24 is the only position source allowed to drive the returned aircraft fix
- * and new surface-stage progress. FlightAware operational times remain intact,
- * and normal multi-provider fusion resumes once the airplane is airborne.
+ * and new surface-stage progress. During departure we keep accepting fresh FR24
+ * telemetry even if FR24 flips on_ground false before the passenger Flight stage,
+ * so runway acceleration cannot get stranded at Pushback/Taxiing out.
  */
 export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResume): FlightStory {
   const providers = story.providers as (Record<string, unknown> | undefined);
   const candidate = providers?.fr24Position as NormalizedPosition | null | undefined;
   const sameLeg = sameResumeLeg(story, prior);
+  const priorStage = sameLeg ? prior?.departureStage ?? null : null;
   const expected = {
     callsigns: [story.callsign, story.iata].filter(Boolean),
     registration: sameLeg ? prior?.tail ?? null : null,
     hex: sameLeg ? prior?.hex ?? null : null,
   };
-  const freshFrGround = Boolean(candidate
+  const departureContext = DEPARTURE_SURFACE_STAGES.has(story.currentStage)
+    || priorStage === "push"
+    || priorStage === "taxi"
+    || priorStage === "takeoff_roll";
+  const freshFrDeparture = Boolean(candidate
     && candidate.provider === "fr24"
-    && candidate.onGround === true
     && positionAgeSec(candidate) <= FR24_SURFACE_FRESH_SEC
-    && identityCompatible(candidate, expected));
+    && identityCompatible(candidate, expected)
+    && (candidate.onGround === true || departureContext));
 
-  if (freshFrGround && candidate) {
+  if (freshFrDeparture && candidate) {
     const age = positionAgeSec(candidate);
     return {
       ...story,
@@ -53,7 +59,6 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
 
   if (story.aircraft?.onGround === true && story.providers?.chosenPosition !== "fr24") {
     let stage = story.currentStage;
-    const priorStage = sameLeg ? prior?.departureStage ?? null : null;
     if (DEPARTURE_SURFACE_STAGES.has(stage)) {
       if (priorStage === "takeoff_roll") stage = "taxi";
       else if (priorStage === "taxi") stage = "taxi";
@@ -75,7 +80,7 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
     };
   }
 
-  if (SURFACE_STAGES.has(story.currentStage) && story.aircraft?.onGround !== false && !freshFrGround) {
+  if (SURFACE_STAGES.has(story.currentStage) && story.aircraft?.onGround !== false && !freshFrDeparture) {
     return story;
   }
 
@@ -98,19 +103,23 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   // Flight state that has already been accurate from FlightAware/live evidence.
   if (["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(current)) return story;
 
-  const freshSurface = Boolean(live?.onGround && story.providers?.chosenPosition === "fr24"
+  // Fresh FR24 departure telemetry remains usable through the runway roll even if
+  // FR24 changes on_ground to false before our 150 kt Flight threshold.
+  const freshDepartureFr24 = Boolean(live && story.providers?.chosenPosition === "fr24"
     && !live.extrapolated && (live.seenSec ?? 999) <= FR24_SURFACE_FRESH_SEC
     && Number.isFinite(live?.lat) && Number.isFinite(live?.lon));
+  const freshSurface = Boolean(freshDepartureFr24 && live?.onGround === true);
   const nearOrigin = Boolean(
-    freshSurface
+    freshDepartureFr24
     && Number.isFinite(story.origin?.lat) && Number.isFinite(story.origin?.lon)
     && haversineNm({ lat: story.origin.lat, lon: story.origin.lon }, { lat: live!.lat, lon: live!.lon }) <= 3
   );
   const resumeBase = story.resume ?? (sameLeg ? prior : undefined);
 
-  // Hard runway rule: once a fresh FR24 surface sample reaches 50 kt near the
+  // Hard runway rule: once a fresh FR24 departure sample reaches 50 kt near the
   // departure airport, Takeoff roll wins immediately even if an older schedule
-  // layer still says Pushback. This removes the pushback-on-runway failure mode.
+  // layer still says Pushback. This works whether FR24 currently marks on-ground
+  // true or false.
   if (nearOrigin && gsKt >= 50) {
     // If Takeoff roll was already shown on a previous refresh, 150 kt advances
     // to Flight. If this is the first fast sample (even 150+), show Takeoff roll
@@ -149,8 +158,8 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   const providerPushConfirmed = story.times.pushSource === "provider_actual" || story.times.pushKind === "actual";
   if (providerPushConfirmed && (stage === "origin_gate" || stage === "inbound")) stage = "push";
 
-  // Any real FR24 ground movement of 3 kt or more means we are at least Taxiing
-  // out. Do not require an old parked coordinate to escape Pushback.
+  // Any real FR24 departure movement of 3 kt or more means we are at least
+  // Taxiing out. Do not require an old parked coordinate to escape Pushback.
   if (nearOrigin && gsKt >= 3 && (stage === "inbound" || stage === "origin_gate" || stage === "push")) {
     stage = "taxi";
   } else if (nearOrigin && gsKt >= 1 && (stage === "inbound" || stage === "origin_gate")) {
