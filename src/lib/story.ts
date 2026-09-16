@@ -204,28 +204,33 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
 }
 
 /**
- * If the first live observation catches an airplane already taxiing, do not stamp
- * that load time as "pushback detected." We did not observe the airplane leave
- * the stand, so keep the scheduled gate-out time and report the exact pushback
- * time as unknown. A provider actual timestamp remains authoritative.
+ * Do not invent an exact pushback time if the first trustworthy movement we saw
+ * was already taxi-speed movement. This covers both a fresh app load mid-taxi and
+ * a flight that was tracked at the gate but whose FR24 position did not refresh
+ * during the actual tug movement. In either case, taxi start is not pushback time.
+ * Provider-published actual gate-out remains authoritative.
  */
 export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightResume): FlightStory {
-  if (sameResumeLeg(story, prior)) return story;
+  const sameLeg = sameResumeLeg(story, prior);
+  const priorStage = sameLeg ? prior?.departureStage ?? null : null;
+  // If we had already positively observed Pushback (or later), preserve the time.
+  if (priorStage === "push" || priorStage === "taxi" || priorStage === "takeoff_roll") return story;
+
   const live = story.aircraft;
   const t = story.times;
   const detected = t.pushSource === "live_detected" || t.pushSource === "track_detected";
   const pushUnix = t.pushUnix ?? null;
   const loadedUnix = story.fetchedAt / 1000;
-  const looksLikeLoadTime = pushUnix != null && Math.abs(loadedUnix - pushUnix) <= 120;
-  const joinedMoving = Boolean(
+  const looksLikeRecentDetection = pushUnix != null && Math.abs(loadedUnix - pushUnix) <= 120;
+  const firstSeenAlreadyTaxiing = Boolean(
     live?.onGround
     && story.providers?.chosenPosition === "fr24"
     && !live.extrapolated
     && (live.seenSec ?? 999) <= FR24_SURFACE_FRESH_SEC
-    && (live.gsKt ?? 0) >= 8
+    && (live.gsKt ?? 0) >= 3
     && (story.currentStage === "taxi" || story.currentStage === (TAKEOFF_ROLL_STAGE as FlightStory["currentStage"]))
   );
-  if (!detected || !looksLikeLoadTime || !joinedMoving || t.origPushUnix == null) return story;
+  if (!detected || !looksLikeRecentDetection || !firstSeenAlreadyTaxiing || t.origPushUnix == null) return story;
 
   return {
     ...story,
@@ -238,6 +243,7 @@ export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightR
       pushWas: null,
       delayMin: 0,
     },
+    ...(story.resume ? { resume: { ...story.resume, detectedPushUnix: null } } : {}),
   };
 }
 
