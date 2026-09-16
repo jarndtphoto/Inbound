@@ -5,6 +5,7 @@ import type { FlightStory } from "./types.ts";
 // A short bridge through an outage, never a flight-number-to-route database.
 export const RESUME_MAX_AGE_MS = 2 * 60 * 60_000;
 type Stamp = { scheduled: number | null; estimated: number | null; actual: number | null };
+export type DepartureStageCheckpoint = "push" | "taxi" | "takeoff_roll";
 export type FlightResume = {
   version: 1;
   callsign: string;
@@ -34,7 +35,7 @@ export type FlightResume = {
   hex: string | null;
   type: string | null;
   waypoints: { lat: number; lon: number }[];
-  departureStage?: "push" | "taxi" | null;
+  departureStage?: DepartureStageCheckpoint | null;
   detectedPushUnix?: number | null;
   parkedLat?: number | null;
   parkedLon?: number | null;
@@ -93,7 +94,9 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
     p && typeof p.lat === "number" && Number.isFinite(p.lat) && Math.abs(p.lat) <= 90
       && typeof p.lon === "number" && Number.isFinite(p.lon) && Math.abs(p.lon) <= 180
   ).map((p: any) => ({ lat: p.lat, lon: p.lon })) : [];
-  const departureStage = r.departureStage === "push" || r.departureStage === "taxi" ? r.departureStage : null;
+  const departureStage = r.departureStage === "push" || r.departureStage === "taxi" || r.departureStage === "takeoff_roll"
+    ? r.departureStage as DepartureStageCheckpoint
+    : null;
   const detectedPushUnix = typeof r.detectedPushUnix === "number" && Number.isFinite(r.detectedPushUnix)
     && r.detectedPushUnix * 1000 <= now + 30_000 && now - r.detectedPushUnix * 1000 <= RESUME_MAX_AGE_MS
     ? r.detectedPushUnix : null;
@@ -109,20 +112,23 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
   } as FlightResume;
 }
 
-function observedDepartureStage(story: FlightStory): "push" | "taxi" | null {
+function observedDepartureStage(story: FlightStory): DepartureStageCheckpoint | null {
+  if (String(story.currentStage) === "Takeoff roll") return "takeoff_roll";
   return story.currentStage === "taxi" ? "taxi" : story.currentStage === "push" ? "push" : null;
 }
 
-function maxDepartureStage(a: "push" | "taxi" | null | undefined, b: "push" | "taxi" | null | undefined) {
-  return a === "taxi" || b === "taxi" ? "taxi" : a === "push" || b === "push" ? "push" : null;
+function maxDepartureStage(a: DepartureStageCheckpoint | null | undefined, b: DepartureStageCheckpoint | null | undefined) {
+  if (a === "takeoff_roll" || b === "takeoff_roll") return "takeoff_roll";
+  if (a === "taxi" || b === "taxi") return "taxi";
+  return a === "push" || b === "push" ? "push" : null;
 }
 
 export function resumeFromStory(story: FlightStory | undefined, q: string, now = Date.now()): FlightResume | undefined {
   if (!story || story.diversion || !storyMatchesQuery(story, q)) return;
 
   // The displayed stage is itself trustworthy history. Never let a provider
-  // refresh erase a taxi checkpoint merely because the embedded resume omitted
-  // it. Once taxi has been shown for this leg, all later requests carry taxi.
+  // refresh erase a departure checkpoint merely because the embedded resume
+  // omitted it. Once takeoff roll or taxi has been shown, carry it forward.
   const observed = observedDepartureStage(story);
   if (story.resume) {
     const parsed = readFlightResume(story.resume, q, now);
