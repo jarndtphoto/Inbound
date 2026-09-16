@@ -137,6 +137,19 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   const freshSurface = Boolean(live?.onGround && story.providers?.chosenPosition === "fr24"
     && !live.extrapolated && (live.seenSec ?? 999) <= FR24_SURFACE_FRESH_SEC
     && Number.isFinite(live?.lat) && Number.isFinite(live?.lon));
+  const nearOrigin = Boolean(
+    freshSurface
+    && Number.isFinite(story.origin?.lat) && Number.isFinite(story.origin?.lon)
+    && haversineNm({ lat: story.origin.lat, lon: story.origin.lon }, { lat: live!.lat, lon: live!.lon }) <= 3
+  );
+
+  // Sometimes the schedule layer still labels the leg Inbound after the outbound
+  // aircraft has already begun moving. A fresh FR24 fix on the origin surface is
+  // stronger evidence of the passenger flight's current state. Do not wait for a
+  // later schedule refresh: immediately enter Pushback/Taxiing out from live motion.
+  if (stage === "inbound" && nearOrigin && gsKt >= 1) {
+    stage = gsKt >= 3 ? "taxi" : "push";
+  }
 
   let parkedLat = sameLeg ? prior?.parkedLat ?? null : null;
   let parkedLon = sameLeg ? prior?.parkedLon ?? null : null;
