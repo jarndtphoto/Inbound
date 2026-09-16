@@ -93,6 +93,14 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
       flightSpeedStreak: 0, flightSpeedStreakSeenAt: null } } : {}) };
   }
 
+  // A confirmed takeoff roll must not regress to At gate merely because the next
+  // FR24 sample is late or missing. Keep the last confirmed roll until fresh FR24
+  // shows a rejected takeoff/slow runway exit, or airborne logic advances to Flight.
+  if (priorStage === "takeoff_roll" && !freshSurface) {
+    return { ...story, currentStage: TAKEOFF_ROLL_STAGE as FlightStory["currentStage"],
+      ...(resumeBase ? { resume: { ...resumeBase, departureStage: "takeoff_roll" } } : {}) };
+  }
+
   let stage = current;
   if (priorStage === "taxi" || priorStage === "push") {
     if (current === "origin_gate" || current === "push" || current === "taxi" || current === "inbound") stage = "taxi";
