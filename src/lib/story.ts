@@ -19,7 +19,8 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
   const candidate = providers?.fr24Position as NormalizedPosition | null | undefined;
   const sameLeg = sameResumeLeg(story, prior);
   const priorStage = sameLeg ? prior?.departureStage ?? null : null;
-  const lockSavedAircraft = sameLeg && story.currentStage !== "inbound";
+  const departureConfirmed = priorStage === "push" || priorStage === "taxi" || priorStage === "takeoff_roll";
+  const lockSavedAircraft = sameLeg && departureConfirmed;
   const expected = {
     callsigns: [story.callsign, story.iata].filter(Boolean),
     registration: lockSavedAircraft ? prior?.tail ?? null : null,
