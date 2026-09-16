@@ -66,6 +66,13 @@ export function nextStep(s: FlightStory, now = Date.now(), failed = false) {
     return {title,body:body.trim(),confidence};
   }
   if (failed || age > 60) return {title:"Waiting for a fresh update",body:"The information below is saved. Position, flight stage, and times may have changed.",confidence};
+  if ((s.currentStage as string) === "Takeoff roll") {
+    return {
+      title: "Takeoff roll underway",
+      body: "The aircraft is accelerating on the runway. The flight will switch to airborne once takeoff is confirmed.",
+      confidence,
+    };
+  }
   const event = passengerNextEvent(s);
   if (s.currentStage === "ride") return {...event, body:rideOutlook(s), confidence};
   if (s.currentStage === "taxi") return {...event, body:s.times.pushSource === "provider_actual" ? `Pushback was reported${s.times.push ? " at "+s.times.push : ""}. Takeoff time remains an estimate until confirmed.` : (s.times.pushSource === "live_detected" || s.times.pushSource === "track_detected") && s.times.push ? `Pushback was detected from live movement around ${s.times.push}. Takeoff time remains an estimate until confirmed.` : "The aircraft was already taxiing when tracking began, so the earlier pushback time isn't available.", confidence};
