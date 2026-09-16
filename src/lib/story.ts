@@ -7,6 +7,7 @@ import type { FlightStory } from "./types";
 
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
 const SURFACE_STAGES = new Set(["origin_gate", "push", "taxi", "taxi_in", "gate"]);
+const FR24_SURFACE_FRESH_SEC = 20;
 
 function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
   return Boolean(prior && prior.originIcao === story.origin?.icao && prior.destIcao === story.dest?.icao);
@@ -30,7 +31,7 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
   const freshFrGround = Boolean(candidate
     && candidate.provider === "fr24"
     && candidate.onGround === true
-    && positionAgeSec(candidate) <= 45
+    && positionAgeSec(candidate) <= FR24_SURFACE_FRESH_SEC
     && identityCompatible(candidate, expected));
 
   if (freshFrGround && candidate) {
@@ -48,9 +49,6 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
     };
   }
 
-  // If the server returned a non-FR24 ground position, suppress it for this
-  // experiment. On departure, do not accept a brand-new push/taxi advancement
-  // from that position; hold the last durable checkpoint until FR24 confirms it.
   if (story.aircraft?.onGround === true && story.providers?.chosenPosition !== "fr24") {
     let stage = story.currentStage;
     const priorStage = sameLeg ? prior?.departureStage ?? null : null;
@@ -73,9 +71,6 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
     };
   }
 
-  // Surface stages without a ground aircraft fix can remain operationally valid
-  // (for example a provider actual gate-in). We only remove non-FR24 position
-  // evidence; we do not rewrite provider actual times.
   if (SURFACE_STAGES.has(story.currentStage) && story.aircraft?.onGround !== false && !freshFrGround) {
     return story;
   }
@@ -92,16 +87,12 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
 export function preserveDepartureProgress(story: FlightStory, prior?: FlightResume): FlightStory {
   const current = story.currentStage;
 
-  // Airborne/arrival states always outrank departure history.
   if (["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(current)) return story;
 
-  // Only carry a departure checkpoint when it belongs to this same route.
   const sameLeg = sameResumeLeg(story, prior);
   const priorStage = sameLeg ? prior?.departureStage ?? null : null;
   let stage = current;
 
-  // Confirmed taxi is irreversible for this dated flight instance. Pushback is
-  // no longer an available state after taxi has ever been established.
   if (priorStage === "taxi" && (current === "origin_gate" || current === "push" || current === "inbound")) {
     stage = "taxi";
   } else if (priorStage === "push" && (current === "origin_gate" || current === "inbound")) {
@@ -110,13 +101,10 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
 
   const live = story.aircraft;
   const freshSurface = Boolean(live?.onGround && story.providers?.chosenPosition === "fr24"
-    && !live.extrapolated && (live.seenSec ?? 999) <= 45
+    && !live.extrapolated && (live.seenSec ?? 999) <= FR24_SURFACE_FRESH_SEC
     && Number.isFinite(live?.lat) && Number.isFinite(live?.lon));
   const gsKt = live?.gsKt ?? 0;
 
-  // During the FR24-only ground experiment, the stand reference is learned only
-  // from a fresh FR24 fix. This prevents public ADS-B/FlightAware surface jitter
-  // from creating Pushback or Taxiing out.
   let parkedLat = sameLeg ? prior?.parkedLat ?? null : null;
   let parkedLon = sameLeg ? prior?.parkedLon ?? null : null;
   if (freshSurface && stage === "origin_gate" && parkedLat == null && parkedLon == null) {
@@ -127,17 +115,17 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
     ? haversineNm({ lat: parkedLat, lon: parkedLon }, { lat: live!.lat, lon: live!.lon })
     : 0;
 
-  // Pushback is primarily a left-the-stand event. A fresh FR24 surface position
-  // more than ~28 m from the recorded stand is enough even if the airplane stops.
+  // Make pushback responsive to the first real movement away from the stand.
+  // ~0.006 nm is about 11 m; a slow 1 kt tug movement is also sufficient.
   if (freshSurface && stage === "origin_gate") {
-    if (gsKt >= 8 || displacedNm >= 0.08) stage = "taxi";
-    else if (displacedNm >= 0.015 || gsKt >= 2) stage = "push";
+    if (gsKt >= 3 || displacedNm >= 0.025) stage = "taxi";
+    else if (displacedNm >= 0.006 || gsKt >= 1) stage = "push";
   }
 
-  // Once pushback has been established, normal taxi movement or meaningful
-  // additional displacement advances to taxi. Stops after that remain taxi.
+  // Once pushback is established, promote to taxi much sooner. This avoids
+  // holding Pushback through a long taxi or until the aircraft reaches the runway.
   if (freshSurface && stage === "push") {
-    if (current === "taxi" || gsKt >= 5 || displacedNm >= 0.06) stage = "taxi";
+    if (current === "taxi" || gsKt >= 3 || displacedNm >= 0.025) stage = "taxi";
   }
 
   const durableStage = stage === "taxi" ? "taxi" : stage === "push" ? "push" : priorStage;
