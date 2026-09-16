@@ -19,7 +19,7 @@ function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
  * FR24 is the only position source allowed to drive the returned aircraft fix
  * and new surface-stage progress. During departure we keep accepting fresh FR24
  * telemetry even if FR24 flips on_ground false before the passenger Flight stage,
- * so runway acceleration cannot get stranded at Pushback/Taxiing out.
+ * so runway acceleration cannot get stranded at the departure airport.
  */
 export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResume): FlightStory {
   const providers = story.providers as (Record<string, unknown> | undefined);
@@ -66,8 +66,7 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
     let stage = story.currentStage;
     if (DEPARTURE_SURFACE_STAGES.has(stage)) {
       if (priorStage === "takeoff_roll") stage = "taxi";
-      else if (priorStage === "taxi") stage = "taxi";
-      else if (priorStage === "push") stage = "push";
+      else if (priorStage === "taxi" || priorStage === "push") stage = "taxi";
       else if (stage === "push" || stage === "taxi") stage = "origin_gate";
     }
     return {
@@ -94,8 +93,9 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
 
 /**
  * Preserve confirmed departure progress across refreshes/serverless handoffs.
- * Passenger departure is monotonic except that a rejected takeoff may fall from
- * Takeoff roll back to Taxiing out while FR24 still reports on-ground.
+ * Passenger departure is intentionally simple and trustworthy:
+ * At gate -> Heading to runway -> optional Takeoff roll -> Flight.
+ * Internally the existing `taxi` checkpoint represents Heading to runway.
  */
 export function preserveDepartureProgress(story: FlightStory, prior?: FlightResume): FlightStory {
   const current = story.currentStage;
@@ -104,8 +104,8 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   const live = story.aircraft;
   const gsKt = live?.gsKt ?? 0;
 
-  // Existing airborne/arrival detection stays authoritative. This preserves the
-  // Flight state that has already been accurate from FlightAware/live evidence.
+  // Existing airborne/arrival detection stays authoritative. If Takeoff roll is
+  // missed entirely, Heading to runway may transition directly to Flight.
   if (["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(current)) return story;
 
   // Fresh FR24 departure telemetry remains usable through the runway roll even if
@@ -121,14 +121,8 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   );
   const resumeBase = story.resume ?? (sameLeg ? prior : undefined);
 
-  // Hard runway rule: once a fresh FR24 departure sample reaches 50 kt near the
-  // departure airport, Takeoff roll wins immediately even if an older schedule
-  // layer still says Pushback. This works whether FR24 currently marks on-ground
-  // true or false.
+  // Keep Takeoff roll as a useful bonus stage when FR24 catches runway acceleration.
   if (nearOrigin && gsKt >= 50) {
-    // If Takeoff roll was already shown on a previous refresh, 150 kt advances
-    // to Flight. If this is the first fast sample (even 150+), show Takeoff roll
-    // for at least one refresh so the passenger stage cannot be skipped.
     if (priorStage === "takeoff_roll" && gsKt >= 150) {
       return {
         ...story,
@@ -143,8 +137,7 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
     };
   }
 
-  // Rejected takeoff / runway exit: if a previously latched roll drops well below
-  // the roll threshold while still on the surface, return to Taxiing out.
+  // Rejected takeoff / runway exit returns to the broad Heading to runway stage.
   if (priorStage === "takeoff_roll" && freshSurface && gsKt < 35) {
     return {
       ...story,
@@ -154,21 +147,23 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   }
 
   let stage = current;
-  if (priorStage === "taxi" && (current === "origin_gate" || current === "push" || current === "inbound")) {
-    stage = "taxi";
-  } else if (priorStage === "push" && (current === "origin_gate" || current === "inbound")) {
-    stage = "push";
+
+  // Collapse the old Pushback and Taxiing-out passenger phases into one durable
+  // Heading-to-runway phase. Any previously confirmed departure movement keeps it.
+  if (priorStage === "taxi" || priorStage === "push") {
+    if (current === "origin_gate" || current === "push" || current === "taxi" || current === "inbound") stage = "taxi";
   }
+  if (stage === "push") stage = "taxi";
 
+  // Provider actual gate-out is trustworthy evidence that the aircraft has left
+  // the stand, but the timestamp remains separate from the passenger stage.
   const providerPushConfirmed = story.times.pushSource === "provider_actual" || story.times.pushKind === "actual";
-  if (providerPushConfirmed && (stage === "origin_gate" || stage === "inbound")) stage = "push";
+  if (providerPushConfirmed && (stage === "origin_gate" || stage === "inbound")) stage = "taxi";
 
-  // Any real FR24 departure movement of 3 kt or more means we are at least
-  // Taxiing out. Do not require an old parked coordinate to escape Pushback.
-  if (nearOrigin && gsKt >= 3 && (stage === "inbound" || stage === "origin_gate" || stage === "push")) {
+  // Fresh FR24 movement near the origin is enough to enter Heading to runway.
+  // Once entered, stops and holds do not regress the stage.
+  if (nearOrigin && gsKt >= 1 && (stage === "inbound" || stage === "origin_gate" || stage === "push")) {
     stage = "taxi";
-  } else if (nearOrigin && gsKt >= 1 && (stage === "inbound" || stage === "origin_gate")) {
-    stage = "push";
   }
 
   let parkedLat = sameLeg ? prior?.parkedLat ?? null : null;
@@ -181,13 +176,11 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
     ? haversineNm({ lat: parkedLat, lon: parkedLon }, { lat: live!.lat, lon: live!.lon })
     : 0;
 
-  if (freshSurface && stage === "origin_gate") {
-    if (displacedNm >= 0.025) stage = "taxi";
-    else if (displacedNm >= 0.006) stage = "push";
-  }
-  if (freshSurface && stage === "push" && displacedNm >= 0.025) stage = "taxi";
+  // About 11 m of displacement from the stand is enough to say the aircraft is
+  // heading to the runway; we no longer try to distinguish tug pushback from taxi.
+  if (freshSurface && stage === "origin_gate" && displacedNm >= 0.006) stage = "taxi";
 
-  const durableStage = stage === "taxi" ? "taxi" : stage === "push" ? "push" : priorStage;
+  const durableStage = stage === "taxi" ? "taxi" : priorStage === "takeoff_roll" ? "takeoff_roll" : null;
   const resume = resumeBase
     ? {
         ...resumeBase,
@@ -205,15 +198,12 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
 
 /**
  * Do not invent an exact pushback time if the first trustworthy movement we saw
- * was already taxi-speed movement. This covers both a fresh app load mid-taxi and
- * a flight that was tracked at the gate but whose FR24 position did not refresh
- * during the actual tug movement. In either case, taxi start is not pushback time.
- * Provider-published actual gate-out remains authoritative.
+ * was already taxi-speed movement. Pushback time remains independent from the
+ * broad Heading-to-runway passenger stage. Provider actual gate-out still wins.
  */
 export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightResume): FlightStory {
   const sameLeg = sameResumeLeg(story, prior);
   const priorStage = sameLeg ? prior?.departureStage ?? null : null;
-  // If we had already positively observed Pushback (or later), preserve the time.
   if (priorStage === "push" || priorStage === "taxi" || priorStage === "takeoff_roll") return story;
 
   const live = story.aircraft;
@@ -222,7 +212,7 @@ export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightR
   const pushUnix = t.pushUnix ?? null;
   const loadedUnix = story.fetchedAt / 1000;
   const looksLikeRecentDetection = pushUnix != null && Math.abs(loadedUnix - pushUnix) <= 120;
-  const firstSeenAlreadyTaxiing = Boolean(
+  const firstSeenAlreadyMoving = Boolean(
     live?.onGround
     && story.providers?.chosenPosition === "fr24"
     && !live.extrapolated
@@ -230,7 +220,7 @@ export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightR
     && (live.gsKt ?? 0) >= 3
     && (story.currentStage === "taxi" || story.currentStage === (TAKEOFF_ROLL_STAGE as FlightStory["currentStage"]))
   );
-  if (!detected || !looksLikeRecentDetection || !firstSeenAlreadyTaxiing || t.origPushUnix == null) return story;
+  if (!detected || !looksLikeRecentDetection || !firstSeenAlreadyMoving || t.origPushUnix == null) return story;
 
   return {
     ...story,
