@@ -8,10 +8,57 @@ import type { FlightStory } from "./types";
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
 const SURFACE_STAGES = new Set(["origin_gate", "push", "taxi", "taxi_in", "gate"]);
 const FR24_SURFACE_FRESH_SEC = 20;
+const SURFACE_POLL_SEC = 3;
+const SPEED_STREAK_TIMEOUT_SEC = SURFACE_POLL_SEC * 2;
+const SPEED_CONFIRM_SAMPLES = 2;
 const TAKEOFF_ROLL_STAGE = "Takeoff roll";
 
 function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
   return Boolean(prior && prior.originIcao === story.origin?.icao && prior.destIcao === story.dest?.icao);
+}
+
+function streakState(
+  count: number | null | undefined,
+  lastSeenAt: number | null | undefined,
+  sample: { seenAt: number; ageSec: number; gsKt: number } | null,
+  thresholdKt: number,
+  nowSec = Date.now() / 1000,
+) {
+  let nextCount = Math.max(0, Math.min(SPEED_CONFIRM_SAMPLES, count ?? 0));
+  let nextSeenAt = lastSeenAt ?? null;
+  let stale = false;
+
+  // Claude's pause-not-reset rule: a missed/late poll does not immediately
+  // destroy a half-confirmed transition. Keep the streak alive for up to 2x
+  // the expected surface polling interval, then reset and mark telemetry stale.
+  if (nextSeenAt != null && nowSec - nextSeenAt > SPEED_STREAK_TIMEOUT_SEC) {
+    nextCount = 0;
+    nextSeenAt = null;
+    stale = true;
+  }
+
+  const fresh = Boolean(sample && sample.ageSec <= SPEED_STREAK_TIMEOUT_SEC);
+  if (!fresh || !sample) return { count: nextCount, lastSeenAt: nextSeenAt, stale };
+
+  // Repeated requests can return the same FR24 sample. Count only a genuinely
+  // newer telemetry point so one cached 52 kt fix cannot satisfy both samples.
+  if (nextSeenAt != null && sample.seenAt <= nextSeenAt) {
+    return { count: nextCount, lastSeenAt: nextSeenAt, stale: false };
+  }
+
+  nextSeenAt = sample.seenAt;
+  nextCount = sample.gsKt >= thresholdKt ? Math.min(SPEED_CONFIRM_SAMPLES, nextCount + 1) : 0;
+  return { count: nextCount, lastSeenAt: nextSeenAt, stale: false };
+}
+
+function withTelemetryFlag(story: FlightStory, stale: boolean): FlightStory {
+  return {
+    ...story,
+    providers: {
+      ...story.providers,
+      surfaceTelemetryStale: stale,
+    },
+  };
 }
 
 /**
@@ -84,7 +131,6 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
  * Preserve confirmed departure progress across refreshes/serverless handoffs.
  * Departure is a one-way passenger story:
  * origin_gate -> push -> taxi -> takeoff roll -> ride.
- * A stop, provider handoff, or slower surface fix never moves it backward.
  */
 export function preserveDepartureProgress(story: FlightStory, prior?: FlightResume): FlightStory {
   const current = story.currentStage;
@@ -93,30 +139,47 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   const live = story.aircraft;
   const gsKt = live?.gsKt ?? 0;
 
-  // Hard departure gates requested for the passenger story. Once Taxiing out is
-  // established, 50 kt means Takeoff roll. Once Takeoff roll is latched, keep it
-  // through any brief speed fluctuation until 150 kt, then hand off to the existing
-  // Flight stage. Flights first observed already airborne still use the existing
-  // FlightAware/live airborne logic so we do not regress the accurate Flight state.
-  if (priorStage === "takeoff_roll") {
-    if (gsKt >= 150) {
-      const resume = story.resume ? { ...story.resume, departureStage: "takeoff_roll" as const } : story.resume;
-      return { ...story, currentStage: "ride", ...(resume ? { resume } : {}) };
-    }
-    const resume = story.resume ? { ...story.resume, departureStage: "takeoff_roll" as const } : story.resume;
-    return { ...story, currentStage: TAKEOFF_ROLL_STAGE as FlightStory["currentStage"], ...(resume ? { resume } : {}) };
-  }
-
-  if (priorStage === "taxi" && gsKt >= 50 && gsKt < 150) {
-    const resume = story.resume ? { ...story.resume, departureStage: "takeoff_roll" as const } : story.resume;
-    return { ...story, currentStage: TAKEOFF_ROLL_STAGE as FlightStory["currentStage"], ...(resume ? { resume } : {}) };
-  }
-
-  if (priorStage === "taxi" && gsKt >= 150) {
-    return { ...story, currentStage: "ride" };
-  }
-
+  // Keep the existing airborne/arrival detection authoritative. FlightAware/live
+  // airborne evidence has been reliable and should not be delayed by speed streaks.
   if (["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(current)) return story;
+
+  const providers = story.providers as (Record<string, unknown> | undefined);
+  const fr24 = providers?.fr24Position as NormalizedPosition | null | undefined;
+  const speedSample = fr24
+    && fr24.provider === "fr24"
+    && fr24.onGround === true
+    && story.providers?.chosenPosition === "fr24"
+    ? { seenAt: fr24.seenAt, ageSec: positionAgeSec(fr24), gsKt: fr24.gsKt ?? 0 }
+    : null;
+  const resumeBase = story.resume ?? (sameLeg ? prior : undefined);
+
+  // A confirmed Takeoff roll stays visible until Flight is confirmed. The 150 kt
+  // speed path itself needs two distinct fresh samples; a missing poll pauses the
+  // streak for at most 6 seconds, then resets it and marks telemetry stale.
+  if (priorStage === "takeoff_roll") {
+    const flightStreak = streakState(
+      prior?.flightSpeedStreak,
+      prior?.flightSpeedStreakSeenAt,
+      speedSample,
+      150,
+    );
+    const resume = resumeBase ? {
+      ...resumeBase,
+      departureStage: "takeoff_roll" as const,
+      takeoffRollStreak: 0,
+      takeoffRollStreakSeenAt: null,
+      flightSpeedStreak: flightStreak.count,
+      flightSpeedStreakSeenAt: flightStreak.lastSeenAt,
+    } : story.resume;
+    if (flightStreak.count >= SPEED_CONFIRM_SAMPLES) {
+      return withTelemetryFlag({ ...story, currentStage: "ride", ...(resume ? { resume } : {}) }, false);
+    }
+    return withTelemetryFlag({
+      ...story,
+      currentStage: TAKEOFF_ROLL_STAGE as FlightStory["currentStage"],
+      ...(resume ? { resume } : {}),
+    }, flightStreak.stale);
+  }
 
   let stage = current;
 
@@ -127,8 +190,7 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   }
 
   // A provider-published actual gate-out/pushback time is itself authoritative
-  // evidence that the airplane is no longer at the gate. Never continue showing
-  // At the gate after we have accepted that timestamp as an actual.
+  // evidence that the airplane is no longer at the gate.
   const providerPushConfirmed = story.times.pushSource === "provider_actual" || story.times.pushKind === "actual";
   if (providerPushConfirmed && (stage === "origin_gate" || stage === "inbound")) {
     stage = "push";
@@ -143,10 +205,6 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
     && haversineNm({ lat: story.origin.lat, lon: story.origin.lon }, { lat: live!.lat, lon: live!.lon }) <= 3
   );
 
-  // Sometimes the schedule layer still labels the leg Inbound after the outbound
-  // aircraft has already begun moving. A fresh FR24 fix on the origin surface is
-  // stronger evidence of the passenger flight's current state. Do not wait for a
-  // later schedule refresh: immediately enter Pushback/Taxiing out from live motion.
   if (stage === "inbound" && nearOrigin && gsKt >= 1) {
     stage = gsKt >= 3 ? "taxi" : "push";
   }
@@ -161,23 +219,39 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
     ? haversineNm({ lat: parkedLat, lon: parkedLon }, { lat: live!.lat, lon: live!.lon })
     : 0;
 
-  // Make pushback responsive to the first real movement away from the stand.
-  // ~0.006 nm is about 11 m; a slow 1 kt tug movement is also sufficient.
   if (freshSurface && stage === "origin_gate") {
     if (gsKt >= 3 || displacedNm >= 0.025) stage = "taxi";
     else if (displacedNm >= 0.006 || gsKt >= 1) stage = "push";
   }
 
-  // Once pushback is established, promote to taxi much sooner. This avoids
-  // holding Pushback through a long taxi or until the aircraft reaches the runway.
   if (freshSurface && stage === "push") {
     if (current === "taxi" || gsKt >= 3 || displacedNm >= 0.025) stage = "taxi";
   }
 
-  // If this response itself establishes Taxiing out at or above 50 kt, do not
-  // wait another refresh to show Takeoff roll.
+  // Taxi -> Takeoff roll uses two distinct fresh FR24 samples at >=50 kt.
+  // A stale/missed request pauses the half-confirmed streak, but only up to 2x
+  // the 3-second surface poll interval. A fresh sub-50 kt sample resets it now.
+  const rollStreak = stage === "taxi"
+    ? streakState(
+        sameLeg ? prior?.takeoffRollStreak : 0,
+        sameLeg ? prior?.takeoffRollStreakSeenAt : null,
+        speedSample,
+        50,
+      )
+    : { count: 0, lastSeenAt: null as number | null, stale: false };
+
   let hardStage: typeof stage | typeof TAKEOFF_ROLL_STAGE = stage;
-  if (stage === "taxi" && gsKt >= 50) hardStage = TAKEOFF_ROLL_STAGE;
+  let flightSpeedStreak = 0;
+  let flightSpeedStreakSeenAt: number | null = null;
+  if (stage === "taxi" && rollStreak.count >= SPEED_CONFIRM_SAMPLES) {
+    hardStage = TAKEOFF_ROLL_STAGE;
+    // If the confirming roll sample is already >=150 kt, count it as the first
+    // Flight-speed sample, but still show Takeoff roll until a second fresh sample.
+    if (speedSample && speedSample.ageSec <= SPEED_STREAK_TIMEOUT_SEC && speedSample.gsKt >= 150) {
+      flightSpeedStreak = 1;
+      flightSpeedStreakSeenAt = speedSample.seenAt;
+    }
+  }
 
   const durableStage = hardStage === TAKEOFF_ROLL_STAGE
     ? "takeoff_roll"
@@ -186,21 +260,22 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
       : hardStage === "push"
         ? "push"
         : priorStage;
-  const resume = story.resume
+  const resume = resumeBase
     ? {
-        ...story.resume,
+        ...resumeBase,
         ...(durableStage ? { departureStage: durableStage } : {}),
         ...(parkedLat != null && parkedLon != null ? { parkedLat, parkedLon } : {}),
+        takeoffRollStreak: hardStage === TAKEOFF_ROLL_STAGE ? 0 : rollStreak.count,
+        takeoffRollStreakSeenAt: hardStage === TAKEOFF_ROLL_STAGE ? null : rollStreak.lastSeenAt,
+        flightSpeedStreak,
+        flightSpeedStreakSeenAt,
       }
     : story.resume;
 
-  if (hardStage === TAKEOFF_ROLL_STAGE && gsKt >= 150) {
-    return { ...story, currentStage: "ride", ...(resume ? { resume } : {}) };
-  }
-
-  return hardStage === current && resume === story.resume
+  const result = hardStage === current && resume === story.resume
     ? story
     : { ...story, currentStage: hardStage as FlightStory["currentStage"], resume };
+  return withTelemetryFlag(result, rollStreak.stale);
 }
 
 /**
