@@ -39,6 +39,10 @@ export type FlightResume = {
   detectedPushUnix?: number | null;
   parkedLat?: number | null;
   parkedLon?: number | null;
+  takeoffRollStreak?: number | null;
+  takeoffRollStreakSeenAt?: number | null;
+  flightSpeedStreak?: number | null;
+  flightSpeedStreakSeenAt?: number | null;
 };
 
 /** Whitelist bounded device context; no supplied URLs, status, or live fixes. */
@@ -102,6 +106,13 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
     ? r.detectedPushUnix : null;
   const parkedLat = typeof r.parkedLat === "number" && Number.isFinite(r.parkedLat) && Math.abs(r.parkedLat) <= 90 ? r.parkedLat : null;
   const parkedLon = typeof r.parkedLon === "number" && Number.isFinite(r.parkedLon) && Math.abs(r.parkedLon) <= 180 ? r.parkedLon : null;
+  const streak = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 2 ? value : 0;
+  const recentSeenAt = (value: unknown) => typeof value === "number" && Number.isFinite(value)
+    && value * 1000 <= now + 30_000 && now - value * 1000 <= RESUME_MAX_AGE_MS ? value : null;
+  const takeoffRollStreak = streak(r.takeoffRollStreak);
+  const takeoffRollStreakSeenAt = recentSeenAt(r.takeoffRollStreakSeenAt);
+  const flightSpeedStreak = streak(r.flightSpeedStreak);
+  const flightSpeedStreakSeenAt = recentSeenAt(r.flightSpeedStreakSeenAt);
   return {
     version: 1, callsign: want.callsign, ident: r.ident, confirmedAt: r.confirmedAt,
     ...fields, originIcao: r.originIcao, destIcao: r.destIcao,
@@ -109,6 +120,7 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
     gateOut: stamps.gateOut, takeoff: stamps.takeoff, landing: stamps.landing, gateIn: stamps.gateIn,
     tail: token(r.tail, /^[A-Z0-9-]{3,12}$/i), hex: token(r.hex, /^[a-f0-9]{6}$/i),
     type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, departureStage, detectedPushUnix, parkedLat, parkedLon,
+    takeoffRollStreak, takeoffRollStreakSeenAt, flightSpeedStreak, flightSpeedStreakSeenAt,
   } as FlightResume;
 }
 
@@ -158,6 +170,8 @@ export function resumeFromStory(story: FlightStory | undefined, q: string, now =
     landing: stamp(t.landUnix, t.origLandUnix), gateIn: stamp(t.gateUnix),
     tail: story.aircraft?.registration, hex: story.aircraft?.hex, type: story.aircraft?.type,
     waypoints: [], departureStage: observed,
+    takeoffRollStreak: 0, takeoffRollStreakSeenAt: null,
+    flightSpeedStreak: 0, flightSpeedStreakSeenAt: null,
   }, q, now);
 }
 
