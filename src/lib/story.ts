@@ -190,6 +190,44 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
     : { ...story, currentStage: hardStage as FlightStory["currentStage"], resume };
 }
 
+/**
+ * If the first live observation catches an airplane already taxiing, do not stamp
+ * that load time as "pushback detected." We did not observe the airplane leave
+ * the stand, so keep the scheduled gate-out time and report the exact pushback
+ * time as unknown. A provider actual timestamp remains authoritative.
+ */
+export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightResume): FlightStory {
+  if (sameResumeLeg(story, prior)) return story;
+  const live = story.aircraft;
+  const t = story.times;
+  const detected = t.pushSource === "live_detected" || t.pushSource === "track_detected";
+  const pushUnix = t.pushUnix ?? null;
+  const loadedUnix = story.fetchedAt / 1000;
+  const looksLikeLoadTime = pushUnix != null && Math.abs(loadedUnix - pushUnix) <= 120;
+  const joinedMoving = Boolean(
+    live?.onGround
+    && story.providers?.chosenPosition === "fr24"
+    && !live.extrapolated
+    && (live.seenSec ?? 999) <= FR24_SURFACE_FRESH_SEC
+    && (live.gsKt ?? 0) >= 8
+    && (story.currentStage === "taxi" || story.currentStage === (TAKEOFF_ROLL_STAGE as FlightStory["currentStage"]))
+  );
+  if (!detected || !looksLikeLoadTime || !joinedMoving || t.origPushUnix == null) return story;
+
+  return {
+    ...story,
+    times: {
+      ...t,
+      push: t.pushWas ?? t.push,
+      pushUnix: t.origPushUnix,
+      pushKind: "scheduled",
+      pushSource: null,
+      pushWas: null,
+      delayMin: 0,
+    },
+  };
+}
+
 /** Passenger flight story — live track, ride grade, delays. */
 export const getFlightStory = createServerFn({ method: "POST" })
   .validator((input: { q: string; fresh?: boolean; resume?: FlightResume }) => {
@@ -201,7 +239,8 @@ export const getFlightStory = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const story = await loadFlightStory(data.q, { fresh: data.fresh, resume: data.resume });
     const experimental = applyFr24GroundExperiment(story, data.resume);
-    return preserveDepartureProgress(experimental, data.resume);
+    const progressed = preserveDepartureProgress(experimental, data.resume);
+    return suppressLateJoinDetectedPush(progressed, data.resume);
   });
 
 export const listLiveFlights = createServerFn({ method: "POST" }).handler(async () => loadLiveBoard());
