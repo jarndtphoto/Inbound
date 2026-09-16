@@ -21,8 +21,7 @@ export function passengerNextEvent(s: FlightStory): PassengerNextEvent {
   }
   if (stage === "arrival") return { title: "Final approach is next", body: `The flight is approaching ${s.dest.city}. Landing follows final approach.` };
   if (stage === "ride") return { title: `En route to ${s.dest.city}`, body: "" };
-  if (stage === "taxi") return { title: "Takeoff is next", body: "" };
-  if (stage === "push") return { title: "Taxiing out is next", body: "" };
-  if (stage === "origin_gate") return { title: "Pushback is next", body: "" };
-  return { title: "Waiting for pushback", body: "" };
+  if (stage === "taxi" || stage === "push") return { title: "Takeoff is next", body: "" };
+  if (stage === "origin_gate") return { title: "Heading to runway is next", body: "" };
+  return { title: "Waiting for departure movement", body: "" };
 }
