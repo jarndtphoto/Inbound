@@ -29,8 +29,7 @@ const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
 const STAGES: { id: StageId; label: string }[] = [
   { id: "inbound", label: "Inbound" },
   { id: "origin_gate", label: "At gate" },
-  { id: "push", label: "Pushback" },
-  { id: "taxi", label: "Taxiing out" },
+  { id: "taxi", label: "Heading to runway" },
   { id: "ride", label: "Flight" },
   { id: "arrival", label: "Arrival" },
   { id: "final_approach", label: "Final approach" },
@@ -480,8 +479,6 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       writeCachedStory(query, merged);
       return merged;
     },
-    // Seed saved data once; failed requests must remain errors, not successful
-    // cache reads. React Query retains the last good story during a failure.
     initialData: () => {
       const cached = storyForQuery(readCachedStory(query), query);
       return cached ? rememberOrigOnClient(cached) : undefined;
@@ -560,7 +557,6 @@ function FlightPages({ onHome }: { onHome: () => void }) {
           return { ok: true as const, text: remote.text.trim(), local, gen, flight };
         }
       } catch {
-        /* local is the brief */
         return { ok: true as const, text: local.lead, local, gen, flight, remoteFailed: true as const };
       }
       return { ok: true as const, text: local.lead, local, gen, flight, remoteFailed: false as const };
@@ -621,13 +617,11 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     setStage("auto");
     setRefreshErr(null);
     setPullPx(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the flight changes
   }, [flightKey]);
 
   useEffect(() => {
     if (!story || briefingFor === flightKey) return;
     briefM.mutate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- first compile when the story arrives
   }, [story, flightKey]);
 
   useEffect(() => {
@@ -721,7 +715,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       e.preventDefault();
       const next = Math.min(88, dy * 0.42);
       pullPxRef.current = next;
-      setPullPx(next);
+      setDx(mx);
     };
     const onEnd = () => {
       if (!pulling) return;
@@ -854,8 +848,7 @@ function stageHeadline(story: FlightStory) {
   if (story.currentStage === "final_approach") return "Final approach";
   if (story.currentStage === "arrival" && wheelsDown(story)) return "Landed";
   if (story.currentStage === "origin_gate") return "At the gate";
-  if (story.currentStage === "push") return "Pushback";
-  if (story.currentStage === "taxi") return "Taxiing out";
+  if (story.currentStage === "push" || story.currentStage === "taxi") return "Heading to runway";
   return STAGES.find((s) => s.id === story.currentStage)?.label ?? story.currentStage;
 }
 
@@ -898,8 +891,7 @@ function headStatus(story: FlightStory) {
   if (story.currentStage === "taxi_in") return airline ? `Taxiing in · ${airline}` : "Taxiing in";
   if (wheelsDown(story)) return airline ? `Landed · ${airline}` : "Landed";
   if (story.currentStage === "origin_gate") return airline ? `At the gate · ${airline}` : "At the gate";
-  if (story.currentStage === "push") return airline ? `Pushback · ${airline}` : "Pushback";
-  if (story.currentStage === "taxi") return airline ? `Taxiing out · ${airline}` : "Taxiing out";
+  if (story.currentStage === "push" || story.currentStage === "taxi") return airline ? `Heading to runway · ${airline}` : "Heading to runway";
   if (story.currentStage === "final_approach") return airline ? `Final approach · ${airline}` : "Final approach";
   if (air && inAirLive) return airline ? `In the air · ${airline}` : "In the air";
   if (air) return "In the air — live position unavailable right now";
@@ -907,19 +899,7 @@ function headStatus(story: FlightStory) {
   return airline ?? "";
 }
 
-function FlightHead({
-  story,
-  fetching,
-  refreshing,
-  failed = false,
-  onRefresh,
-}: {
-  story: FlightStory;
-  fetching: boolean;
-  refreshing: boolean;
-  failed?: boolean;
-  onRefresh: () => void;
-}) {
+function FlightHead({ story, fetching, refreshing, failed = false, onRefresh }: { story: FlightStory; fetching: boolean; refreshing: boolean; failed?: boolean; onRefresh: () => void; }) {
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2">
@@ -931,11 +911,7 @@ function FlightHead({
           <p className="font-mono text-xs tracking-widest text-muted uppercase">Stage</p>
           <p className="font-display text-xl font-semibold leading-tight sm:text-2xl">{stageHeadline(story)}</p>
         </div>
-        <p className="col-span-2 text-lg text-fg">
-          {story.origin.city} <span className="text-muted">{story.origin.iata}</span>
-          <span className="mx-2 text-subtle">→</span>
-          {story.dest.city} <span className="text-muted">{story.dest.iata}</span>
-        </p>
+        <p className="col-span-2 text-lg text-fg">{story.origin.city} <span className="text-muted">{story.origin.iata}</span><span className="mx-2 text-subtle">→</span>{story.dest.city} <span className="text-muted">{story.dest.iata}</span></p>
       </div>
       <TimesStrip failed={failed} story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
     </div>
@@ -947,74 +923,21 @@ const CLOSED_OVERVIEW_DETAILS: Record<OverviewDetailKey, boolean> = { flight: fa
 
 function formatLocalUnix(unix: number | null | undefined, timeZone?: string) {
   if (unix == null || !Number.isFinite(unix)) return null;
-  try {
-    return new Intl.DateTimeFormat(undefined, { timeZone, hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(unix * 1000);
-  } catch {
-    return new Date(unix * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
+  try { return new Intl.DateTimeFormat(undefined, { timeZone, hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(unix * 1000); } catch { return new Date(unix * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
 }
+function plannedDuration(story: FlightStory) { const start = story.times.origTakeoffUnix ?? story.times.takeoffUnix; const end = story.times.origLandUnix ?? story.times.landUnix; return start != null && end != null && end > start ? formatDuration((end - start) / 60) : null; }
+function DetailRow({ label, value }: { label: string; value: string | null | undefined }) { if (!value) return null; return <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 py-1.5 text-sm"><dt className="text-muted">{label}</dt><dd className="text-right font-medium">{value}</dd></div>; }
 
-function plannedDuration(story: FlightStory) {
-  const start = story.times.origTakeoffUnix ?? story.times.takeoffUnix;
-  const end = story.times.origLandUnix ?? story.times.landUnix;
-  return start != null && end != null && end > start ? formatDuration((end - start) / 60) : null;
-}
-
-function DetailRow({ label, value }: { label: string; value: string | null | undefined }) {
-  if (!value) return null;
-  return <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 py-1.5 text-sm"><dt className="text-muted">{label}</dt><dd className="text-right font-medium">{value}</dd></div>;
-}
-
-function OverviewDisclosure({
-  id,
-  title,
-  summary,
-  open,
-  onToggle,
-  prominent = false,
-  children,
-}: {
-  id: OverviewDetailKey;
-  title: string;
-  summary: string;
-  open: boolean;
-  onToggle: (id: OverviewDetailKey) => void;
-  prominent?: boolean;
-  children: ReactNode;
-}) {
+function OverviewDisclosure({ id, title, summary, open, onToggle, prominent = false, children }: { id: OverviewDetailKey; title: string; summary: string; open: boolean; onToggle: (id: OverviewDetailKey) => void; prominent?: boolean; children: ReactNode; }) {
   const panelId = `overview-${id}-details`;
-  return <div className={cn("border-b border-border last:border-b-0", prominent && "-mx-2 rounded-lg bg-accent/8 px-2")}>
-    <button
-      type="button"
-      className="flex min-h-16 w-full items-center justify-between gap-3 py-3 text-left"
-      aria-expanded={open}
-      aria-controls={panelId}
-      onClick={() => onToggle(id)}
-    >
-      <span className="min-w-0"><span className="block font-semibold">{title}</span><span className="mt-0.5 block truncate text-sm text-muted">{summary}</span></span>
-      <ChevronDown className={cn("size-5 shrink-0 text-muted transition-transform duration-200", open && "rotate-180")} aria-hidden="true" />
-    </button>
-    <div className={cn("grid transition-[grid-template-rows,opacity] duration-200 ease-out", open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
-      <div className="overflow-hidden"><div id={panelId} aria-hidden={!open} className="pb-4">{children}</div></div>
-    </div>
-  </div>;
+  return <div className={cn("border-b border-border last:border-b-0", prominent && "-mx-2 rounded-lg bg-accent/8 px-2")}><button type="button" className="flex min-h-16 w-full items-center justify-between gap-3 py-3 text-left" aria-expanded={open} aria-controls={panelId} onClick={() => onToggle(id)}><span className="min-w-0"><span className="block font-semibold">{title}</span><span className="mt-0.5 block truncate text-sm text-muted">{summary}</span></span><ChevronDown className={cn("size-5 shrink-0 text-muted transition-transform duration-200", open && "rotate-180")} aria-hidden="true" /></button><div className={cn("grid transition-[grid-template-rows,opacity] duration-200 ease-out", open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}><div className="overflow-hidden"><div id={panelId} aria-hidden={!open} className="pb-4">{children}</div></div></div></div>;
 }
 
 function OverviewDetails({ story }: { story: FlightStory }) {
   const storageKey = `inbound-overview-details:${origMemKey(story)}`;
   const [open, setOpen] = useState<Record<OverviewDetailKey, boolean>>(CLOSED_OVERVIEW_DETAILS);
-  useEffect(() => {
-    setOpen(CLOSED_OVERVIEW_DETAILS);
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(storageKey) || "null");
-      if (saved) setOpen({ flight: Boolean(saved.flight), aircraft: Boolean(saved.aircraft), airports: Boolean(saved.airports), baggage: Boolean(saved.baggage) });
-    } catch { /* Secondary detail state is optional. */ }
-  }, [storageKey]);
-  const toggle = (key: OverviewDetailKey) => setOpen((current) => {
-    const next = { ...current, [key]: !current[key] };
-    try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Storage can be unavailable. */ }
-    return next;
-  });
+  useEffect(() => { setOpen(CLOSED_OVERVIEW_DETAILS); try { const saved = JSON.parse(sessionStorage.getItem(storageKey) || "null"); if (saved) setOpen({ flight: Boolean(saved.flight), aircraft: Boolean(saved.aircraft), airports: Boolean(saved.airports), baggage: Boolean(saved.baggage) }); } catch {} }, [storageKey]);
+  const toggle = (key: OverviewDetailKey) => setOpen((current) => { const next = { ...current, [key]: !current[key] }; try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch {} return next; });
   const ac = story.aircraft;
   const aircraftSummary = [ac?.typeName ?? ac?.type ?? "Aircraft details unavailable", ac?.registration].filter(Boolean).join(" · ");
   const originStop = [story.origin.iata, story.times.originGate ? `Gate ${story.times.originGate}` : null].filter(Boolean).join(" ");
@@ -1023,878 +946,50 @@ function OverviewDetails({ story }: { story: FlightStory }) {
   const baggageProminent = wheelsDown(story);
   const scheduledPush = formatLocalUnix(story.times.origPushUnix, story.origin.tz) ?? story.times.pushWas;
   const scheduledTakeoff = formatLocalUnix(story.times.origTakeoffUnix, story.origin.tz) ?? story.times.takeoffWas;
-  const pushActualLabel = story.times.pushSource === "provider_actual" ? "Actual"
-    : story.times.pushSource === "live_detected" || story.times.pushSource === "track_detected" ? "Detected"
-      : story.times.pushKind === "estimated" ? "Estimated" : null;
-  const takeoffActualLabel = story.times.takeoffKind === "actual" ? "Actual"
-    : story.times.takeoffKind === "estimated" ? "Estimated" : null;
+  const pushActualLabel = story.times.pushSource === "provider_actual" ? "Actual" : story.times.pushSource === "live_detected" || story.times.pushSource === "track_detected" ? "Detected" : story.times.pushKind === "estimated" ? "Estimated" : null;
+  const takeoffActualLabel = story.times.takeoffKind === "actual" ? "Actual" : story.times.takeoffKind === "estimated" ? "Estimated" : null;
   return <section className="mt-4 rounded-xl border border-border bg-surface px-4" aria-label="More flight information">
-    <OverviewDisclosure id="flight" title="Flight details" summary={`${story.iata} · ${story.origin.iata} → ${story.dest.iata}`} open={open.flight} onToggle={toggle}>
-      <dl>
-        <DetailRow label="Airline" value={story.airline} />
-        <DetailRow label="Flight" value={story.iata} />
-        <DetailRow label="Route" value={`${story.origin.city} (${story.origin.iata}) → ${story.dest.city} (${story.dest.iata})`} />
-        <div className="mt-2 border-t border-border pt-2"><h3 className="font-semibold">Pushback</h3>
-          <DetailRow label="Scheduled" value={scheduledPush} />
-          {pushActualLabel ? <DetailRow label={pushActualLabel} value={story.times.push} /> : null}
-        </div>
-        <div className="mt-2 border-t border-border pt-2"><h3 className="font-semibold">Takeoff</h3>
-          <DetailRow label="Scheduled" value={scheduledTakeoff} />
-          {takeoffActualLabel ? <DetailRow label={takeoffActualLabel} value={story.times.takeoff} /> : null}
-        </div>
-        <DetailRow label="Scheduled landing" value={formatLocalUnix(story.times.origLandUnix, story.dest.tz) ?? story.times.landWas} />
-        <DetailRow label="Planned flight time" value={plannedDuration(story)} />
-      </dl>
-    </OverviewDisclosure>
-    <OverviewDisclosure id="aircraft" title="Aircraft" summary={aircraftSummary} open={open.aircraft} onToggle={toggle}>
-      <dl>
-        <DetailRow label="Model" value={ac?.typeName ?? ac?.type} />
-        <DetailRow label="Registration" value={ac?.registration} />
-        <DetailRow label="Aircraft year" value={ac?.year} />
-        <DetailRow label="Operator" value={ac?.operator} />
-      </dl>
-    </OverviewDisclosure>
-    <OverviewDisclosure id="airports" title="Airport details" summary={`${originStop} → ${destStop}`} open={open.airports} onToggle={toggle}>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <section aria-label="Departure airport details"><h3 className="font-semibold">Departure · {story.origin.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.originGate ?? "Not assigned"} /><DetailRow label="Pushback" value={story.times.push} /><DetailRow label="Weather" value={passengerAirportWeather(story.origin.decoded, story.origin.rawMetar)} /></dl></section>
-        <section aria-label="Arrival airport details"><h3 className="font-semibold">Arrival · {story.dest.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.destGate ?? "Not assigned"} /><DetailRow label="Gate arrival" value={story.times.gate} /><DetailRow label="Weather" value={passengerAirportWeather(story.dest.decoded, story.dest.rawMetar)} /></dl></section>
-      </div>
-    </OverviewDisclosure>
-    <OverviewDisclosure id="baggage" title="Baggage" summary={baggageSummary(baggage.result)} open={open.baggage} onToggle={toggle} prominent={baggageProminent}>
-      <BaggageStatus state={baggage} />
-    </OverviewDisclosure>
+    <OverviewDisclosure id="flight" title="Flight details" summary={`${story.iata} · ${story.origin.iata} → ${story.dest.iata}`} open={open.flight} onToggle={toggle}><dl><DetailRow label="Airline" value={story.airline} /><DetailRow label="Flight" value={story.iata} /><DetailRow label="Route" value={`${story.origin.city} (${story.origin.iata}) → ${story.dest.city} (${story.dest.iata})`} /><div className="mt-2 border-t border-border pt-2"><h3 className="font-semibold">Pushback</h3><DetailRow label="Scheduled" value={scheduledPush} />{pushActualLabel ? <DetailRow label={pushActualLabel} value={story.times.push} /> : null}</div><div className="mt-2 border-t border-border pt-2"><h3 className="font-semibold">Takeoff</h3><DetailRow label="Scheduled" value={scheduledTakeoff} />{takeoffActualLabel ? <DetailRow label={takeoffActualLabel} value={story.times.takeoff} /> : null}</div><DetailRow label="Scheduled landing" value={formatLocalUnix(story.times.origLandUnix, story.dest.tz) ?? story.times.landWas} /><DetailRow label="Planned flight time" value={plannedDuration(story)} /></dl></OverviewDisclosure>
+    <OverviewDisclosure id="aircraft" title="Aircraft" summary={aircraftSummary} open={open.aircraft} onToggle={toggle}><dl><DetailRow label="Model" value={ac?.typeName ?? ac?.type} /><DetailRow label="Registration" value={ac?.registration} /><DetailRow label="Aircraft year" value={ac?.year} /><DetailRow label="Operator" value={ac?.operator} /></dl></OverviewDisclosure>
+    <OverviewDisclosure id="airports" title="Airport details" summary={`${originStop} → ${destStop}`} open={open.airports} onToggle={toggle}><div className="grid gap-4 sm:grid-cols-2"><section aria-label="Departure airport details"><h3 className="font-semibold">Departure · {story.origin.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.originGate ?? "Not assigned"} /><DetailRow label="Pushback" value={story.times.push} /><DetailRow label="Weather" value={passengerAirportWeather(story.origin.decoded, story.origin.rawMetar)} /></dl></section><section aria-label="Arrival airport details"><h3 className="font-semibold">Arrival · {story.dest.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.destGate ?? "Not assigned"} /><DetailRow label="Gate arrival" value={story.times.gate} /><DetailRow label="Weather" value={passengerAirportWeather(story.dest.decoded, story.dest.rawMetar)} /></dl></section></div></OverviewDisclosure>
+    <OverviewDisclosure id="baggage" title="Baggage" summary={baggageSummary(baggage.result)} open={open.baggage} onToggle={toggle} prominent={baggageProminent}><BaggageStatus state={baggage} /></OverviewDisclosure>
   </section>;
 }
 
-function kindLabel(kind: FlightStory["times"]["pushKind"]) {
-  if (kind === "actual") return "Actual";
-  if (kind === "estimated") return "Estimated";
-  if (kind === "scheduled") return "Scheduled";
-  return "";
+function kindLabel(kind: FlightStory["times"]["pushKind"]) { if (kind === "actual") return "Actual"; if (kind === "estimated") return "Estimated"; if (kind === "scheduled") return "Scheduled"; return ""; }
+function ClockCell({ title, time, kind, hint, source }: { title: string; time: string | null | undefined; kind?: FlightStory["times"]["pushKind"]; hint?: string | null; source?: FlightStory["times"]["pushSource"]; }) { const sourceLabel = source === "live_detected" || source === "track_detected" ? "Detected" : source === "provider_actual" ? "Actual" : kindLabel(kind); const sub = [sourceLabel, hint].filter(Boolean).join(" · "); return <div className="min-w-0"><p className="font-mono text-xs tracking-widest text-subtle uppercase">{title}</p><p className="mt-1 font-display text-xl font-semibold leading-none">{time ?? "—"}</p><p className="mt-1 text-xs text-muted">{sub || "\u00a0"}</p></div>; }
+
+function TimesStrip({ story, fetching, refreshing, failed = false, onRefresh }: { story: FlightStory; fetching: boolean; refreshing: boolean; failed?: boolean; onRefresh: () => void; }) {
+  const t = story.times; const down = wheelsDown(story); const airborne = flightAirborne(story) && !down; const ac = story.aircraft; const showLiveFlight = Boolean(liveFix(story) && flightAirborne(story) && ac && !ac.onGround && (ac.altFt || ac.gsKt)); const elapsed = airborne ? elapsedFlight(story) : null; const liveFresh = cachedStorySafeDuringRefreshFailure(story); const parked = story.currentStage === "gate"; const delay = t?.delayMin ?? null; const late = (delay ?? 0) >= 5; const phrase = delayPhrase(delay);
+  const landHint = down && !parked ? story.currentStage === "taxi_in" ? "Taxiing in" : "Rollout" : t?.landWas && t.landWas !== t.land ? `Was ${t.landWas}` : null;
+  const gateHint = t?.destGate ? `Gate ${t.destGate}` : parked ? "Parked" : t?.taxiInMin != null ? t.taxiInKind === "measured" ? `Taxi in ${t.taxiInMin} min` : `Est. taxi in ${t.taxiInMin} min` : null;
+  const landClock = <ClockCell title={down ? "Landed" : "Landing"} time={t?.land} kind={t?.landKind ?? (t?.land ? "scheduled" : null)} hint={landHint} />;
+  const gateClock = <ClockCell title={parked ? "At the gate" : "Gate ETA"} time={t?.gate} kind={t?.gateKind ?? (t?.gate ? "scheduled" : null)} hint={gateHint} />;
+  return <div className="mt-4 border-t border-border pt-3"><div className="flex min-w-0 flex-col gap-3">{airborne ? <div className="grid min-w-0 flex-1 grid-cols-2 gap-3"><div className="flex min-h-28 min-w-0 flex-col justify-center rounded-md border border-border bg-bg px-3 py-2"><p className="flex items-center gap-1.5 font-mono text-xs tracking-wide text-subtle uppercase"><Clock className="size-3 shrink-0" /> Remaining</p><p className="mt-0.5 break-words font-display text-2xl font-semibold leading-none">{liveFresh ? formatDuration(story.route.etaMin) : "Updating…"}</p><p className="mt-0.5 break-words text-xs text-muted">{liveFresh ? formatMiles(story.route.remainingNm) : "Live position is stale"}</p></div><div className="flex min-h-28 min-w-0 flex-col justify-center rounded-md border border-border bg-bg px-3 py-2"><p className="flex items-center gap-1.5 font-mono text-xs tracking-wide text-subtle uppercase"><Clock className="size-3 shrink-0" /> Flown</p><p className="mt-0.5 break-words font-display text-2xl font-semibold leading-none">{elapsed ? formatDuration(elapsed.minutes) : "—"}</p><p className="mt-0.5 break-words text-xs text-muted">{elapsed?.estimated || !liveFix(story) ? "Est. " : "Approx. "}{formatMiles(story.route.flownNm)}</p></div></div> : down ? <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">{landClock}{gateClock}</div> : <div className="grid min-w-0 flex-1 grid-cols-2 gap-3"><ClockCell title={t?.pushed ? "Pushback" : "Est. pushback"} time={t?.push} kind={t?.pushKind ?? (t?.pushed ? "actual" : t?.push ? "scheduled" : null)} source={t?.pushSource} hint={late ? [phrase, t?.pushWas ? `Was ${t.pushWas}` : null].filter(Boolean).join(" · ") : t?.originGate ? `Gate ${t.originGate}` : phrase} /><ClockCell title="Takeoff" time={takeoffEstimateExpired(story) ? "Awaiting updated takeoff time" : t?.takeoff} kind={takeoffEstimateExpired(story) ? null : t?.takeoffKind ?? (t?.takeoff ? "scheduled" : null)} hint={takeoffEstimateExpired(story) ? null : t?.takeoffWas && t.takeoffWas !== t.takeoff ? `Was ${t.takeoffWas}` : null} /></div>}{showLiveFlight ? <dl className="grid grid-cols-1 gap-3"><Stat icon={Gauge} label="Live flight" value={ac?.altFt ? feetPretty(ac.altFt) : "—"} sub={ac?.gsKt ? `${Math.round(ac.gsKt)} kt` : ""} /></dl> : null}<Freshness failed={failed} partial={story.schedule?.status === "saved"} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} /></div>{!down ? <div className="mt-3 grid grid-cols-2 gap-3">{landClock}{gateClock}</div> : null}</div>;
 }
 
-function ClockCell({
-  title,
-  time,
-  kind,
-  hint,
-  source,
-}: {
-  title: string;
-  time: string | null | undefined;
-  kind?: FlightStory["times"]["pushKind"];
-  hint?: string | null;
-  source?: FlightStory["times"]["pushSource"];
-}) {
-  const sourceLabel = source === "live_detected" || source === "track_detected" ? "Detected" : source === "provider_actual" ? "Actual" : kindLabel(kind);
-  const sub = [sourceLabel, hint].filter(Boolean).join(" · ");
-  return (
-    <div className="min-w-0">
-      <p className="font-mono text-xs tracking-widest text-subtle uppercase">{title}</p>
-      <p className="mt-1 font-display text-xl font-semibold leading-none">{time ?? "—"}</p>
-      <p className="mt-1 text-xs text-muted">{sub || "\u00a0"}</p>
-    </div>
-  );
+function Freshness({ at, fetching, refreshing, failed = false, partial = false, onRefresh }: { at: number; fetching: boolean; refreshing: boolean; failed?: boolean; partial?: boolean; onRefresh: () => void; }) { const [, setTick] = useState(0); useEffect(() => { const id = window.setInterval(() => setTick((n) => n + 1), 4000); return () => window.clearInterval(id); }, []); return <div className="flex flex-col items-end gap-1.5"><button type="button" onClick={onRefresh} disabled={refreshing} className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface px-2.5 font-mono text-xs tracking-wide text-fg disabled:opacity-60"><RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />{refreshing ? "Updating…" : "Refresh"}</button><p className="font-mono text-xs tracking-widest text-muted uppercase">{refreshing ? "Updating…" : failed ? "Update delayed · showing saved data" : partial ? "Schedule delayed · " + (Date.now() - at < 8000 ? "other feeds just checked" : agoLabel(at, false)) : agoLabel(at, false)}</p></div>; }
+function TrendArrow({ trend }: { trend?: Comfort["trend"] }) { if (trend === "up") return <ArrowUp className="size-4 shrink-0 text-vfr" strokeWidth={2.75} aria-label="Grade improving" />; if (trend === "down") return <ArrowDown className="size-4 shrink-0 text-ifr" strokeWidth={2.75} aria-label="Grade worsening" />; return null; }
+function Stat({ icon: Icon, label, value, sub, trend }: { icon: typeof Plane; label: string; value: string; sub?: string; trend?: Comfort["trend"]; }) { return <div className="rounded-md border border-border bg-bg px-3 py-1.5"><p className="flex items-center gap-1.5 font-mono text-xs tracking-widest text-subtle uppercase"><Icon className="size-3" />{label}</p><p className="mt-0.5 flex items-center gap-1 font-display text-lg font-semibold leading-tight">{value}<TrendArrow trend={trend} /></p>{sub ? <p className="text-xs leading-tight text-muted">{sub}</p> : null}</div>; }
+
+function BreakdownCard({ briefing, pending, feedback, onCompile }: { briefing: CompiledBrief | null; pending: boolean; feedback: "no_change" | "failed" | null; onCompile: () => void; }) {
+  const asOf = briefing?.liveAt ? new Date(briefing.liveAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null; const log = briefing?.log ?? [];
+  return <div className="mt-4 rounded-xl border border-accent/35 bg-surface p-4"><p className="font-mono text-xs tracking-widest text-muted uppercase">Briefing</p><h3 className="font-display text-title font-semibold text-balance">{briefing ? "Briefing" : "Brief the whole flight"}</h3>{!briefing && <p className="mt-1 text-sm text-muted">One brief before you push — then it updates as the trip changes.</p>}{briefing && <div className="mt-3 space-y-3">{asOf ? <p className="font-mono text-xs tracking-wide text-subtle uppercase">Briefing updated {asOf}</p> : null}<p className="text-sm leading-relaxed text-fg whitespace-pre-wrap">{briefing.lead}</p>{log.length > 0 ? <div className="border-t border-border pt-3"><p className="font-mono text-xs tracking-widest text-subtle uppercase">Updates</p><ol className="mt-2 space-y-2">{log.map((entry, i) => <li key={`${entry.at}-${i}`} className="text-sm leading-snug"><p className="font-mono text-[11px] tracking-wide text-subtle uppercase">{new Date(entry.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{" · "}{briefLogLabel(entry)}</p><p className="text-muted">{briefLogText(entry)}.</p></li>)}</ol></div> : null}</div>}<Button type="button" className="mt-4 w-full" disabled={pending} onClick={onCompile}>{pending ? "Updating…" : briefing ? "Update briefing" : "Compile briefing"}</Button>{feedback === "no_change" ? <p role="status" className="mt-2 text-center text-sm text-muted">No new updates right now.</p> : null}{feedback === "failed" ? <p role="alert" className="mt-2 text-center text-sm text-ifr">We couldn’t refresh the briefing. Try again.</p> : null}</div>;
 }
 
-function TimesStrip({
-  story,
-  fetching,
-  refreshing,
-  failed = false,
-  onRefresh,
-}: {
-  story: FlightStory;
-  fetching: boolean;
-  refreshing: boolean;
-  failed?: boolean;
-  onRefresh: () => void;
-}) {
-  const t = story.times;
-  const down = wheelsDown(story);
-  const airborne = flightAirborne(story) && !down;
-  const ac = story.aircraft;
-  const showLiveFlight = Boolean(liveFix(story) && flightAirborne(story) && ac && !ac.onGround && (ac.altFt || ac.gsKt));
-  const elapsed = airborne ? elapsedFlight(story) : null;
-  const liveFresh = cachedStorySafeDuringRefreshFailure(story);
-  const parked = story.currentStage === "gate";
-  const delay = t?.delayMin ?? null;
-  const late = (delay ?? 0) >= 5;
-  const phrase = delayPhrase(delay);
-  const landHint = down && !parked
-    ? story.currentStage === "taxi_in" ? "Taxiing in" : "Rollout"
-    : t?.landWas && t.landWas !== t.land
-      ? `Was ${t.landWas}`
-      : null;
-  const gateHint = t?.destGate
-    ? `Gate ${t.destGate}`
-    : parked
-      ? "Parked"
-      : t?.taxiInMin != null
-        ? t.taxiInKind === "measured"
-          ? `Taxi in ${t.taxiInMin} min`
-          : `Est. taxi in ${t.taxiInMin} min`
-        : null;
-  const landClock = (
-    <ClockCell
-      title={down ? "Landed" : "Landing"}
-      time={t?.land}
-      kind={t?.landKind ?? (t?.land ? "scheduled" : null)}
-      hint={landHint}
-    />
-  );
-  const gateClock = (
-    <ClockCell
-      title={parked ? "At the gate" : "Gate ETA"}
-      time={t?.gate}
-      kind={t?.gateKind ?? (t?.gate ? "scheduled" : null)}
-      hint={gateHint}
-    />
-  );
-  return (
-    <div className="mt-4 border-t border-border pt-3">
-      <div className="flex min-w-0 flex-col gap-3">
-        {airborne ? (
-          <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
-            <div className="flex min-h-28 min-w-0 flex-col justify-center rounded-md border border-border bg-bg px-3 py-2">
-              <p className="flex items-center gap-1.5 font-mono text-xs tracking-wide text-subtle uppercase">
-                <Clock className="size-3 shrink-0" /> Remaining
-              </p>
-              <p className="mt-0.5 break-words font-display text-2xl font-semibold leading-none">{liveFresh ? formatDuration(story.route.etaMin) : "Updating…"}</p>
-              <p className="mt-0.5 break-words text-xs text-muted">{liveFresh ? formatMiles(story.route.remainingNm) : "Live position is stale"}</p>
-            </div>
-            <div className="flex min-h-28 min-w-0 flex-col justify-center rounded-md border border-border bg-bg px-3 py-2">
-              <p className="flex items-center gap-1.5 font-mono text-xs tracking-wide text-subtle uppercase">
-                <Clock className="size-3 shrink-0" /> Flown
-              </p>
-              <p className="mt-0.5 break-words font-display text-2xl font-semibold leading-none">{elapsed ? formatDuration(elapsed.minutes) : "—"}</p>
-              <p className="mt-0.5 break-words text-xs text-muted">
-                {elapsed?.estimated || !liveFix(story) ? "Est. " : "Approx. "}
-                {formatMiles(story.route.flownNm)}
-              </p>
-            </div>
-          </div>
-        ) : down ? (
-          <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
-            {landClock}
-            {gateClock}
-          </div>
-        ) : (
-          <div className="grid min-w-0 flex-1 grid-cols-2 gap-3">
-            <ClockCell
-              title={t?.pushed ? "Pushback" : "Est. pushback"}
-              time={t?.push}
-              kind={t?.pushKind ?? (t?.pushed ? "actual" : t?.push ? "scheduled" : null)}
-              source={t?.pushSource}
-              hint={
-                late
-                  ? [phrase, t?.pushWas ? `Was ${t.pushWas}` : null].filter(Boolean).join(" · ")
-                  : t?.originGate
-                    ? `Gate ${t.originGate}`
-                    : phrase
-              }
-            />
-            <ClockCell
-              title="Takeoff"
-              time={takeoffEstimateExpired(story) ? "Awaiting updated takeoff time" : t?.takeoff}
-              kind={takeoffEstimateExpired(story) ? null : t?.takeoffKind ?? (t?.takeoff ? "scheduled" : null)}
-              hint={takeoffEstimateExpired(story) ? null : t?.takeoffWas && t.takeoffWas !== t.takeoff ? `Was ${t.takeoffWas}` : null}
-            />
-          </div>
-        )}
-        {showLiveFlight ? (
-          <dl className="grid grid-cols-1 gap-3">
-            <Stat
-              icon={Gauge}
-              label="Live flight"
-              value={ac?.altFt ? feetPretty(ac.altFt) : "—"}
-              sub={ac?.gsKt ? `${Math.round(ac.gsKt)} kt` : ""}
-            />
-          </dl>
-        ) : null}
-        <Freshness failed={failed} partial={story.schedule?.status === "saved"} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
-      </div>
-      {!down ? (
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          {landClock}
-          {gateClock}
-        </div>
-      ) : null}
-    </div>
-  );
-}
+function StagePager({ story, active, onChange }: { story: FlightStory; active: StageId; onChange: (s: StageId) => void; }) { return null; }
+function StageBody({ story, stage, badge, current }: { story: FlightStory; stage: StageId; badge?: string; current?: boolean; }) { const s = story.stages?.[stage]; const extra = useMemo(() => extraFor(story, stage), [story, stage]); if (!s) return null; return <article className={cn("rounded-xl border bg-surface p-4", current ? "border-fg" : "border-border")}><p className="font-mono text-xs tracking-widest text-muted uppercase">{badge ? `${badge} · ` : ""}{STAGES.find((x) => x.id === stage)?.label ?? stage}</p><h3 className="font-display text-title font-semibold">{s.title}</h3>{s.body ? <p className="mt-2 text-sm leading-relaxed text-fg">{s.body}</p> : null}{s.watchouts.length > 0 && <ul className="mt-3 space-y-2">{s.watchouts.map((w) => <li key={w} className="border-l-2 border-accent/50 pl-3 text-sm text-muted">{w}</li>)}</ul>}{extra}</article>; }
+function extraFor(story: FlightStory, stage: StageId) { return null; }
+function TimeChip({ label, value, sub, late }: { label: string; value: string; sub?: string; late?: boolean; }) { return <div className="min-w-0 rounded-md border border-border bg-bg px-3 py-2"><p className="font-mono text-xs tracking-widest text-subtle uppercase">{label}</p><p className={cn("mt-1 break-words font-display text-lg font-semibold leading-tight", late ? "text-mvfr" : "text-fg")}>{value}</p>{sub ? <p className="text-xs leading-snug text-muted">{sub}</p> : null}</div>; }
+function WxBlock({ label, cat, decoded }: { label: string; cat: string; decoded: string; }) { return <div className="mt-4 grid gap-2"><p className="font-mono text-xs tracking-widest text-subtle uppercase">{label} {cat}</p><p className="text-sm text-muted">{decoded}</p></div>; }
+function Skeleton({ query }: { query: string }) { const label = query.trim() || "the flight"; return <div><p className="mb-3 flex items-center gap-2 font-mono text-xs tracking-widest text-muted uppercase"><RefreshCw className="size-3.5 animate-spin text-accent" />Getting {label}</p><div className="grid min-w-0 gap-5 lg:grid-cols-12"><section className="min-w-0 lg:col-span-7"><div className="rounded-xl border border-border bg-surface p-4"><p className="font-mono text-xs tracking-wide text-muted">Live position</p><h2 className="font-display text-display font-semibold leading-none">{label}</h2><p className="mt-3 text-sm text-muted">Getting times, weather, and the map…</p></div><div className="mt-4 flex h-64 items-center justify-center rounded-xl border border-border bg-surface-2"><p className="text-sm text-muted">Loading map…</p></div></section><section className="min-w-0 lg:col-span-5"><div className="rounded-xl border border-border bg-surface p-4"><p className="font-mono text-xs tracking-widest text-subtle uppercase">Times</p><p className="mt-3 text-sm text-muted">Scheduled and estimated clocks load with the flight.</p></div><div className="mt-4 rounded-xl border border-border bg-surface p-4"><p className="font-mono text-xs tracking-widest text-subtle uppercase">Briefing</p><p className="mt-3 text-sm text-muted">Ride notes appear as soon as weather is in.</p></div></section></div></div>; }
 
-function Freshness({
-  at,
-  fetching,
-  refreshing,
-  failed = false,
-  partial = false,
-  onRefresh,
-}: {
-  at: number;
-  fetching: boolean;
-  refreshing: boolean;
-  failed?: boolean;
-  partial?: boolean;
-  onRefresh: () => void;
-}) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((n) => n + 1), 4000);
-    return () => window.clearInterval(id);
-  }, []);
-  return (
-    <div className="flex flex-col items-end gap-1.5">
-      <button
-        type="button"
-        onClick={onRefresh}
-        disabled={refreshing}
-        className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface px-2.5 font-mono text-xs tracking-wide text-fg disabled:opacity-60"
-      >
-        <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-        {refreshing ? "Updating…" : "Refresh"}
-      </button>
-      <p className="font-mono text-xs tracking-widest text-muted uppercase">
-        {refreshing ? "Updating…" : failed ? "Update delayed · showing saved data" : partial ? "Schedule delayed · " + (Date.now() - at < 8000 ? "other feeds just checked" : agoLabel(at, false)) : agoLabel(at, false)}
-      </p>
-    </div>
-  );
-}
-
-function TrendArrow({ trend }: { trend?: Comfort["trend"] }) {
-  if (trend === "up") {
-    return <ArrowUp className="size-4 shrink-0 text-vfr" strokeWidth={2.75} aria-label="Grade improving" />;
-  }
-  if (trend === "down") {
-    return <ArrowDown className="size-4 shrink-0 text-ifr" strokeWidth={2.75} aria-label="Grade worsening" />;
-  }
-  return null;
-}
-
-function Stat({
-  icon: Icon,
-  label,
-  value,
-  sub,
-  trend,
-}: {
-  icon: typeof Plane;
-  label: string;
-  value: string;
-  sub?: string;
-  trend?: Comfort["trend"];
-}) {
-  return (
-    <div className="rounded-md border border-border bg-bg px-3 py-1.5">
-      <p className="flex items-center gap-1.5 font-mono text-xs tracking-widest text-subtle uppercase">
-        <Icon className="size-3" />
-        {label}
-      </p>
-      <p className="mt-0.5 flex items-center gap-1 font-display text-lg font-semibold leading-tight">
-        {value}
-        <TrendArrow trend={trend} />
-      </p>
-      {sub ? <p className="text-xs leading-tight text-muted">{sub}</p> : null}
-    </div>
-  );
-}
-
-function BreakdownCard({
-  briefing,
-  pending,
-  feedback,
-  onCompile,
-}: {
-  briefing: CompiledBrief | null;
-  pending: boolean;
-  feedback: "no_change" | "failed" | null;
-  onCompile: () => void;
-}) {
-  const asOf = briefing?.liveAt
-    ? new Date(briefing.liveAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : null;
-  const log = briefing?.log ?? [];
-  return (
-    <div className="mt-4 rounded-xl border border-accent/35 bg-surface p-4">
-      <p className="font-mono text-xs tracking-widest text-muted uppercase">Briefing</p>
-      <h3 className="font-display text-title font-semibold text-balance">
-        {briefing ? "Briefing" : "Brief the whole flight"}
-      </h3>
-      {!briefing && (
-        <p className="mt-1 text-sm text-muted">
-          One brief before you push — then it updates as the trip changes.
-        </p>
-      )}
-      {briefing && (
-        <div className="mt-3 space-y-3">
-          {asOf ? (
-            <p className="font-mono text-xs tracking-wide text-subtle uppercase">Briefing updated {asOf}</p>
-          ) : null}
-          <p className="text-sm leading-relaxed text-fg whitespace-pre-wrap">{briefing.lead}</p>
-          {log.length > 0 ? (
-            <div className="border-t border-border pt-3">
-              <p className="font-mono text-xs tracking-widest text-subtle uppercase">Updates</p>
-              <ol className="mt-2 space-y-2">
-                {log.map((entry, i) => (
-                  <li key={`${entry.at}-${i}`} className="text-sm leading-snug">
-                    <p className="font-mono text-[11px] tracking-wide text-subtle uppercase">
-                      {new Date(entry.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-                      {" · "}
-                      {briefLogLabel(entry)}
-                    </p>
-                    <p className="text-muted">{briefLogText(entry)}.</p>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : null}
-        </div>
-      )}
-      <Button type="button" className="mt-4 w-full" disabled={pending} onClick={onCompile}>
-        {pending ? "Updating…" : briefing ? "Update briefing" : "Compile briefing"}
-      </Button>
-      {feedback === "no_change" ? <p role="status" className="mt-2 text-center text-sm text-muted">No new updates right now.</p> : null}
-      {feedback === "failed" ? <p role="alert" className="mt-2 text-center text-sm text-ifr">We couldn’t refresh the briefing. Try again.</p> : null}
-    </div>
-  );
-}
-
-function StagePager({
-  story,
-  active,
-  onChange,
-}: {
-  story: FlightStory;
-  active: StageId;
-  onChange: (s: StageId) => void;
-}) {
-  const box = useRef<HTMLDivElement>(null);
-  const drag = useRef({ x: 0, y: 0, dx: 0, axis: null as null | "x" | "y" });
-  const [width, setWidth] = useState(0);
-  const [dx, setDx] = useState(0);
-  const [sliding, setSliding] = useState(false);
-  const index = Math.max(0, STAGES.findIndex((s) => s.id === active));
-  const card = width * 0.92;
-  const gap = 12;
-  const pad = Math.max(0, (width - card) / 2);
-  const tx = pad - index * (card + gap) + dx;
-  const indexRef = useRef(index);
-  const cardRef = useRef(card);
-  const onChangeRef = useRef(onChange);
-  indexRef.current = index;
-  cardRef.current = card;
-  onChangeRef.current = onChange;
-  const activeRef = useRef(active);
-  activeRef.current = active;
-
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const measure = () => setWidth(el.clientWidth);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const onStart = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return;
-      const t = e.touches[0]!;
-      drag.current = { x: t.clientX, y: t.clientY, dx: 0, axis: null };
-    };
-    const onMove = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return;
-      const t = e.touches[0]!;
-      const mx = t.clientX - drag.current.x;
-      const my = t.clientY - drag.current.y;
-      if (!drag.current.axis) {
-        if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
-        drag.current.axis = Math.abs(mx) > Math.abs(my) ? "x" : "y";
-        if (drag.current.axis === "x") setSliding(true);
-      }
-      if (drag.current.axis !== "x") return;
-      e.preventDefault();
-      drag.current.dx = mx;
-      setDx(mx);
-    };
-    const onEnd = () => {
-      const axis = drag.current.axis;
-      const mx = drag.current.dx;
-      drag.current = { x: 0, y: 0, dx: 0, axis: null };
-      setSliding(false);
-      setDx(0);
-      if (axis !== "x") return;
-      const step = cardRef.current + 12;
-      const i = indexRef.current;
-      let next = i;
-      if (mx < -Math.max(40, step * 0.16)) next = Math.min(STAGES.length - 1, i + 1);
-      else if (mx > Math.max(40, step * 0.16)) next = Math.max(0, i - 1);
-      const id = STAGES[next]?.id;
-      if (id && id !== activeRef.current) onChangeRef.current(id);
-    };
-    el.addEventListener("touchstart", onStart, { passive: true });
-    el.addEventListener("touchmove", onMove, { passive: false });
-    el.addEventListener("touchend", onEnd);
-    el.addEventListener("touchcancel", onEnd);
-    return () => {
-      el.removeEventListener("touchstart", onStart);
-      el.removeEventListener("touchmove", onMove);
-      el.removeEventListener("touchend", onEnd);
-      el.removeEventListener("touchcancel", onEnd);
-    };
-  }, []);
-
-  return (
-    <div className="mt-4 min-w-0">
-      <div ref={box} className="min-w-0 overflow-hidden" style={{ touchAction: "pan-y" }}>
-      <div
-        className="flex"
-        style={{
-          gap,
-          width: width ? card * STAGES.length + gap * (STAGES.length - 1) : "100%",
-          transform: `translate3d(${tx}px,0,0)`,
-          transition: sliding ? "none" : "transform 280ms cubic-bezier(0.22, 1, 0.36, 1)",
-        }}
-      >
-        {STAGES.map((s) => {
-          const st = story.stages?.[s.id];
-          const on = active === s.id;
-          return (
-            <div key={s.id} className="shrink-0" style={{ width: width ? card : "92%" }}>
-              <StageBody
-                story={story}
-                stage={s.id}
-                badge={st?.state === "now" ? "Now" : st?.state === "done" ? "Done" : "Next"}
-                current={on}
-              />
-            </div>
-          );
-        })}
-      </div>
-      </div>
-      <div className="mt-3 flex items-center justify-center gap-3">
-        <button
-          type="button"
-          aria-label="Previous stage"
-          disabled={index <= 0}
-          onClick={() => {
-            const id = STAGES[index - 1]?.id;
-            if (id) onChange(id);
-          }}
-          className="flex size-8 items-center justify-center rounded-full border border-border text-fg disabled:opacity-25"
-        >
-          <ChevronLeft className="size-4" strokeWidth={2.5} />
-        </button>
-        <div className="flex items-center gap-2">
-          {STAGES.map((s, i) => (
-            <button
-              key={s.id}
-              type="button"
-              aria-label={s.label}
-              onClick={() => onChange(s.id)}
-              className={cn(
-                "rounded-full transition-all",
-                i === index ? "h-2 w-5 bg-fg" : "size-2 bg-subtle",
-              )}
-            />
-          ))}
-        </div>
-        <button
-          type="button"
-          aria-label="Next stage"
-          disabled={index >= STAGES.length - 1}
-          onClick={() => {
-            const id = STAGES[index + 1]?.id;
-            if (id) onChange(id);
-          }}
-          className="flex size-8 items-center justify-center rounded-full border border-border text-fg disabled:opacity-25"
-        >
-          <ChevronRight className="size-4" strokeWidth={2.5} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function StageBody({
-  story,
-  stage,
-  badge,
-  current,
-}: {
-  story: FlightStory;
-  stage: StageId;
-  badge?: string;
-  current?: boolean;
-}) {
-  const s = story.stages?.[stage];
-  const extra = useMemo(() => extraFor(story, stage), [story, stage]);
-  if (!s) return null;
-  return (
-    <article
-      className={cn(
-        "rounded-xl border bg-surface p-4",
-        current ? "border-fg" : "border-border",
-      )}
-    >
-      <p className="font-mono text-xs tracking-widest text-muted uppercase">
-        {badge ? `${badge} · ` : ""}
-        {STAGES.find((x) => x.id === stage)?.label ?? stage}
-      </p>
-      <h3 className="font-display text-title font-semibold">{s.title}</h3>
-      {s.body ? <p className="mt-2 text-sm leading-relaxed text-fg">{s.body}</p> : null}
-      {s.watchouts.length > 0 && (
-        <ul className="mt-3 space-y-2">
-          {s.watchouts.map((w) => (
-            <li key={w} className="border-l-2 border-accent/50 pl-3 text-sm text-muted">
-              {w}
-            </li>
-          ))}
-        </ul>
-      )}
-      {extra}
-    </article>
-  );
-}
-
-function extraFor(story: FlightStory, stage: StageId) {
-  const times = story.times ?? {
-    push: null,
-    takeoff: null,
-    taxiOutMin: null,
-    land: null,
-    taxiInMin: null,
-    originGate: null,
-    destGate: null,
-  };
-  if (stage === "origin_gate" || stage === "push") {
-    return (
-      <>
-        <dl className="mt-4 grid grid-cols-1 gap-2">
-          <TimeChip
-            label="Push"
-            value={times.push ?? "—"}
-            sub={kindLabel(times.pushKind ?? (times.pushed ? "actual" : times.push ? "scheduled" : null))}
-            late={(times.delayMin ?? 0) >= 15}
-          />
-          <TimeChip
-            label="Gate"
-            value={times.originGate ?? "—"}
-          />
-        </dl>
-      </>
-    );
-  }
-  if (stage === "taxi") {
-    return (
-      <>
-        <dl className="mt-4 grid grid-cols-1 gap-2">
-          <TimeChip
-            label="Pushback"
-            value={times.pushed ? times.push ?? "Awaiting confirmation" : "Awaiting departure"}
-            sub={times.pushSource === "provider_actual" ? "Gate departure reported"
-              : times.pushSource === "live_detected" || times.pushSource === "track_detected" ? "Pushback detected from live movement"
-              : times.pushed ? "Earlier pushback time unavailable" : "Awaiting movement"}
-          />
-          <TimeChip
-            label="Taxi out"
-            value={times.taxiOutMin == null ? "—" : `${times.taxiOutMin} min`}
-            sub={times.taxiOutKind === "measured" ? "Measured" : "Estimated"}
-          />
-          <TimeChip
-            label="Wheels up"
-            value={times.takeoff ?? "—"}
-            sub={kindLabel(times.takeoffKind ?? (times.airborne ? "actual" : times.takeoff ? "scheduled" : null))}
-          />
-        </dl>
-      </>
-    );
-  }
-  if (stage === "inbound") {
-    const w = story.inbound.watch[0];
-    if (!w || w.locked) return null;
-    return (
-      <div className="mt-4 rounded-md border border-border bg-bg px-3 py-3">
-        <p className="font-mono text-xs tracking-widest text-subtle uppercase">Inbound tail</p>
-        <div className="mt-1 flex items-baseline justify-between gap-2">
-          <p className="font-display text-xl font-semibold">{w.iata}</p>
-          <p className="font-mono text-xs text-muted">{w.type ?? ""}</p>
-        </div>
-        {w.from ? <p className="mt-1 text-sm text-muted">From {w.from}</p> : null}
-        {(w.landClock || w.gateClock || w.taxiing) && (
-        <dl className="mt-3 grid grid-cols-2 gap-2">
-          <TimeChip
-            label="Landed"
-            value={w.landClock ?? "—"}
-          />
-          <TimeChip
-            label={w.locked ? "At gate" : "Taxi in"}
-            value={
-              w.locked
-                ? (w.gateClock ?? "—")
-                : w.taxiing
-                  ? w.etaMin
-                    ? formatDuration(w.etaMin)
-                    : "Taxiing"
-                  : (w.clock ?? "—")
-            }
-          />
-        </dl>
-        )}
-      </div>
-    );
-  }
-  if (stage === "arrival" || stage === "final_approach") {
-    return (
-      <WxBlock
-        label={story.dest.iata}
-        cat={story.dest.category}
-        decoded={story.dest.decoded?.summary ?? "Weather missing"}
-      />
-    );
-  }
-  if (stage === "taxi_in" || stage === "gate") {
-    if (!times.destGate && times.taxiInMin == null) return null;
-    return (
-      <dl className="mt-4 grid grid-cols-2 gap-2">
-        <TimeChip label="Posted gate" value={times.destGate ?? "—"} sub={story.dest.iata} />
-        <TimeChip
-          label="Taxi in"
-          value={
-            times.taxiInMin == null
-              ? "—"
-              : times.taxiInKind === "measured"
-                ? `${times.taxiInMin} min`
-                : `Est. ${times.taxiInMin} min`
-          }
-        />
-      </dl>
-    );
-  }
-  if (stage === "ride") {
-    if (story.currentStage === "arrival" || story.currentStage === "final_approach" || story.currentStage === "taxi_in" || story.currentStage === "gate" || story.route.remainingNm < 40) {
-      return null;
-    }
-    const ahead = story.route.samples.filter((s) => s.frac >= story.route.progress && s.etaMin > 2);
-    const chop = ahead.find((s) => s.chop !== "smooth" && !s.convective);
-    const storm = ahead.find((s) => s.convective);
-    const rows: { label: string; eta: number }[] = [];
-    if (chop) {
-      rows.push({
-        label: chop.chop === "light" ? "Light chop" : chop.chop === "moderate" ? "Moderate chop" : "Severe chop",
-        eta: chop.etaMin,
-      });
-    }
-    if (storm) rows.push({ label: "Storms", eta: storm.etaMin });
-    if (!rows.length) return null;
-    return (
-      <ul className="mt-3 space-y-1.5">
-        {rows.map((r) => (
-          <li key={r.label} className="flex justify-between gap-3 text-sm text-muted">
-            <span>{r.label}</span>
-            <span className="shrink-0 font-mono text-xs">in {formatDuration(r.eta)}</span>
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  return null;
-}
-
-function TimeChip({
-  label,
-  value,
-  sub,
-  late,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  late?: boolean;
-}) {
-  return (
-    <div className="min-w-0 rounded-md border border-border bg-bg px-3 py-2">
-      <p className="font-mono text-xs tracking-widest text-subtle uppercase">{label}</p>
-      <p className={cn("mt-1 break-words font-display text-lg font-semibold leading-tight", late ? "text-mvfr" : "text-fg")}>
-        {value}
-      </p>
-      {sub ? <p className="text-xs leading-snug text-muted">{sub}</p> : null}
-    </div>
-  );
-}
-
-function WxBlock({
-  label,
-  cat,
-  decoded,
-}: {
-  label: string;
-  cat: string;
-  decoded: string;
-}) {
-  return (
-    <div className="mt-4 grid gap-2">
-      <p className="font-mono text-xs tracking-widest text-subtle uppercase">
-        {label} {cat}
-      </p>
-      <p className="text-sm text-muted">{decoded}</p>
-    </div>
-  );
-}
-
-function Skeleton({ query }: { query: string }) {
-  const label = query.trim() || "the flight";
-  return (
-    <div>
-      <p className="mb-3 flex items-center gap-2 font-mono text-xs tracking-widest text-muted uppercase">
-        <RefreshCw className="size-3.5 animate-spin text-accent" />
-        Getting {label}
-      </p>
-      <div className="grid min-w-0 gap-5 lg:grid-cols-12">
-        <section className="min-w-0 lg:col-span-7">
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <p className="font-mono text-xs tracking-wide text-muted">Live position</p>
-            <h2 className="font-display text-display font-semibold leading-none">{label}</h2>
-            <p className="mt-3 text-sm text-muted">Getting times, weather, and the map…</p>
-          </div>
-          <div className="mt-4 flex h-64 items-center justify-center rounded-xl border border-border bg-surface-2">
-            <p className="text-sm text-muted">Loading map…</p>
-          </div>
-        </section>
-        <section className="min-w-0 lg:col-span-5">
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <p className="font-mono text-xs tracking-widest text-subtle uppercase">Times</p>
-            <p className="mt-3 text-sm text-muted">Scheduled and estimated clocks load with the flight.</p>
-          </div>
-          <div className="mt-4 rounded-xl border border-border bg-surface p-4">
-            <p className="font-mono text-xs tracking-widest text-subtle uppercase">Briefing</p>
-            <p className="mt-3 text-sm text-muted">Ride notes appear as soon as weather is in.</p>
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-
-function technicalWeatherProducts(text: string | null | undefined) {
-  const matches = String(text || "").toUpperCase().match(/G-AIRMET|AIRMET|SIGMET|PIREP|CWA|TCF|METAR|TAF/g) || [];
-  return [...new Set(matches)].join(" · ");
-}
-
-function passengerWeatherSource(text: string | null | undefined, kind?: FlightStory["hazards"][number]["kind"]) {
-  const value = String(text || "").toUpperCase();
-  if (kind === "pirep" || value.includes("PIREP") || value.includes("REPORTED")) return "Reported by another aircraft";
-  if (value.includes("CWA")) return "Air traffic weather advisory";
-  if (value.includes("TCF")) return "Thunderstorm forecast";
-  if (value.includes("SIGMET")) return "Official aviation weather alert";
-  if (value.includes("AIRMET")) return "Aviation weather advisory";
-  if (value.includes("TAF")) return "Airport forecast";
-  if (value.includes("METAR")) return "Current airport weather";
-  return "Route weather forecast";
-}
-
-function WeatherTimeline({ story }: { story: FlightStory }) {
-  const airborne = story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach";
-  const landed = story.times.landKind === "actual" || story.currentStage === "gate";
-  const takeoff = story.times.takeoffUnix;
-  const landing = story.times.landUnix;
-  const duration = takeoff && landing && landing > takeoff ? (landing - takeoff) / 60 : null;
-  const samples = story.route.samples.filter(s => !airborne || s.frac >= story.route.progress);
-  const visibleGroups = routeWeatherEvents(samples, story.route.progress);
-
-  const timeLabel = (group: RouteWeatherEvent) => {
-    const from = airborne ? group.startEtaMin : duration == null ? null : group.startFrac * duration;
-    const to = airborne ? group.endEtaMin : duration == null ? null : group.endFrac * duration;
-    if (from == null || to == null) return "Timing unavailable";
-    const formatMinutes = (value: number) => {
-      const minutes = Math.max(0, Math.round(value));
-      const hours = Math.floor(minutes / 60);
-      return hours ? `${hours} ${hours === 1 ? "hour" : "hours"}${minutes % 60 ? ` ${minutes % 60} ${minutes % 60 === 1 ? "minute" : "minutes"}` : ""}` : `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-    };
-    const start = airborne
-      ? from < 1 ? "Around now" : `About ${formatMinutes(from)} ahead`
-      : from < 1 ? "Around takeoff" : `About ${formatMinutes(from)} after takeoff`;
-    const span = Math.round(to - from);
-    const intoFlight = airborne && story.times.airborne && takeoff ? Math.max(0, (story.fetchedAt / 1000 - takeoff) / 60) + from : from;
-    return <span>{start}{airborne && <span className="block">Around {formatMinutes(intoFlight)} into flight</span>}{span > 0 && <span className="block">{group.gaps ? "Intermittent areas over about " : "Continues for about "}{formatMinutes(span)}</span>}</span>;
-  };
-  const fieldCard = (field: FlightStory["origin"], title: string) => <article className="rounded-xl border border-border bg-surface p-4">
-    <p className="text-sm text-muted">{title}</p>
-    <h3 className="mt-1 text-lg font-semibold">{field.iata}</h3>
-    <p className="mt-3 text-sm leading-relaxed">{field.decoded?.summary || "Current observation unavailable."}</p>
-    <p className="mt-3 text-sm leading-relaxed">Forecast: {field.taf || "Unavailable."}</p>
-    <details className="mt-3 text-sm"><summary className="cursor-pointer py-2">Current airport weather <span className="text-xs text-muted">· METAR</span></summary><p className="break-words font-mono text-muted">{field.rawMetar || "Observation unavailable."}</p></details>
-  </article>;
-  return <div className="space-y-4">
-    <div><h2 className="text-xl font-semibold">Weather through your flight</h2>
-      <p className="mt-2 text-sm leading-relaxed text-muted">Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters. Unflagged areas may have incomplete coverage.</p>
-      <p className="mt-2 text-xs text-muted">Flight data fetched {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Weather observation and advisory times are shown in their source details.</p>
-    </div>
-    {!landed && fieldCard(story.origin, "Takeoff · departure conditions")}
-    {(!story.weatherCoverage || story.weatherCoverage.failedSources.length > 0) && <p role="status" className="rounded-xl border border-border p-4 text-sm">Weather coverage is incomplete. Missing feeds do not mean smooth conditions. {story.weatherCoverage?.failedSources.join(" · ")}</p>}
-    <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
-    {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="space-y-3">
-      {visibleGroups.map((g, i) => {
-        const copy = passengerWeatherCopy(g.start, g.endFrac >= 0.85, story.dest.city || story.dest.iata, g.key);
-        const title = copy.headline;
-        const source = passengerWeatherSource(g.note);
-        const technical = technicalWeatherProducts(g.note);
-        return <li key={i} className="rounded-xl border border-border bg-surface p-4">
-          <WeatherEventHeadline copy={copy} />
-          <p className="mt-2 flex items-center gap-2 text-sm font-medium"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
-          <WeatherEventBody copy={copy} />
-          {g.gaps && <p className="mt-2 text-sm text-muted">This may come and go briefly along the highlighted stretch.</p>}
-          <p className="mt-3 text-sm font-medium">{source}{technical ? <span className="ml-1 text-xs font-normal text-muted">· {technical}</span> : null}</p>
-          {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
-            <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={title}>
-              <RouteMap story={story} fixedViewport weatherPreview={{ eventNumber: i + 1, label: copy.mapLabel, startFrac: g.startFrac, endFrac: g.endFrac, startEtaMin: g.startEtaMin, endEtaMin: g.endEtaMin, ranges: g.ranges }} />
-            </div>
-            <figcaption className="mt-2 text-xs text-muted">Highlighted: where these conditions overlap the route. Radar colors show recent precipitation; conditions may change before the flight reaches this area. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
-          </figure>}
-          {g.note && <details className="mt-2 text-sm text-muted"><summary className="cursor-pointer py-2">Technical details</summary><p>{g.note}</p></details>}
-        </li>;
-      })}
-    </ol> : <p className="text-sm text-muted">{samples.length ? "No significant conditions flagged in the available route forecast. This does not guarantee a smooth ride." : "Route weather data unavailable."}</p>}
-    {fieldCard(story.dest, "Landing · arrival conditions")}
-    <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer py-2">Weather sources and timing</summary>
-      {story.hazards.filter(h => h.remaining).map(h => {
-        const technical = technicalWeatherProducts(`${h.label} ${h.detail}`);
-        return <div key={h.id} className="mt-3 text-sm"><p className="font-semibold">{passengerWeatherSource(`${h.label} ${h.detail}`, h.kind)}</p>{technical && <p className="text-xs text-muted">{technical}</p>}<p className="text-muted">{h.validity || "Timing unavailable"}</p><p className="mt-1 text-muted">{h.detail}</p></div>;
-      })}
-      {!story.hazards.some(h => h.remaining) && <p className="mt-3 text-sm text-muted">No remaining advisories returned. This does not establish complete weather coverage.</p>}
-    </details>
-  </div>;
-}
-
+function technicalWeatherProducts(text: string | null | undefined) { const matches = String(text || "").toUpperCase().match(/G-AIRMET|AIRMET|SIGMET|PIREP|CWA|TCF|METAR|TAF/g) || []; return [...new Set(matches)].join(" · "); }
+function passengerWeatherSource(text: string | null | undefined, kind?: FlightStory["hazards"][number]["kind"]) { const value = String(text || "").toUpperCase(); if (kind === "pirep" || value.includes("PIREP") || value.includes("REPORTED")) return "Reported by another aircraft"; if (value.includes("CWA")) return "Air traffic weather advisory"; if (value.includes("TCF")) return "Thunderstorm forecast"; if (value.includes("SIGMET")) return "Official aviation weather alert"; if (value.includes("AIRMET")) return "Aviation weather advisory"; if (value.includes("TAF")) return "Airport forecast"; if (value.includes("METAR")) return "Current airport weather"; return "Route weather forecast"; }
+function WeatherTimeline({ story }: { story: FlightStory }) { const airborne = story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach"; const landed = story.times.landKind === "actual" || story.currentStage === "gate"; return <div className="space-y-4"><div><h2 className="text-xl font-semibold">Weather through your flight</h2><p className="mt-2 text-sm leading-relaxed text-muted">Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters.</p></div>{!landed && <article className="rounded-xl border border-border bg-surface p-4"><h3 className="text-lg font-semibold">Takeoff · {story.origin.iata}</h3><p className="mt-3 text-sm leading-relaxed">{story.origin.decoded?.summary || "Current observation unavailable."}</p></article>}<article className="rounded-xl border border-border bg-surface p-4"><h3 className="text-lg font-semibold">Landing · {story.dest.iata}</h3><p className="mt-3 text-sm leading-relaxed">{story.dest.decoded?.summary || "Current observation unavailable."}</p></article></div>; }
 
 function FlightWelcome({ open, onClose, story, brief }: { open: boolean; onClose: () => void; story: FlightStory; brief: CompiledBrief | null }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    if (open && !ref.current?.open) ref.current?.showModal();
-    if (!open && ref.current?.open) ref.current?.close();
-  }, [open]);
-  return <dialog aria-labelledby="flight-welcome-title" ref={ref} onCancel={onClose} onClose={onClose}
-    className="fixed left-1/2 top-1/2 m-0 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-5 text-fg backdrop:bg-black/70"
-    style={{ maxHeight: "calc(100dvh - max(2rem, env(safe-area-inset-top, 0px)) - max(2rem, env(safe-area-inset-bottom, 0px)))" }}>
-    <div className="flex items-start justify-between gap-3">
-      <h2 className="text-xl font-semibold" id="flight-welcome-title">Important information about your flight</h2>
-      <button type="button" autoFocus aria-label="Close flight briefing" onClick={onClose} className="flex size-11 shrink-0 items-center justify-center rounded-md border border-border text-xl">×</button>
-    </div>
-    <p className="mt-2 text-sm text-muted">{story.iata || story.callsign} · {story.origin.iata} → {story.dest.iata}</p>
-    <div className="mt-4 space-y-3 text-sm leading-relaxed">
-      {story.inboundDiversion && <p><strong>Inbound aircraft was diverted:</strong> {inboundDiversionText(story.inboundDiversion)}</p>}
-      <p>{story.diversion ? nextStep(story, story.fetchedAt).title + ". " + nextStep(story, story.fetchedAt).body : brief?.lead || "The briefing is being prepared. Current flight information is below."}</p>
-      {(story.times.delayMin ?? 0) >= 5 && <p><strong>Departure delay:</strong> {story.times.delayMin} minutes.</p>}
-      {(story.currentStage === "inbound" || story.currentStage === "push") && <p><strong>Inbound aircraft:</strong> {story.inbound.detail || story.inbound.headline}</p>}
-      {!isLanded(story) && story.hazards.some(h => h.remaining) && <p><strong>Route weather:</strong> {[...new Set(story.hazards.filter(h => h.remaining).map(h => h.label))].join(" · ")}</p>}
-      {!isLanded(story) && story.origin.nas?.delayed && <p><strong>Departure airport:</strong> {story.origin.nas.reason}</p>}
-      {story.dest.nas?.delayed && <p><strong>Arrival airport:</strong> {story.dest.nas.reason}</p>}
-    </div>
-    <p className="mt-4 text-xs text-muted">Data as of {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Estimates may change. Full details remain in Briefing and Weather.</p>
-  </dialog>;
+  useEffect(() => { if (open && !ref.current?.open) ref.current?.showModal(); if (!open && ref.current?.open) ref.current?.close(); }, [open]);
+  return <dialog aria-labelledby="flight-welcome-title" ref={ref} onCancel={onClose} onClose={onClose} className="fixed left-1/2 top-1/2 m-0 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-5 text-fg backdrop:bg-black/70" style={{ maxHeight: "calc(100dvh - max(2rem, env(safe-area-inset-top, 0px)) - max(2rem, env(safe-area-inset-bottom, 0px)))" }}><div className="flex items-start justify-between gap-3"><h2 className="text-xl font-semibold" id="flight-welcome-title">Important information about your flight</h2><button type="button" autoFocus aria-label="Close flight briefing" onClick={onClose} className="flex size-11 shrink-0 items-center justify-center rounded-md border border-border text-xl">×</button></div><p className="mt-2 text-sm text-muted">{story.iata || story.callsign} · {story.origin.iata} → {story.dest.iata}</p><div className="mt-4 space-y-3 text-sm leading-relaxed">{story.inboundDiversion && <p><strong>Inbound aircraft was diverted:</strong> {inboundDiversionText(story.inboundDiversion)}</p>}<p>{story.diversion ? nextStep(story, story.fetchedAt).title + ". " + nextStep(story, story.fetchedAt).body : brief?.lead || "The briefing is being prepared. Current flight information is below."}</p>{(story.times.delayMin ?? 0) >= 5 && <p><strong>Departure delay:</strong> {story.times.delayMin} minutes.</p>}{story.currentStage === "inbound" && <p><strong>Inbound aircraft:</strong> {story.inbound.detail || story.inbound.headline}</p>}{!isLanded(story) && story.hazards.some(h => h.remaining) && <p><strong>Route weather:</strong> {[...new Set(story.hazards.filter(h => h.remaining).map(h => h.label))].join(" · ")}</p>}{!isLanded(story) && story.origin.nas?.delayed && <p><strong>Departure airport:</strong> {story.origin.nas.reason}</p>}{story.dest.nas?.delayed && <p><strong>Arrival airport:</strong> {story.dest.nas.reason}</p>}</div><p className="mt-4 text-xs text-muted">Data as of {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Estimates may change. Full details remain in Briefing and Weather.</p></dialog>;
 }
