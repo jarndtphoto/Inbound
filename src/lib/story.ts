@@ -26,10 +26,15 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
   const candidate = providers?.fr24Position as NormalizedPosition | null | undefined;
   const sameLeg = sameResumeLeg(story, prior);
   const priorStage = sameLeg ? prior?.departureStage ?? null : null;
+  // While the schedule layer still says Inbound, the saved tail/hex can belong to
+  // the pre-departure handoff and may be stale after an equipment swap. Do not let
+  // that lock reject a fresh FR24 surface fix for the requested flight number.
+  // Once departure has begun, resume tail/hex locking normally.
+  const lockSavedAircraft = sameLeg && story.currentStage !== "inbound";
   const expected = {
     callsigns: [story.callsign, story.iata].filter(Boolean),
-    registration: sameLeg ? prior?.tail ?? null : null,
-    hex: sameLeg ? prior?.hex ?? null : null,
+    registration: lockSavedAircraft ? prior?.tail ?? null : null,
+    hex: lockSavedAircraft ? prior?.hex ?? null : null,
   };
   const departureContext = DEPARTURE_SURFACE_STAGES.has(story.currentStage)
     || priorStage === "push"
