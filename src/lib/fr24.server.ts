@@ -28,7 +28,10 @@ export function normalizeFr24Position(f: any): NormalizedPosition | null {
 
 export async function loadFr24Flight(ident: string): Promise<NormalizedFlight | null> {
   if (!process.env.FR24_API_TOKEN?.trim()) return null;
-  const data: any = await get(`/live/flight-positions/full?callsigns=${encodeURIComponent(ident)}`, 12_000);
+  // The tracked-flight UI polls every ~3s while visible. Keep the live-position
+  // cache just below that cadence so surface speed/takeoff-roll transitions can
+  // consume a new FR24 sample on each visible poll without background polling.
+  const data: any = await get(`/live/flight-positions/full?callsigns=${encodeURIComponent(ident)}`, 2_500);
   const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
   const f = rows[0]; if (!f) return null;
   const position = normalizeFr24Position(f);
