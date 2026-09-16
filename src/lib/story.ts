@@ -99,6 +99,14 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
     stage = "push";
   }
 
+  // A provider-published actual gate-out/pushback time is itself authoritative
+  // evidence that the airplane is no longer at the gate. Never continue showing
+  // At the gate after we have accepted that timestamp as an actual.
+  const providerPushConfirmed = story.times.pushSource === "provider_actual" || story.times.pushKind === "actual";
+  if (providerPushConfirmed && (stage === "origin_gate" || stage === "inbound")) {
+    stage = "push";
+  }
+
   const live = story.aircraft;
   const freshSurface = Boolean(live?.onGround && story.providers?.chosenPosition === "fr24"
     && !live.extrapolated && (live.seenSec ?? 999) <= FR24_SURFACE_FRESH_SEC
