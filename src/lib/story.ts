@@ -8,6 +8,7 @@ import type { FlightStory } from "./types";
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
 const SURFACE_STAGES = new Set(["origin_gate", "push", "taxi", "taxi_in", "gate"]);
 const FR24_SURFACE_FRESH_SEC = 20;
+const TAKEOFF_ROLL_STAGE = "Takeoff roll";
 
 function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
   return Boolean(prior && prior.originIcao === story.origin?.icao && prior.destIcao === story.dest?.icao);
@@ -53,7 +54,8 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
     let stage = story.currentStage;
     const priorStage = sameLeg ? prior?.departureStage ?? null : null;
     if (DEPARTURE_SURFACE_STAGES.has(stage)) {
-      if (priorStage === "taxi") stage = "taxi";
+      if (priorStage === "takeoff_roll") stage = "taxi";
+      else if (priorStage === "taxi") stage = "taxi";
       else if (priorStage === "push") stage = "push";
       else if (stage === "push" || stage === "taxi") stage = "origin_gate";
     }
@@ -81,16 +83,41 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
 /**
  * Preserve confirmed departure progress across refreshes/serverless handoffs.
  * Departure is a one-way passenger story:
- * origin_gate -> push -> taxi -> ride.
+ * origin_gate -> push -> taxi -> takeoff roll -> ride.
  * A stop, provider handoff, or slower surface fix never moves it backward.
  */
 export function preserveDepartureProgress(story: FlightStory, prior?: FlightResume): FlightStory {
   const current = story.currentStage;
+  const sameLeg = sameResumeLeg(story, prior);
+  const priorStage = sameLeg ? prior?.departureStage ?? null : null;
+  const live = story.aircraft;
+  const gsKt = live?.gsKt ?? 0;
+
+  // Hard departure gates requested for the passenger story. Once Taxiing out is
+  // established, 50 kt means Takeoff roll. Once Takeoff roll is latched, keep it
+  // through any brief speed fluctuation until 150 kt, then hand off to the existing
+  // Flight stage. Flights first observed already airborne still use the existing
+  // FlightAware/live airborne logic so we do not regress the accurate Flight state.
+  if (priorStage === "takeoff_roll") {
+    if (gsKt >= 150) {
+      const resume = story.resume ? { ...story.resume, departureStage: "takeoff_roll" as const } : story.resume;
+      return { ...story, currentStage: "ride", ...(resume ? { resume } : {}) };
+    }
+    const resume = story.resume ? { ...story.resume, departureStage: "takeoff_roll" as const } : story.resume;
+    return { ...story, currentStage: TAKEOFF_ROLL_STAGE as FlightStory["currentStage"], ...(resume ? { resume } : {}) };
+  }
+
+  if (priorStage === "taxi" && gsKt >= 50 && gsKt < 150) {
+    const resume = story.resume ? { ...story.resume, departureStage: "takeoff_roll" as const } : story.resume;
+    return { ...story, currentStage: TAKEOFF_ROLL_STAGE as FlightStory["currentStage"], ...(resume ? { resume } : {}) };
+  }
+
+  if (priorStage === "taxi" && gsKt >= 150) {
+    return { ...story, currentStage: "ride" };
+  }
 
   if (["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(current)) return story;
 
-  const sameLeg = sameResumeLeg(story, prior);
-  const priorStage = sameLeg ? prior?.departureStage ?? null : null;
   let stage = current;
 
   if (priorStage === "taxi" && (current === "origin_gate" || current === "push" || current === "inbound")) {
@@ -107,11 +134,9 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
     stage = "push";
   }
 
-  const live = story.aircraft;
   const freshSurface = Boolean(live?.onGround && story.providers?.chosenPosition === "fr24"
     && !live.extrapolated && (live.seenSec ?? 999) <= FR24_SURFACE_FRESH_SEC
     && Number.isFinite(live?.lat) && Number.isFinite(live?.lon));
-  const gsKt = live?.gsKt ?? 0;
 
   let parkedLat = sameLeg ? prior?.parkedLat ?? null : null;
   let parkedLon = sameLeg ? prior?.parkedLon ?? null : null;
@@ -136,7 +161,18 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
     if (current === "taxi" || gsKt >= 3 || displacedNm >= 0.025) stage = "taxi";
   }
 
-  const durableStage = stage === "taxi" ? "taxi" : stage === "push" ? "push" : priorStage;
+  // If this response itself establishes Taxiing out at or above 50 kt, do not
+  // wait another refresh to show Takeoff roll.
+  let hardStage: typeof stage | typeof TAKEOFF_ROLL_STAGE = stage;
+  if (stage === "taxi" && gsKt >= 50) hardStage = TAKEOFF_ROLL_STAGE;
+
+  const durableStage = hardStage === TAKEOFF_ROLL_STAGE
+    ? "takeoff_roll"
+    : hardStage === "taxi"
+      ? "taxi"
+      : hardStage === "push"
+        ? "push"
+        : priorStage;
   const resume = story.resume
     ? {
         ...story.resume,
@@ -145,7 +181,13 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
       }
     : story.resume;
 
-  return stage === current && resume === story.resume ? story : { ...story, currentStage: stage, resume };
+  if (hardStage === TAKEOFF_ROLL_STAGE && gsKt >= 150) {
+    return { ...story, currentStage: "ride", ...(resume ? { resume } : {}) };
+  }
+
+  return hardStage === current && resume === story.resume
+    ? story
+    : { ...story, currentStage: hardStage as FlightStory["currentStage"], resume };
 }
 
 /** Passenger flight story — live track, ride grade, delays. */
