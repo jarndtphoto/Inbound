@@ -8,8 +8,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const W = 800;
 const H = 800;
+const MIN_GROUND_ZOOM = 1.45;
 const MAX_GROUND_ZOOM = 64;
 const INITIAL_GROUND_ZOOM = 7;
+
+const overviewView = (): View => ({
+  scale: MIN_GROUND_ZOOM,
+  x: (W - W * MIN_GROUND_ZOOM) / 2,
+  y: (H - H * MIN_GROUND_ZOOM) / 2,
+});
 
 type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
@@ -48,8 +55,7 @@ function saveGround(flightKey: string, kind: "departure" | "arrival", aircraft: 
 }
 
 function clampView(v: View): View {
-  const scale = Math.max(1, Math.min(MAX_GROUND_ZOOM, v.scale));
-  if (scale <= 1.001) return { scale: 1, x: 0, y: 0 };
+  const scale = Math.max(MIN_GROUND_ZOOM, Math.min(MAX_GROUND_ZOOM, v.scale));
   return {
     scale,
     x: Math.min(0, Math.max(W - W * scale, v.x)),
@@ -59,13 +65,13 @@ function clampView(v: View): View {
 
 function useGroundZoom(resetKey: string) {
   const boxRef = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState<View>({ scale: 1, x: 0, y: 0 });
+  const [view, setView] = useState<View>(() => overviewView());
   const viewRef = useRef(view);
   viewRef.current = view;
   const pinchRef = useRef<{ distance: number; view: View; mx: number; my: number } | null>(null);
   const dragRef = useRef<{ cx: number; cy: number; x: number; y: number } | null>(null);
 
-  useEffect(() => setView({ scale: 1, x: 0, y: 0 }), [resetKey]);
+  useEffect(() => setView(overviewView()), [resetKey]);
 
   const toSvg = (el: HTMLElement, cx: number, cy: number) => {
     const r = el.getBoundingClientRect();
@@ -74,7 +80,7 @@ function useGroundZoom(resetKey: string) {
 
   const zoomAt = (factor: number, mx = W / 2, my = H / 2) => {
     const current = viewRef.current;
-    const nextScale = Math.max(1, Math.min(MAX_GROUND_ZOOM, current.scale * factor));
+    const nextScale = Math.max(MIN_GROUND_ZOOM, Math.min(MAX_GROUND_ZOOM, current.scale * factor));
     setView(clampView({
       scale: nextScale,
       x: mx - ((mx - current.x) * nextScale) / current.scale,
@@ -83,7 +89,7 @@ function useGroundZoom(resetKey: string) {
   };
 
   const focusOn = (x: number, y: number, scale = INITIAL_GROUND_ZOOM) => {
-    const nextScale = Math.max(1, Math.min(MAX_GROUND_ZOOM, scale));
+    const nextScale = Math.max(MIN_GROUND_ZOOM, Math.min(MAX_GROUND_ZOOM, scale));
     setView(clampView({
       scale: nextScale,
       x: W / 2 - x * nextScale,
@@ -104,7 +110,7 @@ function useGroundZoom(resetKey: string) {
         const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
         pinchRef.current = { distance: Math.max(1, distance(a, b)), view: viewRef.current, mx: mid.x, my: mid.y };
         dragRef.current = null;
-      } else if (e.touches.length === 1 && viewRef.current.scale > 1.01) {
+      } else if (e.touches.length === 1 && viewRef.current.scale > MIN_GROUND_ZOOM + 0.01) {
         const t = e.touches[0]!;
         dragRef.current = { cx: t.clientX, cy: t.clientY, x: viewRef.current.x, y: viewRef.current.y };
       }
@@ -117,14 +123,14 @@ function useGroundZoom(resetKey: string) {
         const b = e.touches[1]!;
         const p = pinchRef.current;
         const factor = distance(a, b) / p.distance;
-        const nextScale = Math.max(1, Math.min(MAX_GROUND_ZOOM, p.view.scale * factor));
+        const nextScale = Math.max(MIN_GROUND_ZOOM, Math.min(MAX_GROUND_ZOOM, p.view.scale * factor));
         const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
         setView(clampView({
           scale: nextScale,
           x: mid.x - ((p.mx - p.view.x) * nextScale) / p.view.scale,
           y: mid.y - ((p.my - p.view.y) * nextScale) / p.view.scale,
         }));
-      } else if (e.touches.length === 1 && dragRef.current && viewRef.current.scale > 1.01) {
+      } else if (e.touches.length === 1 && dragRef.current && viewRef.current.scale > MIN_GROUND_ZOOM + 0.01) {
         e.preventDefault();
         const t = e.touches[0]!;
         const r = el.getBoundingClientRect();
@@ -159,7 +165,7 @@ function useGroundZoom(resetKey: string) {
     focusOn,
     zoomIn: () => zoomAt(2.5),
     zoomOut: () => zoomAt(1 / 2.5),
-    reset: () => setView({ scale: 1, x: 0, y: 0 }),
+    reset: () => setView(overviewView()),
   };
 }
 
@@ -313,9 +319,9 @@ function GroundMovementMap({
         ) : null}
         <div className="absolute bottom-3 right-3 flex gap-2">
           <button type="button" onClick={zoom.zoomIn} disabled={zoom.view.scale >= MAX_GROUND_ZOOM - 0.01} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold disabled:opacity-40">+</button>
-          <button type="button" onClick={zoom.zoomOut} disabled={zoom.view.scale <= 1.01} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold disabled:opacity-40">−</button>
+          <button type="button" onClick={zoom.zoomOut} disabled={zoom.view.scale <= MIN_GROUND_ZOOM + 0.01} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold disabled:opacity-40">−</button>
         </div>
-        {zoom.view.scale > 1.01 ? <button type="button" onClick={zoom.reset} className="absolute bottom-3 left-3 rounded-md border border-border bg-surface px-3 py-2 text-xs font-medium">Reset</button> : null}
+        {zoom.view.scale > MIN_GROUND_ZOOM + 0.01 ? <button type="button" onClick={zoom.reset} className="absolute bottom-3 left-3 rounded-md border border-border bg-surface px-3 py-2 text-xs font-medium">Reset</button> : null}
         {surfaceQ.isPending ? <div className="absolute top-24 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Loading airport surface…</div> : null}
         {surfaceQ.isError ? <div className="absolute top-24 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Surface detail unavailable.</div> : null}
       </div>
