@@ -38,15 +38,15 @@ describe("position confidence fusion", () => {
     const right = pos("adsb", 32.901, -97.001);
     assert.equal(choosePosition([wrong, right], { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "adsb");
   });
-  it("uses a fresh identity-compatible FR24 ground fix as the only surface source", () => {
+  it("uses a fresh identity-compatible FR24 ground fix as the preferred surface source", () => {
     const fr24 = groundPos("fr24", 41.786, -87.752, 8, 3);
     const adsb = groundPos("adsb", 41.784, -87.754, 1, 0);
     assert.equal(choosePosition([adsb, fr24], { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "fr24");
   });
-  it("does not fall back to ADS-B or FlightAware for a ground position when FR24 is missing", () => {
+  it("falls back to the best validated ground provider when FR24 is missing", () => {
     const adsb = groundPos("adsb", 41.784, -87.754, 1, 8);
     const fa = groundPos("flightaware", 41.785, -87.753, 2, 7);
-    assert.equal(choosePosition([adsb, fa], { registration: "N123AA", hex: "abc123" }, 10_000).chosen, null);
+    assert.equal(choosePosition([adsb, fa], { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "adsb");
   });
   it("does not use a stale FR24 surface fix and resumes normal fusion once airborne", () => {
     const staleFr = groundPos("fr24", 41.786, -87.752, 50, 0);
