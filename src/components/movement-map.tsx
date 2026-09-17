@@ -4,12 +4,13 @@ import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.serve
 import { haversineNm } from "@/lib/geo";
 import type { FlightStory } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const W = 800;
 const H = 800;
 
 type TrackPoint = { lat: number; lon: number; at: number };
+type View = { scale: number; x: number; y: number };
 
 type GroundMode = {
   kind: "departure" | "arrival";
@@ -32,8 +33,6 @@ function groundMode(story: FlightStory): GroundMode | null {
     : null;
   const freshEnough = positionAge == null || positionAge <= 120;
 
-  // Do not require story.live or provider onGround. Those flags can lag while
-  // a fresh position already shows the aircraft taxiing on the airport.
   const surfaceLike = ac.onGround
     || (nearestNm <= 4 && (altFt == null || altFt <= 1200) && (gsKt == null || gsKt <= 110))
     || (nearestNm <= 2 && (altFt == null || altFt <= 2500));
@@ -41,6 +40,114 @@ function groundMode(story: FlightStory): GroundMode | null {
   if (!freshEnough || !surfaceLike) return null;
   if (destNm + 1.5 < originNm) return { kind: "arrival", airport: story.dest };
   return { kind: "departure", airport: story.origin };
+}
+
+function clampView(v: View): View {
+  const scale = Math.max(1, Math.min(8, v.scale));
+  if (scale <= 1.001) return { scale: 1, x: 0, y: 0 };
+  const minX = W - W * scale;
+  const minY = H - H * scale;
+  return {
+    scale,
+    x: Math.min(0, Math.max(minX, v.x)),
+    y: Math.min(0, Math.max(minY, v.y)),
+  };
+}
+
+function useGroundZoom(resetKey: string) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<View>({ scale: 1, x: 0, y: 0 });
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const pinchRef = useRef<{ distance: number; view: View; mx: number; my: number } | null>(null);
+  const dragRef = useRef<{ cx: number; cy: number; x: number; y: number } | null>(null);
+
+  useEffect(() => setView({ scale: 1, x: 0, y: 0 }), [resetKey]);
+
+  const toSvg = (el: HTMLElement, cx: number, cy: number) => {
+    const r = el.getBoundingClientRect();
+    return {
+      x: ((cx - r.left) / Math.max(1, r.width)) * W,
+      y: ((cy - r.top) / Math.max(1, r.height)) * H,
+    };
+  };
+
+  const zoomAt = (factor: number, mx = W / 2, my = H / 2) => {
+    const current = viewRef.current;
+    const nextScale = Math.max(1, Math.min(8, current.scale * factor));
+    setView(clampView({
+      scale: nextScale,
+      x: mx - ((mx - current.x) * nextScale) / current.scale,
+      y: my - ((my - current.y) * nextScale) / current.scale,
+    }));
+  };
+
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const distance = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        e.preventDefault();
+        const a = e.touches[0]!;
+        const b = e.touches[1]!;
+        const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+        pinchRef.current = {
+          distance: Math.max(1, distance(a, b)),
+          view: viewRef.current,
+          mx: mid.x,
+          my: mid.y,
+        };
+        dragRef.current = null;
+      } else if (e.touches.length === 1 && viewRef.current.scale > 1.01) {
+        const t = e.touches[0]!;
+        dragRef.current = { cx: t.clientX, cy: t.clientY, x: viewRef.current.x, y: viewRef.current.y };
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length >= 2 && pinchRef.current) {
+        e.preventDefault();
+        const a = e.touches[0]!;
+        const b = e.touches[1]!;
+        const p = pinchRef.current;
+        const factor = distance(a, b) / p.distance;
+        const nextScale = Math.max(1, Math.min(8, p.view.scale * factor));
+        const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+        setView(clampView({
+          scale: nextScale,
+          x: mid.x - ((p.mx - p.view.x) * nextScale) / p.view.scale,
+          y: mid.y - ((p.my - p.view.y) * nextScale) / p.view.scale,
+        }));
+      } else if (e.touches.length === 1 && dragRef.current && viewRef.current.scale > 1.01) {
+        e.preventDefault();
+        const t = e.touches[0]!;
+        const r = el.getBoundingClientRect();
+        const dx = ((t.clientX - dragRef.current.cx) / Math.max(1, r.width)) * W;
+        const dy = ((t.clientY - dragRef.current.cy) / Math.max(1, r.height)) * H;
+        setView(clampView({ scale: viewRef.current.scale, x: dragRef.current.x + dx, y: dragRef.current.y + dy }));
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinchRef.current = null;
+      if (e.touches.length === 0) dragRef.current = null;
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, []);
+
+  return { boxRef, view, zoomIn: () => zoomAt(1.6), zoomOut: () => zoomAt(1 / 1.6), reset: () => setView({ scale: 1, x: 0, y: 0 }) };
 }
 
 function useMovementTrail(story: FlightStory) {
@@ -87,6 +194,7 @@ function GroundMovementMap({ story, mode, trail }: { story: FlightStory; mode: G
     retry: 1,
   });
   const ac = story.aircraft!;
+  const zoom = useGroundZoom(`${story.iata}:${airport.iata}:${mode.kind}`);
   const cos = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
   const latHalf = 0.068;
   const lonHalf = latHalf / cos;
@@ -115,32 +223,40 @@ function GroundMovementMap({ story, mode, trail }: { story: FlightStory; mode: G
           <div>{provider}{age != null ? ` · ${age}s` : ""}</div>
         </div>
       </div>
-      <div className="relative min-h-0 flex-1 overflow-hidden bg-bg">
+      <div ref={zoom.boxRef} className="relative min-h-0 flex-1 overflow-hidden bg-bg" style={{ touchAction: "none" }}>
         <svg viewBox={`0 0 ${W} ${H}`} className="block h-full w-full" role="img" aria-label={`${airport.iata} airport surface and live aircraft position`}>
           <rect width={W} height={H} className="fill-bg" />
-          <g opacity="0.28">
-            {Array.from({length: 9}, (_, i) => <line key={`v-${i}`} x1={i*100} y1="0" x2={i*100} y2={H} className="stroke-fg/15" strokeWidth="1" />)}
-            {Array.from({length: 9}, (_, i) => <line key={`h-${i}`} x1="0" y1={i*100} x2={W} y2={i*100} className="stroke-fg/15" strokeWidth="1" />)}
+          <g transform={`translate(${zoom.view.x} ${zoom.view.y}) scale(${zoom.view.scale})`}>
+            <g opacity="0.28">
+              {Array.from({length: 9}, (_, i) => <line key={`v-${i}`} x1={i*100} y1="0" x2={i*100} y2={H} className="stroke-fg/15" strokeWidth="1" />)}
+              {Array.from({length: 9}, (_, i) => <line key={`h-${i}`} x1="0" y1={i*100} x2={W} y2={i*100} className="stroke-fg/15" strokeWidth="1" />)}
+            </g>
+            {features.filter((f) => f.kind === "apron").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
+            {features.filter((f) => f.kind === "terminal").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
+            {features.filter((f) => f.kind === "runway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
+            {features.filter((f) => f.kind === "taxiway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
+            {features.filter((f) => f.kind === "gate" || f.kind === "holding_position").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
+            {trailPoints ? <polyline points={trailPoints} className="fill-none stroke-accent" strokeWidth={4 / zoom.view.scale} strokeLinecap="round" strokeLinejoin="round" opacity="0.72" /> : null}
+            <circle cx={plane.x} cy={plane.y} r={16 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={3 / zoom.view.scale} />
+            <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${Number.isFinite(ac.track) ? ac.track : 0})`}>
+              <path d="M0 -13 L6 8 L0 5 L-6 8 Z" className="fill-accent" />
+            </g>
+            <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale})`}>
+              <text x="21" y="-8" className="fill-fg" fontSize="13" fontWeight="700">{story.iata}</text>
+              <text x="21" y="10" className="fill-muted" fontSize="10">{Math.round(ac.gsKt ?? 0)} kt</text>
+            </g>
           </g>
-          {features.filter((f) => f.kind === "apron").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
-          {features.filter((f) => f.kind === "terminal").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
-          {features.filter((f) => f.kind === "runway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
-          {features.filter((f) => f.kind === "taxiway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
-          {features.filter((f) => f.kind === "gate" || f.kind === "holding_position").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
-          {trailPoints ? <polyline points={trailPoints} className="fill-none stroke-accent" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" opacity="0.72" /> : null}
-          <circle cx={plane.x} cy={plane.y} r="16" className="fill-bg stroke-accent" strokeWidth="3" />
-          <g transform={`translate(${plane.x} ${plane.y}) rotate(${Number.isFinite(ac.track) ? ac.track : 0})`}>
-            <path d="M0 -13 L6 8 L0 5 L-6 8 Z" className="fill-accent" />
-          </g>
-          <text x={plane.x + 21} y={plane.y - 8} className="fill-fg" fontSize="13" fontWeight="700">{story.iata}</text>
-          <text x={plane.x + 21} y={plane.y + 10} className="fill-muted" fontSize="10">{Math.round(ac.gsKt ?? 0)} kt</text>
-          <circle cx={W/2} cy={H/2} r="4" className="fill-fg/50" />
         </svg>
-        {surfaceQ.isPending ? <div className="absolute bottom-3 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Loading airport surface…</div> : null}
-        {surfaceQ.isError ? <div className="absolute bottom-3 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Surface detail unavailable · live aircraft position still active</div> : null}
+        <div className="absolute bottom-3 right-3 flex gap-2">
+          <button type="button" onClick={zoom.zoomIn} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold">+</button>
+          <button type="button" onClick={zoom.zoomOut} disabled={zoom.view.scale <= 1.01} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold disabled:opacity-40">−</button>
+        </div>
+        {zoom.view.scale > 1.01 ? <button type="button" onClick={zoom.reset} className="absolute bottom-3 left-3 rounded-md border border-border bg-surface px-3 py-2 text-xs font-medium">Reset</button> : null}
+        {surfaceQ.isPending ? <div className="absolute top-3 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Loading airport surface…</div> : null}
+        {surfaceQ.isError ? <div className="absolute top-3 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Surface detail unavailable · live aircraft position still active</div> : null}
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-[10px] leading-tight text-muted">
-        <span>Aircraft position follows Inbound's freshest live provider.</span>
+        <span>Pinch to zoom · drag to pan</span>
         <span className="shrink-0">Airport surface © OpenStreetMap contributors</span>
       </div>
     </div>
