@@ -212,3 +212,14 @@ html[data-theme="sunrise"] .route-fix-marker {
   stroke: #26323d;
   stroke-width: 1.25px;
 }
+
+/* Keep the already-flown leg visible instead of letting it disappear into the map. */
+[data-route-stroke="flown"] {
+  stroke: var(--color-accent);
+  opacity: 0.58;
+}
+
+html[data-theme="sunrise"] [data-route-stroke="flown"] {
+  stroke: #315e74;
+  opacity: 0.62;
+}
