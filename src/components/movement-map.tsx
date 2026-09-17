@@ -3,7 +3,7 @@ import { getAirportSurface } from "@/lib/airport-surface";
 import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.server";
 import { haversineNm } from "@/lib/geo";
 import type { FlightStory } from "@/lib/types";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const W = 800;
@@ -11,6 +11,7 @@ const H = 800;
 const MIN_GROUND_ZOOM = 1.45;
 const MAX_GROUND_ZOOM = 64;
 const INITIAL_GROUND_ZOOM = 7;
+const SURFACE_CACHE_MS = 12 * 60 * 60_000;
 
 const overviewView = (): View => ({
   scale: MIN_GROUND_ZOOM,
@@ -27,6 +28,16 @@ type GroundMode = {
   kind: "departure" | "arrival";
   airport: FlightStory["origin"];
 };
+
+function surfaceQueryOptions(airport: FlightStory["origin"]) {
+  return {
+    queryKey: ["airport-surface", airport.icao, airport.lat.toFixed(3), airport.lon.toFixed(3)] as const,
+    queryFn: () => getAirportSurface({ data: { airport: airport.icao, lat: airport.lat, lon: airport.lon } }),
+    staleTime: SURFACE_CACHE_MS,
+    gcTime: SURFACE_CACHE_MS,
+    retry: 1,
+  };
+}
 
 function savedGroundKey(flightKey: string, kind: "departure" | "arrival") {
   return `inbound:ground:${flightKey}:${kind}`;
@@ -219,12 +230,7 @@ function GroundMovementMap({
   inFlight?: boolean;
 }) {
   const airport = mode.airport;
-  const surfaceQ = useQuery({
-    queryKey: ["airport-surface", airport.icao, airport.lat.toFixed(3), airport.lon.toFixed(3)],
-    queryFn: () => getAirportSurface({ data: { airport: airport.icao, lat: airport.lat, lon: airport.lon } }),
-    staleTime: 12 * 60 * 60_000,
-    retry: 1,
-  });
+  const surfaceQ = useQuery(surfaceQueryOptions(airport));
   const zoom = useGroundZoom(`${story.iata}:${airport.iata}:${mode.kind}`);
   const autoFocusRef = useRef("");
   const cos = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
@@ -379,12 +385,21 @@ function initialTab(story: FlightStory): MapTab {
 }
 
 export function MovementMap({ story }: { story: FlightStory }) {
+  const queryClient = useQueryClient();
   const trail = useMovementTrail(story);
   const flightKey = `${story.iata}:${story.origin.iata}:${story.dest.iata}`;
   const [tab, setTab] = useState<MapTab>(() => initialTab(story));
   const [lastDeparture, setLastDeparture] = useState<AircraftSnapshot | null>(null);
   const [lastArrival, setLastArrival] = useState<AircraftSnapshot | null>(null);
   const userSelectedTab = useRef(false);
+
+  useEffect(() => {
+    // Start both airport-surface requests as soon as the Map workspace mounts.
+    // Keeping them in React Query for the full flight makes arrival ground radar
+    // ready before touchdown instead of waiting on a cold Overpass request.
+    void queryClient.prefetchQuery(surfaceQueryOptions(story.origin));
+    void queryClient.prefetchQuery(surfaceQueryOptions(story.dest));
+  }, [queryClient, flightKey, story.origin.icao, story.origin.lat, story.origin.lon, story.dest.icao, story.dest.lat, story.dest.lon]);
 
   useEffect(() => {
     userSelectedTab.current = false;
