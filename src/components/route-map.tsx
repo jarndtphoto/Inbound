@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const W = 800;
 const H = 800;
 const PAD = 40;
+const MAX_ROUTE_ZOOM = 12;
 
 function chopClass(c: Chop, past: boolean) {
   if (past) return "stroke-muted/40";
@@ -153,7 +154,7 @@ function RadarLayer({
 }
 
 function clampView(next: { s: number; x: number; y: number }, mapH = 800) {
-  const s = Math.min(5, Math.max(1, next.s));
+  const s = Math.min(MAX_ROUTE_ZOOM, Math.max(1, next.s));
   if (s <= 1.001) return { s: 1, x: 0, y: 0 };
   const minX = W - W * s;
   const minY = mapH - mapH * s;
@@ -197,7 +198,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
 
   const zoomBy = useCallback((factor: number) => {
     const { s, x, y } = viewRef.current;
-    const ns = Math.min(5, Math.max(1, s * factor));
+    const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, s * factor));
     const cx = W / 2;
     const cy = H / 2;
     setView(
@@ -226,7 +227,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
       e.preventDefault();
       const { s, x, y } = viewRef.current;
       const factor = Math.exp(-e.deltaY * 0.0018);
-      const ns = Math.min(5, Math.max(1, s * factor));
+      const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, s * factor));
       const { mx, my } = toSvg(el, e.clientX, e.clientY);
       apply({
         s: ns,
@@ -266,7 +267,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
         const p = pinchRef.current;
         if (!p) return;
         const factor = dist(a, b) / p.d;
-        const ns = Math.min(5, Math.max(1, p.s * factor));
+        const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, p.s * factor));
         const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
         apply({
           s: ns,
@@ -430,17 +431,19 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     if (story.live && story.aircraft && Number.isFinite(story.aircraft.lon)) lons.push(story.aircraft.lon);
   }
   const freeWorld = fixedViewport && !weatherPreview;
+  const worldSize = W;
+  const worldYOffset = (H - worldSize) / 2;
   useEffect(() => {
     if (!freeWorld || lats.length < 2 || lons.length < 2) return;
-    const xs = lons.map((lon) => mercX(lon) * W);
-    const ys = lats.map((lat) => mercY(lat) * H);
+    const xs = lons.map((lon) => mercX(lon) * worldSize);
+    const ys = lats.map((lat) => worldYOffset + mercY(lat) * worldSize);
     const minX = Math.min(...xs);
     const maxX = Math.max(...xs);
     const minY = Math.min(...ys);
     const maxY = Math.max(...ys);
     const spanX = Math.max(1, maxX - minX);
     const spanY = Math.max(1, maxY - minY);
-    const s = Math.min(5, Math.max(1, Math.min((W - PAD * 2) / spanX, (H - PAD * 2) / spanY)));
+    const s = Math.min(MAX_ROUTE_ZOOM, Math.max(1, Math.min((W - PAD * 2) / spanX, (H - PAD * 2) / spanY)));
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     zoom.setHomeView({ s, x: W / 2 - cx * s, y: H / 2 - cy * s });
@@ -462,8 +465,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   maxLat = proj.maxLat;
   minLon = proj.minLon;
   maxLon = proj.maxLon;
-  const sx = freeWorld ? (lon: number) => mercX(lon) * W : proj.sx;
-  const sy = freeWorld ? (lat: number) => mercY(lat) * H : proj.sy;
+  const sx = freeWorld ? (lon: number) => mercX(lon) * worldSize : proj.sx;
+  const sy = freeWorld ? (lat: number) => worldYOffset + mercY(lat) * worldSize : proj.sy;
 
   const origin = { lat: story.origin.lat, lon: story.origin.lon };
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
