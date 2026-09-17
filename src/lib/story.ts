@@ -7,7 +7,7 @@ import type { FlightStory } from "./types";
 
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
 const SURFACE_STAGES = new Set(["origin_gate", "push", "taxi", "taxi_in", "gate"]);
-const FR24_SURFACE_FRESH_SEC = 20;
+const FR24_SURFACE_FRESH_SEC = 30;
 const TAKEOFF_ROLL_STAGE = "Takeoff roll";
 
 function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
@@ -93,9 +93,6 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
       flightSpeedStreak: 0, flightSpeedStreakSeenAt: null } } : {}) };
   }
 
-  // A confirmed takeoff roll must not regress to At gate merely because the next
-  // FR24 sample is late or missing. Keep the last confirmed roll until fresh FR24
-  // shows a rejected takeoff/slow runway exit, or airborne logic advances to Flight.
   if (priorStage === "takeoff_roll" && !freshSurface) {
     return { ...story, currentStage: TAKEOFF_ROLL_STAGE as FlightStory["currentStage"],
       ...(resumeBase ? { resume: { ...resumeBase, departureStage: "takeoff_roll" } } : {}) };
@@ -151,12 +148,6 @@ export function preferFreshAirborneState(story: FlightStory): FlightStory {
   };
 }
 
-/**
- * Reject a movement-detected pushback timestamp that cannot plausibly belong to
- * this flight instance. A detected time may be late (we can miss tug movement),
- * but it must not predate this leg's scheduled pushback by more than one hour.
- * Provider-published actual gate-out is never altered here.
- */
 export function sanitizeDetectedPushTime(story: FlightStory): FlightStory {
   const t = story.times;
   const detected = t.pushSource === "live_detected" || t.pushSource === "track_detected";
