@@ -11,6 +11,7 @@ async function get(path: string, ttlMs: number) {
   if (!key) return null;
   const hit = cache.get(path);
   if (hit && Date.now() - hit.at < ttlMs) return hit.value;
+  console.info(JSON.stringify({ event: "flightaware_upstream_request", timestamp: new Date().toISOString(), path, cache: "miss" }));
   const res = await fetch(`${BASE}${path}`, { headers: { "x-apikey": key, Accept: "application/json" }, signal: AbortSignal.timeout(6500) });
   if (!res.ok) throw new Error(`AeroAPI ${res.status}`);
   const value = await res.json();
@@ -39,8 +40,6 @@ export function normalizeAeroApiFlight(f: any): NormalizedFlight {
 }
 
 export function normalizeAeroApiRoute(data: any) {
-  // AeroAPI's filed-route endpoint returns authoritative named RouteFix
-  // objects in `fixes`. Keep the older shapes as compatibility fallbacks.
   const points = Array.isArray(data?.fixes) ? data.fixes
     : Array.isArray(data?.route) ? data.route
     : Array.isArray(data?.waypoints) ? data.waypoints : [];
@@ -52,7 +51,6 @@ export function normalizeAeroApiRoute(data: any) {
     && typeof p.label === "string" && p.label.trim().length > 0);
 }
 
-/** Keep a departed same-number leg current until it reaches the gate. */
 export function selectCurrentAeroApiFlight(flights: any[], now = Date.now() / 1000) {
   const valid = flights.filter((f: any) => f && !f.cancelled && f.origin && f.destination);
   const departed = valid.filter((f: any) => {
@@ -83,7 +81,7 @@ export function selectCurrentAeroApiFlight(flights: any[], now = Date.now() / 10
 
 export async function loadAeroApiFlight(ident: string): Promise<NormalizedFlight | null> {
   if (!aeroApiKey()) return null;
-  const data: any = await get(`/flights/${encodeURIComponent(ident)}?max_pages=1`, 45_000);
+  const data: any = await get(`/flights/${encodeURIComponent(ident)}?max_pages=1`, 90_000);
   const flights = Array.isArray(data?.flights) ? data.flights : [];
   if (!flights.length) return null;
   const f = selectCurrentAeroApiFlight(flights);
@@ -91,7 +89,7 @@ export async function loadAeroApiFlight(ident: string): Promise<NormalizedFlight
   const normalized = normalizeAeroApiFlight(f);
   if (normalized.flightId) {
     const [trackData, routeData]: any[] = await Promise.all([
-      get(`/flights/${encodeURIComponent(normalized.flightId)}/track`, 30_000).catch(() => null),
+      get(`/flights/${encodeURIComponent(normalized.flightId)}/track`, 120_000).catch(() => null),
       get(`/flights/${encodeURIComponent(normalized.flightId)}/route`, 30 * 60_000).catch(() => null),
     ]);
     normalized.track = (trackData?.positions ?? []).map((p: any) => ({ lat: p.latitude, lon: p.longitude, altFt: Number.isFinite(p.altitude) ? p.altitude * 100 : null, gsKt: p.groundspeed ?? null, track: p.heading ?? null, seenAt: unix(p.timestamp) ?? 0 })).filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
