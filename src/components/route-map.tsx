@@ -19,6 +19,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const W = 800;
 const H = 800;
 const PAD = 40;
+const MAX_ROUTE_ZOOM = 12;
+const PAN_WORLD_SCREENS = 24;
 
 function chopClass(c: Chop, past: boolean) {
   if (past) return "stroke-muted/40";
@@ -152,11 +154,20 @@ function RadarLayer({
   );
 }
 
-function clampView(next: { s: number; x: number; y: number }) {
-  const s = Math.min(5, Math.max(1, next.s));
+function clampView(next: { s: number; x: number; y: number }, mapH = 800, freePan = false) {
+  const s = Math.min(MAX_ROUTE_ZOOM, Math.max(1, next.s));
+  if (freePan) {
+    const xLimit = W * PAN_WORLD_SCREENS * s;
+    const yLimit = mapH * PAN_WORLD_SCREENS * s;
+    return {
+      s,
+      x: Math.min(xLimit, Math.max(-xLimit, next.x)),
+      y: Math.min(yLimit, Math.max(-yLimit, next.y)),
+    };
+  }
   if (s <= 1.001) return { s: 1, x: 0, y: 0 };
   const minX = W - W * s;
-  const minY = H - H * s;
+  const minY = mapH - mapH * s;
   return {
     s,
     x: Math.min(0, Math.max(minX, next.x)),
@@ -164,7 +175,7 @@ function clampView(next: { s: number; x: number; y: number }) {
   };
 }
 
-function useMapBoxZoom(resetKey: string, H = 800) {
+function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ s: 1, x: 0, y: 0 });
   const viewRef = useRef(view);
@@ -191,7 +202,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
 
   const zoomBy = useCallback((factor: number) => {
     const { s, x, y } = viewRef.current;
-    const ns = Math.min(5, Math.max(1, s * factor));
+    const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, s * factor));
     const cx = W / 2;
     const cy = H / 2;
     setView(
@@ -199,9 +210,9 @@ function useMapBoxZoom(resetKey: string, H = 800) {
         s: ns,
         x: cx - ((cx - x) * ns) / s,
         y: cy - ((cy - y) * ns) / s,
-      }),
+      }, H, freePan),
     );
-  }, [H]);
+  }, [H, freePan]);
 
   useEffect(() => {
     setView({ s: 1, x: 0, y: 0 });
@@ -211,14 +222,14 @@ function useMapBoxZoom(resetKey: string, H = 800) {
     const el = boxRef.current;
     if (!el) return;
 
-    const apply = (next: { s: number; x: number; y: number }) => setView(clampView(next));
+    const apply = (next: { s: number; x: number; y: number }) => setView(clampView(next, H, freePan));
 
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       const { s, x, y } = viewRef.current;
       const factor = Math.exp(-e.deltaY * 0.0018);
-      const ns = Math.min(5, Math.max(1, s * factor));
+      const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, s * factor));
       const { mx, my } = toSvg(el, e.clientX, e.clientY);
       apply({
         s: ns,
@@ -244,8 +255,9 @@ function useMapBoxZoom(resetKey: string, H = 800) {
           my: mid.my,
         };
         dragRef.current = null;
-      } else if (e.touches.length === 1 && viewRef.current.s > 1.02) {
-        dragRef.current = null;
+      } else if (e.touches.length === 1 && freePan) {
+        const t = e.touches[0]!;
+        dragRef.current = { px: t.clientX, py: t.clientY, x: viewRef.current.x, y: viewRef.current.y };
       }
     };
 
@@ -257,15 +269,22 @@ function useMapBoxZoom(resetKey: string, H = 800) {
         const p = pinchRef.current;
         if (!p) return;
         const factor = dist(a, b) / p.d;
-        const ns = Math.min(5, Math.max(1, p.s * factor));
+        const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, p.s * factor));
         const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
         apply({
           s: ns,
           x: mid.mx - ((p.mx - p.x) * ns) / p.s,
           y: mid.my - ((p.my - p.y) * ns) / p.s,
         });
-      } else if (e.touches.length === 1 && dragRef.current && viewRef.current.s > 1.02) {
-        return;
+      } else if (e.touches.length === 1 && freePan && dragRef.current) {
+        e.preventDefault();
+        const t = e.touches[0]!;
+        const r = el.getBoundingClientRect();
+        apply({
+          s: viewRef.current.s,
+          x: dragRef.current.x + ((t.clientX - dragRef.current.px) / Math.max(1, r.width)) * W,
+          y: dragRef.current.y + ((t.clientY - dragRef.current.py) / Math.max(1, r.height)) * H,
+        });
       }
     };
 
@@ -305,7 +324,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
       document.removeEventListener("gesturechange", blockPageGesture);
       document.removeEventListener("gestureend", blockPageGesture);
     };
-  }, [H]);
+  }, [H, freePan]);
 
   return { boxRef, s: view.s, x: view.x, y: view.y, reset, zoomBy };
 }
@@ -398,7 +417,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const H = fixedViewport ? mapHeight : 800;
   const weatherOn = useFiled((s) => s.weatherOn);
   const setWeatherOn = useFiled((s) => s.setWeatherOn);
-  const zoom = useMapBoxZoom(`${story.callsign}:${story.origin.iata}:${story.dest.iata}`, H);
+  const freePan = fixedViewport && !weatherPreview;
+  const zoom = useMapBoxZoom(`${story.callsign}:${story.origin.iata}:${story.dest.iata}`, H, freePan);
   const samples = story.route?.samples ?? [];
   if (samples.length < 2) return null;
 
@@ -497,11 +517,12 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const filedStep = Math.max(1, Math.ceil(allFiledFixes.length / 24));
   const filedFixes = allFiledFixes.filter((_, index) => index % filedStep === 0);
   const runs = pathRuns(samples, progress).build(sx, sy);
-  const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
-  const admin1 = ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
-  const hawaii = HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
-  const lakes = GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
+  const countries = freePan ? WORLD_COUNTRY_RINGS : WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const admin1 = freePan ? ADMIN1_RINGS : ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const hawaii = freePan ? HAWAII_COASTLINES : HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
+  const lakes = freePan ? GREAT_LAKES : GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
   const hazards = upcomingStorms(story.hazards ?? []);
+  const movedFromHome = zoom.s > 1.02 || Math.abs(zoom.x) > 1 || Math.abs(zoom.y) > 1;
 
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-surface", fixedViewport && "flex h-full flex-col items-center")}>
@@ -656,7 +677,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : Date.now() - story.fetchedAt > 15_000 || (story.providers?.chosenPositionAgeSec ?? Infinity) > 60 ? "Updating live position…" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
         </p>
       </div>
-        {weatherPreview ? null : zoom.s > 1.02 ? (
+        {weatherPreview ? null : movedFromHome ? (
           <button
             type="button"
             onClick={zoom.reset}
@@ -666,7 +687,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           </button>
         ) : (
           <p className="pointer-events-none absolute bottom-3 left-3 font-mono text-xs tracking-wide text-subtle">
-            Pinch to zoom
+            Pinch to zoom · drag to pan
           </p>
         )}
         <div style={weatherPreview ? { display: "none" } : undefined} className="absolute right-3 bottom-3 z-10 flex gap-1">
