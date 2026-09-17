@@ -19,7 +19,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const W = 800;
 const H = 800;
 const PAD = 40;
-const MAX_ROUTE_ZOOM = 12;
 
 function chopClass(c: Chop, past: boolean) {
   if (past) return "stroke-muted/40";
@@ -153,11 +152,11 @@ function RadarLayer({
   );
 }
 
-function clampView(next: { s: number; x: number; y: number }, mapH = 800) {
-  const s = Math.min(MAX_ROUTE_ZOOM, Math.max(1, next.s));
+function clampView(next: { s: number; x: number; y: number }) {
+  const s = Math.min(5, Math.max(1, next.s));
   if (s <= 1.001) return { s: 1, x: 0, y: 0 };
   const minX = W - W * s;
-  const minY = mapH - mapH * s;
+  const minY = H - H * s;
   return {
     s,
     x: Math.min(0, Math.max(minX, next.x)),
@@ -169,7 +168,6 @@ function useMapBoxZoom(resetKey: string, H = 800) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ s: 1, x: 0, y: 0 });
   const viewRef = useRef(view);
-  const homeViewRef = useRef(view);
   viewRef.current = view;
   const pinchRef = useRef<{
     d: number;
@@ -181,12 +179,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
   } | null>(null);
   const dragRef = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
 
-  const reset = useCallback(() => setView(homeViewRef.current), []);
-  const setHomeView = useCallback((next: { s: number; x: number; y: number }) => {
-    const clamped = clampView(next, H);
-    homeViewRef.current = clamped;
-    setView(clamped);
-  }, [H]);
+  const reset = useCallback(() => setView({ s: 1, x: 0, y: 0 }), []);
 
   const toSvg = (el: HTMLElement, cx: number, cy: number) => {
     const r = el.getBoundingClientRect();
@@ -198,7 +191,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
 
   const zoomBy = useCallback((factor: number) => {
     const { s, x, y } = viewRef.current;
-    const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, s * factor));
+    const ns = Math.min(5, Math.max(1, s * factor));
     const cx = W / 2;
     const cy = H / 2;
     setView(
@@ -206,28 +199,26 @@ function useMapBoxZoom(resetKey: string, H = 800) {
         s: ns,
         x: cx - ((cx - x) * ns) / s,
         y: cy - ((cy - y) * ns) / s,
-      }, H),
+      }),
     );
   }, [H]);
 
   useEffect(() => {
-    const base = { s: 1, x: 0, y: 0 };
-    homeViewRef.current = base;
-    setView(base);
+    setView({ s: 1, x: 0, y: 0 });
   }, [resetKey, H]);
 
   useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
 
-    const apply = (next: { s: number; x: number; y: number }) => setView(clampView(next, H));
+    const apply = (next: { s: number; x: number; y: number }) => setView(clampView(next));
 
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       const { s, x, y } = viewRef.current;
       const factor = Math.exp(-e.deltaY * 0.0018);
-      const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, s * factor));
+      const ns = Math.min(5, Math.max(1, s * factor));
       const { mx, my } = toSvg(el, e.clientX, e.clientY);
       apply({
         s: ns,
@@ -254,8 +245,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
         };
         dragRef.current = null;
       } else if (e.touches.length === 1 && viewRef.current.s > 1.02) {
-        const t = e.touches[0]!;
-        dragRef.current = { px: t.clientX, py: t.clientY, x: viewRef.current.x, y: viewRef.current.y };
+        dragRef.current = null;
       }
     };
 
@@ -267,7 +257,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
         const p = pinchRef.current;
         if (!p) return;
         const factor = dist(a, b) / p.d;
-        const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, p.s * factor));
+        const ns = Math.min(5, Math.max(1, p.s * factor));
         const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
         apply({
           s: ns,
@@ -275,14 +265,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
           y: mid.my - ((p.my - p.y) * ns) / p.s,
         });
       } else if (e.touches.length === 1 && dragRef.current && viewRef.current.s > 1.02) {
-        e.preventDefault();
-        const t = e.touches[0]!;
-        const r = el.getBoundingClientRect();
-        apply({
-          s: viewRef.current.s,
-          x: dragRef.current.x + ((t.clientX - dragRef.current.px) / Math.max(1, r.width)) * W,
-          y: dragRef.current.y + ((t.clientY - dragRef.current.py) / Math.max(1, r.height)) * H,
-        });
+        return;
       }
     };
 
@@ -324,7 +307,7 @@ function useMapBoxZoom(resetKey: string, H = 800) {
     };
   }, [H]);
 
-  return { boxRef, s: view.s, x: view.x, y: view.y, reset, zoomBy, setHomeView };
+  return { boxRef, s: view.s, x: view.x, y: view.y, reset, zoomBy };
 }
 
 function pathRuns(samples: RouteSample[], progress: number) {
@@ -342,10 +325,14 @@ function pathRuns(samples: RouteSample[], progress: number) {
           cur = { chop, past, pts: [pt] };
           continue;
         }
+        // Split only at the longitude seam; zoom can make valid adjacent
+        // route samples hundreds of screen pixels apart.
         const crossesSeam = Math.abs(s.lon - samples[i - 1]!.lon) > 180;
         if (cur.chop === chop && cur.past === past && !crossesSeam) {
           cur.pts.push(pt);
         } else {
+          // Weather begins at the first affected sample and ends at the last
+          // affected sample. Share that exact boundary with the adjacent run.
           const enteringWeather: boolean = cur.chop === "smooth" && chop !== "smooth" && cur.past === past;
           if (!crossesSeam && enteringWeather) cur.pts.push(pt);
           if (cur.pts.length >= 2) out.push(cur);
@@ -415,6 +402,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const samples = story.route?.samples ?? [];
   if (samples.length < 2) return null;
 
+  // Forecast previews frame the affected segment, rather than the entire trip.
   const focusSamples = weatherPreview
     ? samples.filter(s => s.frac >= weatherPreview.startFrac - 0.015 && s.frac <= weatherPreview.endFrac + 0.015)
     : samples;
@@ -430,25 +418,6 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     if (story.live && story.aircraft && Number.isFinite(story.aircraft.lat)) lats.push(story.aircraft.lat);
     if (story.live && story.aircraft && Number.isFinite(story.aircraft.lon)) lons.push(story.aircraft.lon);
   }
-  const freeWorld = fixedViewport && !weatherPreview;
-  const worldSize = W;
-  const worldYOffset = (H - worldSize) / 2;
-  useEffect(() => {
-    if (!freeWorld || lats.length < 2 || lons.length < 2) return;
-    const xs = lons.map((lon) => mercX(lon) * worldSize);
-    const ys = lats.map((lat) => worldYOffset + mercY(lat) * worldSize);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const spanX = Math.max(1, maxX - minX);
-    const spanY = Math.max(1, maxY - minY);
-    const s = Math.min(MAX_ROUTE_ZOOM, Math.max(1, Math.min((W - PAD * 2) / spanX, (H - PAD * 2) / spanY)));
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    zoom.setHomeView({ s, x: W / 2 - cx * s, y: H / 2 - cy * s });
-  }, [freeWorld, H, story.callsign, story.origin.iata, story.dest.iata]);
-
   if (lats.length < 2 || lons.length < 2) return null;
   let minLat = Math.min(...lats);
   let maxLat = Math.max(...lats);
@@ -465,8 +434,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   maxLat = proj.maxLat;
   minLon = proj.minLon;
   maxLon = proj.maxLon;
-  const sx = freeWorld ? (lon: number) => mercX(lon) * worldSize : proj.sx;
-  const sy = freeWorld ? (lat: number) => worldYOffset + mercY(lat) * worldSize : proj.sy;
+  const sx = proj.sx;
+  const sy = proj.sy;
 
   const origin = { lat: story.origin.lat, lon: story.origin.lon };
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
@@ -500,6 +469,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
     ? (story.times.landUnix - takeoffAt) / 60 : null;
   const mapEvents = routeWeatherEvents(samples, progress);
+  // Both the full map and preview pin the event's entry point. The affected
+  // route line still spans every range through the event's exit.
   const ticks = weatherPreview
     ? [{
         eventNumber: weatherPreview.eventNumber,
@@ -521,13 +492,15 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       }));
   const allFiledFixes = (story.route.filedFixes ?? []).filter((p) =>
     Number.isFinite(p.lat) && Number.isFinite(p.lon) && typeof p.label === "string" && p.label.trim().length > 0);
+  // Marker count is derived only from the published plan and remains stable
+  // while zooming. Route samples still drive geometry, ETA, and weather.
   const filedStep = Math.max(1, Math.ceil(allFiledFixes.length / 24));
   const filedFixes = allFiledFixes.filter((_, index) => index % filedStep === 0);
   const runs = pathRuns(samples, progress).build(sx, sy);
-  const countries = freeWorld ? WORLD_COUNTRY_RINGS : WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
-  const admin1 = freeWorld ? ADMIN1_RINGS : ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
-  const hawaii = freeWorld ? HAWAII_COASTLINES : HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
-  const lakes = freeWorld ? GREAT_LAKES : GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
+  const countries = WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const admin1 = ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const hawaii = HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
+  const lakes = GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
   const hazards = upcomingStorms(story.hazards ?? []);
 
   return (
@@ -536,7 +509,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         ref={(node) => { zoom.boxRef.current = node; frameRef.current = node; }}
         data-map-box
         className={cn("relative overflow-hidden select-none", fixedViewport && "w-full min-h-0 flex-1")}
-        style={{ touchAction: fixedViewport ? "none" : "pan-y" }}
+        style={{ touchAction: fixedViewport ? "none" : "pan-y",  }}
       >
       <svg
         viewBox={`0 0 ${W} ${H}`}
@@ -560,15 +533,30 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           {admin1.map((ring, i) => {
             const points = ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ");
             return (
-              <polyline key={`adm-${i}`} points={points} className="fill-none stroke-fg/20" strokeWidth="0.9" />
+              <polyline
+                key={`adm-${i}`}
+                points={points}
+                className="fill-none stroke-fg/20"
+                strokeWidth="0.9"
+              />
             );
           })}
           {countries.map((ring, i) => {
             const points = ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ");
             return ringFillable(ring) ? (
-              <polygon key={`c-${i}`} points={points} className="fill-none stroke-fg/35" strokeWidth="1.25" />
+              <polygon
+                key={`c-${i}`}
+                points={points}
+                className="fill-none stroke-fg/35"
+                strokeWidth="1.25"
+              />
             ) : (
-              <polyline key={`c-${i}`} points={points} className="fill-none stroke-fg/35" strokeWidth="1.25" />
+              <polyline
+                key={`c-${i}`}
+                points={points}
+                className="fill-none stroke-fg/35"
+                strokeWidth="1.25"
+              />
             );
           })}
           {lakes.map((lake) => (
@@ -638,7 +626,12 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           const cy = sy(h.lat!);
           return (
             <g key={h.id} transform={`translate(${cx} ${cy}) scale(${1 / zoom.s})`}>
-              <circle r="10" className="fill-ifr/25 stroke-ifr/70" strokeWidth="1" />
+              <circle
+                r="10"
+                className="fill-ifr/25 stroke-ifr/70"
+                strokeWidth="1"
+              />
+
             </g>
           );
         })}
@@ -673,7 +666,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           </button>
         ) : (
           <p className="pointer-events-none absolute bottom-3 left-3 font-mono text-xs tracking-wide text-subtle">
-            Pinch to zoom · drag to pan
+            Pinch to zoom
           </p>
         )}
         <div style={weatherPreview ? { display: "none" } : undefined} className="absolute right-3 bottom-3 z-10 flex gap-1">
@@ -701,6 +694,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           <summary className="cursor-pointer py-3 font-semibold">Weather alerts</summary>
           <div className="absolute inset-x-0 bottom-full max-h-48 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
             {ticks.map((s) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{s.eventNumber}</span><div><p className="font-semibold">{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
+            
             {!ticks.length && <p>No map alerts shown. Coverage may be incomplete.</p>}
           </div>
         </details>
