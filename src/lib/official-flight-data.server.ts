@@ -19,11 +19,32 @@ async function probe(configured: boolean, load: () => Promise<NormalizedFlight |
   }
 }
 
+function operatingIdentFromFlightAware(flight: NormalizedFlight | null): string | null {
+  const id = flight?.flightId?.toUpperCase() ?? "";
+  const match = id.match(/^([A-Z]{3}\d{1,4}[A-Z]?)-/);
+  return match?.[1] ?? null;
+}
+
 export async function loadOfficialFlightData(ident: string) {
-  const [fa, fr] = await Promise.all([
-    probe(aeroApiConfigured(), () => loadAeroApiFlight(ident)),
-    probe(fr24Configured(), () => loadFr24Flight(ident)),
-  ]);
+  const fa = await probe(aeroApiConfigured(), () => loadAeroApiFlight(ident));
+  let fr = await probe(fr24Configured(), () => loadFr24Flight(ident));
+
+  if (fr.state === "NO_MATCH" && fa.flight) {
+    const operatingIdent = operatingIdentFromFlightAware(fa.flight);
+    if (operatingIdent && operatingIdent !== ident.toUpperCase()) {
+      const operatingFr = await probe(fr24Configured(), () => loadFr24Flight(operatingIdent));
+      if (operatingFr.flight) {
+        console.info(JSON.stringify({
+          event: "fr24_operating_callsign_match",
+          requested: ident,
+          operating: operatingIdent,
+          flightId: fa.flight.flightId,
+        }));
+        fr = operatingFr;
+      }
+    }
+  }
+
   return {
     flightaware: fa.flight,
     fr24: fr.flight,
