@@ -355,8 +355,9 @@ function FlightRadar({ story }: { story: FlightStory }) {
 }
 
 function clearlyAirborne(story: FlightStory) {
-  if (story.times.airborne === true) return true;
   const ac = story.aircraft;
+  if (ac?.onGround === true) return false;
+  if (story.times.airborne === true) return true;
   if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon) || ac.onGround !== false) return false;
   const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : ac.seenSec ?? null;
   if (age != null && age > 45) return false;
@@ -390,6 +391,7 @@ export function MovementMap({ story }: { story: FlightStory }) {
   const [lastDeparture, setLastDeparture] = useState<AircraftSnapshot | null>(null);
   const [lastArrival, setLastArrival] = useState<AircraftSnapshot | null>(null);
   const userSelectedTab = useRef(false);
+  const autoArrivalSwitched = useRef(false);
 
   useEffect(() => {
     void queryClient.prefetchQuery(surfaceQueryOptions(story.origin));
@@ -398,6 +400,7 @@ export function MovementMap({ story }: { story: FlightStory }) {
 
   useEffect(() => {
     userSelectedTab.current = false;
+    autoArrivalSwitched.current = false;
     setTab(initialTab(story));
     setLastDeparture(loadSavedGround(flightKey, "departure"));
     setLastArrival(loadSavedGround(flightKey, "arrival"));
@@ -406,11 +409,12 @@ export function MovementMap({ story }: { story: FlightStory }) {
   const airborneNow = clearlyAirborne(story);
   const arrivedGroundNow = clearlyArrivedOnGround(story);
   useEffect(() => {
-    if (arrivedGroundNow && tab !== "arrival") {
+    if (arrivedGroundNow && !autoArrivalSwitched.current) {
+      autoArrivalSwitched.current = true;
       setTab("arrival");
       return;
     }
-    if (!userSelectedTab.current && airborneNow && tab !== "flight") setTab("flight");
+    if (!autoArrivalSwitched.current && !userSelectedTab.current && airborneNow && tab !== "flight") setTab("flight");
   }, [airborneNow, arrivedGroundNow, tab]);
 
   useEffect(() => {
@@ -468,7 +472,7 @@ export function MovementMap({ story }: { story: FlightStory }) {
   const arrivalLive = Boolean(current && currentDestNm <= 6 && (
     current.onGround === true || story.currentStage === "taxi_in" || story.currentStage === "gate"
   ));
-  const planeInFlight = airborneNow || ["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(story.currentStage);
+  const planeInFlight = airborneNow || ["ride", "arrival", "final_approach"].includes(story.currentStage);
 
   const departureAircraft = departureLive ? current : lastDeparture;
   const arrivalAircraft = arrivalLive ? current : lastArrival;
