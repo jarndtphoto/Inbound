@@ -296,8 +296,8 @@ function GroundMovementMap({
                   <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
                 </g>
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale})`}>
-                  <text x="36" y="-12" className="fill-fg" fontSize="24" fontWeight="900">{story.iata}</text>
-                  <text x="36" y="14" className="fill-muted" fontSize="15" fontWeight="700">{frozen ? "last known" : `${Math.round(aircraft.gsKt ?? 0)} kt`}</text>
+                  <text x="38" y="-13" className="fill-fg" fontSize="32" fontWeight="900">{story.iata}</text>
+                  <text x="38" y="17" className="fill-muted" fontSize="21" fontWeight="800">{frozen ? "last known" : `${Math.round(aircraft.gsKt ?? 0)} kt`}</text>
                 </g>
               </>
             ) : null}
