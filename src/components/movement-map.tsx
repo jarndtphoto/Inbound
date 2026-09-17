@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const W = 800;
 const H = 800;
 const MAX_GROUND_ZOOM = 64;
+const INITIAL_GROUND_ZOOM = 7;
 
 type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
@@ -81,6 +82,15 @@ function useGroundZoom(resetKey: string) {
     }));
   };
 
+  const focusOn = (x: number, y: number, scale = INITIAL_GROUND_ZOOM) => {
+    const nextScale = Math.max(1, Math.min(MAX_GROUND_ZOOM, scale));
+    setView(clampView({
+      scale: nextScale,
+      x: W / 2 - x * nextScale,
+      y: H / 2 - y * nextScale,
+    }));
+  };
+
   useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
@@ -146,6 +156,7 @@ function useGroundZoom(resetKey: string) {
   return {
     boxRef,
     view,
+    focusOn,
     zoomIn: () => zoomAt(2.5),
     zoomOut: () => zoomAt(1 / 2.5),
     reset: () => setView({ scale: 1, x: 0, y: 0 }),
@@ -209,6 +220,7 @@ function GroundMovementMap({
     retry: 1,
   });
   const zoom = useGroundZoom(`${story.iata}:${airport.iata}:${mode.kind}`);
+  const autoFocusRef = useRef("");
   const cos = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
   const latHalf = 0.068;
   const lonHalf = latHalf / cos;
@@ -228,6 +240,13 @@ function GroundMovementMap({
     return [...unique.entries()].slice(0, 120);
   }, [features]);
   const plane = aircraft ? project(aircraft) : null;
+  useEffect(() => {
+    if (!plane || !aircraft) return;
+    const key = `${story.iata}:${airport.iata}:${mode.kind}`;
+    if (autoFocusRef.current === key) return;
+    autoFocusRef.current = key;
+    zoom.focusOn(plane.x, plane.y, INITIAL_GROUND_ZOOM);
+  }, [story.iata, airport.iata, mode.kind, Boolean(plane)]);
   const trailPoints = trail
     .filter((p) => haversineNm(p, airport) < 15)
     .map((p) => { const q = project(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; })
@@ -323,7 +342,20 @@ function FlightRadar({ story }: { story: FlightStory }) {
   );
 }
 
+function clearlyAirborne(story: FlightStory) {
+  if (story.times.airborne === true) return true;
+  const ac = story.aircraft;
+  if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon) || ac.onGround !== false) return false;
+  const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : ac.seenSec ?? null;
+  if (age != null && age > 45) return false;
+  const altFt = typeof ac.altFt === "number" && Number.isFinite(ac.altFt) ? ac.altFt : null;
+  const gsKt = typeof ac.gsKt === "number" && Number.isFinite(ac.gsKt) ? ac.gsKt : null;
+  const originNm = haversineNm(ac, story.origin);
+  return (altFt != null && altFt >= 1200) || (gsKt != null && gsKt >= 165) || originNm >= 4;
+}
+
 function initialTab(story: FlightStory): MapTab {
+  if (clearlyAirborne(story)) return "flight";
   if (story.currentStage === "taxi_in" || story.currentStage === "gate") return "arrival";
   if (story.currentStage === "origin_gate" || story.currentStage === "push" || story.currentStage === "taxi") return "departure";
   return "flight";
@@ -335,12 +367,19 @@ export function MovementMap({ story }: { story: FlightStory }) {
   const [tab, setTab] = useState<MapTab>(() => initialTab(story));
   const [lastDeparture, setLastDeparture] = useState<AircraftSnapshot | null>(null);
   const [lastArrival, setLastArrival] = useState<AircraftSnapshot | null>(null);
+  const userSelectedTab = useRef(false);
 
   useEffect(() => {
+    userSelectedTab.current = false;
     setTab(initialTab(story));
     setLastDeparture(loadSavedGround(flightKey, "departure"));
     setLastArrival(loadSavedGround(flightKey, "arrival"));
   }, [flightKey]);
+
+  const airborneNow = clearlyAirborne(story);
+  useEffect(() => {
+    if (!userSelectedTab.current && airborneNow && tab !== "flight") setTab("flight");
+  }, [airborneNow, tab]);
 
   useEffect(() => {
     const ac = story.aircraft;
@@ -397,7 +436,7 @@ export function MovementMap({ story }: { story: FlightStory }) {
   const arrivalLive = Boolean(current && currentDestNm <= 6 && (
     current.onGround === true || story.currentStage === "taxi_in" || story.currentStage === "gate"
   ));
-  const planeInFlight = story.times.airborne === true || ["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(story.currentStage);
+  const planeInFlight = airborneNow || ["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(story.currentStage);
 
   const departureAircraft = departureLive ? current : lastDeparture;
   const arrivalAircraft = arrivalLive ? current : lastArrival;
@@ -419,7 +458,7 @@ export function MovementMap({ story }: { story: FlightStory }) {
             type="button"
             role="tab"
             aria-selected={tab === item.id}
-            onClick={() => setTab(item.id)}
+            onClick={() => { userSelectedTab.current = true; setTab(item.id); }}
             className={`min-h-10 rounded-lg px-2 py-2 text-center text-xs font-medium transition-colors ${tab === item.id ? "bg-accent text-accent-fg" : "text-muted"}`}
           >
             {item.label}
