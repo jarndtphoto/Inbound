@@ -2,6 +2,8 @@ import { emptyTimes, type NormalizedFlight, type NormalizedPosition } from "./fl
 
 const BASE = "https://fr24api.flightradar24.com/api";
 const cache = new Map<string, { at: number; value: unknown }>();
+const lastGood = new Map<string, { at: number; flight: NormalizedFlight }>();
+const LAST_GOOD_TTL_MS = 25_000;
 const unix = (v: unknown) => typeof v === "number" ? v : typeof v === "string" ? Math.floor(new Date(v).getTime() / 1000) || null : null;
 
 async function get(path: string, ttlMs: number) {
@@ -63,9 +65,27 @@ async function hydrateFr24Flight(f: any, fallbackIdent: string): Promise<Normali
 
 async function loadFr24ByFilter(filter: "callsigns" | "registrations", value: string): Promise<NormalizedFlight | null> {
   if (!process.env.FR24_API_TOKEN?.trim()) return null;
+  const normalizedValue = value.trim().toUpperCase();
+  const stickyKey = `${filter}:${normalizedValue}`;
   const data: any = await get(`/live/flight-positions/full?${filter}=${encodeURIComponent(value)}`, 2_500);
   const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
-  return hydrateFr24Flight(rows[0], value);
+  const flight = await hydrateFr24Flight(rows[0], value);
+  if (flight) {
+    lastGood.set(stickyKey, { at: Date.now(), flight });
+    return flight;
+  }
+  const previous = lastGood.get(stickyKey);
+  if (previous && Date.now() - previous.at <= LAST_GOOD_TTL_MS) {
+    console.info(JSON.stringify({
+      event: "fr24_last_good_reuse",
+      filter,
+      value: normalizedValue,
+      ageMs: Date.now() - previous.at,
+      flightId: previous.flight.flightId ?? null,
+    }));
+    return previous.flight;
+  }
+  return null;
 }
 
 export async function loadFr24Flight(ident: string): Promise<NormalizedFlight | null> {
