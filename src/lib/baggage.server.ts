@@ -13,7 +13,7 @@ const HNL_PUBLIC_URL = "https://airports.hawaii.gov/hnl/flights/";
 const LAX_BOARD_URL = "https://www.flylax.com/lax-baggage-claim";
 const ALASKA_STATUS_ROOT = "https://www.alaskaair.com/status";
 const FLIGHTVIEW_ROOT = "https://www.flightview.com/flight-tracker";
-const FLIGHTVIEW_BAGGAGE_AIRPORTS = new Set(["ORD", "MDW", "MCO"]);
+const FLIGHTVIEW_BAGGAGE_AIRPORTS = new Set(["LAX", "ORD", "MDW", "MCO"]);
 
 type CachedHtml = { html: string; at: number };
 const htmlCache = new Map<string, CachedHtml>();
@@ -164,36 +164,65 @@ function flightViewStatusUrl(leg: BaggageLeg) {
   return `${FLIGHTVIEW_ROOT}/${airline}/${number}?date=${encodeURIComponent(leg.date)}&depapt=${encodeURIComponent(leg.origin)}`;
 }
 
-export async function loadBaggage(leg: BaggageLeg): Promise<BaggageResult> {
+async function tryHnl(leg: BaggageLeg): Promise<BaggageResult | null> {
+  if (leg.destination !== "HNL") return null;
   try {
-    if (leg.destination === "HNL") {
-      const board = await fetchBoard("HNL", HNL_BOARD_URL, (html) => html.includes('role="row"'));
-      const airportResult = withSource(parseBaggage(board.html, leg, board.at), "Honolulu airport arrivals board", HNL_PUBLIC_URL);
-      if (airportResult.status !== "unavailable") return airportResult;
-    }
-    if (leg.destination === "LAX") {
-      const board = await fetchBoard("LAX", LAX_BOARD_URL, (html) => /baggage/i.test(html) && /carousel/i.test(html));
-      const airportResult = withSource(parseLaxBaggage(board.html, leg, board.at), "LAX baggage claim", LAX_BOARD_URL);
-      if (airportResult.status !== "unavailable") return airportResult;
-    }
-
-    if (FLIGHTVIEW_BAGGAGE_AIRPORTS.has(leg.destination)) {
-      const flightViewUrl = flightViewStatusUrl(leg);
-      if (flightViewUrl) {
-        const page = await fetchBoard(`FV:${leg.flight}:${leg.origin}:${leg.destination}:${leg.date}`, flightViewUrl, (html) => /flight status/i.test(html) && /arrival/i.test(html));
-        const flightViewResult = withSource(parseFlightViewBaggage(page.html, leg, page.at), "FlightView by OAG", flightViewUrl);
-        if (flightViewResult.status !== "unavailable") return flightViewResult;
-      }
-    }
-
-    const alaskaUrl = alaskaStatusUrl(leg);
-    if (alaskaUrl) {
-      const board = await fetchBoard(`AS:${leg.flight}:${leg.date}`, alaskaUrl, (html) => /flight status/i.test(html) && /carousel/i.test(html));
-      return withSource(parseAlaskaBaggage(board.html, leg, board.at), "Alaska Airlines flight status", alaskaUrl);
-    }
-
-    return { status: "unavailable", checkedAt: Date.now() };
+    const board = await fetchBoard("HNL", HNL_BOARD_URL, (html) => html.includes('role="row"'));
+    const result = withSource(parseBaggage(board.html, leg, board.at), "Honolulu airport arrivals board", HNL_PUBLIC_URL);
+    return result.status === "unavailable" ? null : result;
   } catch {
-    return { status: "unavailable", checkedAt: Date.now() };
+    return null;
   }
+}
+
+async function tryLaxBoard(leg: BaggageLeg): Promise<BaggageResult | null> {
+  if (leg.destination !== "LAX") return null;
+  try {
+    const board = await fetchBoard("LAX", LAX_BOARD_URL, (html) => /baggage/i.test(html) && /carousel/i.test(html));
+    const result = withSource(parseLaxBaggage(board.html, leg, board.at), "LAX baggage claim", LAX_BOARD_URL);
+    return result.status === "unavailable" ? null : result;
+  } catch {
+    return null;
+  }
+}
+
+async function tryFlightView(leg: BaggageLeg): Promise<BaggageResult | null> {
+  if (!FLIGHTVIEW_BAGGAGE_AIRPORTS.has(leg.destination)) return null;
+  const flightViewUrl = flightViewStatusUrl(leg);
+  if (!flightViewUrl) return null;
+  try {
+    const page = await fetchBoard(`FV:${leg.flight}:${leg.origin}:${leg.destination}:${leg.date}`, flightViewUrl, (html) => /flight status/i.test(html) && /arrival/i.test(html));
+    const result = withSource(parseFlightViewBaggage(page.html, leg, page.at), "FlightView by OAG", flightViewUrl);
+    return result.status === "unavailable" ? null : result;
+  } catch {
+    return null;
+  }
+}
+
+async function tryAlaska(leg: BaggageLeg): Promise<BaggageResult | null> {
+  const alaskaUrl = alaskaStatusUrl(leg);
+  if (!alaskaUrl) return null;
+  try {
+    const board = await fetchBoard(`AS:${leg.flight}:${leg.date}`, alaskaUrl, (html) => /flight status/i.test(html) && /carousel/i.test(html));
+    const result = withSource(parseAlaskaBaggage(board.html, leg, board.at), "Alaska Airlines flight status", alaskaUrl);
+    return result.status === "unavailable" ? null : result;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadBaggage(leg: BaggageLeg): Promise<BaggageResult> {
+  const hnl = await tryHnl(leg);
+  if (hnl) return hnl;
+
+  const lax = await tryLaxBoard(leg);
+  if (lax) return lax;
+
+  const flightView = await tryFlightView(leg);
+  if (flightView) return flightView;
+
+  const alaska = await tryAlaska(leg);
+  if (alaska) return alaska;
+
+  return { status: "unavailable", checkedAt: Date.now() };
 }
