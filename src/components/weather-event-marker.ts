@@ -14,6 +14,14 @@ export function WeatherEventMarker({ eventNumber, entry, x, y, inverseScale = 1 
     transform: `translate(${x} ${y}) scale(${inverseScale})`
   }, [
     createElement("circle", {
+      key: "mask",
+      cx: 0,
+      cy: 0,
+      r: 11,
+      className: "fill-bg",
+      stroke: "none"
+    }),
+    createElement("circle", {
       key: "circle",
       cx: 0,
       cy: 0,
