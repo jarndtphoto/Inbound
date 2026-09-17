@@ -1,11 +1,27 @@
 import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { parseFlightQuery } from "@/lib/flight-parse";
 import { airlineStatusLink } from "@/lib/airline-status";
+import { getAirportSurface } from "@/lib/airport-surface";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useId } from "react";
 import type { FlightStory } from "@/lib/types";
 import { isLanded, nextStep, RideOutlookText } from "@/lib/traveler";
 import { destinationGateTime } from "@/lib/passenger-time";
+
+const SURFACE_CACHE_MS = 12 * 60 * 60_000;
+
+function airportSurfaceQuery(airport: FlightStory["origin"]) {
+  return {
+    queryKey: ["airport-surface", airport.icao, airport.lat.toFixed(3), airport.lon.toFixed(3)] as const,
+    queryFn: () => getAirportSurface({ data: { airport: airport.icao, lat: airport.lat, lon: airport.lon } }),
+    staleTime: SURFACE_CACHE_MS,
+    gcTime: SURFACE_CACHE_MS,
+    retry: 1,
+  };
+}
+
 export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:FlightStory;failed?:boolean;onTrackInbound?:(flight:string)=>void}) {
+  const queryClient=useQueryClient();
   const [now,setNow]=useState(story.fetchedAt);
   const [onward,setOnward]=useState("");
   const onwardId=useId();
@@ -13,6 +29,10 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
   const validOnward=Boolean(onwardFlight && !onwardFlight.registration && onwardFlight.callsign!==parseFlightQuery(story.callsign)?.callsign);
   useEffect(()=>setOnward(""),[story.callsign,story.flightId]);
   useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),15000);setNow(Date.now());return()=>clearInterval(t)},[]);
+  useEffect(()=>{
+    void queryClient.prefetchQuery(airportSurfaceQuery(story.origin));
+    void queryClient.prefetchQuery(airportSurfaceQuery(story.dest));
+  },[queryClient,story.origin.icao,story.origin.lat,story.origin.lon,story.dest.icao,story.dest.lat,story.dest.lon]);
   const step=nextStep(story,now,failed);
   const inbound=story.inbound.watch[0];
   const inboundFlight=inbound?.callsign ? parseFlightQuery(inbound.callsign) : null;
