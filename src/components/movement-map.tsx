@@ -11,11 +11,7 @@ const H = 800;
 
 type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
-
-type GroundMode = {
-  kind: "departure" | "arrival";
-  airport: FlightStory["origin"];
-};
+type GroundMode = { kind: "departure" | "arrival"; airport: FlightStory["origin"] };
 
 function groundMode(story: FlightStory): GroundMode | null {
   const ac = story.aircraft;
@@ -23,34 +19,40 @@ function groundMode(story: FlightStory): GroundMode | null {
 
   const originNm = haversineNm(ac, story.origin);
   const destNm = haversineNm(ac, story.dest);
-  const nearestNm = Math.min(originNm, destNm);
-  if (nearestNm > 14) return null;
-
   const altFt = typeof ac.altFt === "number" && Number.isFinite(ac.altFt) ? ac.altFt : null;
   const gsKt = typeof ac.gsKt === "number" && Number.isFinite(ac.gsKt) ? ac.gsKt : null;
-  const positionAge = typeof story.providers?.chosenPositionAgeSec === "number"
-    ? story.providers.chosenPositionAgeSec
-    : null;
-  const freshEnough = positionAge == null || positionAge <= 120;
+  const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : null;
+  if (age != null && age > 120) return null;
 
-  const surfaceLike = ac.onGround
-    || (nearestNm <= 4 && (altFt == null || altFt <= 1200) && (gsKt == null || gsKt <= 110))
-    || (nearestNm <= 2 && (altFt == null || altFt <= 2500));
+  const departureStage = story.currentStage === "origin_gate" || story.currentStage === "push" || story.currentStage === "taxi";
+  const arrivalStage = story.currentStage === "taxi_in" || story.currentStage === "gate";
 
-  if (!freshEnough || !surfaceLike) return null;
-  if (destNm + 1.5 < originNm) return { kind: "arrival", airport: story.dest };
-  return { kind: "departure", airport: story.origin };
+  // Stay on the airport surface through taxi and takeoff roll. Do not switch
+  // back to the route map until position data itself confirms a real climb or
+  // that the aircraft has clearly left the airport environment.
+  const confirmedAirborne = ac.onGround === false && (
+    (altFt != null && altFt > 1800) || originNm > 4 || (gsKt != null && gsKt > 165)
+  );
+  const departureGround = originNm <= 14 && !confirmedAirborne && (
+    departureStage || ac.onGround === true ||
+    (originNm <= 4 && (altFt == null || altFt <= 1800) && (gsKt == null || gsKt <= 165))
+  );
+  if (departureGround) return { kind: "departure", airport: story.origin };
+
+  // Arrival ground view should require actual ground evidence; low altitude on
+  // final approach by itself is not enough.
+  const arrivalGround = destNm <= 14 && (arrivalStage || ac.onGround === true);
+  if (arrivalGround) return { kind: "arrival", airport: story.dest };
+  return null;
 }
 
 function clampView(v: View): View {
   const scale = Math.max(1, Math.min(8, v.scale));
   if (scale <= 1.001) return { scale: 1, x: 0, y: 0 };
-  const minX = W - W * scale;
-  const minY = H - H * scale;
   return {
     scale,
-    x: Math.min(0, Math.max(minX, v.x)),
-    y: Math.min(0, Math.max(minY, v.y)),
+    x: Math.min(0, Math.max(W - W * scale, v.x)),
+    y: Math.min(0, Math.max(H - H * scale, v.y)),
   };
 }
 
@@ -66,12 +68,8 @@ function useGroundZoom(resetKey: string) {
 
   const toSvg = (el: HTMLElement, cx: number, cy: number) => {
     const r = el.getBoundingClientRect();
-    return {
-      x: ((cx - r.left) / Math.max(1, r.width)) * W,
-      y: ((cy - r.top) / Math.max(1, r.height)) * H,
-    };
+    return { x: ((cx - r.left) / Math.max(1, r.width)) * W, y: ((cy - r.top) / Math.max(1, r.height)) * H };
   };
-
   const zoomAt = (factor: number, mx = W / 2, my = H / 2) => {
     const current = viewRef.current;
     const nextScale = Math.max(1, Math.min(8, current.scale * factor));
@@ -86,26 +84,19 @@ function useGroundZoom(resetKey: string) {
     const el = boxRef.current;
     if (!el) return;
     const distance = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length >= 2) {
         e.preventDefault();
         const a = e.touches[0]!;
         const b = e.touches[1]!;
         const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
-        pinchRef.current = {
-          distance: Math.max(1, distance(a, b)),
-          view: viewRef.current,
-          mx: mid.x,
-          my: mid.y,
-        };
+        pinchRef.current = { distance: Math.max(1, distance(a, b)), view: viewRef.current, mx: mid.x, my: mid.y };
         dragRef.current = null;
       } else if (e.touches.length === 1 && viewRef.current.scale > 1.01) {
         const t = e.touches[0]!;
         dragRef.current = { cx: t.clientX, cy: t.clientY, x: viewRef.current.x, y: viewRef.current.y };
       }
     };
-
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length >= 2 && pinchRef.current) {
         e.preventDefault();
@@ -124,17 +115,17 @@ function useGroundZoom(resetKey: string) {
         e.preventDefault();
         const t = e.touches[0]!;
         const r = el.getBoundingClientRect();
-        const dx = ((t.clientX - dragRef.current.cx) / Math.max(1, r.width)) * W;
-        const dy = ((t.clientY - dragRef.current.cy) / Math.max(1, r.height)) * H;
-        setView(clampView({ scale: viewRef.current.scale, x: dragRef.current.x + dx, y: dragRef.current.y + dy }));
+        setView(clampView({
+          scale: viewRef.current.scale,
+          x: dragRef.current.x + ((t.clientX - dragRef.current.cx) / Math.max(1, r.width)) * W,
+          y: dragRef.current.y + ((t.clientY - dragRef.current.cy) / Math.max(1, r.height)) * H,
+        }));
       }
     };
-
     const onTouchEnd = (e: TouchEvent) => {
       if (e.touches.length < 2) pinchRef.current = null;
       if (e.touches.length === 0) dragRef.current = null;
     };
-
     el.addEventListener("touchstart", onTouchStart, { passive: false });
     el.addEventListener("touchmove", onTouchMove, { passive: false });
     el.addEventListener("touchend", onTouchEnd);
@@ -147,7 +138,13 @@ function useGroundZoom(resetKey: string) {
     };
   }, []);
 
-  return { boxRef, view, zoomIn: () => zoomAt(1.6), zoomOut: () => zoomAt(1 / 1.6), reset: () => setView({ scale: 1, x: 0, y: 0 }) };
+  return {
+    boxRef,
+    view,
+    zoomIn: () => zoomAt(1.6),
+    zoomOut: () => zoomAt(1 / 1.6),
+    reset: () => setView({ scale: 1, x: 0, y: 0 }),
+  };
 }
 
 function useMovementTrail(story: FlightStory) {
@@ -166,23 +163,22 @@ function useMovementTrail(story: FlightStory) {
   return trail;
 }
 
-function SurfaceShape({ feature, project }: { feature: SurfaceFeature; project: (p: {lat:number;lon:number}) => {x:number;y:number} }) {
+function SurfaceShape({ feature, project }: { feature: SurfaceFeature; project: (p: { lat: number; lon: number }) => { x: number; y: number } }) {
+  if (feature.points.length < 2) return null;
   const points = feature.points.map((p) => {
     const q = project(p);
     return `${q.x.toFixed(1)},${q.y.toFixed(1)}`;
   }).join(" ");
-  if (!points) return null;
   if (feature.kind === "apron" || feature.kind === "terminal") {
-    return <polygon points={points} className={feature.kind === "terminal" ? "fill-fg/14 stroke-fg/35" : "fill-fg/7 stroke-fg/20"} strokeWidth="1" />;
+    return <polygon points={points} className={feature.kind === "terminal" ? "fill-fg/14 stroke-fg/35" : "fill-fg/7 stroke-fg/20"} strokeWidth="1" vectorEffect="non-scaling-stroke" />;
   }
   if (feature.kind === "runway") {
-    return <polyline points={points} className="fill-none stroke-fg/65" strokeWidth="13" strokeLinecap="butt" />;
+    return <polyline points={points} className="fill-none stroke-fg/65" strokeWidth="7" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />;
   }
   if (feature.kind === "taxiway") {
-    return <polyline points={points} className="fill-none stroke-accent/55" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />;
+    return <polyline points={points} className="fill-none stroke-accent/55" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />;
   }
-  const q = project(feature.points[0]!);
-  return <circle cx={q.x} cy={q.y} r={feature.kind === "gate" ? 2.6 : 2} className={feature.kind === "gate" ? "fill-accent" : "fill-muted"} />;
+  return null;
 }
 
 function GroundMovementMap({ story, mode, trail }: { story: FlightStory; mode: GroundMode; trail: TrackPoint[] }) {
@@ -198,11 +194,21 @@ function GroundMovementMap({ story, mode, trail }: { story: FlightStory; mode: G
   const cos = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
   const latHalf = 0.068;
   const lonHalf = latHalf / cos;
-  const project = (p: {lat:number;lon:number}) => ({
+  const project = (p: { lat: number; lon: number }) => ({
     x: W / 2 + ((p.lon - airport.lon) / lonHalf) * (W / 2 - 28),
     y: H / 2 - ((p.lat - airport.lat) / latHalf) * (H / 2 - 28),
   });
   const features = (surfaceQ.data as AirportSurface | undefined)?.features ?? [];
+  const taxiwayLabels = useMemo(() => {
+    const unique = new Map<string, SurfaceFeature>();
+    for (const feature of features) {
+      if (feature.kind !== "taxiway" || feature.points.length < 2) continue;
+      const label = (feature.ref || feature.name || "").trim();
+      if (!label || unique.has(label)) continue;
+      unique.set(label, feature);
+    }
+    return [...unique.entries()].slice(0, 80);
+  }, [features]);
   const plane = project(ac);
   const trailPoints = trail
     .filter((p) => haversineNm(p, airport) < 15)
@@ -227,15 +233,24 @@ function GroundMovementMap({ story, mode, trail }: { story: FlightStory; mode: G
         <svg viewBox={`0 0 ${W} ${H}`} className="block h-full w-full" role="img" aria-label={`${airport.iata} airport surface and live aircraft position`}>
           <rect width={W} height={H} className="fill-bg" />
           <g transform={`translate(${zoom.view.x} ${zoom.view.y}) scale(${zoom.view.scale})`}>
-            <g opacity="0.28">
-              {Array.from({length: 9}, (_, i) => <line key={`v-${i}`} x1={i*100} y1="0" x2={i*100} y2={H} className="stroke-fg/15" strokeWidth="1" />)}
-              {Array.from({length: 9}, (_, i) => <line key={`h-${i}`} x1="0" y1={i*100} x2={W} y2={i*100} className="stroke-fg/15" strokeWidth="1" />)}
+            <g opacity="0.12">
+              {Array.from({ length: 9 }, (_, i) => <line key={`v-${i}`} x1={i * 100} y1="0" x2={i * 100} y2={H} className="stroke-fg/15" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
+              {Array.from({ length: 9 }, (_, i) => <line key={`h-${i}`} x1="0" y1={i * 100} x2={W} y2={i * 100} className="stroke-fg/15" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
             </g>
             {features.filter((f) => f.kind === "apron").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "terminal").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "runway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "taxiway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
-            {features.filter((f) => f.kind === "gate" || f.kind === "holding_position").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
+            {zoom.view.scale >= 2.2 ? taxiwayLabels.map(([label, feature]) => {
+              const point = feature.points[Math.floor(feature.points.length / 2)]!;
+              const q = project(point);
+              return (
+                <g key={`taxi-label-${label}`} transform={`translate(${q.x} ${q.y}) scale(${1 / zoom.view.scale})`}>
+                  <rect x="-9" y="-9" width={Math.max(18, label.length * 7 + 10)} height="18" rx="5" className="fill-bg/90 stroke-border" strokeWidth="1" />
+                  <text x="-4" y="4" className="fill-fg" fontSize="10" fontWeight="700">{label}</text>
+                </g>
+              );
+            }) : null}
             {trailPoints ? <polyline points={trailPoints} className="fill-none stroke-accent" strokeWidth={4 / zoom.view.scale} strokeLinecap="round" strokeLinejoin="round" opacity="0.72" /> : null}
             <circle cx={plane.x} cy={plane.y} r={16 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={3 / zoom.view.scale} />
             <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${Number.isFinite(ac.track) ? ac.track : 0})`}>
@@ -266,6 +281,7 @@ function GroundMovementMap({ story, mode, trail }: { story: FlightStory; mode: G
 export function MovementMap({ story }: { story: FlightStory }) {
   const trail = useMovementTrail(story);
   const mode = useMemo(() => groundMode(story), [
+    story.currentStage,
     story.aircraft?.onGround,
     story.aircraft?.lat,
     story.aircraft?.lon,
