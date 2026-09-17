@@ -230,7 +230,7 @@ function GroundMovementMap({
   const cos = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
   const latHalf = 0.068;
   const lonHalf = latHalf / cos;
-  const mapRotationDeg = airport.iata === "MDW" ? 3 : 0;
+  const mapRotationDeg = airport.iata === "MDW" ? -3 : 0;
   const mapRotationRad = mapRotationDeg * Math.PI / 180;
   const project = (p: { lat: number; lon: number }) => {
     const rawX = W / 2 + ((p.lon - airport.lon) / lonHalf) * (W / 2 - 28);
