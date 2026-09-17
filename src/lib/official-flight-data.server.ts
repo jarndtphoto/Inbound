@@ -25,6 +25,23 @@ function operatingIdentFromFlightAware(flight: NormalizedFlight | null): string 
   return match?.[1] ?? null;
 }
 
+function sameAirport(a?: { iata?: string | null; icao?: string | null } | null, b?: { iata?: string | null; icao?: string | null } | null) {
+  if (!a || !b) return false;
+  const aiata = a.iata?.trim().toUpperCase() ?? "";
+  const biata = b.iata?.trim().toUpperCase() ?? "";
+  if (aiata && biata) return aiata === biata;
+  const aicao = a.icao?.trim().toUpperCase() ?? "";
+  const bicao = b.icao?.trim().toUpperCase() ?? "";
+  return Boolean(aicao && bicao && aicao === bicao);
+}
+
+function registrationCandidateMatchesLeg(candidate: NormalizedFlight, authoritative: NormalizedFlight) {
+  const operating = operatingIdentFromFlightAware(authoritative);
+  const candidateCallsign = candidate.callsign?.trim().toUpperCase() ?? "";
+  if (operating && candidateCallsign === operating) return true;
+  return sameAirport(candidate.origin, authoritative.origin) && sameAirport(candidate.destination, authoritative.destination);
+}
+
 export async function loadOfficialFlightData(ident: string) {
   const fa = await probe(aeroApiConfigured(), () => loadAeroApiFlight(ident));
   let fr = await probe(fr24Configured(), () => loadFr24Flight(ident));
@@ -49,7 +66,7 @@ export async function loadOfficialFlightData(ident: string) {
     const registration = fa.flight.registration.trim().toUpperCase();
     if (registration) {
       const registrationFr = await probe(fr24Configured(), () => loadFr24FlightByRegistration(registration));
-      if (registrationFr.flight) {
+      if (registrationFr.flight && registrationCandidateMatchesLeg(registrationFr.flight, fa.flight)) {
         console.info(JSON.stringify({
           event: "fr24_registration_match",
           requested: ident,
@@ -57,6 +74,17 @@ export async function loadOfficialFlightData(ident: string) {
           flightId: fa.flight.flightId,
         }));
         fr = registrationFr;
+      } else if (registrationFr.flight) {
+        console.warn(JSON.stringify({
+          event: "fr24_registration_wrong_leg_rejected",
+          requested: ident,
+          registration,
+          requestedOrigin: fa.flight.origin?.iata ?? fa.flight.origin?.icao ?? null,
+          requestedDestination: fa.flight.destination?.iata ?? fa.flight.destination?.icao ?? null,
+          candidateOrigin: registrationFr.flight.origin?.iata ?? registrationFr.flight.origin?.icao ?? null,
+          candidateDestination: registrationFr.flight.destination?.iata ?? registrationFr.flight.destination?.icao ?? null,
+          candidateCallsign: registrationFr.flight.callsign ?? null,
+        }));
       }
     }
   }
