@@ -1,4 +1,4 @@
-import { RouteMap } from "@/components/route-map";
+import { RouteMap } from "./route-map";
 import { getAirportSurface } from "@/lib/airport-surface";
 import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.server";
 import { haversineNm } from "@/lib/geo";
