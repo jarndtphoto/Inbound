@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import { loadFlightStory, loadLiveBoard } from "./story.server";
-import { loadAeroFlight } from "./aeroapi.server";
 import { readFlightResume, type FlightResume } from "./flight-resume";
 import { haversineNm } from "./geo";
 import { identityCompatible, normalizedToLive, positionAgeSec, type NormalizedPosition } from "./flight-data";
@@ -94,6 +93,9 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
       flightSpeedStreak: 0, flightSpeedStreakSeenAt: null } } : {}) };
   }
 
+  // A confirmed takeoff roll must not regress to At gate merely because the next
+  // FR24 sample is late or missing. Keep the last confirmed roll until fresh FR24
+  // shows a rejected takeoff/slow runway exit, or airborne logic advances to Flight.
   if (priorStage === "takeoff_roll" && !freshSurface) {
     return { ...story, currentStage: TAKEOFF_ROLL_STAGE as FlightStory["currentStage"],
       ...(resumeBase ? { resume: { ...resumeBase, departureStage: "takeoff_roll" } } : {}) };
@@ -127,6 +129,12 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   return stage === current && resume === story.resume ? story : { ...story, currentStage: stage, resume };
 }
 
+/**
+ * Reject a movement-detected pushback timestamp that cannot plausibly belong to
+ * this flight instance. A detected time may be late (we can miss tug movement),
+ * but it must not predate this leg's scheduled pushback by more than one hour.
+ * Provider-published actual gate-out is never altered here.
+ */
 export function sanitizeDetectedPushTime(story: FlightStory): FlightStory {
   const t = story.times;
   const detected = t.pushSource === "live_detected" || t.pushSource === "track_detected";
@@ -173,61 +181,16 @@ export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightR
     ...(story.resume ? { resume: { ...story.resume, detectedPushUnix: null } } : {}) };
 }
 
-function sameProviderLeg(story: FlightStory, aware: Awaited<ReturnType<typeof loadAeroFlight>>) {
-  if (!aware) return false;
-  const originMatch = !aware.originIcao || aware.originIcao === story.origin.icao || aware.originIata === story.origin.iata;
-  const destMatch = !aware.destIcao || aware.destIcao === story.dest.icao || aware.destIata === story.dest.iata;
-  const actual = aware.gateOut?.actual;
-  const scheduled = story.times.origPushUnix ?? story.times.pushUnix ?? null;
-  const plausibleTime = actual == null || scheduled == null || Math.abs(actual - scheduled) <= 18 * 60 * 60;
-  return originMatch && destMatch && plausibleTime;
-}
-
-export async function preferFlightAwareActualPush(story: FlightStory): Promise<FlightStory> {
-  const aware = await loadAeroFlight(story.callsign);
-  const actual = aware?.gateOut?.actual;
-  if (!Number.isFinite(actual) || !sameProviderLeg(story, aware)) return story;
-  const actualUnix = actual as number;
-  const scheduled = story.times.origPushUnix ?? actualUnix;
-  const delayRaw = Math.round((actualUnix - scheduled) / 60);
-  const delayMin = Math.abs(delayRaw) < 5 ? 0 : delayRaw;
-  let push: string;
-  try {
-    push = new Intl.DateTimeFormat("en-US", {
-      timeZone: story.origin.tz,
-      hour: "numeric",
-      minute: "2-digit",
-      timeZoneName: "short",
-    }).format(actualUnix * 1000);
-  } catch {
-    push = new Date(actualUnix * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
-  return {
-    ...story,
-    times: {
-      ...story.times,
-      pushed: true,
-      push,
-      pushUnix: actualUnix,
-      pushKind: "actual",
-      pushSource: "provider_actual",
-      delayMin,
-    },
-    ...(story.resume ? { resume: { ...story.resume, detectedPushUnix: null } } : {}),
-  };
-}
-
 export const getFlightStory = createServerFn({ method: "POST" })
   .validator((input: { q: string; fresh?: boolean; resume?: FlightResume }) => {
     const q = String(input?.q ?? "").trim();
     if (!q) throw new Error("Enter a flight number");
     if (q.length > 16) throw new Error("Flight number is too long");
-    return { q, fresh: Boolean(input.fresh), resume: readFlightResume(input.resume, q) };
+    return { q, fresh: Boolean(input?.fresh), resume: readFlightResume(input?.resume, q) };
   })
   .handler(async ({ data }) => {
     const story = await loadFlightStory(data.q, { fresh: data.fresh, resume: data.resume });
-    const authoritative = await preferFlightAwareActualPush(story);
-    const experimental = applyFr24GroundExperiment(authoritative, data.resume);
+    const experimental = applyFr24GroundExperiment(story, data.resume);
     const progressed = preserveDepartureProgress(experimental, data.resume);
     const sanitized = sanitizeDetectedPushTime(progressed);
     return suppressLateJoinDetectedPush(sanitized, data.resume);
