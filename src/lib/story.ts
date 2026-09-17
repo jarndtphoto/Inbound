@@ -8,6 +8,7 @@ import type { FlightStory } from "./types";
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
 const SURFACE_STAGES = new Set(["origin_gate", "push", "taxi", "taxi_in", "gate"]);
 const FR24_SURFACE_FRESH_SEC = 30;
+const ALT_SURFACE_FRESH_SEC = 60;
 const TAKEOFF_ROLL_STAGE = "Takeoff roll";
 
 function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
@@ -43,6 +44,24 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
   }
 
   if (story.aircraft?.onGround === true && story.providers?.chosenPosition !== "fr24") {
+    const alternate = story.aircraft;
+    const alternateAge = typeof story.providers?.chosenPositionAgeSec === "number"
+      ? story.providers.chosenPositionAgeSec
+      : alternate.seenSec ?? Infinity;
+    const nearOrigin = Number.isFinite(alternate.lat) && Number.isFinite(alternate.lon)
+      ? haversineNm({ lat: story.origin.lat, lon: story.origin.lon }, { lat: alternate.lat, lon: alternate.lon }) <= 6
+      : false;
+    const nearDest = Number.isFinite(alternate.lat) && Number.isFinite(alternate.lon)
+      ? haversineNm({ lat: story.dest.lat, lon: story.dest.lon }, { lat: alternate.lat, lon: alternate.lon }) <= 6
+      : false;
+    if (alternateAge <= ALT_SURFACE_FRESH_SEC && (nearOrigin || nearDest)) {
+      return { ...story, live: true, providers: {
+        ...story.providers,
+        chosenPositionAgeSec: alternateAge,
+        surfaceTelemetryStale: true,
+      }};
+    }
+
     let stage = story.currentStage;
     if (DEPARTURE_SURFACE_STAGES.has(stage)) {
       if (priorStage === "takeoff_roll") stage = "taxi";
