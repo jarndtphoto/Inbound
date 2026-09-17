@@ -12,6 +12,8 @@ const HNL_BOARD_URL = "https://tracker.flightview.com/FVAccess3/tools/fids/fidsD
 const HNL_PUBLIC_URL = "https://airports.hawaii.gov/hnl/flights/";
 const LAX_BOARD_URL = "https://www.flylax.com/lax-baggage-claim";
 const ALASKA_STATUS_ROOT = "https://www.alaskaair.com/status";
+const FLIGHTVIEW_ROOT = "https://www.flightview.com/flight-tracker";
+const FLIGHTVIEW_BAGGAGE_AIRPORTS = new Set(["ORD", "MDW", "MCO"]);
 
 type CachedHtml = { html: string; at: number };
 const htmlCache = new Map<string, CachedHtml>();
@@ -44,7 +46,13 @@ async function fetchBoard(key: string, url: string, recognizable: (html: string)
   const existing = htmlPending.get(key);
   if (existing) return existing;
   const request = (async () => {
-    const response = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { Accept: "text/html" } });
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+        "User-Agent": "Inbound/1.0 (passenger flight companion)",
+      },
+    });
     if (!response.ok) throw new Error("Baggage board unavailable");
     const html = await response.text();
     if (html.length > 4000000 || !recognizable(html)) throw new Error("Unrecognized baggage board");
@@ -91,6 +99,38 @@ export function parseLaxBaggage(html: string, leg: BaggageLeg, checkedAt: number
 }
 
 /**
+ * Parse an exact OAG/FlightView flight page. We only accept baggage from the
+ * Arrival section after confirming the requested origin and destination are on
+ * that page. A missing baggage field is treated as not posted, never guessed.
+ */
+export function parseFlightViewBaggage(html: string, leg: BaggageLeg, checkedAt: number): BaggageResult {
+  const text = cleanCell(html);
+  const departureIndex = text.search(/\bDeparture\b/i);
+  const arrivalIndex = text.search(/\bArrival\b/i);
+  const detailsIndex = text.search(/\bFlight Details\b/i);
+  if (departureIndex < 0 || arrivalIndex <= departureIndex) return { status: "unavailable", checkedAt };
+
+  const departure = text.slice(departureIndex, arrivalIndex);
+  const arrival = text.slice(arrivalIndex, detailsIndex > arrivalIndex ? detailsIndex : undefined);
+  const originMatch = new RegExp(`(?:\\(|\\b)${leg.origin}(?:\\)|\\b)`, "i").test(departure);
+  const destinationMatch = new RegExp(`(?:\\(|\\b)${leg.destination}(?:\\)|\\b)`, "i").test(arrival);
+  if (!originMatch || !destinationMatch) return { status: "unavailable", checkedAt };
+
+  const baggageMatches = [...arrival.matchAll(/\bBaggage\s*:\s*([A-Za-z0-9 -]{1,16}?)(?=\s+(?:More airport info|Flight Details|Terminal|Gate|Scheduled Time|At Gate Time|$))/gi)]
+    .map((m) => m[1].trim())
+    .filter(Boolean);
+  if (baggageMatches.length > 1) return { status: "unavailable", checkedAt };
+
+  const terminalMatches = [...arrival.matchAll(/\bTerminal\s*:\s*([A-Za-z0-9 -]{1,12}?)(?=\s+(?:Gate|Baggage|More airport info|Scheduled Time|At Gate Time|$))/gi)]
+    .map((m) => m[1].trim())
+    .filter(Boolean);
+  const terminal = terminalMatches.length === 1 && validTerminal(terminalMatches[0]) ? terminalMatches[0] : undefined;
+  const carousel = baggageMatches[0] ?? "";
+  if (!validCarousel(carousel)) return { status: "unavailable", checkedAt };
+  return { status: carousel ? "posted" : "not-posted", ...(carousel ? { carousel } : {}), ...(terminal ? { terminal } : {}), checkedAt };
+}
+
+/**
  * Alaska publishes carousel information on its anonymous flight-status pages.
  * Some Alaska flight numbers operate multiple segments in one day, so we only
  * accept a page with exactly one carousel occurrence and both requested airport
@@ -117,6 +157,13 @@ function alaskaStatusUrl(leg: BaggageLeg) {
   return number ? `${ALASKA_STATUS_ROOT}/${number}/${leg.date}` : null;
 }
 
+function flightViewStatusUrl(leg: BaggageLeg) {
+  const match = leg.flight.toUpperCase().match(/^([A-Z0-9]{2})(\d{1,4})$/);
+  if (!match) return null;
+  const [, airline, number] = match;
+  return `${FLIGHTVIEW_ROOT}/${airline}/${number}?date=${encodeURIComponent(leg.date)}&depapt=${encodeURIComponent(leg.origin)}`;
+}
+
 export async function loadBaggage(leg: BaggageLeg): Promise<BaggageResult> {
   try {
     if (leg.destination === "HNL") {
@@ -128,6 +175,15 @@ export async function loadBaggage(leg: BaggageLeg): Promise<BaggageResult> {
       const board = await fetchBoard("LAX", LAX_BOARD_URL, (html) => /baggage/i.test(html) && /carousel/i.test(html));
       const airportResult = withSource(parseLaxBaggage(board.html, leg, board.at), "LAX baggage claim", LAX_BOARD_URL);
       if (airportResult.status !== "unavailable") return airportResult;
+    }
+
+    if (FLIGHTVIEW_BAGGAGE_AIRPORTS.has(leg.destination)) {
+      const flightViewUrl = flightViewStatusUrl(leg);
+      if (flightViewUrl) {
+        const page = await fetchBoard(`FV:${leg.flight}:${leg.origin}:${leg.destination}:${leg.date}`, flightViewUrl, (html) => /flight status/i.test(html) && /arrival/i.test(html));
+        const flightViewResult = withSource(parseFlightViewBaggage(page.html, leg, page.at), "FlightView by OAG", flightViewUrl);
+        if (flightViewResult.status !== "unavailable") return flightViewResult;
+      }
     }
 
     const alaskaUrl = alaskaStatusUrl(leg);
