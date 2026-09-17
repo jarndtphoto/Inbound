@@ -85,11 +85,18 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   const gsKt = live?.gsKt ?? 0;
   if (["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(current)) return story;
 
-  const freshDepartureFr24 = Boolean(live && story.providers?.chosenPosition === "fr24"
-    && !live.extrapolated && (live.seenSec ?? 999) <= FR24_SURFACE_FRESH_SEC
-    && Number.isFinite(live?.lat) && Number.isFinite(live?.lon));
-  const freshSurface = Boolean(freshDepartureFr24 && live?.onGround === true);
-  const nearOrigin = Boolean(freshDepartureFr24
+  const chosenProvider = typeof story.providers?.chosenPosition === "string" ? story.providers.chosenPosition : null;
+  const chosenAge = typeof story.providers?.chosenPositionAgeSec === "number"
+    ? story.providers.chosenPositionAgeSec
+    : live?.seenSec ?? Infinity;
+  const allowedSurfaceAge = chosenProvider === "fr24" ? FR24_SURFACE_FRESH_SEC : ALT_SURFACE_FRESH_SEC;
+  const freshDeparturePosition = Boolean(live
+    && !live.extrapolated
+    && chosenAge <= allowedSurfaceAge
+    && Number.isFinite(live.lat)
+    && Number.isFinite(live.lon));
+  const freshSurface = Boolean(freshDeparturePosition && live?.onGround === true);
+  const nearOrigin = Boolean(freshDeparturePosition
     && Number.isFinite(story.origin?.lat) && Number.isFinite(story.origin?.lon)
     && haversineNm({ lat: story.origin.lat, lon: story.origin.lon }, { lat: live!.lat, lon: live!.lon }) <= 3);
   const resumeBase = story.resume ?? (sameLeg ? prior : undefined);
