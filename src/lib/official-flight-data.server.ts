@@ -1,5 +1,5 @@
 import { loadAeroApiFlight, aeroApiConfigured } from "./flightaware-aeroapi.server.ts";
-import { loadFr24Flight, fr24Configured } from "./fr24.server.ts";
+import { loadFr24Flight, loadFr24FlightByRegistration, fr24Configured } from "./fr24.server.ts";
 import type { NormalizedFlight, ProviderState } from "./flight-data.ts";
 
 function stateFor(error: unknown): ProviderState {
@@ -41,6 +41,22 @@ export async function loadOfficialFlightData(ident: string) {
           flightId: fa.flight.flightId,
         }));
         fr = operatingFr;
+      }
+    }
+  }
+
+  if (fr.state === "NO_MATCH" && fa.flight?.registration) {
+    const registration = fa.flight.registration.trim().toUpperCase();
+    if (registration) {
+      const registrationFr = await probe(fr24Configured(), () => loadFr24FlightByRegistration(registration));
+      if (registrationFr.flight) {
+        console.info(JSON.stringify({
+          event: "fr24_registration_match",
+          requested: ident,
+          registration,
+          flightId: fa.flight.flightId,
+        }));
+        fr = registrationFr;
       }
     }
   }
