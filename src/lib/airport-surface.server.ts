@@ -57,7 +57,7 @@ function parse(elements: OverpassElement[], airport: string, checkedAt: number):
       ...(element.tags?.name ? { name: element.tags.name.slice(0, 80) } : {}),
       points,
     });
-    if (features.length >= 900) break;
+    if (features.length >= 2_000) break;
   }
   return { airport, checkedAt, source: "OpenStreetMap", features };
 }
@@ -67,7 +67,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   if (!/^[A-Z0-9]{3,4}$/.test(airport) || !validCoord(input.lat, -90, 90) || !validCoord(input.lon, -180, 180)) {
     throw new Error("Invalid airport surface request");
   }
-  const key = `${airport}:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
+  const key = `${airport}:surface-v2:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const existing = pending.get(key);
@@ -82,10 +82,13 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
     const north = (input.lat + latPad).toFixed(6);
     const west = (input.lon - lonPad).toFixed(6);
     const east = (input.lon + lonPad).toFixed(6);
-    const query = `[out:json][timeout:12];nwr["aeroway"~"^(runway|taxiway|apron|terminal|gate|holding_position)$"](${south},${west},${north},${east});out geom;`;
+    // Ground radar only renders movement geometry. Do not spend the public-data
+    // result budget on thousands of gate/holding-position nodes at large hubs;
+    // those can crowd out actual taxiway ways such as at ORD.
+    const query = `[out:json][timeout:15];nwr["aeroway"~"^(runway|taxiway|apron|terminal)$"](${south},${west},${north},${east});out geom;`;
     const response = await fetch(OVERPASS, {
       method: "POST",
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(18_000),
       headers: {
         Accept: "application/json",
         "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
