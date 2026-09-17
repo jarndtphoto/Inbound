@@ -8,7 +8,7 @@ import type { FlightStory } from "./types";
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
 const SURFACE_STAGES = new Set(["origin_gate", "push", "taxi", "taxi_in", "gate"]);
 const FR24_SURFACE_FRESH_SEC = 30;
-const ALT_SURFACE_FRESH_SEC = 60;
+const ALT_SURFACE_FRESH_SEC = 120;
 const TAKEOFF_ROLL_STAGE = "Takeoff roll";
 
 function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
