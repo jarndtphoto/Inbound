@@ -13,7 +13,7 @@ const SUPPORTED_AIRPORTS = new Set(["HNL", "LAX"]);
 export function useBaggageStatus({flight,origin,destination,date}:{flight:string;origin:string;destination:string;date:string|null}): BaggageStatusState {
   const key=[flight,origin,destination,date].join("/");
   const [result,setResult]=useState<{key:string;value:BaggageResult}|null>(null);
-  const supported=SUPPORTED_AIRPORTS.has(destination) && Boolean(date);
+  const supported=(SUPPORTED_AIRPORTS.has(destination) || /^AS\d{1,4}$/.test(flight.toUpperCase())) && Boolean(date);
   useEffect(()=>{
     if(!supported || !date)return;
     let cancelled=false;

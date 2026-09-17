@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseBaggage,parseLaxBaggage,loadBaggage} from '../src/lib/baggage.server.ts';
+import {parseBaggage,parseLaxBaggage,parseAlaskaBaggage,loadBaggage} from '../src/lib/baggage.server.ts';
 import {baggageSummary} from '../src/lib/baggage-copy.ts';
 
 const leg={flight:'UA219',origin:'ORD',destination:'HNL',date:'2026-09-13'};
@@ -17,5 +17,11 @@ test('LAX does not borrow another flight carousel',()=>assert.equal(parseLaxBagg
 test('LAX ambiguous duplicate rows fail closed',()=>assert.equal(parseLaxBaggage(laxRow()+laxRow(),laxLeg,456).status,'unavailable'));
 test('LAX blank carousel is not posted',()=>assert.equal(parseLaxBaggage(laxRow('AA123',''),laxLeg,456).status,'not-posted'));
 
-test('unsupported airport does not fetch; upstream errors stay isolated',async()=>{const original=globalThis.fetch;let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('offline')};try{assert.equal((await loadBaggage({...leg,destination:'ATL'})).status,'unavailable');assert.equal(calls,0);assert.equal((await loadBaggage(leg)).status,'unavailable');assert.equal((await loadBaggage(laxLeg)).status,'unavailable')}finally{globalThis.fetch=original}});
+const alaskaLeg={flight:'AS65',origin:'SEA',destination:'ANC',date:'2026-09-16'};
+const alaskaPage=(carousel='1')=>`<html><body><h1>Flight status</h1><p>Seattle (SEA)</p><p>Anchorage (ANC)</p><p>Gate D1</p><p>Carousel ${carousel}</p></body></html>`;
+test('Alaska anonymous status page supplies carousel for exact route',()=>assert.deepEqual(parseAlaskaBaggage(alaskaPage(),alaskaLeg,789),{status:'posted',carousel:'1',checkedAt:789}));
+test('Alaska route mismatch fails closed',()=>assert.equal(parseAlaskaBaggage(alaskaPage(),{...alaskaLeg,destination:'PDX'},789).status,'unavailable'));
+test('Alaska multi-segment page with multiple carousel occurrences is ambiguous',()=>assert.equal(parseAlaskaBaggage(alaskaPage()+alaskaPage('3'),alaskaLeg,789).status,'unavailable'));
+
+test('unsupported airport does not fetch; upstream errors stay isolated',async()=>{const original=globalThis.fetch;let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('offline')};try{assert.equal((await loadBaggage({...leg,destination:'ATL'})).status,'unavailable');assert.equal(calls,0);assert.equal((await loadBaggage(leg)).status,'unavailable');assert.equal((await loadBaggage(laxLeg)).status,'unavailable');assert.equal((await loadBaggage(alaskaLeg)).status,'unavailable')}finally{globalThis.fetch=original}});
 test('collapsed baggage summary never guesses an assignment',()=>{assert.equal(baggageSummary(null),'Not assigned yet');assert.equal(baggageSummary({status:'not-posted',checkedAt:123}),'Not assigned yet');assert.equal(baggageSummary({status:'posted',carousel:'6',checkedAt:123}),'Carousel 6')});
