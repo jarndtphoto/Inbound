@@ -26,7 +26,7 @@ type CacheEntry = { value: AirportSurface; at: number };
 const cache = new Map<string, CacheEntry>();
 const pending = new Map<string, Promise<AirportSurface>>();
 const OVERPASS = "https://overpass-api.de/api/interpreter";
-const CACHE_MS = 12 * 60 * 60_000;
+const CACHE_MS = 24 * 60 * 60_000;
 
 function validCoord(n: unknown, min: number, max: number): n is number {
   return typeof n === "number" && Number.isFinite(n) && n >= min && n <= max;
@@ -67,28 +67,26 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   if (!/^[A-Z0-9]{3,4}$/.test(airport) || !validCoord(input.lat, -90, 90) || !validCoord(input.lon, -180, 180)) {
     throw new Error("Invalid airport surface request");
   }
-  const key = `${airport}:surface-v2:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
+  const key = `${airport}:surface-v3:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const existing = pending.get(key);
   if (existing) return existing;
 
   const request = (async () => {
-    // Roughly 5-7 nm each direction at mid-latitudes. Enough to cover large hubs
-    // such as ORD while keeping the public Overpass request intentionally small.
+    // Ground radar only renders line/polygon movement geometry. Querying ways
+    // directly is materially faster than asking Overpass for nodes + ways +
+    // relations and avoids spending time on objects we never render.
     const latPad = 0.075;
     const lonPad = Math.min(0.12, 0.075 / Math.max(0.45, Math.cos(input.lat * Math.PI / 180)));
     const south = (input.lat - latPad).toFixed(6);
     const north = (input.lat + latPad).toFixed(6);
     const west = (input.lon - lonPad).toFixed(6);
     const east = (input.lon + lonPad).toFixed(6);
-    // Ground radar only renders movement geometry. Do not spend the public-data
-    // result budget on thousands of gate/holding-position nodes at large hubs;
-    // those can crowd out actual taxiway ways such as at ORD.
-    const query = `[out:json][timeout:15];nwr["aeroway"~"^(runway|taxiway|apron|terminal)$"](${south},${west},${north},${east});out geom;`;
+    const query = `[out:json][timeout:10];way["aeroway"~"^(runway|taxiway|apron|terminal)$"](${south},${west},${north},${east});out geom;`;
     const response = await fetch(OVERPASS, {
       method: "POST",
-      signal: AbortSignal.timeout(18_000),
+      signal: AbortSignal.timeout(12_000),
       headers: {
         Accept: "application/json",
         "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
