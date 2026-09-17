@@ -129,6 +129,28 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   return stage === current && resume === story.resume ? story : { ...story, currentStage: stage, resume };
 }
 
+export function preferFreshAirborneState(story: FlightStory): FlightStory {
+  const ac = story.aircraft;
+  if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon) || ac.onGround !== false) return story;
+  const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : ac.seenSec ?? null;
+  if (age != null && age > 30) return story;
+  const altFt = typeof ac.altFt === "number" && Number.isFinite(ac.altFt) ? ac.altFt : null;
+  const gsKt = typeof ac.gsKt === "number" && Number.isFinite(ac.gsKt) ? ac.gsKt : null;
+  const originNm = Number.isFinite(story.origin?.lat) && Number.isFinite(story.origin?.lon)
+    ? haversineNm({ lat: story.origin.lat, lon: story.origin.lon }, { lat: ac.lat, lon: ac.lon })
+    : 999;
+  const clearlyAirborne = (altFt != null && altFt >= 1200) || (gsKt != null && gsKt >= 165) || originNm >= 4;
+  if (!clearlyAirborne) return story;
+  const staleDepartureStage = ["inbound", "origin_gate", "push", "taxi"].includes(String(story.currentStage))
+    || String(story.currentStage) === TAKEOFF_ROLL_STAGE;
+  if (!staleDepartureStage && story.times.airborne === true) return story;
+  return {
+    ...story,
+    currentStage: staleDepartureStage ? "ride" : story.currentStage,
+    times: { ...story.times, airborne: true },
+  };
+}
+
 /**
  * Reject a movement-detected pushback timestamp that cannot plausibly belong to
  * this flight instance. A detected time may be late (we can miss tug movement),
@@ -192,7 +214,8 @@ export const getFlightStory = createServerFn({ method: "POST" })
     const story = await loadFlightStory(data.q, { fresh: data.fresh, resume: data.resume });
     const experimental = applyFr24GroundExperiment(story, data.resume);
     const progressed = preserveDepartureProgress(experimental, data.resume);
-    const sanitized = sanitizeDetectedPushTime(progressed);
+    const airborne = preferFreshAirborneState(progressed);
+    const sanitized = sanitizeDetectedPushTime(airborne);
     return suppressLateJoinDetectedPush(sanitized, data.resume);
   });
 
