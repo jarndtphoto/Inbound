@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const W = 800;
 const H = 800;
-const MAX_GROUND_ZOOM = 24;
+const MAX_GROUND_ZOOM = 64;
 
 type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
@@ -146,8 +146,8 @@ function useGroundZoom(resetKey: string) {
   return {
     boxRef,
     view,
-    zoomIn: () => zoomAt(2),
-    zoomOut: () => zoomAt(1 / 2),
+    zoomIn: () => zoomAt(2.5),
+    zoomOut: () => zoomAt(1 / 2.5),
     reset: () => setView({ scale: 1, x: 0, y: 0 }),
   };
 }
@@ -272,13 +272,13 @@ function GroundMovementMap({
             {trailPoints ? <polyline points={trailPoints} className="fill-none stroke-accent" strokeWidth={4 / zoom.view.scale} strokeLinecap="round" strokeLinejoin="round" opacity="0.72" /> : null}
             {plane && aircraft ? (
               <>
-                <circle cx={plane.x} cy={plane.y} r={20 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={3.5 / zoom.view.scale} />
+                <circle cx={plane.x} cy={plane.y} r={27 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={4.5 / zoom.view.scale} />
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${Number.isFinite(aircraft.track) ? aircraft.track : 0})`}>
-                  <path d="M0 -20 L8 11 L0 7 L-8 11 Z" className="fill-accent" />
+                  <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
                 </g>
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale})`}>
-                  <text x="27" y="-10" className="fill-fg" fontSize="18" fontWeight="800">{story.iata}</text>
-                  <text x="27" y="11" className="fill-muted" fontSize="12" fontWeight="600">{frozen ? "last known" : `${Math.round(aircraft.gsKt ?? 0)} kt`}</text>
+                  <text x="36" y="-12" className="fill-fg" fontSize="24" fontWeight="900">{story.iata}</text>
+                  <text x="36" y="14" className="fill-muted" fontSize="15" fontWeight="700">{frozen ? "last known" : `${Math.round(aircraft.gsKt ?? 0)} kt`}</text>
                 </g>
               </>
             ) : null}
