@@ -230,10 +230,21 @@ function GroundMovementMap({
   const cos = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
   const latHalf = 0.068;
   const lonHalf = latHalf / cos;
-  const project = (p: { lat: number; lon: number }) => ({
-    x: W / 2 + ((p.lon - airport.lon) / lonHalf) * (W / 2 - 28),
-    y: H / 2 - ((p.lat - airport.lat) / latHalf) * (H / 2 - 28),
-  });
+  const mapRotationDeg = airport.iata === "MDW" ? 3 : 0;
+  const mapRotationRad = mapRotationDeg * Math.PI / 180;
+  const project = (p: { lat: number; lon: number }) => {
+    const rawX = W / 2 + ((p.lon - airport.lon) / lonHalf) * (W / 2 - 28);
+    const rawY = H / 2 - ((p.lat - airport.lat) / latHalf) * (H / 2 - 28);
+    if (!mapRotationDeg) return { x: rawX, y: rawY };
+    const dx = rawX - W / 2;
+    const dy = rawY - H / 2;
+    const c = Math.cos(mapRotationRad);
+    const s = Math.sin(mapRotationRad);
+    return {
+      x: W / 2 + dx * c - dy * s,
+      y: H / 2 + dx * s + dy * c,
+    };
+  };
   const features = (surfaceQ.data as AirportSurface | undefined)?.features ?? [];
   const taxiwayLabels = useMemo(() => {
     const unique = new Map<string, SurfaceFeature>();
@@ -298,7 +309,7 @@ function GroundMovementMap({
             {plane && aircraft ? (
               <>
                 <circle cx={plane.x} cy={plane.y} r={27 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={4.5 / zoom.view.scale} />
-                <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${Number.isFinite(aircraft.track) ? aircraft.track : 0})`}>
+                <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${(Number.isFinite(aircraft.track) ? aircraft.track : 0) + mapRotationDeg})`}>
                   <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
                 </g>
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale})`}>
