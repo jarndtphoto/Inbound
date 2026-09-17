@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { loadBaggage, type BaggageLeg } from "./baggage.server";
+import { loadCiriumBaggage } from "./cirium-baggage.server";
 
 export const getBaggage = createServerFn({ method: "POST" })
   .validator((input: BaggageLeg) => {
@@ -10,4 +11,7 @@ export const getBaggage = createServerFn({ method: "POST" })
       || !/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error("Invalid baggage flight");
     return { flight: input.flight, origin: input.origin, destination: input.destination, date: input.date };
   })
-  .handler(({ data }) => loadBaggage(data));
+  .handler(async ({ data }) => {
+    const cirium = await loadCiriumBaggage(data);
+    return cirium ?? loadBaggage(data);
+  });
