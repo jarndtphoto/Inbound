@@ -53,11 +53,9 @@ export function choosePosition(positions: Array<NormalizedPosition | null | unde
   let disagreementNm: number | null = null;
   for (let i = 0; i < usable.length; i++) for (let j = i + 1; j < usable.length; j++) { const d = haversineNm(usable[i]!, usable[j]!); disagreementNm = disagreementNm == null ? d : Math.max(disagreementNm, d); }
 
-  // Ground-source experiment: FR24 is the only positional source allowed to
-  // represent an aircraft on the airport surface. Public ADS-B and FlightAware
-  // remain available once the aircraft is airborne. A stale/missing FR24 surface
-  // fix intentionally yields no chosen ground position rather than silently
-  // falling back to another provider.
+  // FR24 remains the preferred surface source when it has a fresh, validated
+  // on-ground fix. If FR24 is missing or stale, do not throw away other fresh,
+  // identity-compatible ground positions; score those providers instead.
   const frGround = candidates.fr24;
   if (frGround?.onGround === true && positionAgeSec(frGround, now) <= 45) {
     return { chosen: frGround, disagreementNm, candidates };
@@ -65,8 +63,8 @@ export function choosePosition(positions: Array<NormalizedPosition | null | unde
 
   let scoringPool = usable;
   if (usable.some((p) => p.onGround === true)) {
-    scoringPool = usable.filter((p) => p.onGround !== true);
-    if (!scoringPool.length) return { chosen: null, disagreementNm, candidates };
+    const groundPool = usable.filter((p) => p.onGround === true);
+    if (groundPool.length) scoringPool = groundPool;
   }
 
   let chosen: NormalizedPosition | null = null, best = -Infinity;
