@@ -236,21 +236,10 @@ function GroundMovementMap({
   const cos = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
   const latHalf = 0.068;
   const lonHalf = latHalf / cos;
-  const mapRotationDeg = airport.iata === "MDW" ? -3 : 0;
-  const mapRotationRad = mapRotationDeg * Math.PI / 180;
-  const project = (p: { lat: number; lon: number }) => {
-    const rawX = W / 2 + ((p.lon - airport.lon) / lonHalf) * (W / 2 - 28);
-    const rawY = H / 2 - ((p.lat - airport.lat) / latHalf) * (H / 2 - 28);
-    if (!mapRotationDeg) return { x: rawX, y: rawY };
-    const dx = rawX - W / 2;
-    const dy = rawY - H / 2;
-    const c = Math.cos(mapRotationRad);
-    const s = Math.sin(mapRotationRad);
-    return {
-      x: W / 2 + dx * c - dy * s,
-      y: H / 2 + dx * s + dy * c,
-    };
-  };
+  const project = (p: { lat: number; lon: number }) => ({
+    x: W / 2 + ((p.lon - airport.lon) / lonHalf) * (W / 2 - 28),
+    y: H / 2 - ((p.lat - airport.lat) / latHalf) * (H / 2 - 28),
+  });
   const features = (surfaceQ.data as AirportSurface | undefined)?.features ?? [];
   const taxiwayLabels = useMemo(() => {
     const unique = new Map<string, SurfaceFeature>();
@@ -315,7 +304,7 @@ function GroundMovementMap({
             {plane && aircraft ? (
               <>
                 <circle cx={plane.x} cy={plane.y} r={27 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={4.5 / zoom.view.scale} />
-                <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${(Number.isFinite(aircraft.track) ? aircraft.track : 0) + mapRotationDeg})`}>
+                <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${Number.isFinite(aircraft.track) ? aircraft.track : 0})`}>
                   <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
                 </g>
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale})`}>
@@ -377,7 +366,16 @@ function clearlyAirborne(story: FlightStory) {
   return (altFt != null && altFt >= 1200) || (gsKt != null && gsKt >= 165) || originNm >= 4;
 }
 
+function clearlyArrivedOnGround(story: FlightStory) {
+  const ac = story.aircraft;
+  if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon) || ac.onGround !== true) return false;
+  const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : ac.seenSec ?? null;
+  if (age != null && age > 45) return false;
+  return haversineNm(ac, story.dest) <= 6;
+}
+
 function initialTab(story: FlightStory): MapTab {
+  if (clearlyArrivedOnGround(story)) return "arrival";
   if (clearlyAirborne(story)) return "flight";
   if (story.currentStage === "taxi_in" || story.currentStage === "gate") return "arrival";
   if (story.currentStage === "origin_gate" || story.currentStage === "push" || story.currentStage === "taxi") return "departure";
@@ -394,9 +392,6 @@ export function MovementMap({ story }: { story: FlightStory }) {
   const userSelectedTab = useRef(false);
 
   useEffect(() => {
-    // Start both airport-surface requests as soon as the Map workspace mounts.
-    // Keeping them in React Query for the full flight makes arrival ground radar
-    // ready before touchdown instead of waiting on a cold Overpass request.
     void queryClient.prefetchQuery(surfaceQueryOptions(story.origin));
     void queryClient.prefetchQuery(surfaceQueryOptions(story.dest));
   }, [queryClient, flightKey, story.origin.icao, story.origin.lat, story.origin.lon, story.dest.icao, story.dest.lat, story.dest.lon]);
@@ -409,9 +404,14 @@ export function MovementMap({ story }: { story: FlightStory }) {
   }, [flightKey]);
 
   const airborneNow = clearlyAirborne(story);
+  const arrivedGroundNow = clearlyArrivedOnGround(story);
   useEffect(() => {
+    if (arrivedGroundNow && tab !== "arrival") {
+      setTab("arrival");
+      return;
+    }
     if (!userSelectedTab.current && airborneNow && tab !== "flight") setTab("flight");
-  }, [airborneNow, tab]);
+  }, [airborneNow, arrivedGroundNow, tab]);
 
   useEffect(() => {
     const ac = story.aircraft;
