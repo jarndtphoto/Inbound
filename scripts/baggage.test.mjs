@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {parseBaggage,parseLaxBaggage,parseFlightViewBaggage,parseAlaskaBaggage,loadBaggage} from '../src/lib/baggage.server.ts';
+import {parseCiriumBaggage} from '../src/lib/cirium-baggage.server.ts';
 import {baggageSummary} from '../src/lib/baggage-copy.ts';
 
 const leg={flight:'UA219',origin:'ORD',destination:'HNL',date:'2026-09-13'};
@@ -25,6 +26,11 @@ const mdwLeg={flight:'WN1110',origin:'DEN',destination:'MDW',date:'2026-09-16'};
 test('FlightView MDW page without baggage stays not-posted',()=>assert.deepEqual(parseFlightViewBaggage(flightViewPage({origin:'DEN',destination:'MDW',terminal:'',bag:''}),mdwLeg,901),{status:'not-posted',checkedAt:901}));
 const mcoLeg={flight:'F91952',origin:'DFW',destination:'MCO',date:'2026-09-16'};
 test('FlightView MCO arrival supplies carousel',()=>assert.deepEqual(parseFlightViewBaggage(flightViewPage({origin:'DFW',destination:'MCO',terminal:'A',bag:'7'}),mcoLeg,902),{status:'posted',carousel:'7',terminal:'A',checkedAt:902}));
+
+const ciriumPayload={flightStatuses:[{carrierFsCode:'UA',flightNumber:'219',departureAirportFsCode:'ORD',arrivalAirportFsCode:'HNL',airportResources:{arrivalTerminal:'2',baggage:'31'}}]};
+test('Cirium exact flight supplies baggage and terminal',()=>assert.deepEqual(parseCiriumBaggage(ciriumPayload,leg,1000),{status:'posted',carousel:'31',terminal:'2',checkedAt:1000,sourceName:'Cirium FlightStats'}));
+test('Cirium exact flight without baggage stays not-posted',()=>assert.equal(parseCiriumBaggage({flightStatuses:[{...ciriumPayload.flightStatuses[0],airportResources:{arrivalTerminal:'2'}}]},leg,1001).status,'not-posted'));
+test('Cirium wrong route or ambiguous status fails closed',()=>{assert.equal(parseCiriumBaggage({flightStatuses:[{...ciriumPayload.flightStatuses[0],arrivalAirportFsCode:'LAX'}]},leg,1002).status,'unavailable');assert.equal(parseCiriumBaggage({flightStatuses:[...ciriumPayload.flightStatuses,...ciriumPayload.flightStatuses]},leg,1002).status,'unavailable')});
 
 const alaskaLeg={flight:'AS65',origin:'SEA',destination:'ANC',date:'2026-09-16'};
 const alaskaPage=(carousel='1')=>`<html><body><h1>Flight status</h1><p>Seattle (SEA)</p><p>Anchorage (ANC)</p><p>Gate D1</p><p>Carousel ${carousel}</p></body></html>`;
