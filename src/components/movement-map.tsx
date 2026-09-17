@@ -18,10 +18,27 @@ type GroundMode = {
 
 function groundMode(story: FlightStory): GroundMode | null {
   const ac = story.aircraft;
-  if (!story.live || !ac?.onGround || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon)) return null;
+  if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon)) return null;
+
   const originNm = haversineNm(ac, story.origin);
   const destNm = haversineNm(ac, story.dest);
-  if (originNm > 14 && destNm > 14) return null;
+  const nearestNm = Math.min(originNm, destNm);
+  if (nearestNm > 14) return null;
+
+  const altFt = typeof ac.altFt === "number" && Number.isFinite(ac.altFt) ? ac.altFt : null;
+  const gsKt = typeof ac.gsKt === "number" && Number.isFinite(ac.gsKt) ? ac.gsKt : null;
+  const positionAge = typeof story.providers?.chosenPositionAgeSec === "number"
+    ? story.providers.chosenPositionAgeSec
+    : null;
+  const freshEnough = positionAge == null || positionAge <= 120;
+
+  // Do not require story.live or provider onGround. Those flags can lag while
+  // a fresh position already shows the aircraft taxiing on the airport.
+  const surfaceLike = ac.onGround
+    || (nearestNm <= 4 && (altFt == null || altFt <= 1200) && (gsKt == null || gsKt <= 110))
+    || (nearestNm <= 2 && (altFt == null || altFt <= 2500));
+
+  if (!freshEnough || !surfaceLike) return null;
   if (destNm + 1.5 < originNm) return { kind: "arrival", airport: story.dest };
   return { kind: "departure", airport: story.origin };
 }
@@ -32,13 +49,13 @@ function useMovementTrail(story: FlightStory) {
   useEffect(() => setTrail([]), [flightKey]);
   useEffect(() => {
     const ac = story.aircraft;
-    if (!story.live || !ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon)) return;
+    if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon)) return;
     setTrail((previous) => {
       const last = previous.at(-1);
       if (last && haversineNm(last, ac) < 0.008 && story.fetchedAt - last.at < 20_000) return previous;
       return [...previous, { lat: ac.lat, lon: ac.lon, at: story.fetchedAt }].slice(-80);
     });
-  }, [flightKey, story.fetchedAt, story.live, story.aircraft?.lat, story.aircraft?.lon]);
+  }, [flightKey, story.fetchedAt, story.aircraft?.lat, story.aircraft?.lon]);
   return trail;
 }
 
@@ -132,7 +149,18 @@ function GroundMovementMap({ story, mode, trail }: { story: FlightStory; mode: G
 
 export function MovementMap({ story }: { story: FlightStory }) {
   const trail = useMovementTrail(story);
-  const mode = useMemo(() => groundMode(story), [story.live, story.aircraft?.onGround, story.aircraft?.lat, story.aircraft?.lon, story.origin.lat, story.origin.lon, story.dest.lat, story.dest.lon]);
+  const mode = useMemo(() => groundMode(story), [
+    story.aircraft?.onGround,
+    story.aircraft?.lat,
+    story.aircraft?.lon,
+    story.aircraft?.altFt,
+    story.aircraft?.gsKt,
+    story.origin.lat,
+    story.origin.lon,
+    story.dest.lat,
+    story.dest.lon,
+    story.providers?.chosenPositionAgeSec,
+  ]);
   if (mode) return <GroundMovementMap story={story} mode={mode} trail={trail} />;
   return (
     <div className="flex h-full min-h-0 flex-col">
