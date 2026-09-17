@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const W = 800;
 const H = 800;
+const MAX_GROUND_ZOOM = 24;
 
 type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
@@ -20,7 +21,7 @@ type GroundMode = {
 };
 
 function clampView(v: View): View {
-  const scale = Math.max(1, Math.min(8, v.scale));
+  const scale = Math.max(1, Math.min(MAX_GROUND_ZOOM, v.scale));
   if (scale <= 1.001) return { scale: 1, x: 0, y: 0 };
   return {
     scale,
@@ -46,7 +47,7 @@ function useGroundZoom(resetKey: string) {
 
   const zoomAt = (factor: number, mx = W / 2, my = H / 2) => {
     const current = viewRef.current;
-    const nextScale = Math.max(1, Math.min(8, current.scale * factor));
+    const nextScale = Math.max(1, Math.min(MAX_GROUND_ZOOM, current.scale * factor));
     setView(clampView({
       scale: nextScale,
       x: mx - ((mx - current.x) * nextScale) / current.scale,
@@ -80,7 +81,7 @@ function useGroundZoom(resetKey: string) {
         const b = e.touches[1]!;
         const p = pinchRef.current;
         const factor = distance(a, b) / p.distance;
-        const nextScale = Math.max(1, Math.min(8, p.view.scale * factor));
+        const nextScale = Math.max(1, Math.min(MAX_GROUND_ZOOM, p.view.scale * factor));
         const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
         setView(clampView({
           scale: nextScale,
@@ -119,8 +120,8 @@ function useGroundZoom(resetKey: string) {
   return {
     boxRef,
     view,
-    zoomIn: () => zoomAt(1.6),
-    zoomOut: () => zoomAt(1 / 1.6),
+    zoomIn: () => zoomAt(2),
+    zoomOut: () => zoomAt(1 / 2),
     reset: () => setView({ scale: 1, x: 0, y: 0 }),
   };
 }
@@ -243,13 +244,13 @@ function GroundMovementMap({
             {trailPoints ? <polyline points={trailPoints} className="fill-none stroke-accent" strokeWidth={4 / zoom.view.scale} strokeLinecap="round" strokeLinejoin="round" opacity="0.72" /> : null}
             {plane && aircraft ? (
               <>
-                <circle cx={plane.x} cy={plane.y} r={16 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={3 / zoom.view.scale} />
+                <circle cx={plane.x} cy={plane.y} r={20 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={3.5 / zoom.view.scale} />
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${Number.isFinite(aircraft.track) ? aircraft.track : 0})`}>
-                  <path d="M0 -13 L6 8 L0 5 L-6 8 Z" className="fill-accent" />
+                  <path d="M0 -20 L8 11 L0 7 L-8 11 Z" className="fill-accent" />
                 </g>
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale})`}>
-                  <text x="21" y="-8" className="fill-fg" fontSize="13" fontWeight="700">{story.iata}</text>
-                  <text x="21" y="10" className="fill-muted" fontSize="10">{frozen ? "last known" : `${Math.round(aircraft.gsKt ?? 0)} kt`}</text>
+                  <text x="27" y="-10" className="fill-fg" fontSize="18" fontWeight="800">{story.iata}</text>
+                  <text x="27" y="11" className="fill-muted" fontSize="12" fontWeight="600">{frozen ? "last known" : `${Math.round(aircraft.gsKt ?? 0)} kt`}</text>
                 </g>
               </>
             ) : null}
@@ -258,7 +259,7 @@ function GroundMovementMap({
         {!aircraft ? <div className="absolute top-3 left-3 rounded bg-bg/90 px-3 py-2 text-xs text-muted">No ground position captured yet.</div> : null}
         {frozen ? <div className="absolute top-3 left-3 rounded bg-bg/90 px-3 py-2 text-xs text-muted">Aircraft has departed · showing last known departure-ground position.</div> : null}
         <div className="absolute bottom-3 right-3 flex gap-2">
-          <button type="button" onClick={zoom.zoomIn} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold">+</button>
+          <button type="button" onClick={zoom.zoomIn} disabled={zoom.view.scale >= MAX_GROUND_ZOOM - 0.01} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold disabled:opacity-40">+</button>
           <button type="button" onClick={zoom.zoomOut} disabled={zoom.view.scale <= 1.01} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold disabled:opacity-40">−</button>
         </div>
         {zoom.view.scale > 1.01 ? <button type="button" onClick={zoom.reset} className="absolute bottom-3 left-3 rounded-md border border-border bg-surface px-3 py-2 text-xs font-medium">Reset</button> : null}
