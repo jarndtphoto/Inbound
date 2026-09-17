@@ -20,6 +20,32 @@ type GroundMode = {
   airport: FlightStory["origin"];
 };
 
+function savedGroundKey(flightKey: string, kind: "departure" | "arrival") {
+  return `inbound:ground:${flightKey}:${kind}`;
+}
+
+function loadSavedGround(flightKey: string, kind: "departure" | "arrival"): AircraftSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(savedGroundKey(flightKey, kind));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AircraftSnapshot;
+    if (!Number.isFinite(parsed?.lat) || !Number.isFinite(parsed?.lon)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveGround(flightKey: string, kind: "departure" | "arrival", aircraft: AircraftSnapshot) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(savedGroundKey(flightKey, kind), JSON.stringify(aircraft));
+  } catch {
+    // Ground-map persistence is best effort only.
+  }
+}
+
 function clampView(v: View): View {
   const scale = Math.max(1, Math.min(MAX_GROUND_ZOOM, v.scale));
   if (scale <= 1.001) return { scale: 1, x: 0, y: 0 };
@@ -166,12 +192,14 @@ function GroundMovementMap({
   trail,
   aircraft,
   frozen = false,
+  inFlight = false,
 }: {
   story: FlightStory;
   mode: GroundMode;
   trail: TrackPoint[];
   aircraft: AircraftSnapshot | null;
   frozen?: boolean;
+  inFlight?: boolean;
 }) {
   const airport = mode.airport;
   const surfaceQ = useQuery({
@@ -212,11 +240,11 @@ function GroundMovementMap({
       <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-2">
         <div>
           <p className="font-mono text-[11px] tracking-widest text-subtle uppercase">{mode.kind === "departure" ? "Departure ground" : "Arrival ground"}</p>
-          <p className="font-display text-base font-semibold">{airport.iata} · {frozen ? "last ground position" : aircraft ? "live movement" : "airport surface"}</p>
+          <p className="font-display text-base font-semibold">{airport.iata} · {frozen ? "last ground position" : inFlight ? "aircraft in flight" : aircraft ? "live movement" : "airport surface"}</p>
         </div>
         <div className="text-right font-mono text-[10px] leading-tight text-muted">
-          {aircraft ? <div>{Math.round(aircraft.gsKt ?? 0)} kt · {frozen ? "frozen" : aircraft.onGround ? "ground" : `${Math.round(aircraft.altFt ?? 0)} ft`}</div> : <div>Awaiting aircraft</div>}
-          <div>{frozen ? "last known ground fix" : `${provider}${age != null ? ` · ${age}s` : ""}`}</div>
+          {inFlight ? <div>Plane in flight</div> : aircraft ? <div>{Math.round(aircraft.gsKt ?? 0)} kt · {frozen ? "frozen" : aircraft.onGround ? "ground" : `${Math.round(aircraft.altFt ?? 0)} ft`}</div> : <div>Awaiting aircraft</div>}
+          <div>{frozen ? "last known ground fix" : inFlight ? "departure complete" : `${provider}${age != null ? ` · ${age}s` : ""}`}</div>
         </div>
       </div>
       <div ref={zoom.boxRef} className="relative min-h-0 flex-1 overflow-hidden bg-bg" style={{ touchAction: "none" }}>
@@ -256,15 +284,21 @@ function GroundMovementMap({
             ) : null}
           </g>
         </svg>
-        {!aircraft ? <div className="absolute top-3 left-3 rounded bg-bg/90 px-3 py-2 text-xs text-muted">No ground position captured yet.</div> : null}
-        {frozen ? <div className="absolute top-3 left-3 rounded bg-bg/90 px-3 py-2 text-xs text-muted">Aircraft has departed · showing last known departure-ground position.</div> : null}
+        {inFlight ? (
+          <div className="pointer-events-none absolute left-4 right-4 top-4 rounded-xl border border-border bg-bg/95 px-4 py-4 text-center shadow-sm">
+            <div className="font-display text-2xl font-bold tracking-tight">PLANE IS IN FLIGHT</div>
+            <div className="mt-1 text-xs text-muted">{aircraft ? "Last known departure-ground position shown below." : "Departure ground tracking has ended for this flight."}</div>
+          </div>
+        ) : !aircraft ? (
+          <div className="absolute top-3 left-3 rounded bg-bg/90 px-3 py-2 text-xs text-muted">No ground position captured yet.</div>
+        ) : null}
         <div className="absolute bottom-3 right-3 flex gap-2">
           <button type="button" onClick={zoom.zoomIn} disabled={zoom.view.scale >= MAX_GROUND_ZOOM - 0.01} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold disabled:opacity-40">+</button>
           <button type="button" onClick={zoom.zoomOut} disabled={zoom.view.scale <= 1.01} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold disabled:opacity-40">−</button>
         </div>
         {zoom.view.scale > 1.01 ? <button type="button" onClick={zoom.reset} className="absolute bottom-3 left-3 rounded-md border border-border bg-surface px-3 py-2 text-xs font-medium">Reset</button> : null}
-        {surfaceQ.isPending ? <div className="absolute top-14 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Loading airport surface…</div> : null}
-        {surfaceQ.isError ? <div className="absolute top-14 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Surface detail unavailable.</div> : null}
+        {surfaceQ.isPending ? <div className="absolute top-24 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Loading airport surface…</div> : null}
+        {surfaceQ.isError ? <div className="absolute top-24 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Surface detail unavailable.</div> : null}
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-[10px] leading-tight text-muted">
         <span>Pinch to zoom · drag to pan</span>
@@ -304,8 +338,8 @@ export function MovementMap({ story }: { story: FlightStory }) {
 
   useEffect(() => {
     setTab(initialTab(story));
-    setLastDeparture(null);
-    setLastArrival(null);
+    setLastDeparture(loadSavedGround(flightKey, "departure"));
+    setLastArrival(loadSavedGround(flightKey, "arrival"));
   }, [flightKey]);
 
   useEffect(() => {
@@ -323,14 +357,22 @@ export function MovementMap({ story }: { story: FlightStory }) {
       ac.onGround === true ||
       ((altFt == null || altFt <= 1200) && (gsKt == null || gsKt <= 165))
     );
-    if (departureSurfaceLike) setLastDeparture({ ...ac });
+    if (departureSurfaceLike) {
+      const snapshot = { ...ac };
+      setLastDeparture(snapshot);
+      saveGround(flightKey, "departure", snapshot);
+    }
 
     const arrivalSurfaceLike = destNm <= 6 && (
       ac.onGround === true ||
       story.currentStage === "taxi_in" ||
       story.currentStage === "gate"
     );
-    if (arrivalSurfaceLike) setLastArrival({ ...ac });
+    if (arrivalSurfaceLike) {
+      const snapshot = { ...ac };
+      setLastArrival(snapshot);
+      saveGround(flightKey, "arrival", snapshot);
+    }
   }, [
     flightKey,
     story.fetchedAt,
@@ -355,6 +397,7 @@ export function MovementMap({ story }: { story: FlightStory }) {
   const arrivalLive = Boolean(current && currentDestNm <= 6 && (
     current.onGround === true || story.currentStage === "taxi_in" || story.currentStage === "gate"
   ));
+  const planeInFlight = story.times.airborne === true || ["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(story.currentStage);
 
   const departureAircraft = departureLive ? current : lastDeparture;
   const arrivalAircraft = arrivalLive ? current : lastArrival;
@@ -391,6 +434,7 @@ export function MovementMap({ story }: { story: FlightStory }) {
             trail={departureTrail}
             aircraft={departureAircraft}
             frozen={!departureLive && Boolean(lastDeparture)}
+            inFlight={planeInFlight && !departureLive}
           />
         ) : tab === "arrival" ? (
           <GroundMovementMap
