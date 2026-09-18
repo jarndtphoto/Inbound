@@ -13,13 +13,21 @@ export type AirportSurface = {
   features: SurfaceFeature[];
 };
 
+type OverpassGeometryPoint = { lat: number; lon: number };
+type OverpassMember = {
+  type?: "node" | "way" | "relation";
+  ref?: number;
+  role?: string;
+  geometry?: OverpassGeometryPoint[];
+};
 type OverpassElement = {
   id: number;
   type: "node" | "way" | "relation";
   lat?: number;
   lon?: number;
   tags?: Record<string, string>;
-  geometry?: Array<{ lat: number; lon: number }>;
+  geometry?: OverpassGeometryPoint[];
+  members?: OverpassMember[];
 };
 
 type CacheEntry = { value: AirportSurface; at: number };
@@ -39,28 +47,84 @@ function normalizeKind(value: string | undefined): SurfaceFeature["kind"] | null
   return value === "runway" || value === "taxiway" || value === "apron" || value === "terminal" || value === "gate" || value === "holding_position" ? value : null;
 }
 
+function samePoint(a: SurfacePoint | undefined, b: SurfacePoint | undefined) {
+  return Boolean(a && b && Math.abs(a.lat - b.lat) < 1e-7 && Math.abs(a.lon - b.lon) < 1e-7);
+}
+
+function validGeometry(points: OverpassGeometryPoint[] | undefined): SurfacePoint[] {
+  if (!Array.isArray(points)) return [];
+  return points
+    .filter((p) => validCoord(p.lat, -90, 90) && validCoord(p.lon, -180, 180))
+    .map((p) => ({ lat: p.lat, lon: p.lon }));
+}
+
+function relationOuterRings(element: OverpassElement): SurfacePoint[][] {
+  const segments = (element.members ?? [])
+    .filter((member) => member.type === "way" && (member.role === "outer" || !member.role))
+    .map((member) => validGeometry(member.geometry))
+    .filter((points) => points.length >= 2);
+  const rings: SurfacePoint[][] = [];
+
+  while (segments.length) {
+    let ring = segments.shift()!;
+    let joined = true;
+    while (joined && segments.length && !samePoint(ring[0], ring.at(-1))) {
+      joined = false;
+      for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i]!;
+        if (samePoint(ring.at(-1), segment[0])) {
+          ring = [...ring, ...segment.slice(1)];
+        } else if (samePoint(ring.at(-1), segment.at(-1))) {
+          ring = [...ring, ...segment.slice(0, -1).reverse()];
+        } else if (samePoint(ring[0], segment.at(-1))) {
+          ring = [...segment.slice(0, -1), ...ring];
+        } else if (samePoint(ring[0], segment[0])) {
+          ring = [...segment.slice(1).reverse(), ...ring];
+        } else {
+          continue;
+        }
+        segments.splice(i, 1);
+        joined = true;
+        break;
+      }
+    }
+    if (ring.length >= 3) rings.push(ring);
+  }
+  return rings;
+}
+
 function parse(elements: OverpassElement[], airport: string, checkedAt: number): AirportSurface {
   const features: SurfaceFeature[] = [];
-  for (const element of elements) {
-    const kind = normalizeKind(element.tags?.aeroway);
-    if (!kind) continue;
-    let points: SurfacePoint[] = [];
-    if (element.type === "node" && validCoord(element.lat, -90, 90) && validCoord(element.lon, -180, 180)) {
-      points = [{ lat: element.lat, lon: element.lon }];
-    } else if (Array.isArray(element.geometry)) {
-      points = element.geometry
-        .filter((p) => validCoord(p.lat, -90, 90) && validCoord(p.lon, -180, 180))
-        .map((p) => ({ lat: p.lat, lon: p.lon }));
-    }
-    if (!points.length || points.length > 400) continue;
+  const pushFeature = (element: OverpassElement, kind: SurfaceFeature["kind"], points: SurfacePoint[], suffix = 0) => {
+    if (!points.length || points.length > 800 || features.length >= 2_500) return;
     features.push({
-      id: element.id,
+      id: suffix ? -(element.id * 100 + suffix) : element.id,
       kind,
       ...(element.tags?.ref ? { ref: element.tags.ref.slice(0, 20) } : {}),
       ...(element.tags?.name ? { name: element.tags.name.slice(0, 80) } : {}),
       points,
     });
-    if (features.length >= 2_000) break;
+  };
+
+  for (const element of elements) {
+    const kind = normalizeKind(element.tags?.aeroway);
+    if (!kind) continue;
+
+    if (element.type === "relation") {
+      if (kind !== "terminal" && kind !== "apron") continue;
+      const rings = relationOuterRings(element);
+      rings.forEach((ring, index) => pushFeature(element, kind, ring, index + 1));
+      continue;
+    }
+
+    let points: SurfacePoint[] = [];
+    if (element.type === "node" && validCoord(element.lat, -90, 90) && validCoord(element.lon, -180, 180)) {
+      points = [{ lat: element.lat, lon: element.lon }];
+    } else {
+      points = validGeometry(element.geometry);
+    }
+    pushFeature(element, kind, points);
+    if (features.length >= 2_500) break;
   }
   return { airport, checkedAt, source: "OpenStreetMap", features };
 }
@@ -70,7 +134,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   if (!/^[A-Z0-9]{3,4}$/.test(airport) || !validCoord(input.lat, -90, 90) || !validCoord(input.lon, -180, 180)) {
     throw new Error("Invalid airport surface request");
   }
-  const key = `${airport}:surface-v3:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
+  const key = `${airport}:surface-v4:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const existing = pending.get(key);
@@ -86,7 +150,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
     const north = (input.lat + latPad).toFixed(6);
     const west = (input.lon - lonPad).toFixed(6);
     const east = (input.lon + lonPad).toFixed(6);
-    const query = `[out:json][timeout:10];way["aeroway"~"^(runway|taxiway|apron|terminal)$"](${south},${west},${north},${east});out geom;`;
+    const query = `[out:json][timeout:10];(way["aeroway"~"^(runway|taxiway|apron|terminal)$"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east}););out geom;`;
     const body = new URLSearchParams({ data: query }).toString();
     const json = await Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
       const response = await fetch(endpoint, {
