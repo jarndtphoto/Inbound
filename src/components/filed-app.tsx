@@ -917,15 +917,45 @@ function wheelsDown(story: FlightStory) {
   return false;
 }
 
+function displayStage(story: FlightStory): StageId {
+  const ac = story.aircraft;
+  const positionAge = story.providers?.chosenPositionAgeSec;
+  const freshGroundAtOrigin = Boolean(
+    ac &&
+    ac.onGround === true &&
+    Number.isFinite(ac.lat) &&
+    Number.isFinite(ac.lon) &&
+    typeof positionAge === "number" &&
+    positionAge <= 30 &&
+    haversineNm(ac, story.origin) < 12 &&
+    story.times?.landKind !== "actual" &&
+    story.currentStage !== "taxi_in" &&
+    story.currentStage !== "gate"
+  );
+
+  // Presentation guard only: never tell the passenger the flight is airborne
+  // while a fresh live fix still has the aircraft on the departure airport.
+  if (freshGroundAtOrigin && (
+    story.currentStage === "ride" ||
+    story.currentStage === "arrival" ||
+    story.currentStage === "final_approach"
+  )) {
+    if (story.times?.pushed || (ac?.gsKt ?? 0) >= 3) return "taxi";
+    return "origin_gate";
+  }
+  return story.currentStage;
+}
+
 function stageHeadline(story: FlightStory) {
-  if (story.currentStage === "gate") return "At the gate";
-  if (story.currentStage === "taxi_in") return "Taxiing in";
-  if (story.currentStage === "final_approach") return "Final approach";
-  if (story.currentStage === "arrival" && wheelsDown(story)) return "Landed";
-  if (story.currentStage === "origin_gate") return "At the gate";
-  if (story.currentStage === "push") return "Pushback";
-  if (story.currentStage === "taxi") return "Taxiing out";
-  return STAGES.find((s) => s.id === story.currentStage)?.label ?? story.currentStage;
+  const stage = displayStage(story);
+  if (stage === "gate") return "At the gate";
+  if (stage === "taxi_in") return "Taxiing in";
+  if (stage === "final_approach") return "Final approach";
+  if (stage === "arrival" && wheelsDown(story)) return "Landed";
+  if (stage === "origin_gate") return "At the gate";
+  if (stage === "push") return "Pushback";
+  if (stage === "taxi") return "Taxiing out";
+  return STAGES.find((s) => s.id === stage)?.label ?? stage;
 }
 
 function liveFix(story: FlightStory) {
@@ -988,7 +1018,7 @@ function statusProgressIndex(stage: StageId) {
 }
 
 function FlightStatusProgress({ story }: { story: FlightStory }) {
-  const active = statusProgressIndex(story.currentStage);
+  const active = statusProgressIndex(displayStage(story));
   return (
     <div className="mt-4" aria-label={`Flight progress: ${STATUS_PROGRESS[active]}`}>
       <div className="grid grid-cols-6 gap-1">
@@ -1246,7 +1276,8 @@ function TimesStrip({
 }) {
   const t = story.times;
   const down = wheelsDown(story);
-  const airborne = flightAirborne(story) && !down;
+  const shownStage = displayStage(story);
+  const airborne = (shownStage === "ride" || shownStage === "arrival" || shownStage === "final_approach") && !down;
   const ac = story.aircraft;
   const showLiveFlight = Boolean(liveFix(story) && flightAirborne(story) && ac && !ac.onGround && (ac.altFt || ac.gsKt));
   const elapsed = airborne ? elapsedFlight(story) : null;
@@ -1281,7 +1312,7 @@ function TimesStrip({
       : null,
   ].filter(Boolean).join(" · ");
 
-  const preDepartureTakeoffPrimary = story.currentStage === "push" || story.currentStage === "taxi";
+  const preDepartureTakeoffPrimary = shownStage === "push" || shownStage === "taxi";
 
   return (
     <div className="mt-3 border-t border-border pt-3">
