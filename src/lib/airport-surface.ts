@@ -14,7 +14,7 @@ export const getAirportSurface = createServerFn({ method: "POST" })
   .handler(({ data }) => loadAirportSurface(data));
 
 
-const AIRPORT_SURFACE_BROWSER_CACHE = "inbound-airport-surfaces-v1";
+const AIRPORT_SURFACE_BROWSER_CACHE = "inbound-airport-surfaces-v2";
 const AIRPORT_SURFACE_BROWSER_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 
 function browserSurfaceKey(input: { airport: string; lat: number; lon: number }) {
