@@ -924,6 +924,7 @@ function gateOutTimes(v) {
 	return ambiguousPublicActual ? { ...gateOut, actual: null } : gateOut;
 }
 function confirmedGateOutActual(v) {
+	if (v?._trustedActual === true) return asTimes(v).actual;
 	return gateOutTimes(v).actual;
 }
 function bestUnix(t) {
@@ -3135,7 +3136,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		official.flightaware.flightId === aware.flightId
 	);
 	const effectiveGateOut = aeroPushMatchesFlight && aeroPush?.actual
-		? { ...aware.gateOut, actual: aeroPush.actual }
+		? { ...aware.gateOut, actual: aeroPush.actual, _trustedActual: true }
 		: aware.gateOut;
 	const awareWithEffectiveGateOut = effectiveGateOut === aware.gateOut
 		? aware
