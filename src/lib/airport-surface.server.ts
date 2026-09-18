@@ -25,7 +25,10 @@ type OverpassElement = {
 type CacheEntry = { value: AirportSurface; at: number };
 const cache = new Map<string, CacheEntry>();
 const pending = new Map<string, Promise<AirportSurface>>();
-const OVERPASS = "https://overpass-api.de/api/interpreter";
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
 const CACHE_MS = 24 * 60 * 60_000;
 
 function validCoord(n: unknown, min: number, max: number): n is number {
@@ -84,18 +87,25 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
     const west = (input.lon - lonPad).toFixed(6);
     const east = (input.lon + lonPad).toFixed(6);
     const query = `[out:json][timeout:10];way["aeroway"~"^(runway|taxiway|apron|terminal)$"](${south},${west},${north},${east});out geom;`;
-    const response = await fetch(OVERPASS, {
-      method: "POST",
-      signal: AbortSignal.timeout(12_000),
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "User-Agent": "Inbound/1.0 airport-surface experiment",
-      },
-      body: new URLSearchParams({ data: query }).toString(),
+    const body = new URLSearchParams({ data: query }).toString();
+    const json = await Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        signal: AbortSignal.timeout(8_000),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "User-Agent": "Inbound/1.0 airport-surface experiment",
+        },
+        body,
+      });
+      if (!response.ok) throw new Error(`Airport surface unavailable (${response.status})`);
+      const payload = await response.json() as { elements?: OverpassElement[] };
+      if (!Array.isArray(payload.elements)) throw new Error("Invalid airport surface response");
+      return payload;
+    })).catch(() => {
+      throw new Error("Airport surface unavailable");
     });
-    if (!response.ok) throw new Error(`Airport surface unavailable (${response.status})`);
-    const json = await response.json() as { elements?: OverpassElement[] };
     if (!Array.isArray(json.elements)) throw new Error("Invalid airport surface response");
     const value = parse(json.elements, airport, Date.now());
     cache.set(key, { value, at: Date.now() });
