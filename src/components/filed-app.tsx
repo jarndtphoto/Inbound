@@ -7,7 +7,7 @@ import { isLanded, nextStep } from "@/lib/traveler";
 import { briefRide } from "@/lib/brief";
 import { briefLogLabel, briefLogText, briefingRefreshOutcome, composeBrief, logManualRefresh, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase } from "@/lib/format";
-import { formatDuration, formatMiles, feetPretty } from "@/lib/geo";
+import { formatDuration, formatMiles, feetPretty, haversineNm } from "@/lib/geo";
 import { parseFlightQuery, storyMatchesQuery } from "@/lib/flight-parse";
 import { RESUME_MAX_AGE_MS, resumeFromStory, savedScheduleNote } from "@/lib/flight-resume";
 import { useFiled } from "@/lib/store";
