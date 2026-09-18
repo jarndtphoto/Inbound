@@ -71,6 +71,53 @@ type RadarMaps = {
   radar: { past?: { time: number; path: string }[] };
 };
 
+const US_STATE_NAMES: Record<string, string> = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+  CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
+  HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+  KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri",
+  MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey",
+  NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio",
+  OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
+  SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont",
+  VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+  DC: "District of Columbia", PR: "Puerto Rico", VI: "U.S. Virgin Islands", GU: "Guam",
+};
+
+function WeatherPreviewLocation({ lat, lon }: { lat: number; lon: number }) {
+  const q = useQuery({
+    queryKey: ["weather-event-nearest-place", lat.toFixed(3), lon.toFixed(3)],
+    queryFn: async ({ signal }) => {
+      const res = await fetch(`https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`, {
+        signal,
+        headers: { Accept: "application/geo+json" },
+      });
+      if (!res.ok) throw new Error("location unavailable");
+      const data = await res.json() as {
+        properties?: {
+          relativeLocation?: { properties?: { city?: string; state?: string } };
+        };
+      };
+      const place = data.properties?.relativeLocation?.properties;
+      const city = place?.city?.trim();
+      const stateCode = place?.state?.trim().toUpperCase();
+      if (!city || !stateCode) return null;
+      return `${city}, ${US_STATE_NAMES[stateCode] ?? stateCode}`;
+    },
+    staleTime: 24 * 60 * 60_000,
+    gcTime: 24 * 60 * 60_000,
+    retry: false,
+  });
+
+  if (!q.data) return null;
+  return (
+    <p className="pointer-events-none absolute left-1/2 top-14 z-10 -translate-x-1/2 whitespace-nowrap rounded-sm border border-border bg-bg/90 px-2.5 py-1 font-mono text-xs text-fg shadow-sm">
+      Near {q.data}
+    </p>
+  );
+}
+
 function useRadarMaps() {
   return useQuery({
     queryKey: ["radar-maps"],
@@ -677,6 +724,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : Date.now() - story.fetchedAt > 15_000 || (story.providers?.chosenPositionAgeSec ?? Infinity) > 60 ? "Updating live position…" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
         </p>
       </div>
+      {weatherPreview && ticks[0] ? <WeatherPreviewLocation lat={ticks[0].lat} lon={ticks[0].lon} /> : null}
         {weatherPreview ? null : movedFromHome ? (
           <button
             type="button"
