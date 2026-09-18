@@ -15,6 +15,7 @@ import { routeWeatherEvents, type RouteWeatherEvent } from "@/lib/weather-events
 import { passengerWeatherCopy } from "@/lib/weather-card-copy";
 import { passengerAirportWeather } from "@/lib/passenger-airport-weather";
 import { getFlightStory } from "@/lib/story";
+import { getGroundPosition } from "@/lib/ground-position";
 import type { Comfort, FlightStory, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
@@ -598,7 +599,71 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     if (storyQ.dataUpdatedAt > 0) setRefreshErr(null);
   }, [query, storyQ.dataUpdatedAt]);
 
-  const story = storyForQuery(storyQ.data, query);
+  const baseStory = storyForQuery(storyQ.data, query);
+  const groundStoryQ = useQuery({
+    queryKey: [
+      "ground-position",
+      baseStory?.flightId ?? baseStory?.iata ?? normFlight(query),
+      baseStory?.origin.iata ?? "",
+      baseStory?.aircraft?.registration ?? "",
+      baseStory?.aircraft?.callsign ?? baseStory?.callsign ?? "",
+    ],
+    queryFn: () => getGroundPosition({ data: {
+      callsign: baseStory?.aircraft?.callsign ?? baseStory?.callsign ?? null,
+      registration: baseStory?.aircraft?.registration ?? null,
+      airportLat: baseStory!.origin.lat,
+      airportLon: baseStory!.origin.lon,
+    } }),
+    enabled: Boolean(baseStory
+      && ["inbound", "origin_gate", "push", "taxi"].includes(String(baseStory.currentStage))
+      && baseStory.times?.landKind !== "actual"),
+    refetchInterval: 2_500,
+    staleTime: 1_000,
+    gcTime: 60_000,
+    retry: false,
+  });
+  const fastGround = groundStoryQ.data;
+  const fastGroundAge = fastGround?.seenAt ? Math.max(0, Date.now() / 1000 - fastGround.seenAt) : Infinity;
+  const story = baseStory && fastGround && fastGroundAge <= 30
+    ? {
+        ...baseStory,
+        live: true,
+        aircraft: {
+          ...(baseStory.aircraft ?? {
+            hex: "",
+            registration: null,
+            type: null,
+            typeName: null,
+            year: null,
+            operator: null,
+            vertFpm: null,
+            phase: "parked" as const,
+          }),
+          lat: fastGround.lat,
+          lon: fastGround.lon,
+          altFt: fastGround.altFt ?? 0,
+          gsKt: fastGround.gsKt ?? 0,
+          track: fastGround.track ?? baseStory.aircraft?.track ?? null,
+          onGround: fastGround.onGround,
+          phase: fastGround.onGround ? ((fastGround.gsKt ?? 0) > 5 ? "taxi" as const : "parked" as const) : "cruise" as const,
+          registration: fastGround.registration ?? baseStory.aircraft?.registration ?? null,
+          callsign: fastGround.callsign ?? baseStory.aircraft?.callsign ?? null,
+          extrapolated: false,
+          seenSec: fastGroundAge,
+        },
+        currentStage: fastGround.onGround && (fastGround.gsKt ?? 0) >= 1
+          && ["inbound", "origin_gate", "push"].includes(String(baseStory.currentStage))
+          ? "taxi" as const
+          : baseStory.currentStage,
+        providers: {
+          ...baseStory.providers,
+          chosenPosition: "fr24",
+          chosenPositionSeenAt: fastGround.seenAt,
+          chosenPositionAgeSec: fastGroundAge,
+          surfaceTelemetryStale: false,
+        },
+      }
+    : baseStory;
   useEffect(() => {
     if (!story) return;
     const key = normFlight(query);
