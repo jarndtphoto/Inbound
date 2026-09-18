@@ -2178,7 +2178,7 @@ export function isFinalApproach(live, dest) {
 }
 
 export function currentStageOf(args) {
-	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed, faAirborne, taxiHint, taxiOutLatched, distPark, parkedAtGate, gateInActual } = args;
+	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed, faAirborne, taxiHint, taxiOutLatched, distPark, parkedAtGate, gateInActual, currentFlightSurfaceConfirmed } = args;
 	const postLanding = postLandingState({ ourLanded, ourLandingActual, gateInActual, parkedAtGate, live, dest });
 	if (postLanding === "gate") return "gate";
 	if (postLanding === "taxi_in") return "taxi_in";
@@ -2187,12 +2187,17 @@ export function currentStageOf(args) {
 	// has been established, a stop, turn, stale fix, or provider handoff cannot
 	// demote the aircraft back to Pushback.
 	if (taxiOutLatched && !ourTakeoffActual && !(live && !live.onGround)) return "taxi";
-	// A surface position is not evidence of arrival at the departure gate.
-	// Keep the main stage aligned with the identified inbound leg until there
-	// is departure evidence, regardless of whether a position feed drops out.
+	const atOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
+	// A fresh surface fix positively identified as this selected flight is
+	// stronger than the separate inbound-aircraft story. This prevents the
+	// current outbound flight from being labeled Inbound while it is parked.
+	if (!pushed && !faAirborne && !ourTakeoffActual && currentFlightSurfaceConfirmed && atOrigin) {
+		return "origin_gate";
+	}
+	// Otherwise a generic surface position can still belong to the identified
+	// inbound leg, so preserve Inbound until this flight has departure evidence.
 	if (!pushed && !faAirborne && !ourTakeoffActual
 		&& ["airborne", "watching", "at_field"].includes(inboundStatus)) return "inbound";
-	const atOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const begun = flightBegun(live, origin);
 	const freshSurface = Boolean(live && live.onGround && !live.extrapolated
 		&& (live.seenSec ?? 999) <= 30 && atOrigin);
@@ -3400,6 +3405,17 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		taxiOut: times.taxiOutMin,
 		inbound: inbound.status
 	}, comfort);
+	const liveTail = String(live?.registration ?? "").replace(/[-\s]/g, "").toUpperCase();
+	const awareTail = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
+	const currentFlightSurfaceConfirmed = Boolean(
+		live &&
+		live.onGround &&
+		!live.extrapolated &&
+		(live.seenSec ?? 999) <= 30 &&
+		origin &&
+		haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10 &&
+		(flightIdentOk(live.callsign, parsed, aware) || Boolean(awareTail && liveTail && awareTail === liveTail))
+	);
 	const current = currentStageOf({
 		live,
 		remainingNm,
@@ -3417,7 +3433,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		taxiOutLatched,
 		distPark,
 		parkedAtGate,
-		gateInActual: aware?.gateIn?.actual ?? null
+		gateInActual: aware?.gateIn?.actual ?? null,
+		currentFlightSurfaceConfirmed
 	});
 	const arrivalStatus = current === "taxi_in"
 		? "taxi_in"
