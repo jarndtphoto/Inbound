@@ -215,6 +215,43 @@ function storyForQuery(s: FlightStory | undefined, q: string): FlightStory | und
   return isUsableStory(s) && storyMatchesQuery(s, q) ? s : undefined;
 }
 
+const TRACK_ROUTE_HOLD_MS = 20 * 60_000;
+
+function keepRecentTrackGeometry(incoming: FlightStory, saved: FlightStory | undefined): FlightStory {
+  if (!saved || incoming.route.source === "track" || saved.route.source !== "track") return incoming;
+  if (incoming.origin.iata !== saved.origin.iata || incoming.dest.iata !== saved.dest.iata) return incoming;
+  if (incoming.flightId && saved.flightId && incoming.flightId !== saved.flightId) return incoming;
+  if (Date.now() - saved.fetchedAt > TRACK_ROUTE_HOLD_MS) return incoming;
+  if (!["ride", "arrival", "final_approach"].includes(incoming.currentStage)) return incoming;
+  const oldSamples = saved.route.samples ?? [];
+  const freshSamples = incoming.route.samples ?? [];
+  if (oldSamples.length < 8 || freshSamples.length < 2) return incoming;
+
+  const samples = oldSamples.map((old) => {
+    let best = freshSamples[0]!;
+    let delta = Math.abs(best.frac - old.frac);
+    for (let i = 1; i < freshSamples.length; i++) {
+      const candidate = freshSamples[i]!;
+      const d = Math.abs(candidate.frac - old.frac);
+      if (d < delta) {
+        best = candidate;
+        delta = d;
+      }
+    }
+    return { ...best, lat: old.lat, lon: old.lon, frac: old.frac };
+  });
+
+  return {
+    ...incoming,
+    route: {
+      ...incoming.route,
+      source: "track",
+      samples,
+      filedFixes: incoming.route.filedFixes ?? saved.route.filedFixes,
+    },
+  };
+}
+
 function rideLabelOf(story: FlightStory) {
   const ahead = story.route.samples.filter((s) => s.frac >= story.route.progress);
   if (ahead.some((s) => s.chop === "severe")) return "Severe turbulence";
@@ -494,7 +531,10 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       if (!storyMatchesQuery(s, query)) {
         throw new Error("Could not load that flight. Try another number.");
       }
-      const merged = rememberOrigOnClient(s);
+      const merged = keepRecentTrackGeometry(
+        rememberOrigOnClient(s),
+        storyForQuery(saved, query),
+      );
       writeCachedStory(query, merged);
       return merged;
     },
