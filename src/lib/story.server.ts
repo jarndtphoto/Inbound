@@ -2655,6 +2655,13 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		}
 		if (progressResume.departureStage === "taxi") taxiOutLatch.set(landKey, { at: Date.now() / 1e3 });
 	}
+	const departureProgressKnownBeforeMovement = Boolean(
+		pushLatch.has(landKey) ||
+		taxiOutLatch.has(landKey) ||
+		progressResume?.departureStage === "push" ||
+		progressResume?.departureStage === "taxi" ||
+		progressResume?.departureStage === "takeoff_roll"
+	);
 	if ((faLanded && !flyingAway) || onFieldNow) landedLatch.set(landKey, Date.now() / 1e3);
 	let ourLanded = Boolean(landedLatch.get(landKey));
 	if (ourLanded && live && !live.onGround) {
@@ -3168,6 +3175,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		(leftGate && motion.taxiing) ||
 		(freshSurface && (distPark >= 0.10 || (live.gsKt ?? 0) >= 8))
 	);
+	// Do not let one sparse surface update create Pushback and Taxi at once.
+	// If this is the first movement evidence for the leg, expose Pushback for
+	// this response; a later confirmed movement update may advance to Taxi.
+	const firstDepartureMovement = Boolean(leftGate && !departureProgressKnownBeforeMovement && !times.pushed);
+	const stageTaxiHint = taxiHint && !firstDepartureMovement;
 	// Airport reference coordinates are not gate coordinates. Only a stand
 	// observed before departure can contradict a reported gate-out, and the
 	// position itself must be fresh and newer than that report.
@@ -3240,7 +3252,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		const prev = pushLatch.get(landKey);
 		if (!prev || typeof prev !== "object" || !prev.live) pushLatch.delete(landKey);
 	}
-	if (taxiHint || motion.taxiing || times.airborne || (live && !live.onGround)) {
+	if ((stageTaxiHint || (motion.taxiing && !firstDepartureMovement)) || times.airborne || (live && !live.onGround)) {
 		taxiOutLatch.set(landKey, { at: Date.now() / 1e3 });
 	}
 	const taxiOutLatched = taxiOutLatch.has(landKey);
@@ -3380,8 +3392,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		// aircraft's fresh departure-airport position as an inbound flight.
 		inboundStatus: resumed && !inboundAware ? "unknown" : inbound.status,
 		pushed: Boolean(times.pushed || leftGate),
-		faAirborne: Boolean(ourAirborne || motion.flying) && !surfaceFixAtOrigin && !taxiHint,
-		taxiHint,
+		faAirborne: Boolean(ourAirborne || motion.flying) && !surfaceFixAtOrigin && !stageTaxiHint,
+		taxiHint: stageTaxiHint,
 		taxiOutLatched,
 		distPark,
 		parkedAtGate,
@@ -3413,6 +3425,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			taxiOutLatched,
 			pushTimestamp: times.pushed ? times.pushUnix : null,
 			pushTimestampSource: times.pushed ? times.pushSource ?? null : null,
+			firstDepartureMovement,
+			rawTaxiHint: taxiHint,
+			stageTaxiHint,
 			providerGateOut: aware?.gateOut ?? null,
 			groundspeedKt: live?.gsKt ?? null,
 			onGround: live?.onGround ?? null,
