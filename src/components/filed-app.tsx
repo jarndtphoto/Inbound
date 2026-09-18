@@ -381,7 +381,7 @@ export function FiledApp() {
       </header>
 
       <section className="flex min-h-0 flex-1 flex-col justify-center rounded-2xl border border-border bg-surface p-5 sm:p-8">
-        <p className="text-sm font-medium text-muted">Live flight tracking from pushback to the gate</p>
+        <p className="text-sm font-medium text-muted">Live flight tracking from gate to gate</p>
         <h1 className="mt-2 font-display text-4xl leading-[0.95] sm:text-6xl">Know what’s happening<br />with your flight.</h1>
         <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted sm:text-base">Follow the aircraft, see the route and weather ahead, and stay current as the flight moves.</p>
         <form className="mt-5 space-y-2.5" onSubmit={e => { e.preventDefault(); start(flight); }}>
