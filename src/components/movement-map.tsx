@@ -212,6 +212,12 @@ function SurfaceShape({ feature, project }: { feature: SurfaceFeature; project: 
   if (feature.kind === "taxiway") {
     return <polyline points={points} className="fill-none stroke-accent/55" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />;
   }
+  if (feature.kind === "taxilane") {
+    return <polyline points={points} className="fill-none stroke-accent/38" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />;
+  }
+  if (feature.kind === "parking_position") {
+    return <polyline points={points} className="fill-none stroke-fg/28" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />;
+  }
   return null;
 }
 
@@ -289,7 +295,7 @@ function GroundMovementMap({
   const taxiwayLabels = useMemo(() => {
     const unique = new Map<string, SurfaceFeature>();
     for (const feature of features) {
-      if (feature.kind !== "taxiway" || feature.points.length < 2) continue;
+      if ((feature.kind !== "taxiway" && feature.kind !== "taxilane") || feature.points.length < 2) continue;
       const label = (feature.ref || feature.name || "").trim();
       if (!label || unique.has(label)) continue;
       unique.set(label, feature);
@@ -336,6 +342,8 @@ function GroundMovementMap({
             {features.filter((f) => f.kind === "terminal").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "runway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "taxiway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
+            {features.filter((f) => f.kind === "taxilane").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
+            {features.filter((f) => f.kind === "parking_position").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {zoom.view.scale >= 2.2 ? taxiwayLabels.map(([label, feature]) => {
               const point = feature.points[Math.floor(feature.points.length / 2)]!;
               const q = project(point);
