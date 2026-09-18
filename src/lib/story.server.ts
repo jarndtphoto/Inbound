@@ -192,7 +192,7 @@ function splitTraceLegs(points) {
 		}
 		if (isGroundPt(p)) {
 			groundStreak++;
-			if (airPts >= 8 && groundStreak >= 2) {
+			if (airPts >= 6 && groundStreak >= 2) {
 				cur.push(p);
 				flush();
 				continue;
@@ -454,7 +454,7 @@ async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, fa
 		const arrival = stitchArrival(flown, live, dest);
 		if (arrival && arrival.length >= 4) return { points: arrival, spine, flown, source: flown.length >= 6 ? "track" : "direct" };
 	}
-	if (flown.length >= 8) {
+	if (flown.length >= 6) {
 		return {
 			points: densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48),
 			spine,
@@ -688,7 +688,7 @@ export function motionFromTrace(points, origin) {
 		const d = haversineNm(first, p);
 		if (d > maxDist) maxDist = d;
 	}
-	const taxiing = lastGround && (maxDist > 0.10 || (lastGs >= 8 && maxDist > 0.05));
+	const taxiing = lastGround && (maxDist > 0.10 || (lastGs >= 6 && maxDist > 0.05));
 	const pushed = lastGround && (maxDist > 0.05 || (lastGs >= 4 && maxDist > 0.03));
 	return { pushed, taxiing, flying };
 }
@@ -1554,7 +1554,7 @@ function pirepChop(tb) {
 }
 function letterOf(score) {
 	const s = Math.max(22, Math.min(99, Math.round(score)));
-	return s >= 85 ? "A" : s >= 72 ? "B" : s >= 58 ? "C" : s >= 44 ? "D" : "F";
+	return s >= 65 ? "A" : s >= 72 ? "B" : s >= 58 ? "C" : s >= 44 ? "D" : "F";
 }
 function letterRank(g) {
 	return {
@@ -1698,8 +1698,8 @@ function whyTrend(base, snap, trend) {
 	if (!snap.originNas && base.originNas) return "The departure delay program dropped off.";
 	if (snap.depDelay - base.depDelay >= 12) return "The posted push slipped further.";
 	if (base.depDelay - snap.depDelay >= 12) return "The posted push came back toward the original.";
-	if ((snap.taxiOut ?? 0) - (base.taxiOut ?? 0) >= 8) return "Taxi out got longer.";
-	if ((base.taxiOut ?? 0) - (snap.taxiOut ?? 0) >= 8) return "Taxi out shortened.";
+	if ((snap.taxiOut ?? 0) - (base.taxiOut ?? 0) >= 6) return "Taxi out got longer.";
+	if ((base.taxiOut ?? 0) - (snap.taxiOut ?? 0) >= 6) return "Taxi out shortened.";
 	return trend === "down" ? "The whole-trip grade dropped on the latest update." : "The whole-trip grade improved on the latest update.";
 }
 function applyGradeTrend(key, snap, comfort) {
@@ -1707,7 +1707,7 @@ function applyGradeTrend(key, snap, comfort) {
 	const baseline = hist.find((h) => Date.now() - h.at >= 9e4) ?? hist[0];
 	let trend = "steady";
 	let trendWhy = null;
-	if (baseline && snap.at - baseline.at >= 8e3) {
+	if (baseline && snap.at - baseline.at >= 6e3) {
 		const dScore = snap.score - baseline.score;
 		const dLetter = letterRank(snap.grade) - letterRank(baseline.grade);
 		if (dLetter < 0 || dScore <= -5) trend = "down";
@@ -1795,7 +1795,7 @@ function tzFromCoord(lat, lon) {
 	if (lat >= 35 && lat <= 71 && lon >= -10 && lon < 12) return "Europe/Paris";
 	if (lat >= 34 && lat <= 65 && lon >= 12 && lon <= 30) return "Europe/Athens";
 	if (lat >= 22 && lat <= 42 && lon >= 25 && lon <= 45) return "Asia/Dubai";
-	if (lat >= 8 && lat <= 37 && lon >= 68 && lon <= 90) return "Asia/Kolkata";
+	if (lat >= 6 && lat <= 37 && lon >= 68 && lon <= 90) return "Asia/Kolkata";
 	if (lat >= 18 && lat <= 54 && lon >= 100 && lon <= 125) return "Asia/Shanghai";
 	if (lat >= 30 && lat <= 46 && lon >= 129 && lon <= 146) return "Asia/Tokyo";
 	if (lat >= -48 && lat <= -10 && lon >= 112 && lon <= 155) return lon < 129 ? "Australia/Perth" : "Australia/Sydney";
@@ -1961,7 +1961,7 @@ function holdLastGoodRouteTrack(key, filed) {
 	const origin = spine[0];
 	const dest = spine[spine.length - 1];
 	const flown = prev.flown;
-	const points = flown.length >= 8
+	const points = flown.length >= 6
 		? densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48)
 		: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36);
 	return { ...filed, points, spine, flown, source: "track" };
@@ -2863,7 +2863,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const filed = !ourLanded && ourAirborne ? holdLastGoodRouteTrack(routeTrackKey, filedRaw) : filedRaw;
 	let path;
 	let pathSource;
-	if (filed.source === "track" && filed.points.length >= 8) {
+	if (filed.source === "track" && filed.points.length >= 6) {
 		path = filed.points;
 		pathSource = "track";
 	} else if (aware && aware.waypoints.length >= 4) {
@@ -2945,7 +2945,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		const prev = path[i - 1];
 		const step = prev ? haversineNm(prev, p) : 0;
 		sinceFix += step;
-		const isFix = i > 0 && i < path.length - 1 && sinceFix >= 85;
+		const isFix = i > 0 && i < path.length - 1 && sinceFix >= 65;
 		if (isFix) sinceFix = 0;
 		const distNm = path.slice(0, i + 1).reduce((acc, cur, idx) => {
 			if (idx === 0) return 0;
@@ -3190,8 +3190,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		)
 	);
 	// Pushback begins on the first validated movement evidence. Taxi begins only
-	// once a fresh on-ground fix reaches 8 kt for the first time.
-	const taxiHint = Boolean(freshSurface && (live.gsKt ?? 0) >= 8);
+	// once a fresh on-ground fix reaches 6 kt for the first time.
+	const taxiHint = Boolean(freshSurface && (live.gsKt ?? 0) >= 6);
 	// Do not let one sparse surface update create Pushback and Taxi at once.
 	// If this is the first movement evidence for the leg, expose Pushback for
 	// this response; a later confirmed movement update may advance to Taxi.
@@ -3463,7 +3463,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			firstDepartureMovement,
 			rawTaxiHint: taxiHint,
 			stageTaxiHint,
-			taxiThresholdKt: 8,
+			taxiThresholdKt: 6,
 			parkedObservedSec,
 			stationaryAtStand,
 			providerGateOut: effectiveGateOut ?? null,
@@ -3771,7 +3771,7 @@ export async function loadLiveBoard() {
 			if (typeof raw.alt_baro !== "number" || raw.alt_baro < 12e3) continue;
 			if (!prefs.some((p) => cs.startsWith(p))) continue;
 			picked.set(cs, raw);
-			if (picked.size >= 8) break;
+			if (picked.size >= 6) break;
 		}
 		const entries = [...picked.entries()];
 		const cards = (await Promise.all(entries.map(async ([cs, raw]) => {
