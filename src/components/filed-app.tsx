@@ -113,10 +113,21 @@ function origMemKey(story: FlightStory) {
   return `${normFlight(story.callsign)}:${story.origin.iata}:${story.dest.iata}:${day}`;
 }
 
-const BRIEF_HISTORY_KEY = "inbound-brief-history-v1";
+const BRIEF_HISTORY_KEY = "inbound-brief-history-v2";
+
+function briefHistoryKey(story: FlightStory) {
+  const instance = story.flightId?.trim();
+  if (instance) return `${instance}:${story.origin.iata}:${story.dest.iata}`;
+  const u = story.times?.origPushUnix ?? story.times?.pushUnix ?? story.times?.takeoffUnix;
+  const day = u != null
+    ? new Date(u * 1000).toISOString().slice(0, 10)
+    : new Date(story.fetchedAt).toISOString().slice(0, 10);
+  return `${normFlight(story.callsign)}:${story.origin.iata}:${story.dest.iata}:${day}`;
+}
+
 function savedBrief(story: FlightStory): CompiledBrief | null {
   try {
-    const entry = JSON.parse(localStorage.getItem(BRIEF_HISTORY_KEY) || "{}")[origMemKey(story)];
+    const entry = JSON.parse(localStorage.getItem(BRIEF_HISTORY_KEY) || "{}")[briefHistoryKey(story)];
     const b = entry?.brief;
     return b && typeof b.lead === "string" && b.snap && Array.isArray(b.log)
       && Array.isArray(b.segments) ? b : null;
@@ -125,7 +136,7 @@ function savedBrief(story: FlightStory): CompiledBrief | null {
 function saveBrief(story: FlightStory, brief: CompiledBrief) {
   try {
     const records = JSON.parse(localStorage.getItem(BRIEF_HISTORY_KEY) || "{}");
-    records[origMemKey(story)] = { at: Date.now(), brief };
+    records[briefHistoryKey(story)] = { at: Date.now(), brief };
     const latest = Object.entries(records).sort((a, b) =>
       (b[1] as {at: number}).at - (a[1] as {at: number}).at).slice(0, 30);
     localStorage.setItem(BRIEF_HISTORY_KEY, JSON.stringify(Object.fromEntries(latest)));
@@ -1889,10 +1900,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     <details className="mt-3 text-sm"><summary className="cursor-pointer py-2">Current airport weather <span className="text-xs text-muted">· METAR</span></summary><p className="break-words font-mono text-muted">{field.rawMetar || "Observation unavailable."}</p></details>
   </article>;
   return <div className="space-y-4">
-    <div><h2 className="text-xl font-semibold">Weather through your flight</h2>
-      <p className="mt-2 text-sm leading-relaxed text-muted">Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters. Unflagged areas may have incomplete coverage.</p>
-      <p className="mt-2 text-xs text-muted">Flight data fetched {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Weather observation and advisory times are shown in their source details.</p>
-    </div>
+    <div><h2 className="text-xl font-semibold">Weather through your flight</h2></div>
     {!landed && fieldCard(story.origin, "Takeoff · departure conditions")}
     {(!story.weatherCoverage || story.weatherCoverage.failedSources.length > 0) && <p role="status" className="rounded-xl border border-border p-4 text-sm">Weather coverage is incomplete. Missing feeds do not mean smooth conditions. {story.weatherCoverage?.failedSources.join(" · ")}</p>}
     <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
@@ -1920,6 +1928,10 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     </ol> : <p className="text-sm text-muted">{samples.length ? "No significant conditions flagged in the available route forecast. This does not guarantee a smooth ride." : "Route weather data unavailable."}</p>}
     {fieldCard(story.dest, "Landing · arrival conditions")}
     <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer py-2">Weather sources and timing</summary>
+      <div className="mt-3 space-y-2 text-sm text-muted">
+        <p>Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters. Unflagged areas may have incomplete coverage.</p>
+        <p className="text-xs">Flight data fetched {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Weather observation and advisory times are shown in their source details.</p>
+      </div>
       {story.hazards.filter(h => h.remaining).map(h => {
         const technical = technicalWeatherProducts(`${h.label} ${h.detail}`);
         return <div key={h.id} className="mt-3 text-sm"><p className="font-semibold">{passengerWeatherSource(`${h.label} ${h.detail}`, h.kind)}</p>{technical && <p className="text-xs text-muted">{technical}</p>}<p className="text-muted">{h.validity || "Timing unavailable"}</p><p className="mt-1 text-muted">{h.detail}</p></div>;
