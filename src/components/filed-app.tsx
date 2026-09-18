@@ -623,47 +623,49 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     retry: false,
   });
   const fastGround = groundStoryQ.data;
-  const fastGroundAge = fastGround?.seenAt ? Math.max(0, Date.now() / 1000 - fastGround.seenAt) : Infinity;
-  const story = baseStory && fastGround && fastGroundAge <= 30
-    ? {
-        ...baseStory,
-        live: true,
-        aircraft: {
-          ...(baseStory.aircraft ?? {
-            hex: "",
-            registration: null,
-            type: null,
-            typeName: null,
-            year: null,
-            operator: null,
-            vertFpm: null,
-            phase: "parked" as const,
-          }),
-          lat: fastGround.lat,
-          lon: fastGround.lon,
-          altFt: fastGround.altFt ?? 0,
-          gsKt: fastGround.gsKt ?? 0,
-          track: fastGround.track ?? baseStory.aircraft?.track ?? null,
-          onGround: fastGround.onGround,
-          phase: fastGround.onGround ? ((fastGround.gsKt ?? 0) > 5 ? "taxi" as const : "parked" as const) : "cruise" as const,
-          registration: fastGround.registration ?? baseStory.aircraft?.registration ?? null,
-          callsign: fastGround.callsign ?? baseStory.aircraft?.callsign ?? null,
-          extrapolated: false,
-          seenSec: fastGroundAge,
-        },
-        currentStage: fastGround.onGround && (fastGround.gsKt ?? 0) >= 1
-          && ["inbound", "origin_gate", "push"].includes(String(baseStory.currentStage))
-          ? "taxi" as const
-          : baseStory.currentStage,
-        providers: {
-          ...baseStory.providers,
-          chosenPosition: "fr24",
-          chosenPositionSeenAt: fastGround.seenAt,
-          chosenPositionAgeSec: fastGroundAge,
-          surfaceTelemetryStale: false,
-        },
-      }
-    : baseStory;
+  const story = useMemo(() => {
+    if (!baseStory || !fastGround) return baseStory;
+    const fastGroundAge = fastGround.seenAt ? Math.max(0, Date.now() / 1000 - fastGround.seenAt) : Infinity;
+    if (fastGroundAge > 30) return baseStory;
+    return {
+      ...baseStory,
+      live: true,
+      aircraft: {
+        ...(baseStory.aircraft ?? {
+          hex: "",
+          registration: null,
+          type: null,
+          typeName: null,
+          year: null,
+          operator: null,
+          vertFpm: null,
+          phase: "parked" as const,
+        }),
+        lat: fastGround.lat,
+        lon: fastGround.lon,
+        altFt: fastGround.altFt ?? 0,
+        gsKt: fastGround.gsKt ?? 0,
+        track: fastGround.track ?? baseStory.aircraft?.track ?? null,
+        onGround: fastGround.onGround,
+        phase: fastGround.onGround ? ((fastGround.gsKt ?? 0) > 5 ? "taxi" as const : "parked" as const) : "cruise" as const,
+        registration: fastGround.registration ?? baseStory.aircraft?.registration ?? null,
+        callsign: fastGround.callsign ?? baseStory.aircraft?.callsign ?? null,
+        extrapolated: false,
+        seenSec: fastGroundAge,
+      },
+      currentStage: fastGround.onGround && (fastGround.gsKt ?? 0) >= 1
+        && ["inbound", "origin_gate", "push"].includes(String(baseStory.currentStage))
+        ? "taxi" as const
+        : baseStory.currentStage,
+      providers: {
+        ...baseStory.providers,
+        chosenPosition: "fr24",
+        chosenPositionSeenAt: fastGround.seenAt,
+        chosenPositionAgeSec: fastGroundAge,
+        surfaceTelemetryStale: false,
+      },
+    };
+  }, [baseStory, fastGround]);
   useEffect(() => {
     if (!story) return;
     const key = normFlight(query);
