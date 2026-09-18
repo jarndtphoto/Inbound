@@ -1,5 +1,5 @@
 import { RouteMap } from "./route-map";
-import { getAirportSurface } from "@/lib/airport-surface";
+import { getAirportSurfaceCached } from "@/lib/airport-surface";
 import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.server";
 import { haversineNm } from "@/lib/geo";
 import type { FlightStory } from "@/lib/types";
@@ -32,7 +32,7 @@ type GroundMode = {
 function surfaceQueryOptions(airport: FlightStory["origin"]) {
   return {
     queryKey: ["airport-surface", airport.icao, airport.lat.toFixed(3), airport.lon.toFixed(3)] as const,
-    queryFn: () => getAirportSurface({ data: { airport: airport.icao, lat: airport.lat, lon: airport.lon } }),
+    queryFn: () => getAirportSurfaceCached({ airport: airport.icao, lat: airport.lat, lon: airport.lon }),
     staleTime: SURFACE_CACHE_MS,
     gcTime: SURFACE_CACHE_MS,
     retry: 1,
