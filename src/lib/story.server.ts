@@ -3127,7 +3127,20 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		});
 	}
 	const uniqHazards = distinctRouteHazards(hazards);
-	let times = timesOf(aware, origin, dest);
+	const aeroPush = official.flightaware?.push ?? null;
+	const aeroPushMatchesFlight = Boolean(
+		aeroPush &&
+		official.flightaware?.flightId &&
+		aware?.flightId &&
+		official.flightaware.flightId === aware.flightId
+	);
+	const effectiveGateOut = aeroPushMatchesFlight && aeroPush?.actual
+		? { ...aware.gateOut, actual: aeroPush.actual }
+		: aware.gateOut;
+	const awareWithEffectiveGateOut = effectiveGateOut === aware.gateOut
+		? aware
+		: { ...aware, gateOut: effectiveGateOut };
+	let times = timesOf(awareWithEffectiveGateOut, origin, dest);
 	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
 	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30 && !pushLatch.get(landKey) && !times.pushed) {
@@ -3184,7 +3197,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// observed before departure can contradict a reported gate-out, and the
 	// position itself must be fresh and newer than that report.
 	const fixUnix = live ? Date.now() / 1e3 - (live.seenSec ?? 999) : 0;
-	const gateOutUnix = confirmedGateOutActual(aware?.gateOut);
+	const gateOutUnix = confirmedGateOutActual(effectiveGateOut);
 	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && park
 		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) < 1.2
 		&& distPark < 0.025 && !pushLatch.has(landKey)
@@ -3205,7 +3218,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	if (ourAirborne && !times.airborne) {
 		times = { ...times, airborne: true };
 	}
-	const providerPushActual = confirmedGateOutActual(aware?.gateOut);
+	const providerPushActual = confirmedGateOutActual(effectiveGateOut);
 	const selectedPush = choosePushEvidence(providerPushActual, [
 		flightAwarePush && { ...flightAwarePush, provider: "flightaware" },
 		fr24Push && { ...fr24Push, provider: "fr24" },
@@ -3213,7 +3226,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	]);
 	if (selectedPush && !stationaryAtStand && (leftGate || taxiHint || times.pushed || times.airborne)) {
 		const prior = pushLatch.get(landKey);
-		const reconciledPush = reconcilePushLatch(prior, selectedPush, aware?.gateOut);
+		const reconciledPush = reconcilePushLatch(prior, selectedPush, effectiveGateOut);
 		const useUnix = reconciledPush.unix;
 		const useSource = reconciledPush.source;
 		const origPush = times.origPushUnix ?? useUnix;
@@ -3292,7 +3305,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	if (times.taxiOutKind !== "measured") {
 		const wheelsUp = Boolean(live && !live.onGround) || (Boolean(aware?.takeoff?.actual) && !(live && live.onGround && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 12));
 		if (wheelsUp) {
-			const pushU = confirmedGateOutActual(aware?.gateOut);
+			const pushU = confirmedGateOutActual(effectiveGateOut);
 			const toU = aware?.takeoff?.actual;
 			if (pushU && toU && toU > pushU) {
 				const m = Math.round((toU - pushU) / 60);
@@ -3315,7 +3328,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		const prev = gateLatch.get(landKey) ?? {};
 		const landUnix = aware?.landing?.actual ?? prev.landUnix ?? times.landUnix ?? landedLatch.get(landKey) ?? now;
 		const gateUnix = aware?.gateIn?.actual ?? prev.gateUnix ?? now;
-		const pushUnix = confirmedGateOutActual(aware?.gateOut) ?? prev.pushUnix ?? times.pushUnix;
+		const pushUnix = confirmedGateOutActual(effectiveGateOut) ?? prev.pushUnix ?? times.pushUnix;
 		const takeoffUnix = aware?.takeoff?.actual ?? prev.takeoffUnix ?? times.takeoffUnix;
 		gateLatch.set(landKey, { landUnix, gateUnix, pushUnix, takeoffUnix });
 	}
@@ -3358,7 +3371,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const inbound = buildInbound({
 		live,
 		ourTakeoffActual: aware?.takeoff.actual ?? null,
-		ourGateOutActual: confirmedGateOutActual(aware?.gateOut),
+		ourGateOutActual: confirmedGateOutActual(effectiveGateOut),
 		origin,
 		inboundIdent: inboundAware?.ident ?? inboundIdent,
 		inboundAware,
@@ -3428,7 +3441,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			firstDepartureMovement,
 			rawTaxiHint: taxiHint,
 			stageTaxiHint,
-			providerGateOut: aware?.gateOut ?? null,
+			providerGateOut: effectiveGateOut ?? null,
+			providerGateOutPublic: aware?.gateOut ?? null,
 			groundspeedKt: live?.gsKt ?? null,
 			onGround: live?.onGround ?? null,
 			distanceFromParkedNm: park && live ? distPark : null,
