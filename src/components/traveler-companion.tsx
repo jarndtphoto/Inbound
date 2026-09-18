@@ -1,7 +1,7 @@
 import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { parseFlightQuery } from "@/lib/flight-parse";
 import { airlineStatusLink } from "@/lib/airline-status";
-import { getAirportSurface } from "@/lib/airport-surface";
+import { getAirportSurfaceCached } from "@/lib/airport-surface";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useId } from "react";
 import type { FlightStory } from "@/lib/types";
@@ -13,7 +13,7 @@ const SURFACE_CACHE_MS = 12 * 60 * 60_000;
 function airportSurfaceQuery(airport: FlightStory["origin"]) {
   return {
     queryKey: ["airport-surface", airport.icao, airport.lat.toFixed(3), airport.lon.toFixed(3)] as const,
-    queryFn: () => getAirportSurface({ data: { airport: airport.icao, lat: airport.lat, lon: airport.lon } }),
+    queryFn: () => getAirportSurfaceCached({ airport: airport.icao, lat: airport.lat, lon: airport.lon }),
     staleTime: SURFACE_CACHE_MS,
     gcTime: SURFACE_CACHE_MS,
     retry: 1,
