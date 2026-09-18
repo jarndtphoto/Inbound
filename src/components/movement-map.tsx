@@ -203,12 +203,14 @@ function SurfaceShape({ feature, project }: { feature: SurfaceFeature; project: 
     const q = project(p);
     return `${q.x.toFixed(1)},${q.y.toFixed(1)}`;
   }).join(" ");
-  if (feature.kind === "apron" || feature.kind === "terminal" || feature.kind === "taxiway_area") {
+  if (feature.kind === "apron" || feature.kind === "terminal" || feature.kind === "taxiway_area" || feature.kind === "runway_area") {
     const cls = feature.kind === "terminal"
       ? "fill-fg/14 stroke-fg/35"
       : feature.kind === "taxiway_area"
         ? "fill-accent/6 stroke-accent/18"
-        : "fill-fg/7 stroke-fg/20";
+        : feature.kind === "runway_area"
+          ? "fill-fg/18 stroke-fg/45"
+          : "fill-fg/7 stroke-fg/20";
     return <polygon points={points} className={cls} strokeWidth="1" vectorEffect="non-scaling-stroke" />;
   }
   if (feature.kind === "runway") {
@@ -345,6 +347,7 @@ function GroundMovementMap({
             </g>
             {features.filter((f) => f.kind === "apron").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "taxiway_area").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
+            {features.filter((f) => f.kind === "runway_area").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "terminal").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "runway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "taxiway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
@@ -393,7 +396,7 @@ function GroundMovementMap({
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-[10px] leading-tight text-muted">
         <span>Pinch to zoom · drag to pan</span>
-        <span className="shrink-0">Airport surface © OpenStreetMap contributors</span>
+        <span className="shrink-0">Airport surface · {(surfaceQ.data as AirportSurface | undefined)?.source ?? "loading"}</span>
       </div>
     </div>
   );
