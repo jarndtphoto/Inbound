@@ -203,8 +203,13 @@ function SurfaceShape({ feature, project }: { feature: SurfaceFeature; project: 
     const q = project(p);
     return `${q.x.toFixed(1)},${q.y.toFixed(1)}`;
   }).join(" ");
-  if (feature.kind === "apron" || feature.kind === "terminal") {
-    return <polygon points={points} className={feature.kind === "terminal" ? "fill-fg/14 stroke-fg/35" : "fill-fg/7 stroke-fg/20"} strokeWidth="1" vectorEffect="non-scaling-stroke" />;
+  if (feature.kind === "apron" || feature.kind === "terminal" || feature.kind === "taxiway_area") {
+    const cls = feature.kind === "terminal"
+      ? "fill-fg/14 stroke-fg/35"
+      : feature.kind === "taxiway_area"
+        ? "fill-accent/6 stroke-accent/18"
+        : "fill-fg/7 stroke-fg/20";
+    return <polygon points={points} className={cls} strokeWidth="1" vectorEffect="non-scaling-stroke" />;
   }
   if (feature.kind === "runway") {
     return <polyline points={points} className="fill-none stroke-fg/65" strokeWidth="7" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />;
@@ -339,6 +344,7 @@ function GroundMovementMap({
               {Array.from({ length: 9 }, (_, i) => <line key={`h-${i}`} x1="0" y1={i * 100} x2={W} y2={i * 100} className="stroke-fg/15" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
             </g>
             {features.filter((f) => f.kind === "apron").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
+            {features.filter((f) => f.kind === "taxiway_area").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "terminal").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "runway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
             {features.filter((f) => f.kind === "taxiway").map((f) => <SurfaceShape key={`${f.kind}-${f.id}`} feature={f} project={project} />)}
