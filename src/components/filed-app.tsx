@@ -337,6 +337,7 @@ export function FiledApp() {
   const [entered, setEntered] = useState(false);
   const [page, setPage] = useState<"home" | "flight">("home");
   const [theme, setTheme] = useState<"sunset" | "sunrise">("sunrise");
+  const [themeSettingsOpen, setThemeSettingsOpen] = useState(false);
   const [flight, setFlight] = useState("");
   const recents = useFiled(s => s.recents);
   const hydrate = useFiled(s => s.hydrate);
@@ -372,29 +373,46 @@ export function FiledApp() {
     </div>
   </main>;
   if (page === "flight") return <FlightPages onHome={() => setPage("home")} />;
-  return <main className="h-dvh overflow-y-auto bg-bg px-5 pt-safe pb-safe text-fg sm:px-8">
-    <div className="mx-auto max-w-2xl space-y-7 pb-8">
-      <header className="flex items-center justify-between"><span className="flex items-center gap-2 font-semibold"><Plane className="h-5 w-5 text-accent" aria-hidden="true" /> Inbound</span><a href="#home-settings" className="rounded-lg border border-border px-4 py-3 text-sm">Settings</a></header>
-      <section className="rounded-2xl border border-border bg-surface p-6 sm:p-8">
-        <p className="text-sm text-muted">From your gate to your destination</p>
-        <h1 className="mt-3 font-display text-5xl sm:text-6xl">Your flight.<br />A clearer picture.</h1>
-        <p className="mt-4 max-w-md text-muted">Follow your aircraft, see weather ahead, and keep up with important changes.</p>
-        <form className="mt-6 space-y-3" onSubmit={e => { e.preventDefault(); start(flight); }}>
+  return <main className="h-dvh overflow-hidden bg-bg px-5 pt-safe pb-safe text-fg sm:px-8">
+    <div className="mx-auto flex h-full max-w-2xl flex-col gap-4 py-3 sm:py-5">
+      <header className="flex shrink-0 items-center justify-between gap-3">
+        <span className="flex items-center gap-2 font-semibold"><Plane className="h-5 w-5 text-accent" aria-hidden="true" /> Inbound</span>
+        <button type="button" onClick={() => setThemeSettingsOpen(true)} className="rounded-lg border border-border px-4 py-2.5 text-sm font-semibold">Theme settings</button>
+      </header>
+
+      <section className="flex min-h-0 flex-1 flex-col justify-center rounded-2xl border border-border bg-surface p-5 sm:p-8">
+        <p className="text-sm font-medium text-muted">Live flight tracking from pushback to the gate</p>
+        <h1 className="mt-2 font-display text-4xl leading-[0.95] sm:text-6xl">Know what’s happening<br />with your flight.</h1>
+        <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted sm:text-base">Follow the aircraft, see the route and weather ahead, and stay current as the flight moves.</p>
+        <form className="mt-5 space-y-2.5" onSubmit={e => { e.preventDefault(); start(flight); }}>
           <label htmlFor="home-flight" className="block text-sm font-semibold">Flight number</label>
-          <input id="home-flight" required maxLength={16} value={flight} onChange={e => setFlight(e.target.value)} placeholder="For example, AA1114" autoCapitalize="characters" autoComplete="off" spellCheck={false} className="w-full rounded-xl border border-border bg-bg px-4 py-4 text-lg outline-none focus:ring-2 focus:ring-accent" />
-          <button type="submit" disabled={!flight.trim()} className="w-full rounded-xl bg-accent px-5 py-4 font-semibold text-accent-fg disabled:opacity-50">Track my flight →</button>
+          <input id="home-flight" required maxLength={16} value={flight} onChange={e => setFlight(e.target.value)} placeholder="For example, AA1114" autoCapitalize="characters" autoComplete="off" spellCheck={false} className="w-full rounded-xl border border-border bg-bg px-4 py-3.5 text-lg outline-none focus:ring-2 focus:ring-accent" />
+          <button type="submit" disabled={!flight.trim()} className="w-full rounded-xl bg-accent px-5 py-3.5 font-semibold text-accent-fg disabled:opacity-50">Track my flight →</button>
         </form>
       </section>
-      {recents.length > 0 && <section aria-label="Recent flights"><h2 className="mb-3 font-semibold">Pick up where you left off</h2><div className="flex flex-wrap gap-2">{recents.map(q => <button key={q} type="button" onClick={() => start(q)} className="rounded-xl border border-border bg-surface px-4 py-3">{q}</button>)}</div></section>}
-      <section id="home-settings" className="scroll-mt-5 rounded-2xl border border-border bg-surface p-6">
-        <h2 className="text-xl font-semibold">Settings</h2><p className="mt-1 text-sm text-muted">Choose the light that suits your journey.</p>
-        <fieldset className="mt-5"><legend className="mb-3 text-sm font-semibold">Appearance</legend><div className="grid grid-cols-2 gap-3">
-          {(["sunrise", "sunset"] as const).map(mode => <button key={mode} type="button" aria-pressed={theme === mode} onClick={() => chooseTheme(mode)} className={cn("rounded-xl border-2 p-4 text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent", theme === mode ? "ring-2 ring-accent ring-offset-2 ring-offset-bg" : "")} style={{ background: mode === "sunrise" ? "#fff3ce" : "#172238", color: mode === "sunrise" ? "#30230c" : "#f4f6ff", borderColor: mode === "sunrise" ? "#ad7415" : "#748cb5" }}>
-            <span aria-hidden="true" className="mb-3 block text-2xl">{mode === "sunset" ? "☾" : "☀"}</span>
-            <span className="block font-semibold">{mode === "sunset" ? "Sunset" : "Sunrise"}</span><span className="mt-1 block text-sm">{mode === "sunset" ? "Dark & calm" : "Light & bright"}</span><span className="mt-3 block text-xs font-semibold">{theme === mode ? "✓ Selected" : "Choose theme"}</span>
-          </button>)}
-        </div></fieldset><p className="mt-4 text-xs text-muted">Your preference is saved on this device and used throughout the app.</p>
-      </section>
+
+      {recents.length > 0 && <section className="shrink-0" aria-label="Recent flights">
+        <div className="mb-2 flex items-center justify-between gap-3"><h2 className="text-sm font-semibold">Recent flights</h2><span className="text-xs text-muted">Tap to reopen</span></div>
+        <div className="grid grid-cols-3 gap-2">{recents.slice(0, 3).map(q => <button key={q} type="button" onClick={() => start(q)} className="min-w-0 truncate rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-semibold">{q}</button>)}</div>
+      </section>}
+
+      {themeSettingsOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-5 py-safe" role="presentation" onMouseDown={e => { if (e.currentTarget === e.target) setThemeSettingsOpen(false); }}>
+        <section role="dialog" aria-modal="true" aria-labelledby="theme-settings-title" className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 text-fg shadow-2xl">
+          <div className="flex items-start justify-between gap-3">
+            <div><h2 id="theme-settings-title" className="text-xl font-semibold">Theme settings</h2><p className="mt-1 text-sm text-muted">Choose how Inbound looks on this device.</p></div>
+            <button type="button" aria-label="Close theme settings" onClick={() => setThemeSettingsOpen(false)} className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border text-xl">×</button>
+          </div>
+          <fieldset className="mt-5"><legend className="sr-only">Appearance</legend><div className="grid grid-cols-2 gap-3">
+            {(["sunrise", "sunset"] as const).map(mode => <button key={mode} type="button" aria-pressed={theme === mode} onClick={() => chooseTheme(mode)} className={cn("rounded-xl border-2 p-4 text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent", theme === mode ? "ring-2 ring-accent ring-offset-2 ring-offset-bg" : "")} style={{ background: mode === "sunrise" ? "#fff3ce" : "#172238", color: mode === "sunrise" ? "#30230c" : "#f4f6ff", borderColor: mode === "sunrise" ? "#ad7415" : "#748cb5" }}>
+              <span aria-hidden="true" className="mb-3 block text-2xl">{mode === "sunset" ? "☾" : "☀"}</span>
+              <span className="block font-semibold">{mode === "sunset" ? "Sunset" : "Sunrise"}</span>
+              <span className="mt-1 block text-sm">{mode === "sunset" ? "Dark & calm" : "Light & bright"}</span>
+              <span className="mt-3 block text-xs font-semibold">{theme === mode ? "✓ Selected" : "Choose theme"}</span>
+            </button>)}
+          </div></fieldset>
+          <p className="mt-4 text-xs text-muted">Your preference is saved on this device and used throughout the app.</p>
+        </section>
+      </div>}
     </div>
   </main>;
 }
