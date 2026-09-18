@@ -2440,8 +2440,22 @@ function normalizedAdsb(live): NormalizedPosition | null {
 		confidence: live.extrapolated ? "low" : "high"
 	};
 }
+function officialAwareCompatible(base, official: NormalizedFlight | null) {
+	if (!official) return false;
+	if (!base) return true;
+	const baseId = typeof base.flightId === "string" ? base.flightId.trim() : "";
+	const officialId = typeof official.flightId === "string" ? official.flightId.trim() : "";
+	if (baseId && officialId && baseId !== officialId) return false;
+	const baseOrigin = String(base.originIata ?? base.originIcao ?? "").toUpperCase();
+	const baseDest = String(base.destIata ?? base.destIcao ?? "").toUpperCase();
+	const officialOrigin = String(official.origin?.iata ?? official.origin?.icao ?? "").toUpperCase();
+	const officialDest = String(official.destination?.iata ?? official.destination?.icao ?? "").toUpperCase();
+	if (baseOrigin && officialOrigin && baseOrigin !== officialOrigin) return false;
+	if (baseDest && officialDest && baseDest !== officialDest) return false;
+	return true;
+}
 function mergeOfficialAware(base, official: NormalizedFlight | null) {
-	if (!official) return base;
+	if (!official || !officialAwareCompatible(base, official)) return base;
 	const out = base ? { ...base } : {};
 	const mergeTimes = (current, next) => ({
 		scheduled: next?.scheduled ?? current?.scheduled ?? null,
@@ -2518,7 +2532,17 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		safe(loadRoute(parsed.callsign), null),
 		loadOfficialFlightData(parsed.callsign)
 	]);
-	const aware = mergeOfficialAware(publicAware, official.flightaware);
+	const flightawareOfficial = officialAwareCompatible(publicAware, official.flightaware) ? official.flightaware : null;
+	if (official.flightaware && !flightawareOfficial) {
+		console.log("[flightaware-instance-mismatch]", {
+			requested: parsed.callsign,
+			selectedFlightId: publicAware?.flightId ?? null,
+			officialFlightId: official.flightaware.flightId ?? null,
+			selectedRoute: [publicAware?.originIata ?? publicAware?.originIcao ?? null, publicAware?.destIata ?? publicAware?.destIcao ?? null],
+			officialRoute: [official.flightaware.origin?.iata ?? official.flightaware.origin?.icao ?? null, official.flightaware.destination?.iata ?? official.flightaware.destination?.icao ?? null]
+		});
+	}
+	const aware = mergeOfficialAware(publicAware, flightawareOfficial);
 	// Flight-number route databases retain old assignments after a number moves
 	// to a different city pair. Require a current, leg-specific schedule feed.
 	if (!parsed.registration && (!(aware?.originIata || aware?.originIcao) || !(aware?.destIata || aware?.destIcao))) {
@@ -2543,7 +2567,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const liveCs = parsed.callsign;
 	const adsbLive = rawAc ? toLive(rawAc) : null;
 	const positionChoice = choosePosition(
-		[normalizedAdsb(adsbLive), official.fr24?.position, official.flightaware?.position],
+		[normalizedAdsb(adsbLive), official.fr24?.position, flightawareOfficial?.position],
 		{ callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean), registration: aware?.tail ?? null, hex: knownHex ?? aware?.hex ?? null }
 	);
 	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen) : adsbLive ?? liveFromAware(aware);
@@ -3132,10 +3156,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		});
 	}
 	const uniqHazards = distinctRouteHazards(hazards);
-	const aeroPush = official.flightaware?.push ?? null;
+	const aeroPush = flightawareOfficial?.push ?? null;
 	const aeroPushMatchesFlight = Boolean(
 		aeroPush &&
-		official.flightaware?.flightId &&
+		flightawareOfficial?.flightId &&
 		aware?.flightId &&
 		official.flightaware.flightId === aware.flightId
 	);
@@ -3173,7 +3197,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	}
 	const historyStart = (aware?.gateOut?.scheduled ?? aware?.gateOut?.estimated ?? aware?.takeoff?.scheduled ?? Date.now() / 1e3) - 6 * 3600;
 	const faHistory = mergeTraces(
-		official.flightaware?.track?.map((p) => ({ ...p, t: p.seenAt, gs: p.gsKt, alt: p.altFt, ground: p.altFt === 0 })) ?? [],
+		flightawareOfficial?.track?.map((p) => ({ ...p, t: p.seenAt, gs: p.gsKt, alt: p.altFt, ground: p.altFt === 0 })) ?? [],
 		aware?.faTrack ?? []
 	);
 	const fr24History = official.fr24?.track?.map((p) => ({ ...p, t: p.seenAt, gs: p.gsKt, alt: p.altFt, ground: p.altFt === 0 })) ?? [];
@@ -3443,7 +3467,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				: "airborne";
 	const finalPositionAgeSec = liveAgeSec(live);
 	const finalPositionSource = live?.source ?? (live?.extrapolated ? "estimated" : "fallback");
-	const faPosition = official.flightaware?.position ?? null;
+	const faPosition = flightawareOfficial?.position ?? null;
 	const fr24Position = official.fr24?.position ?? null;
 	const adsbPosition = normalizedAdsb(adsbLive);
 	const providerDistancesNm = {
@@ -3478,9 +3502,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			callsignRequested: query,
 			flightInstance: landKey,
 			flightaware: {
-				flightId: official.flightaware?.flightId ?? aware?.flightId ?? null,
+				flightId: flightawareOfficial?.flightId ?? aware?.flightId ?? null,
 				publicGateOut: aware?.gateOut ?? null,
-				aeroApiOut: official.flightaware?.push ?? null,
+				aeroApiOut: flightawareOfficial?.push ?? null,
 				firstTrackMovement: flightAwarePush
 			},
 			fr24: {
@@ -3535,7 +3559,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			fr24Position,
 			adsbPosition,
 			providerStatus: official.status,
-			providerEta: { flightaware: official.flightaware?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
+			providerEta: { flightaware: flightawareOfficial?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
 			providerDistancesNm,
 			fusionDisagreementNm: positionChoice.disagreementNm,
 			filedRouteDeviationNm,
@@ -3667,7 +3691,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			disagreementNm: positionChoice.disagreementNm,
 			providerDistancesNm,
 			filedRouteDeviationNm,
-			providerEta: { flightaware: official.flightaware?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
+			providerEta: { flightaware: flightawareOfficial?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
 			remainingNm,
 			etaMin,
 			landed: ourLanded
