@@ -1,7 +1,7 @@
 export type SurfacePoint = { lat: number; lon: number };
 export type SurfaceFeature = {
   id: number;
-  kind: "runway" | "taxiway" | "taxilane" | "parking_position" | "apron" | "terminal" | "gate" | "holding_position";
+  kind: "runway" | "taxiway" | "taxiway_area" | "taxilane" | "parking_position" | "apron" | "terminal" | "gate" | "holding_position";
   ref?: string;
   name?: string;
   points: SurfacePoint[];
@@ -43,7 +43,8 @@ function validCoord(n: unknown, min: number, max: number): n is number {
   return typeof n === "number" && Number.isFinite(n) && n >= min && n <= max;
 }
 
-function normalizeKind(value: string | undefined): SurfaceFeature["kind"] | null {
+function normalizeKind(value: string | undefined, areaValue?: string | undefined): SurfaceFeature["kind"] | null {
+  if (areaValue === "taxiway") return "taxiway_area";
   return value === "runway" || value === "taxiway" || value === "taxilane" || value === "parking_position" || value === "apron" || value === "terminal" || value === "gate" || value === "holding_position" ? value : null;
 }
 
@@ -107,11 +108,11 @@ function parse(elements: OverpassElement[], airport: string, checkedAt: number):
   };
 
   for (const element of elements) {
-    const kind = normalizeKind(element.tags?.aeroway);
+    const kind = normalizeKind(element.tags?.aeroway, element.tags?.["area:aeroway"]);
     if (!kind) continue;
 
     if (element.type === "relation") {
-      if (kind !== "terminal" && kind !== "apron") continue;
+      if (kind !== "terminal" && kind !== "apron" && kind !== "taxiway_area") continue;
       const rings = relationOuterRings(element);
       rings.forEach((ring, index) => pushFeature(element, kind, ring, index + 1));
       continue;
@@ -134,7 +135,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   if (!/^[A-Z0-9]{3,4}$/.test(airport) || !validCoord(input.lat, -90, 90) || !validCoord(input.lon, -180, 180)) {
     throw new Error("Invalid airport surface request");
   }
-  const key = `${airport}:surface-v5:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
+  const key = `${airport}:surface-v6:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const existing = pending.get(key);
@@ -150,7 +151,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
     const north = (input.lat + latPad).toFixed(6);
     const west = (input.lon - lonPad).toFixed(6);
     const east = (input.lon + lonPad).toFixed(6);
-    const query = `[out:json][timeout:10];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east}););out geom;`;
+    const query = `[out:json][timeout:10];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${south},${west},${north},${east});way["area:aeroway"="taxiway"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east});relation["area:aeroway"="taxiway"](${south},${west},${north},${east}););out geom;`;
     const body = new URLSearchParams({ data: query }).toString();
     const json = await Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
       const response = await fetch(endpoint, {
