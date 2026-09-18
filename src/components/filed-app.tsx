@@ -940,7 +940,9 @@ function displayStage(story: FlightStory): StageId {
     story.currentStage === "arrival" ||
     story.currentStage === "final_approach"
   )) {
-    if (story.times?.pushed || (ac?.gsKt ?? 0) >= 3) return "taxi";
+    const gsKt = ac?.gsKt ?? 0;
+    if (story.times?.pushed && gsKt >= 8) return "taxi";
+    if (story.times?.pushed || gsKt >= 2) return "push";
     return "origin_gate";
   }
   return story.currentStage;
