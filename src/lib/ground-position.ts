@@ -19,18 +19,13 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     return { callsign, registration, airportLat, airportLon };
   })
   .handler(async ({ data }) => {
-    const attempts = [] as Array<Promise<any>>;
-    if (data.registration) attempts.push(loadFr24FlightByRegistration(data.registration).catch(() => null));
-    if (data.callsign) attempts.push(loadFr24Flight(data.callsign).catch(() => null));
-    if (!attempts.length) return null;
-
-    const results = await Promise.all(attempts);
     const airport = { lat: data.airportLat, lon: data.airportLon };
-    for (const flight of results) {
+
+    const usable = (flight: any) => {
       const p = flight?.position;
-      if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
-      if (haversineNm(p, airport) > 20) continue;
-      if (p.onGround !== true && (p.altFt ?? 9999) > 250) continue;
+      if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return null;
+      if (haversineNm(p, airport) > 20) return null;
+      if (p.onGround !== true && (p.altFt ?? 9999) > 250) return null;
       return {
         lat: p.lat,
         lon: p.lon,
@@ -43,6 +38,19 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         callsign: p.callsign ?? flight.callsign ?? null,
         provider: "fr24" as const,
       };
+    };
+
+    // Registration is the strongest identity key and avoids spending a second
+    // FR24 request on every 2.5-second poll when we already know the tail.
+    if (data.registration) {
+      const byRegistration = await loadFr24FlightByRegistration(data.registration).catch(() => null);
+      const position = usable(byRegistration);
+      if (position) return position;
+    }
+    if (data.callsign) {
+      const byCallsign = await loadFr24Flight(data.callsign).catch(() => null);
+      const position = usable(byCallsign);
+      if (position) return position;
     }
     return null;
-  });
+  });;
