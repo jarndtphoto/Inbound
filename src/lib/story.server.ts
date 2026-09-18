@@ -2203,8 +2203,7 @@ export function currentStageOf(args) {
 		&& (live.seenSec ?? 999) <= 30 && atOrigin);
 	const pushMovement = Boolean(freshSurface
 		&& ((live.gsKt ?? 0) >= 2 || (distPark ?? 0) >= 0.03));
-	const taxiMovement = Boolean(taxiHint || taxiOutLatched
-		|| (freshSurface && ((live.gsKt ?? 0) >= 8 || (distPark ?? 0) >= 0.10)));
+	const taxiMovement = Boolean(taxiOutLatched || taxiHint);
 	if (!begun && !faAirborne) {
 		if (taxiMovement) return "taxi";
 		if (pushed || pushMovement) return "push";
@@ -3190,10 +3189,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			motion.taxiing
 		)
 	);
-	const taxiHint = Boolean(
-		(leftGate && motion.taxiing) ||
-		(freshSurface && (distPark >= 0.10 || (live.gsKt ?? 0) >= 8))
-	);
+	// Pushback begins on the first validated movement evidence. Taxi begins only
+	// once a fresh on-ground fix reaches 8 kt for the first time.
+	const taxiHint = Boolean(freshSurface && (live.gsKt ?? 0) >= 8);
 	// Do not let one sparse surface update create Pushback and Taxi at once.
 	// If this is the first movement evidence for the leg, expose Pushback for
 	// this response; a later confirmed movement update may advance to Taxi.
@@ -3277,7 +3275,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		const prev = pushLatch.get(landKey);
 		if (!prev || typeof prev !== "object" || !prev.live) pushLatch.delete(landKey);
 	}
-	if ((stageTaxiHint || (motion.taxiing && !firstDepartureMovement)) || times.airborne || (live && !live.onGround)) {
+	if (stageTaxiHint || times.airborne || (live && !live.onGround)) {
 		taxiOutLatch.set(landKey, { at: Date.now() / 1e3 });
 	}
 	const taxiOutLatched = taxiOutLatch.has(landKey);
@@ -3465,6 +3463,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			firstDepartureMovement,
 			rawTaxiHint: taxiHint,
 			stageTaxiHint,
+			taxiThresholdKt: 8,
 			parkedObservedSec,
 			stationaryAtStand,
 			providerGateOut: effectiveGateOut ?? null,
