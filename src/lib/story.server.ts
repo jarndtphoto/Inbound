@@ -1936,6 +1936,35 @@ const parkByFlight = /* @__PURE__ */ new Map();
 const hexByIdent = /* @__PURE__ */ new Map();
 const hexRouteByIdent = /* @__PURE__ */ new Map();
 const lastKinByIdent = /* @__PURE__ */ new Map();
+const routeTrackByFlight = /* @__PURE__ */ new Map();
+const ROUTE_TRACK_HOLD_MS = 20 * 60_000;
+
+function holdLastGoodRouteTrack(key, filed) {
+	const now = Date.now();
+	const hasTrack = filed?.source === "track" && Array.isArray(filed.flown) && filed.flown.length >= 2;
+	if (hasTrack) {
+		routeTrackByFlight.set(key, {
+			at: now,
+			flown: filed.flown,
+			spine: Array.isArray(filed.spine) ? filed.spine : [],
+		});
+		return filed;
+	}
+	const prev = routeTrackByFlight.get(key);
+	if (!prev || now - prev.at > ROUTE_TRACK_HOLD_MS || !Array.isArray(prev.flown) || prev.flown.length < 2) {
+		if (prev && now - prev.at > ROUTE_TRACK_HOLD_MS) routeTrackByFlight.delete(key);
+		return filed;
+	}
+	const spine = Array.isArray(filed?.spine) && filed.spine.length >= 2 ? filed.spine : prev.spine;
+	if (!Array.isArray(spine) || spine.length < 2) return filed;
+	const origin = spine[0];
+	const dest = spine[spine.length - 1];
+	const flown = prev.flown;
+	const points = flown.length >= 8
+		? densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48)
+		: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36);
+	return { ...filed, points, spine, flown, source: "track" };
+}
 function inboundSnapKey(aware, origin, dest, query) {
 	if (aware) return origKey(aware);
 	const day = new Date().toISOString().slice(0, 10);
@@ -2815,7 +2844,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		lon: dest.lon
 	};
 	const hex = live ? (live.hex || "").toLowerCase() : null;
-	const filed = await loadFiledPath(!ourLanded && ourAirborne ? hex : null, start, end, !ourLanded && ourAirborne ? live : null, aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? null, aware?.waypoints ?? [], aware?.faTrack ?? []);
+	const filedRaw = await loadFiledPath(!ourLanded && ourAirborne ? hex : null, start, end, !ourLanded && ourAirborne ? live : null, aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? null, aware?.waypoints ?? [], aware?.faTrack ?? []);
+	const routeInstanceTime = aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? aware?.gateOut?.scheduled ?? null;
+	const routeInstanceDay = routeInstanceTime ? new Date(routeInstanceTime * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+	const routeTrackKey = `${aware?.flightId ?? stateIdent}|${routeKey}|${routeInstanceDay}`;
+	const filed = !ourLanded && ourAirborne ? holdLastGoodRouteTrack(routeTrackKey, filedRaw) : filedRaw;
 	let path;
 	let pathSource;
 	if (filed.source === "track" && filed.points.length >= 8) {
