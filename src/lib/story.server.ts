@@ -3199,10 +3199,16 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// position itself must be fresh and newer than that report.
 	const fixUnix = live ? Date.now() / 1e3 - (live.seenSec ?? 999) : 0;
 	const gateOutUnix = confirmedGateOutActual(effectiveGateOut);
+	const parkedObservedSec = park ? Math.max(0, (Date.now() - park.at) / 1000) : 0;
+	const stationaryEvidenceBeatsGateOut = Boolean(
+		!gateOutUnix ||
+		(park && park.at / 1e3 < gateOutUnix && fixUnix >= gateOutUnix) ||
+		parkedObservedSec >= 12
+	);
 	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && park
 		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) < 1.2
 		&& distPark < 0.025 && !pushLatch.has(landKey)
-		&& (!gateOutUnix || (park.at / 1e3 < gateOutUnix && fixUnix >= gateOutUnix)));
+		&& stationaryEvidenceBeatsGateOut);
 	// A recent stationary surface fix is stronger evidence than a provider's
 	// prematurely stamped gate-out or takeoff time.
 	if (stationaryAtStand && !motion.pushed && !motion.taxiing && !leftGate) {
@@ -3442,6 +3448,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			firstDepartureMovement,
 			rawTaxiHint: taxiHint,
 			stageTaxiHint,
+			parkedObservedSec,
+			stationaryAtStand,
 			providerGateOut: effectiveGateOut ?? null,
 			providerGateOutPublic: aware?.gateOut ?? null,
 			groundspeedKt: live?.gsKt ?? null,
