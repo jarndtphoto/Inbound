@@ -945,7 +945,7 @@ function displayStage(story: FlightStory): StageId {
     story.currentStage === "final_approach"
   )) {
     const gsKt = ac?.gsKt ?? 0;
-    if (story.times?.pushed && gsKt >= 8) return "taxi";
+    if (story.times?.pushed && gsKt >= 6) return "taxi";
     if (story.times?.pushed || gsKt >= 2) return "push";
     return "origin_gate";
   }
