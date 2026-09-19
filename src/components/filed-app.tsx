@@ -64,8 +64,12 @@ function readCachedStory(q: string): FlightStory | undefined {
 export function cachedStorySafeDuringRefreshFailure(story: FlightStory, now = Date.now()) {
   const moving = story.live || story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach" || story.currentStage === "taxi_in";
   const positionAge = story.providers?.chosenPositionAgeSec;
-  const positionFresh = !moving || (typeof positionAge === "number" && positionAge <= 60);
-  return positionFresh && now - story.fetchedAt <= (moving ? 15_000 : 45 * 60_000);
+  // Airborne ETA freshness should follow the aircraft fix itself. A slow or
+  // failed story refresh must not blank Remaining while the position is still
+  // recent enough to drive distance/ETA.
+  const positionFresh = !moving || (typeof positionAge === "number" && positionAge <= 90);
+  if (moving) return positionFresh;
+  return now - story.fetchedAt <= 45 * 60_000;
 }
 
 function writeCachedStory(q: string, story: FlightStory) {
