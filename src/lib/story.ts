@@ -125,13 +125,23 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   }
 
   let stage = current;
-  if (priorStage === "taxi" || priorStage === "push") {
+  // Keep departure progression consistent with the server rule:
+  // first validated movement is Pushback; Taxi starts only once a fresh
+  // on-ground fix reaches 6 kt. Once Taxi has been observed, it remains durable.
+  if (priorStage === "taxi") {
     if (current === "origin_gate" || current === "push" || current === "taxi" || current === "inbound") stage = "taxi";
+  } else if (priorStage === "push") {
+    if (current === "origin_gate" || current === "push" || current === "inbound") stage = "push";
   }
-  if (stage === "push") stage = "taxi";
+
   const providerPushConfirmed = story.times.pushSource === "provider_actual" || story.times.pushKind === "actual";
-  if (providerPushConfirmed && (stage === "origin_gate" || stage === "inbound")) stage = "taxi";
-  if (nearOrigin && gsKt >= 1 && (stage === "inbound" || stage === "origin_gate" || stage === "push")) stage = "taxi";
+  if (providerPushConfirmed && (stage === "origin_gate" || stage === "inbound")) stage = "push";
+
+  if (freshSurface && nearOrigin && gsKt >= 6 && (stage === "inbound" || stage === "origin_gate" || stage === "push" || stage === "taxi")) {
+    stage = "taxi";
+  } else if (freshSurface && nearOrigin && gsKt >= 1 && (stage === "inbound" || stage === "origin_gate")) {
+    stage = "push";
+  }
 
   let parkedLat = sameLeg ? prior?.parkedLat ?? null : null;
   let parkedLon = sameLeg ? prior?.parkedLon ?? null : null;
@@ -140,9 +150,15 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   }
   const displacedNm = freshSurface && parkedLat != null && parkedLon != null
     ? haversineNm({ lat: parkedLat, lon: parkedLon }, { lat: live!.lat, lon: live!.lon }) : 0;
-  if (freshSurface && stage === "origin_gate" && displacedNm >= 0.006) stage = "taxi";
+  if (freshSurface && (stage === "origin_gate" || stage === "inbound") && displacedNm >= 0.006) stage = "push";
 
-  const durableStage = stage === "taxi" ? "taxi" : priorStage === "takeoff_roll" ? "takeoff_roll" : null;
+  const durableStage = stage === "taxi"
+    ? "taxi"
+    : stage === "push" || priorStage === "push"
+      ? "push"
+      : priorStage === "takeoff_roll"
+        ? "takeoff_roll"
+        : null;
   const resume = resumeBase ? { ...resumeBase,
     ...(durableStage ? { departureStage: durableStage } : {}),
     ...(parkedLat != null && parkedLon != null ? { parkedLat, parkedLon } : {}),
