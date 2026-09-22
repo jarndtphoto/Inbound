@@ -14,6 +14,14 @@
 -- ops, at most a few hours); nothing here auto-deletes old rows yet -- see
 -- the updated_at index, intended for a future periodic cleanup job.
 
+-- version is an optimistic-concurrency guard, not a display field: two
+-- near-simultaneous polls for the same flight (two instances, two tabs) can
+-- both load the same row, compute independently, and race to write it back.
+-- Without a guard the slower write can silently overwrite a newer, more
+-- advanced observation with a stale one. Every write is a conditional
+-- UPDATE ... WHERE version = <the version this write read> (see
+-- savePhaseState in flight-phase-state.server.ts); a write that loses the
+-- race affects zero rows instead of clobbering the winner.
 create table if not exists flight_phase_state (
   land_key text primary key,
   push_unix double precision,
@@ -21,6 +29,7 @@ create table if not exists flight_phase_state (
   push_live boolean,
   push_at double precision,
   taxi_out_at double precision,
+  version integer not null default 1,
   updated_at timestamptz not null default now()
 );
 

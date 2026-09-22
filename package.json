@@ -16,7 +16,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/flight-data.test.ts src/lib/adsb-fusion.test.ts src/lib/wx-brief.test.ts src/lib/world-map-lines.test.ts src/lib/brief-copy.test.ts src/lib/passenger-polish.test.ts src/lib/radar-tiles.test.ts src/lib/geo-format.test.ts src/lib/flight-parse.test.ts src/lib/story-aware.test.ts src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/flight-data.test.ts src/lib/adsb-fusion.test.ts src/lib/wx-brief.test.ts src/lib/world-map-lines.test.ts src/lib/brief-copy.test.ts src/lib/passenger-polish.test.ts src/lib/radar-tiles.test.ts src/lib/geo-format.test.ts src/lib/flight-parse.test.ts src/lib/story-aware.test.ts src/lib/flight-phase-state-logic.test.ts src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

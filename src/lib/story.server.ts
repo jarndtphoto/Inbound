@@ -2689,13 +2689,20 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// Maps). Loaded once here, mutated locally exactly as the old Maps were,
 	// written back once near the end of this function.
 	const loadedPhase = await loadPhaseState(landKey);
-	let pushLatchValue = loadedPhase.push;
-	let taxiOutLatchValue = loadedPhase.taxiOut;
+	let pushLatchValue = loadedPhase.state.push;
+	let taxiOutLatchValue = loadedPhase.state.taxiOut;
+	let phaseStatePersistence = loadedPhase.status;
 	if (progressResume && progressResume.originIcao === origin.icao && progressResume.destIcao === dest.icao) {
 		if (progressResume.detectedPushUnix && !pushLatchValue) {
 			pushLatchValue = { unix: progressResume.detectedPushUnix, source: "live_detected", live: true, at: progressResume.detectedPushUnix };
 		}
-		if (progressResume.departureStage === "taxi") taxiOutLatchValue = { at: Date.now() / 1e3 };
+		// Restoring from a resume token means taxiing was previously confirmed,
+		// not that it started this instant -- use the real timestamp the token
+		// carried (detectedTaxiUnix) when present, falling back to "now" only
+		// for an older resume token that predates that field.
+		if (progressResume.departureStage === "taxi") {
+			taxiOutLatchValue = { at: progressResume.detectedTaxiUnix ?? Date.now() / 1e3 };
+		}
 	}
 	const departureProgressKnownBeforeMovement = Boolean(
 		pushLatchValue ||
@@ -3538,7 +3545,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				pushLatch: pushLatchValue ?? null,
 				taxiOutLatch: taxiOutLatchValue ?? null,
 				finalPushUnix: times.pushed ? times.pushUnix : null,
-				finalPushSource: times.pushed ? times.pushSource ?? null : null
+				finalPushSource: times.pushed ? times.pushSource ?? null : null,
+				phaseStatePersistenceOnLoad: loadedPhase.status
 			}
 		}));
 	}
@@ -3676,16 +3684,20 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		departureStage: taxiOutLatched ? "taxi" : pushLatchValue ? "push" : null,
 		detectedPushUnix: detectedPush && typeof detectedPush === "object" && detectedPush.source === "live_detected"
 			? detectedPush.unix
-			: baseResume.detectedPushUnix ?? null
+			: baseResume.detectedPushUnix ?? null,
+		detectedTaxiUnix: taxiOutLatchValue?.at ?? baseResume.detectedTaxiUnix ?? null
 	} : undefined;
 	// Persist ground-phase progress durably (see loadPhaseState() above) so the
 	// next poll -- possibly served by a different Vercel instance -- doesn't
-	// forget pushback/taxi-out was already observed. Fire-and-forget: this
-	// state isn't needed for the response already computed above, so don't
-	// make every poll pay the extra DB round trip.
+	// forget pushback/taxi-out was already observed. AWAITED: an un-awaited
+	// write here can be dropped by Vercel suspending the invocation right
+	// after the response streams, which would silently reproduce the bug
+	// this table exists to fix. Only fires on an actual transition, not every
+	// poll, so the added latency is bounded to the moments that matter.
 	const nextPhase = { push: pushLatchValue, taxiOut: taxiOutLatchValue };
-	if (landKey && !phaseStateEqual(loadedPhase, nextPhase)) {
-		void savePhaseState(landKey, nextPhase);
+	if (landKey && !phaseStateEqual(loadedPhase.state, nextPhase)) {
+		const saveStatus = await savePhaseState(landKey, nextPhase, loadedPhase.version);
+		if (saveStatus !== "ok") phaseStatePersistence = saveStatus;
 	}
 	return {
 		fetchedAt: Date.now(),
@@ -3716,7 +3728,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			providerEta: { flightaware: flightawareOfficial?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
 			remainingNm,
 			etaMin,
-			landed: ourLanded
+			landed: ourLanded,
+			// "ok" unless the durable ground-phase store (flight_phase_state) had
+			// trouble this request -- read_failed/write_failed/conflict_* mean
+			// pushLatchValue/taxiOutLatchValue above were computed from an empty
+			// or stale base rather than the real persisted state. Surfaced here
+			// (not just server logs) so a strangely-behaving flight can be
+			// checked from the response itself, not just a log search.
+			phaseStatePersistence
 		},
 		aircraft,
 		origin,
