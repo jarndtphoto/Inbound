@@ -3,6 +3,7 @@ import { loadAeroFlight } from "./aeroapi.server.ts";
 import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
 import { readFlightResume } from "./flight-resume";
+import { loadPhaseState, savePhaseState, phaseStateEqual } from "./flight-phase-state.server";
 import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
 import { routeWeatherEvents } from "./weather-events";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
@@ -1931,8 +1932,13 @@ function inboundLiveFits(live, inb, origin, landed) {
 const inboundSnapByFlight = /* @__PURE__ */ new Map();
 const landedLatch = /* @__PURE__ */ new Map();
 const gateLatch = /* @__PURE__ */ new Map();
-const pushLatch = /* @__PURE__ */ new Map();
-const taxiOutLatch = /* @__PURE__ */ new Map();
+// pushLatch / taxiOutLatch used to live here as module-scope Maps too. On
+// Vercel that memory isn't durable or shared across cold starts / concurrent
+// instances, which is why pushback and taxi-out detection could silently
+// "forget" a flight's progress depending on which instance handled a given
+// poll. They're now per-call local variables (see landKey below), seeded
+// from and written back to the flight_phase_state table via
+// loadPhaseState()/savePhaseState() -- see src/lib/flight-phase-state.server.ts.
 const parkByFlight = /* @__PURE__ */ new Map();
 const hexByIdent = /* @__PURE__ */ new Map();
 const hexRouteByIdent = /* @__PURE__ */ new Map();
@@ -2678,15 +2684,29 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	);
 	const flyingAway = Boolean(live && !live.onGround && ((live.altFt ?? 0) > 2500 || (live.gsKt ?? 0) > 160) && dLiveDest > 25);
 	const landKey = flightInstanceKey(aware, `${parsed.callsign}|${origin.iata}|${dest.iata}`);
+	// Durable ground-phase state for this flight instance (see
+	// src/lib/flight-phase-state.server.ts for why this replaced module-scope
+	// Maps). Loaded once here, mutated locally exactly as the old Maps were,
+	// written back once near the end of this function.
+	const loadedPhase = await loadPhaseState(landKey);
+	let pushLatchValue = loadedPhase.state.push;
+	let taxiOutLatchValue = loadedPhase.state.taxiOut;
+	let phaseStatePersistence = loadedPhase.status;
 	if (progressResume && progressResume.originIcao === origin.icao && progressResume.destIcao === dest.icao) {
-		if (progressResume.detectedPushUnix && !pushLatch.has(landKey)) {
-			pushLatch.set(landKey, { unix: progressResume.detectedPushUnix, source: "live_detected", live: true, at: progressResume.detectedPushUnix });
+		if (progressResume.detectedPushUnix && !pushLatchValue) {
+			pushLatchValue = { unix: progressResume.detectedPushUnix, source: "live_detected", live: true, at: progressResume.detectedPushUnix };
 		}
-		if (progressResume.departureStage === "taxi") taxiOutLatch.set(landKey, { at: Date.now() / 1e3 });
+		// Restoring from a resume token means taxiing was previously confirmed,
+		// not that it started this instant -- use the real timestamp the token
+		// carried (detectedTaxiUnix) when present, falling back to "now" only
+		// for an older resume token that predates that field.
+		if (progressResume.departureStage === "taxi") {
+			taxiOutLatchValue = { at: progressResume.detectedTaxiUnix ?? Date.now() / 1e3 };
+		}
 	}
 	const departureProgressKnownBeforeMovement = Boolean(
-		pushLatch.has(landKey) ||
-		taxiOutLatch.has(landKey) ||
+		pushLatchValue ||
+		taxiOutLatchValue ||
 		progressResume?.departureStage === "push" ||
 		progressResume?.departureStage === "taxi" ||
 		progressResume?.departureStage === "takeoff_roll"
@@ -3172,7 +3192,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	let times = timesOf(awareWithEffectiveGateOut, origin, dest);
 	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
-	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30 && !pushLatch.get(landKey) && !times.pushed) {
+	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30 && !pushLatchValue && !times.pushed) {
 		const prev = parkByFlight.get(landKey);
 		if (!prev) parkByFlight.set(landKey, { lat: live.lat, lon: live.lon, at: Date.now() });
 		else if (haversineNm({ lat: live.lat, lon: live.lon }, prev) < 0.03) {
@@ -3183,7 +3203,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const distPark = live && park ? haversineNm({ lat: live.lat, lon: live.lon }, park) : 0;
 	let motion = { pushed: false, taxiing: false, flying: false };
 	const hexNow = String(live?.hex || hexByIdent.get(stateIdent) || aware?.hex || "").toLowerCase();
-	const needsGroundTrace = !live || (live.onGround && (live.gsKt ?? 0) < 1.2 && distPark < 0.025 && !pushLatch.has(landKey));
+	const needsGroundTrace = !live || (live.onGround && (live.gsKt ?? 0) < 1.2 && distPark < 0.025 && !pushLatchValue);
 	const takeoffForHistory = aware?.takeoff?.actual ?? null;
 	const historyStillUseful = !takeoffForHistory || Date.now() / 1e3 - takeoffForHistory < 2 * 3600;
 	let openTrace = [];
@@ -3234,7 +3254,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	);
 	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && park
 		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) < 1.2
-		&& distPark < 0.025 && !pushLatch.has(landKey)
+		&& distPark < 0.025 && !pushLatchValue
 		&& stationaryEvidenceBeatsGateOut);
 	// A recent stationary surface fix is stronger evidence than a provider's
 	// prematurely stamped gate-out or takeoff time.
@@ -3259,7 +3279,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		adsbPush && { ...adsbPush, provider: "adsb" }
 	]);
 	if (selectedPush && !stationaryAtStand && (leftGate || taxiHint || times.pushed || times.airborne)) {
-		const prior = pushLatch.get(landKey);
+		const prior = pushLatchValue;
 		const reconciledPush = reconcilePushLatch(prior, selectedPush, effectiveGateOut);
 		const useUnix = reconciledPush.unix;
 		const useSource = reconciledPush.source;
@@ -3268,14 +3288,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		times = { ...times, pushed: true, pushKind: useSource === "provider_actual" ? "actual" : "estimated",
 			pushSource: useSource, pushUnix: useUnix, push: clockAt(useUnix, tzOf(origin)), delayMin,
 			pushWas: delayMin != null && delayMin >= 5 ? clockAt(origPush, tzOf(origin)) : times.pushWas };
-		pushLatch.set(landKey, { unix: useUnix, source: useSource, live: true, at: Date.now() / 1e3 });
+		pushLatchValue = { unix: useUnix, source: useSource, live: true, at: Date.now() / 1e3 };
 	}
 	// A taxi hold can look stationary near the departure stand. Preserve the
 	// observed pushback until this flight's identity changes.
 	if (leftGate && !times.pushed) {
 		const now = Date.now() / 1e3;
 		const otz = tzOf(origin);
-		const priorPush = pushLatch.get(landKey);
+		const priorPush = pushLatchValue;
 		const pushUnix = priorPush && typeof priorPush === "object" && priorPush.live && priorPush.unix
 			? priorPush.unix
 			: now;
@@ -3294,16 +3314,16 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	}
 	if (leftGate || times.airborne || (live && !live.onGround)) {
 		const unix = times.pushUnix ?? Date.now() / 1e3;
-		pushLatch.set(landKey, { unix, source: times.pushSource ?? "live_detected", live: true, at: Date.now() / 1e3 });
+		pushLatchValue = { unix, source: times.pushSource ?? "live_detected", live: true, at: Date.now() / 1e3 };
 	} else if (!live && !times.airborne) {
-		const prev = pushLatch.get(landKey);
-		if (!prev || typeof prev !== "object" || !prev.live) pushLatch.delete(landKey);
+		const prev = pushLatchValue;
+		if (!prev || typeof prev !== "object" || !prev.live) pushLatchValue = null;
 	}
 	if (stageTaxiHint || times.airborne || (live && !live.onGround)) {
-		taxiOutLatch.set(landKey, { at: Date.now() / 1e3 });
+		taxiOutLatchValue = { at: Date.now() / 1e3 };
 	}
-	const taxiOutLatched = taxiOutLatch.has(landKey);
-	const latched = pushLatch.get(landKey);
+	const taxiOutLatched = Boolean(taxiOutLatchValue);
+	const latched = pushLatchValue;
 	const latchUnix = latched && typeof latched === "object" ? latched.unix : typeof latched === "number" ? null : null;
 	if (latchUnix && !times.pushed) {
 		const age = Date.now() / 1e3 - (latched.at ?? latchUnix);
@@ -3480,7 +3500,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			callsignRequested: query,
 			flightInstance: landKey,
 			currentStage: current,
-			pushLatched: pushLatch.has(landKey),
+			pushLatched: Boolean(pushLatchValue),
 			taxiOutLatched,
 			pushTimestamp: times.pushed ? times.pushUnix : null,
 			pushTimestampSource: times.pushed ? times.pushSource ?? null : null,
@@ -3522,10 +3542,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			inbound: {
 				parkedPosition: park ?? null,
 				selectedPush,
-				pushLatch: pushLatch.get(landKey) ?? null,
-				taxiOutLatch: taxiOutLatch.get(landKey) ?? null,
+				pushLatch: pushLatchValue ?? null,
+				taxiOutLatch: taxiOutLatchValue ?? null,
 				finalPushUnix: times.pushed ? times.pushUnix : null,
-				finalPushSource: times.pushed ? times.pushSource ?? null : null
+				finalPushSource: times.pushed ? times.pushSource ?? null : null,
+				phaseStatePersistenceOnLoad: loadedPhase.status
 			}
 		}));
 	}
@@ -3657,14 +3678,27 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		wx = null;
 	}
 	const baseResume = resumed?.resume ?? resumeFromAware(aware, query);
-	const detectedPush = pushLatch.get(landKey);
+	const detectedPush = pushLatchValue;
 	const storyResume = baseResume ? {
 		...baseResume,
-		departureStage: taxiOutLatched ? "taxi" : pushLatch.has(landKey) ? "push" : null,
+		departureStage: taxiOutLatched ? "taxi" : pushLatchValue ? "push" : null,
 		detectedPushUnix: detectedPush && typeof detectedPush === "object" && detectedPush.source === "live_detected"
 			? detectedPush.unix
-			: baseResume.detectedPushUnix ?? null
+			: baseResume.detectedPushUnix ?? null,
+		detectedTaxiUnix: taxiOutLatchValue?.at ?? baseResume.detectedTaxiUnix ?? null
 	} : undefined;
+	// Persist ground-phase progress durably (see loadPhaseState() above) so the
+	// next poll -- possibly served by a different Vercel instance -- doesn't
+	// forget pushback/taxi-out was already observed. AWAITED: an un-awaited
+	// write here can be dropped by Vercel suspending the invocation right
+	// after the response streams, which would silently reproduce the bug
+	// this table exists to fix. Only fires on an actual transition, not every
+	// poll, so the added latency is bounded to the moments that matter.
+	const nextPhase = { push: pushLatchValue, taxiOut: taxiOutLatchValue };
+	if (landKey && !phaseStateEqual(loadedPhase.state, nextPhase)) {
+		const saveStatus = await savePhaseState(landKey, nextPhase, loadedPhase.version);
+		if (saveStatus !== "ok") phaseStatePersistence = saveStatus;
+	}
 	return {
 		fetchedAt: Date.now(),
 		schedule: aware ? { status: resumed ? "saved" : "current", confirmedAt: aware.confirmedAt ?? Date.now() } : undefined,
@@ -3694,7 +3728,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			providerEta: { flightaware: flightawareOfficial?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
 			remainingNm,
 			etaMin,
-			landed: ourLanded
+			landed: ourLanded,
+			// "ok" unless the durable ground-phase store (flight_phase_state) had
+			// trouble this request -- read_failed/write_failed/conflict_* mean
+			// pushLatchValue/taxiOutLatchValue above were computed from an empty
+			// or stale base rather than the real persisted state. Surfaced here
+			// (not just server logs) so a strangely-behaving flight can be
+			// checked from the response itself, not just a log search.
+			phaseStatePersistence
 		},
 		aircraft,
 		origin,

@@ -37,6 +37,7 @@ export type FlightResume = {
   waypoints: { lat: number; lon: number }[];
   departureStage?: DepartureStageCheckpoint | null;
   detectedPushUnix?: number | null;
+  detectedTaxiUnix?: number | null;
   parkedLat?: number | null;
   parkedLon?: number | null;
   takeoffRollStreak?: number | null;
@@ -113,13 +114,17 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
   const takeoffRollStreakSeenAt = recentSeenAt(r.takeoffRollStreakSeenAt);
   const flightSpeedStreak = streak(r.flightSpeedStreak);
   const flightSpeedStreakSeenAt = recentSeenAt(r.flightSpeedStreakSeenAt);
+  // Same bounds as detectedPushUnix: a real observation timestamp, not a
+  // fabricated "now" -- lets a resumed taxi stage carry its true start time
+  // instead of story.server.ts having to invent one on restore.
+  const detectedTaxiUnix = recentSeenAt(r.detectedTaxiUnix);
   return {
     version: 1, callsign: want.callsign, ident: r.ident, confirmedAt: r.confirmedAt,
     ...fields, originIcao: r.originIcao, destIcao: r.destIcao,
     originGate: token(r.originGate, /^[A-Z0-9 -]{1,12}$/i), destGate: token(r.destGate, /^[A-Z0-9 -]{1,12}$/i),
     gateOut: stamps.gateOut, takeoff: stamps.takeoff, landing: stamps.landing, gateIn: stamps.gateIn,
     tail: token(r.tail, /^[A-Z0-9-]{3,12}$/i), hex: token(r.hex, /^[a-f0-9]{6}$/i),
-    type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, departureStage, detectedPushUnix, parkedLat, parkedLon,
+    type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, departureStage, detectedPushUnix, detectedTaxiUnix, parkedLat, parkedLon,
     takeoffRollStreak, takeoffRollStreakSeenAt, flightSpeedStreak, flightSpeedStreakSeenAt,
   } as FlightResume;
 }

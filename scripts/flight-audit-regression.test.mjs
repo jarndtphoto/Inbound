@@ -1,18 +1,28 @@
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { registerHooks } from 'node:module';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { build } from 'vite';
 
 // Match the app's extensionless TypeScript imports in the Node test runner.
 registerHooks({ resolve(specifier, context, nextResolve) {
-  if (specifier.startsWith('.') && !/\.[a-z]+$/.test(specifier)) {
+  if (specifier.startsWith('.') && !/\.(?:[cm]?[jt]sx?|json)$/.test(specifier)) {
     try { return nextResolve(specifier + '.ts', context); } catch {}
   }
   return nextResolve(specifier, context);
 }});
-const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import('../src/lib/story.server.ts');
+const storyBundleDir = await mkdtemp(resolve('node_modules/.inbound-audit-test-'));
+await build({ configFile: false, logLevel: 'silent', build: {
+  ssr: resolve('src/lib/story.server.ts'), outDir: storyBundleDir,
+  rollupOptions: { output: { entryFileNames: 'story.mjs' } },
+}});
+after(async () => rm(storyBundleDir, { recursive: true, force: true }));
+const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
 const { normalizeAeroApiRoute } = await import('../src/lib/flightaware-aeroapi.server.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');

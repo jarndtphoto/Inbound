@@ -1,7 +1,6 @@
 import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "vite";
@@ -36,7 +35,7 @@ function page(context) {
   return new Response("trackpollBootstrap = " + JSON.stringify({ flights: { SWA1111: record } }) + ";", { status: 200 });
 }
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), "inbound-feed-test-"));
+  directory = await mkdtemp(resolve("node_modules/.inbound-feed-test-"));
   await build({ configFile: false, logLevel: "silent", build: {
     ssr: resolve("src/lib/story.server.ts"), outDir: directory,
     rollupOptions: { output: { entryFileNames: "story.mjs" } },
@@ -68,6 +67,9 @@ beforeEach(async () => {
     throw new Error("Unexpected test upstream: " + url);
   };
   server = await import(pathToFileURL(join(directory, "story.mjs")).href + "?case=" + ++moduleNumber);
+  await globalThis.__pgBootstrapPromise__;
+  const pg = await globalThis.__pgliteInstance__;
+  await pg.exec("delete from flight_phase_state");
 });
 after(async () => {
   globalThis.fetch = realFetch;
@@ -79,7 +81,7 @@ describe("schedule outage resilience", { concurrency: false }, () => {
   it("keeps an overdue departure at the gate until fresh movement, then detects takeoff", async () => {
     const saved = resume();
     const first = await server.loadFlightStory("WN1111", { resume: saved, fresh: true });
-    assert.equal(first.currentStage, "push");
+    assert.equal(first.currentStage, "origin_gate");
     assert.equal(first.times.pushed, false);
     assert.equal(first.times.airborne, false);
     assert.equal(first.schedule.status, "saved");
@@ -92,15 +94,20 @@ describe("schedule outage resilience", { concurrency: false }, () => {
     now += 10_000;
     aircraft = { ...aircraft, lat: 41.788, lon: -87.751, gs: 10 };
     const moving = await server.loadFlightStory("WN1111", { resume: first.resume, fresh: true });
-    assert.equal(moving.currentStage, "taxi");
+    assert.equal(moving.currentStage, "push");
     assert.equal(moving.times.pushed, true);
     assert.notEqual(moving.times.pushKind, "actual");
     assert.equal(moving.times.airborne, false);
     assert.equal(moving.schedule.confirmedAt, saved.confirmedAt);
 
+    now += 10_000;
+    aircraft = { ...aircraft, lat: 41.789, lon: -87.75, gs: 10 };
+    const taxiing = await server.loadFlightStory("WN1111", { resume: moving.resume, fresh: true });
+    assert.equal(taxiing.currentStage, "taxi");
+
     now += 180_000;
     aircraft = { ...aircraft, lat: 42.2, lon: -88.3, alt_baro: 12000, gs: 300, baro_rate: 1500 };
-    const flying = await server.loadFlightStory("WN1111", { resume: moving.resume, fresh: true });
+    const flying = await server.loadFlightStory("WN1111", { resume: taxiing.resume, fresh: true });
     assert.equal(flying.currentStage, "ride");
     assert.equal(flying.times.airborne, true);
     assert.equal(flying.live, true);
@@ -118,7 +125,7 @@ describe("schedule outage resilience", { concurrency: false }, () => {
     await assert.rejects(server.loadFlightStory("WN1111", { resume: invalid }), /HTTP 402/);
     assert.equal(readFlightResume({ ...resume(), confirmedAt: now + 3600_000 }, "WN1111"), undefined);
     assert.equal(readFlightResume({ ...resume(), destIcao: "../../metadata" }, "WN1111"), undefined);
-    assert.equal(readFlightResume({ ...resume(), destLat: Infinity }, "WN1111"), undefined);
+    assert.equal(readFlightResume({ ...resume(), destIcao: "KZZZ", destIata: "ZZZ", destLat: Infinity }, "WN1111"), undefined);
   });
   it("does not present a fresh flight stage when both schedule and position are unavailable", async () => {
     aircraft = null;
@@ -129,7 +136,7 @@ describe("schedule outage resilience", { concurrency: false }, () => {
     saved.gateOut.actual = now / 1000 - 90;
     const partial = await server.loadFlightStory("WN1111", { resume: saved });
     assert.equal(partial.schedule.status, "saved");
-    assert.equal(partial.currentStage, "taxi");
+    assert.equal(partial.currentStage, "push");
     await assert.rejects(server.loadFlightStory("WN1111"), /HTTP 402/);
     now += 61_000;
     upstream = 200;
