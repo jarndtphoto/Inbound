@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { EMPTY_PHASE_STATE, mergeForward, phaseStateEqual, type PhaseState } from "./flight-phase-state-logic.ts";
 
-const push = (unix: number, source: string | null = "live_detected", live = true, at = unix): PhaseState["push"] => ({ unix, source, live, at });
+const push = (unix: number, source: string | null = "track_detected", live = true, at = unix): PhaseState["push"] => ({ unix, source, live, at });
 const taxi = (at: number): PhaseState["taxiOut"] => ({ at });
 const state = (push_: PhaseState["push"], taxi_: PhaseState["taxiOut"]): PhaseState => ({ push: push_, taxiOut: taxi_ });
 
@@ -21,11 +21,33 @@ describe("mergeForward", () => {
     assert.deepEqual(mergeForward(b, a), a);
   });
 
-  it("prefers the numerically later push when both sides have one", () => {
+  it("prefers the earlier push when both sides have one and neither is provider_actual", () => {
+    // choosePushEvidence/reconcilePushLatch in story.server.ts both treat an
+    // earlier confirmed observation as the more trustworthy one -- a later
+    // detection of the same event isn't "better," just laggier. The conflict
+    // merge mirrors that instead of independently inventing a "later wins"
+    // rule.
     const earlier = state(push(100), null);
     const later = state(push(200), null);
-    assert.deepEqual(mergeForward(earlier, later), later);
-    assert.deepEqual(mergeForward(later, earlier), later);
+    assert.deepEqual(mergeForward(earlier, later), earlier);
+    assert.deepEqual(mergeForward(later, earlier), earlier);
+  });
+
+  it("prefers a provider_actual push over a later-or-earlier track/live detection", () => {
+    const authoritative = state(push(150, "provider_actual"), null);
+    const earlierTrack = state(push(100, "track_detected"), null);
+    const laterTrack = state(push(200, "live_detected"), null);
+    assert.deepEqual(mergeForward(authoritative, earlierTrack), authoritative);
+    assert.deepEqual(mergeForward(earlierTrack, authoritative), authoritative);
+    assert.deepEqual(mergeForward(authoritative, laterTrack), authoritative);
+    assert.deepEqual(mergeForward(laterTrack, authoritative), authoritative);
+  });
+
+  it("falls back to earliest-wins between two provider_actual records", () => {
+    const earlier = state(push(100, "provider_actual"), null);
+    const later = state(push(200, "provider_actual"), null);
+    assert.deepEqual(mergeForward(earlier, later), earlier);
+    assert.deepEqual(mergeForward(later, earlier), earlier);
   });
 
   it("prefers the numerically later taxiOut when both sides have one", () => {
@@ -36,11 +58,11 @@ describe("mergeForward", () => {
   });
 
   it("resolves push and taxiOut independently, never all-or-nothing", () => {
-    // a has the newer push but no taxi; b has an older push but the only taxi.
+    // a has the later push but no taxi; b has the earlier (preferred) push and the only taxi.
     const a = state(push(200), null);
     const b = state(push(100), taxi(50));
     const merged = mergeForward(a, b);
-    assert.deepEqual(merged.push, push(200));
+    assert.deepEqual(merged.push, push(100));
     assert.deepEqual(merged.taxiOut, taxi(50));
   });
 
