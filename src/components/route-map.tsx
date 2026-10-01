@@ -475,7 +475,6 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const freePan = fixedViewport && !weatherPreview;
   const zoom = useMapBoxZoom(`${story.callsign}:${story.origin.iata}:${story.dest.iata}`, H, freePan);
   const samples = story.route?.samples ?? [];
-  if (samples.length < 2) return null;
 
   // Forecast previews frame the affected segment, rather than the entire trip.
   const focusSamples = weatherPreview
@@ -512,7 +511,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     zoom.setHomeView({ s, x: W / 2 - cx * s, y: H / 2 - cy * s });
   }, [freeWorld, H, story.callsign, story.origin.iata, story.dest.iata]);
 
-  if (lats.length < 2 || lons.length < 2) return null;
+  if (samples.length < 2 || lats.length < 2 || lons.length < 2) return null;
   let minLat = Math.min(...lats);
   let maxLat = Math.max(...lats);
   let minLon = Math.min(...lons);
