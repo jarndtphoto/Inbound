@@ -961,6 +961,12 @@ function identFromFa(id) {
 	if (!id) return null;
 	return String(id).toUpperCase().match(/^([A-Z]{2,4}\d{1,4}[A-Z]?)/)?.[1] ?? null;
 }
+export function operatingIdentFromSchedule(aware, requested) {
+	const operating = identFromFa(aware?.flightId);
+	const requestedIdent = String(requested ?? "").replace(/\s/g, "").toUpperCase();
+	if (!operating || !requestedIdent || operating === requestedIdent) return null;
+	return operating;
+}
 function coordPair(v) {
 	if (!Array.isArray(v) || v.length < 2) return null;
 	const a = v[0];
@@ -2605,7 +2611,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const stateIdent = `${resumed?.scope ?? ""}${identKey}`;
 	let knownHex = hexByIdent.get(stateIdent) || null;
 	const hazardsP = loadHazards();
-	const [rawAc0, publicAware, route, official] = await Promise.all([
+	const [rawAc0, publicAware, route, initialOfficial] = await Promise.all([
 		knownHex
 			? safe(adsbByHex(knownHex), null)
 			: parsed.registration
@@ -2621,6 +2627,28 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		safe(loadRoute(parsed.callsign), null),
 		loadOfficialFlightData(parsed.callsign)
 	]);
+	let official = initialOfficial;
+	// Codeshare/public flight-number pages can identify the operating ATC
+	// callsign even when the requested marketing callsign has no FR24 match.
+	// The ground map already uses this identity from flightId; use the same
+	// identity in the main story so stage detection sees the same aircraft.
+	const operatingIdent = operatingIdentFromSchedule(publicAware, parsed.callsign);
+	if (!official.fr24 && official.status.fr24 === "NO_MATCH" && operatingIdent) {
+		const operatingOfficial = await loadOfficialFlightData(operatingIdent);
+		if (operatingOfficial.fr24) {
+			console.info(JSON.stringify({
+				event: "fr24_public_operating_callsign_match",
+				requested: parsed.callsign,
+				operating: operatingIdent,
+				flightId: publicAware?.flightId ?? null,
+			}));
+			official = {
+				...official,
+				fr24: operatingOfficial.fr24,
+				status: { ...official.status, fr24: operatingOfficial.status.fr24 },
+			};
+		}
+	}
 	const fr24Aware = publicAware ? null : awareFromLiveFr24(official.fr24);
 	if (fr24Aware) {
 		console.info(JSON.stringify({
