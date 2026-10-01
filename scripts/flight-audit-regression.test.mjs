@@ -22,7 +22,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
 const { normalizeAeroApiRoute } = await import('../src/lib/flightaware-aeroapi.server.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
@@ -712,6 +712,28 @@ it('preserves missing weather feeds as unknown while the flight still loads', as
   assert.ok(story.weatherCoverage.failedSources.includes('Pilot reports'));
 });
 
+
+describe('current-flight trace selection', () => {
+  it('does not concatenate a previous matching leg underneath the current flight', () => {
+    const previous = [
+      { t: 1000, lat: 41.98, lon: -87.90 },
+      { t: 1200, lat: 42.05, lon: -86.50 },
+      { t: 1400, lat: 42.21, lon: -83.35 },
+    ];
+    const current = [
+      { t: 2000, lat: 41.98, lon: -87.90 },
+      { t: 2200, lat: 41.97, lon: -87.95 },
+      { t: 2400, lat: 42.00, lon: -87.70 },
+    ];
+    assert.deepEqual(selectCurrentTraceLeg([previous, current], { lat: 41.97, lon: -87.95 }), current);
+  });
+
+  it('chooses the most recent matching leg when no live point is available', () => {
+    const older = [{ t: 100, lat: 0, lon: 0 }, { t: 200, lat: 0, lon: 1 }];
+    const newer = [{ t: 300, lat: 0, lon: 0 }, { t: 400, lat: 0, lon: 1 }];
+    assert.deepEqual(selectCurrentTraceLeg([older, newer]), newer);
+  });
+});
 
 describe('live reroute display geometry', () => {
   const dest = { lat: 0, lon: 10 };

@@ -227,6 +227,22 @@ function nearLiveNm(leg, livePt) {
 	}
 	return n;
 }
+
+export function selectCurrentTraceLeg(legs, livePt = null) {
+	if (!Array.isArray(legs) || !legs.length) return [];
+	let candidates = legs;
+	if (livePt) {
+		const nearLive = legs.filter((leg) => nearLiveNm(leg, livePt) < 45);
+		if (nearLive.length) candidates = nearLive;
+	}
+	let best = candidates[0] ?? null;
+	for (const leg of candidates.slice(1)) {
+		const bestEnd = best?.[best.length - 1]?.t ?? 0;
+		const legEnd = leg?.[leg.length - 1]?.t ?? 0;
+		if (legEnd > bestEnd) best = leg;
+	}
+	return best ? best.slice() : [];
+}
 /** Keep only this origin→dest sector. Drop earlier legs of the same tail. */
 function legsForThisSector(legs, origin, dest, live, takeoffUnix) {
 	if (!legs.length) return [];
@@ -272,9 +288,11 @@ function legsForThisSector(legs, origin, dest, live, takeoffUnix) {
 			}
 		}
 	}
-	const pts = [];
-	for (const leg of kept) pts.push(...leg);
-	return pts;
+	// A tail's day trace can contain more than one geographically plausible
+	// sector. Concatenating every match makes the map draw an old flight path
+	// underneath the current one. Keep exactly one current leg: prefer a leg
+	// that passes near the live aircraft, then the most recent by timestamp.
+	return selectCurrentTraceLeg(kept, livePt);
 }
 function ensureEnds(points, origin, dest) {
 	const out = points.slice();
