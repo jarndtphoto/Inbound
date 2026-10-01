@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import {parseBaggage,parseLaxBaggage,parseFlightViewBaggage,parseAlaskaBaggage,loadBaggage} from '../src/lib/baggage.server.ts';
 import {parseCiriumBaggage} from '../src/lib/cirium-baggage.server.ts';
 import {baggageSummary} from '../src/lib/baggage-copy.ts';
+import {flightDepartureDate} from '../src/lib/airline-status.ts';
+
+test('baggage date falls back to public schedule service date when provider clocks are missing',()=>{
+  const story={
+    schedule:{status:'current',confirmedAt:Date.now(),serviceDate:'2026-10-01'},
+    times:{origPushUnix:null,pushUnix:null,origTakeoffUnix:null,takeoffUnix:null},
+    origin:{tz:'America/Chicago'}
+  };
+  assert.equal(flightDepartureDate(story),'2026-10-01');
+});
 
 const leg={flight:'UA219',origin:'ORD',destination:'HNL',date:'2026-09-13'};
 const row=(bag='31')=>`<div role="row" title="UA219 summary"><script>{fn:'219',al:'UA',alname:'United Airlines',depdate:'20260913',deptime:'0925',status:'Arrived',depap:'ORD',depterm:'1',depgate:'B17',arrap:'HNL',arrterm:'2',arrgate:'G3',shares:[]}</script><div role="cell" class="flightValue c11">${bag}</div></div>`;
