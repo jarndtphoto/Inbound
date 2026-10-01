@@ -27,6 +27,9 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return null;
       if (haversineNm(p, airport) > 20) return null;
       if (p.onGround !== true && (p.altFt ?? 9999) > 250) return null;
+      const seenAt = typeof p.seenAt === "number" && Number.isFinite(p.seenAt) ? p.seenAt : Date.now() / 1000;
+      const ageSec = Date.now() / 1000 - seenAt;
+      if (ageSec > 30 || ageSec < -10) return null;
       return {
         lat: p.lat,
         lon: p.lon,
@@ -34,7 +37,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         gsKt: p.gsKt ?? null,
         track: p.track ?? null,
         onGround: p.onGround === true,
-        seenAt: p.seenAt ?? Date.now() / 1000,
+        seenAt,
         registration: p.registration ?? flight.registration ?? null,
         callsign: p.callsign ?? flight.callsign ?? null,
         provider: "fr24" as const,
@@ -52,7 +55,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       if (!onGround && (altFt ?? 9999) > 250) return null;
       const ageSec = raw._fusion?.ageSec
         ?? (typeof raw.seen_pos === "number" ? raw.seen_pos : typeof raw.seen === "number" ? raw.seen : 999);
-      if (!Number.isFinite(ageSec) || ageSec > 60) return null;
+      if (!Number.isFinite(ageSec) || ageSec > 30) return null;
       return {
         lat: point.lat,
         lon: point.lon,
