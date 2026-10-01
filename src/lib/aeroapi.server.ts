@@ -1,3 +1,4 @@
+import { flightAwarePaidApiKey } from "./flightaware-config.ts";
 // Server-only: never return credentials or upstream response bodies to clients.
 type Row = Record<string, any>;
 const stamp = (v:unknown):number|null => typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v)/1000 : null;
@@ -64,7 +65,7 @@ let blockedUntil=0;
 let missingLogged=false;
 /** Per-instance safeguards, not an account-wide billing cap. */
 export async function loadAeroFlight(ident:string,exact=false) {
-  const key=process.env.FLIGHTAWARE_API_KEY?.trim();
+  const key=flightAwarePaidApiKey();
   if(!key){if(!missingLogged){console.info('[aeroapi] key unavailable; using public feed');missingLogged=true;}return null;}
   if(!/^[A-Z0-9][A-Za-z0-9_-]{1,150}$/.test(ident))return null;
   const id=(exact?'id:':'ident:')+ident, now=Date.now();

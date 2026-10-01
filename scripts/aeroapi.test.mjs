@@ -7,4 +7,29 @@ test('active leg beats tomorrow and prior arrival',()=>{assert.equal(selectAeroF
 test('landed flight remains until actual gate arrival',()=>assert.equal(selectAeroFlight([{...row,actual_on:iso(-.1)}],'UAL219',now)?.fa_flight_id,row.fa_flight_id));
 test('wrong callsign and exact leg mismatch rejected',()=>{assert.equal(selectAeroFlight([row],'UAL218',now),null);assert.equal(selectAeroFlight([row],'UAL219-wrong',now,true),null)});
 test('estimates never turn into actual events',()=>{const mapped=mapAeroFlight(row,123);assert.equal(mapped.gateIn.actual,null);assert.equal(mapped.gateIn.estimated,now+3600);assert.equal(mapped.landing.actual,null);assert.equal(mapped.gateOut.actual,now-8*3600);assert.equal(mapped.destGate,'G3');assert.equal(mapped.confirmedAt,123)});
-test('cache limits repeated requests and max_pages is one',async()=>{const original=globalThis.fetch;const old=process.env.FLIGHTAWARE_API_KEY;process.env.FLIGHTAWARE_API_KEY='test-only';let count=0;globalThis.fetch=async(url,options)=>{count++;assert.equal(new URL(url).searchParams.get('max_pages'),'1');assert.equal(options.headers['x-apikey'],'test-only');return Response.json({flights:[row]})};try{await Promise.all([loadAeroFlight('UAL219-test',true),loadAeroFlight('UAL219-test',true)]);await loadAeroFlight('UAL219-test',true);assert.equal(count,1)}finally{globalThis.fetch=original;if(old===undefined)delete process.env.FLIGHTAWARE_API_KEY;else process.env.FLIGHTAWARE_API_KEY=old}});
+test('paid AeroAPI is disabled unless explicitly opted in, then caches repeated requests',async()=>{
+  const original=globalThis.fetch;
+  const oldKey=process.env.FLIGHTAWARE_API_KEY;
+  const oldFlag=process.env.FLIGHTAWARE_PAID_API_ENABLED;
+  process.env.FLIGHTAWARE_API_KEY='test-only';
+  delete process.env.FLIGHTAWARE_PAID_API_ENABLED;
+  let count=0;
+  globalThis.fetch=async(url,options)=>{
+    count++;
+    assert.equal(new URL(url).searchParams.get('max_pages'),'1');
+    assert.equal(options.headers['x-apikey'],'test-only');
+    return Response.json({flights:[row]});
+  };
+  try{
+    assert.equal(await loadAeroFlight('UAL219-test',true),null);
+    assert.equal(count,0);
+    process.env.FLIGHTAWARE_PAID_API_ENABLED='1';
+    await Promise.all([loadAeroFlight('UAL219-test',true),loadAeroFlight('UAL219-test',true)]);
+    await loadAeroFlight('UAL219-test',true);
+    assert.equal(count,1);
+  }finally{
+    globalThis.fetch=original;
+    if(oldKey===undefined)delete process.env.FLIGHTAWARE_API_KEY;else process.env.FLIGHTAWARE_API_KEY=oldKey;
+    if(oldFlag===undefined)delete process.env.FLIGHTAWARE_PAID_API_ENABLED;else process.env.FLIGHTAWARE_PAID_API_ENABLED=oldFlag;
+  }
+});
