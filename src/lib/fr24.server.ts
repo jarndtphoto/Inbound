@@ -88,10 +88,10 @@ async function hydrateFr24Flight(f: any, fallbackIdent: string): Promise<Normali
   return flight;
 }
 
-async function loadFr24ByFilter(filter: "callsigns" | "registrations", value: string): Promise<NormalizedFlight | null> {
+async function loadFr24ByFilter(filter: "callsigns" | "registrations" | "flights", value: string, extraQuery = ""): Promise<NormalizedFlight | null> {
   if (!process.env.FR24_API_TOKEN?.trim()) return null;
   const normalizedValue = value.trim().toUpperCase();
-  const stickyKey = `${filter}:${normalizedValue}`;
+  const stickyKey = `${filter}:${normalizedValue}${extraQuery ? `:${extraQuery}` : ""}`;
   const previous = () => {
     const prior = lastGood.get(stickyKey);
     if (!prior || Date.now() - prior.at > LAST_GOOD_TTL_MS) return null;
@@ -107,7 +107,7 @@ async function loadFr24ByFilter(filter: "callsigns" | "registrations", value: st
 
   let data: any;
   try {
-    data = await get(`/live/flight-positions/full?${filter}=${encodeURIComponent(value)}`, LIVE_POSITION_CACHE_MS);
+    data = await get(`/live/flight-positions/full?${filter}=${encodeURIComponent(value)}${extraQuery}`, LIVE_POSITION_CACHE_MS);
   } catch (error) {
     const prior = previous();
     if (prior) return prior;
@@ -131,6 +131,20 @@ export async function loadFr24FlightByRegistration(registration: string): Promis
   const reg = registration.trim().toUpperCase();
   if (!reg) return null;
   return loadFr24ByFilter("registrations", reg);
+}
+
+export async function loadFr24FlightByNumber(flightNumber: string, bounds?: string): Promise<NormalizedFlight | null> {
+  const flight = flightNumber.replace(/\s/g, "").trim().toUpperCase();
+  if (!flight) return null;
+  const extra = bounds ? `&bounds=${encodeURIComponent(bounds)}&limit=5` : "";
+  return loadFr24ByFilter("flights", flight, extra);
+}
+
+export async function loadFr24RowsByBounds(bounds: string, limit = 40): Promise<any[]> {
+  if (!process.env.FR24_API_TOKEN?.trim()) return [];
+  const safeLimit = Math.max(1, Math.min(100, Math.round(limit)));
+  const data: any = await get(`/live/flight-positions/full?bounds=${encodeURIComponent(bounds)}&limit=${safeLimit}`, LIVE_POSITION_CACHE_MS);
+  return Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
 }
 
 export const fr24Configured = () => Boolean(process.env.FR24_API_TOKEN?.trim());

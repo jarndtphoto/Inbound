@@ -279,7 +279,10 @@ function GroundMovementMap({
     queryFn: () => getGroundPosition({ data: {
       callsign: aircraft?.callsign ?? story.callsign,
       flightId: story.flightId ?? null,
+      flightNumber: story.iata ?? null,
       registration: aircraft?.registration ?? null,
+      originIata: story.origin.iata ?? null,
+      destIata: story.dest.iata ?? null,
       airportLat: airport.lat,
       airportLon: airport.lon,
     } }),
