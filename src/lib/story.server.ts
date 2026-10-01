@@ -3971,7 +3971,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	}
 	return {
 		fetchedAt: Date.now(),
-		schedule: aware ? { status: resumed ? "saved" : "current", confirmedAt: aware.confirmedAt ?? Date.now() } : undefined,
+		schedule: aware ? { status: resumed ? "saved" : "current", confirmedAt: aware.confirmedAt ?? Date.now(), serviceDate: aware._publicScheduleDate ?? null } : undefined,
 		resume: storyResume,
 		flightId: aware?.flightId ?? undefined,
 		diversion: aware?.diversion,
