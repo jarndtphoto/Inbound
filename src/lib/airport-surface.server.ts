@@ -36,6 +36,7 @@ const pending = new Map<string, Promise<AirportSurface>>();
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.nchc.org.tw/api/interpreter",
 ];
 const CACHE_MS = 24 * 60 * 60_000;
 
@@ -308,52 +309,59 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   if (!/^[A-Z0-9]{3,4}$/.test(airport) || !validCoord(input.lat, -90, 90) || !validCoord(input.lon, -180, 180)) {
     throw new Error("Invalid airport surface request");
   }
-  const key = `${airport}:surface-v7:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
+  const key = `${airport}:surface-v8:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const existing = pending.get(key);
   if (existing) return existing;
 
   const request = (async () => {
+    // Use OpenStreetMap first: it is much faster for the line/polygon geometry
+    // this ground radar needs. The FAA catalog path can take many sequential
+    // lookups, so keep it as a fallback instead of blocking every first load.
+    try {
+      const latPad = 0.075;
+      const lonPad = Math.min(0.12, 0.075 / Math.max(0.45, Math.cos(input.lat * Math.PI / 180)));
+      const south = (input.lat - latPad).toFixed(6);
+      const north = (input.lat + latPad).toFixed(6);
+      const west = (input.lon - lonPad).toFixed(6);
+      const east = (input.lon + lonPad).toFixed(6);
+      const query = `[out:json][timeout:10];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${south},${west},${north},${east});way["area:aeroway"="taxiway"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east});relation["area:aeroway"="taxiway"](${south},${west},${north},${east}););out geom;`;
+      const body = new URLSearchParams({ data: query }).toString();
+      const json = await Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          signal: AbortSignal.timeout(6_000),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            "User-Agent": "Inbound/1.0 airport-surface experiment",
+          },
+          body,
+        });
+        if (!response.ok) throw new Error(`Airport surface unavailable (${response.status})`);
+        const payload = await response.json() as { elements?: OverpassElement[] };
+        if (!Array.isArray(payload.elements)) throw new Error("Invalid airport surface response");
+        return payload;
+      }));
+      const osm = parse(json.elements ?? [], airport, Date.now());
+      if (osm.features.length >= 5) {
+        console.log("[airport-surface]", { airport, source: "OpenStreetMap", featureCount: osm.features.length });
+        cache.set(key, { value: osm, at: Date.now() });
+        return osm;
+      }
+      console.warn("[airport-surface] OpenStreetMap returned too little geometry", airport, osm.features.length);
+    } catch (error) {
+      console.warn("[airport-surface] OpenStreetMap load failed", airport, error instanceof Error ? error.message : String(error));
+    }
+
     const faa = await loadFaaAirportSurface({ airport, lat: input.lat, lon: input.lon });
     if (faa) {
       cache.set(key, { value: faa, at: Date.now() });
       return faa;
     }
 
-    // Ground radar only renders line/polygon movement geometry. Querying ways
-    // directly is materially faster than asking Overpass for nodes + ways +
-    // relations and avoids spending time on objects we never render.
-    const latPad = 0.075;
-    const lonPad = Math.min(0.12, 0.075 / Math.max(0.45, Math.cos(input.lat * Math.PI / 180)));
-    const south = (input.lat - latPad).toFixed(6);
-    const north = (input.lat + latPad).toFixed(6);
-    const west = (input.lon - lonPad).toFixed(6);
-    const east = (input.lon + lonPad).toFixed(6);
-    const query = `[out:json][timeout:10];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${south},${west},${north},${east});way["area:aeroway"="taxiway"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east});relation["area:aeroway"="taxiway"](${south},${west},${north},${east}););out geom;`;
-    const body = new URLSearchParams({ data: query }).toString();
-    const json = await Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        signal: AbortSignal.timeout(8_000),
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          "User-Agent": "Inbound/1.0 airport-surface experiment",
-        },
-        body,
-      });
-      if (!response.ok) throw new Error(`Airport surface unavailable (${response.status})`);
-      const payload = await response.json() as { elements?: OverpassElement[] };
-      if (!Array.isArray(payload.elements)) throw new Error("Invalid airport surface response");
-      return payload;
-    })).catch(() => {
-      throw new Error("Airport surface unavailable");
-    });
-    if (!Array.isArray(json.elements)) throw new Error("Invalid airport surface response");
-    const value = parse(json.elements, airport, Date.now());
-    cache.set(key, { value, at: Date.now() });
-    return value;
+    throw new Error("Airport surface unavailable");
   })().finally(() => pending.delete(key));
   pending.set(key, request);
   return request;
