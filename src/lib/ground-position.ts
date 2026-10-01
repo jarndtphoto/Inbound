@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { haversineNm } from "./geo";
 import { loadFr24Flight, loadFr24FlightByRegistration } from "./fr24.server";
+import { fetchByCallsign, fetchByReg, fuseProviderLists, type AdsbRaw } from "./adsb-fusion";
 
 type GroundPositionInput = {
   callsign?: string | null;
@@ -40,6 +41,32 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       };
     };
 
+    const normCallsign = (value: unknown) => String(value ?? "").replace(/\s/g, "").toUpperCase();
+    const normRegistration = (value: unknown) => String(value ?? "").replace(/[-\s]/g, "").toUpperCase();
+    const usableAdsb = (raw: AdsbRaw | null | undefined) => {
+      if (!raw || !Number.isFinite(raw.lat) || !Number.isFinite(raw.lon)) return null;
+      const point = { lat: raw.lat as number, lon: raw.lon as number };
+      if (haversineNm(point, airport) > 20) return null;
+      const onGround = raw.alt_baro === "ground" || raw.alt_baro === 0;
+      const altFt = typeof raw.alt_baro === "number" ? raw.alt_baro : onGround ? 0 : null;
+      if (!onGround && (altFt ?? 9999) > 250) return null;
+      const ageSec = raw._fusion?.ageSec
+        ?? (typeof raw.seen_pos === "number" ? raw.seen_pos : typeof raw.seen === "number" ? raw.seen : 999);
+      if (!Number.isFinite(ageSec) || ageSec > 60) return null;
+      return {
+        lat: point.lat,
+        lon: point.lon,
+        altFt,
+        gsKt: typeof raw.gs === "number" ? raw.gs : typeof raw.spd === "number" ? raw.spd : null,
+        track: typeof raw.track === "number" ? raw.track : null,
+        onGround,
+        seenAt: Date.now() / 1000 - ageSec,
+        registration: raw.r ?? null,
+        callsign: raw.flight?.trim() || null,
+        provider: "adsb" as const,
+      };
+    };
+
     // Registration is the strongest identity key and avoids spending a second
     // FR24 request on every 2.5-second poll when we already know the tail.
     if (data.registration) {
@@ -50,6 +77,27 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     if (data.callsign) {
       const byCallsign = await loadFr24Flight(data.callsign).catch(() => null);
       const position = usable(byCallsign);
+      if (position) return position;
+    }
+
+    // FR24 can be unavailable or temporarily miss surface coverage. Fall back
+    // to open ADS-B fusion so the ground map keeps moving.
+    const packs = data.registration
+      ? await fetchByReg(data.registration).catch(() => [])
+      : data.callsign
+        ? await fetchByCallsign(data.callsign).catch(() => [])
+        : [];
+    const fused = fuseProviderLists(packs, { airside: true });
+    const wantedReg = normRegistration(data.registration);
+    const wantedCallsign = normCallsign(data.callsign);
+    const candidates = fused.filter((raw) => {
+      if (wantedReg) return normRegistration(raw.r) === wantedReg;
+      if (wantedCallsign) return normCallsign(raw.flight) === wantedCallsign;
+      return false;
+    });
+    candidates.sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
+    for (const candidate of candidates) {
+      const position = usableAdsb(candidate);
       if (position) return position;
     }
     return null;

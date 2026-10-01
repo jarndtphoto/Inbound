@@ -226,6 +226,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ s: 1, x: 0, y: 0 });
   const viewRef = useRef(view);
+  const homeViewRef = useRef(view);
   viewRef.current = view;
   const pinchRef = useRef<{
     d: number;
@@ -237,7 +238,12 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
   } | null>(null);
   const dragRef = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
 
-  const reset = useCallback(() => setView({ s: 1, x: 0, y: 0 }), []);
+  const reset = useCallback(() => setView(homeViewRef.current), []);
+  const setHomeView = useCallback((next: { s: number; x: number; y: number }) => {
+    const clamped = clampView(next, H, freePan);
+    homeViewRef.current = clamped;
+    setView(clamped);
+  }, [H, freePan]);
 
   const toSvg = (el: HTMLElement, cx: number, cy: number) => {
     const r = el.getBoundingClientRect();
@@ -262,7 +268,9 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
   }, [H, freePan]);
 
   useEffect(() => {
-    setView({ s: 1, x: 0, y: 0 });
+    const base = { s: 1, x: 0, y: 0 };
+    homeViewRef.current = base;
+    setView(base);
   }, [resetKey, H]);
 
   useEffect(() => {
@@ -373,7 +381,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
     };
   }, [H, freePan]);
 
-  return { boxRef, s: view.s, x: view.x, y: view.y, reset, zoomBy };
+  return { boxRef, s: view.s, x: view.x, y: view.y, reset, zoomBy, setHomeView, home: homeViewRef.current };
 }
 
 function pathRuns(samples: RouteSample[], progress: number) {
@@ -485,6 +493,25 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     if (story.live && story.aircraft && Number.isFinite(story.aircraft.lat)) lats.push(story.aircraft.lat);
     if (story.live && story.aircraft && Number.isFinite(story.aircraft.lon)) lons.push(story.aircraft.lon);
   }
+  const freeWorld = fixedViewport && !weatherPreview;
+  const worldSize = W;
+  const worldYOffset = (H - worldSize) / 2;
+  useEffect(() => {
+    if (!freeWorld || lats.length < 2 || lons.length < 2) return;
+    const xs = lons.map((lon) => mercX(lon) * worldSize);
+    const ys = lats.map((lat) => worldYOffset + mercY(lat) * worldSize);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const spanX = Math.max(1, maxX - minX);
+    const spanY = Math.max(1, maxY - minY);
+    const s = Math.min(MAX_ROUTE_ZOOM, Math.max(1, Math.min((W - PAD * 2) / spanX, (H - PAD * 2) / spanY)));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    zoom.setHomeView({ s, x: W / 2 - cx * s, y: H / 2 - cy * s });
+  }, [freeWorld, H, story.callsign, story.origin.iata, story.dest.iata]);
+
   if (lats.length < 2 || lons.length < 2) return null;
   let minLat = Math.min(...lats);
   let maxLat = Math.max(...lats);
@@ -501,8 +528,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   maxLat = proj.maxLat;
   minLon = proj.minLon;
   maxLon = proj.maxLon;
-  const sx = proj.sx;
-  const sy = proj.sy;
+  const sx = freeWorld ? (lon: number) => mercX(lon) * worldSize : proj.sx;
+  const sy = freeWorld ? (lat: number) => worldYOffset + mercY(lat) * worldSize : proj.sy;
 
   const origin = { lat: story.origin.lat, lon: story.origin.lon };
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
@@ -569,7 +596,9 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const hawaii = freePan ? HAWAII_COASTLINES : HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
   const lakes = freePan ? GREAT_LAKES : GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
   const hazards = upcomingStorms(story.hazards ?? []);
-  const movedFromHome = zoom.s > 1.02 || Math.abs(zoom.x) > 1 || Math.abs(zoom.y) > 1;
+  const movedFromHome = Math.abs(zoom.s - zoom.home.s) > 0.02
+    || Math.abs(zoom.x - zoom.home.x) > 1
+    || Math.abs(zoom.y - zoom.home.y) > 1;
 
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-surface", fixedViewport && "flex h-full flex-col items-center")}>

@@ -321,7 +321,8 @@ function GroundMovementMap({
     .filter((p) => haversineNm(p, airport) < 15)
     .map((p) => { const q = project(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; })
     .join(" ");
-  const provider = fastFix ? "fr24" : typeof story.providers?.chosenPosition === "string" ? story.providers.chosenPosition : "live position";
+  const provider = fastFix?.provider ?? (typeof story.providers?.chosenPosition === "string" ? story.providers.chosenPosition : "live position");
+  const providerLabel = provider === "fr24" ? "FR24" : provider === "adsb" ? "ADS-B" : provider;
   const age = fastAge != null ? Math.max(0, Math.round(fastAge)) : typeof story.providers?.chosenPositionAgeSec === "number" ? Math.max(0, Math.round(story.providers.chosenPositionAgeSec)) : null;
   const fastStale = Boolean(!fast && fastFix);
 
@@ -330,11 +331,11 @@ function GroundMovementMap({
       <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-2">
         <div>
           <p className="font-mono text-[11px] tracking-widest text-subtle uppercase">{mode.kind === "departure" ? "Departure ground" : "Arrival ground"}</p>
-          <p className="font-display text-base font-semibold">{airport.iata} · {frozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? "holding last FR24 fix" : displayAircraft ? "live movement" : "airport surface"}</p>
+          <p className="font-display text-base font-semibold">{airport.iata} · {frozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? `holding last ${providerLabel} fix` : displayAircraft ? "live movement" : "airport surface"}</p>
         </div>
         <div className="text-right font-mono text-[10px] leading-tight text-muted">
           {inFlight ? <div>Plane in flight</div> : displayAircraft ? <div>{Math.round(displayAircraft.gsKt ?? 0)} kt · {frozen ? "frozen" : displayAircraft.onGround ? "ground" : `${Math.round(displayAircraft.altFt ?? 0)} ft`}</div> : <div>Awaiting aircraft</div>}
-          <div>{frozen ? "last known ground fix" : inFlight ? "departure complete" : `${provider}${age != null ? ` · ${age}s` : ""}${fastStale ? " · held" : ""}`}</div>
+          <div>{frozen ? "last known ground fix" : inFlight ? "departure complete" : `${providerLabel}${age != null ? ` · ${age}s` : ""}${fastStale ? " · held" : ""}`}</div>
         </div>
       </div>
       <div ref={zoom.boxRef} className="relative min-h-0 flex-1 overflow-hidden bg-bg" style={{ touchAction: "none" }}>
