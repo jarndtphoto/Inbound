@@ -32,7 +32,7 @@ type GroundMode = {
 
 function surfaceQueryOptions(airport: FlightStory["origin"]) {
   return {
-    queryKey: ["airport-surface", airport.icao, airport.lat.toFixed(3), airport.lon.toFixed(3)] as const,
+    queryKey: ["airport-surface-v6", airport.icao, airport.lat.toFixed(3), airport.lon.toFixed(3)] as const,
     queryFn: () => getAirportSurfaceCached({ airport: airport.icao, lat: airport.lat, lon: airport.lon }),
     staleTime: SURFACE_CACHE_MS,
     gcTime: SURFACE_CACHE_MS,
@@ -249,13 +249,16 @@ function GroundMovementMap({
     queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, aircraft?.registration ?? "", aircraft?.callsign ?? story.callsign],
     queryFn: () => getGroundPosition({ data: {
       callsign: aircraft?.callsign ?? story.callsign,
+      flightId: story.flightId ?? null,
       registration: aircraft?.registration ?? null,
       airportLat: airport.lat,
       airportLon: airport.lon,
     } }),
-    enabled: !frozen && !inFlight && Boolean(aircraft?.registration || aircraft?.callsign || story.callsign),
-    refetchInterval: 2_500,
-    staleTime: 1_000,
+    enabled: !inFlight && Boolean(aircraft?.registration || aircraft?.callsign || story.callsign),
+    refetchInterval: 2_000,
+    refetchIntervalInBackground: true,
+    refetchOnReconnect: "always",
+    staleTime: 750,
     gcTime: 60_000,
     retry: false,
   });
@@ -321,20 +324,22 @@ function GroundMovementMap({
     .filter((p) => haversineNm(p, airport) < 15)
     .map((p) => { const q = project(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; })
     .join(" ");
-  const provider = fastFix ? "fr24" : typeof story.providers?.chosenPosition === "string" ? story.providers.chosenPosition : "live position";
+  const provider = fastFix?.provider ?? (typeof story.providers?.chosenPosition === "string" ? story.providers.chosenPosition : "live position");
+  const providerLabel = provider === "fr24" ? "FR24" : provider === "adsb" ? "ADS-B" : provider;
   const age = fastAge != null ? Math.max(0, Math.round(fastAge)) : typeof story.providers?.chosenPositionAgeSec === "number" ? Math.max(0, Math.round(story.providers.chosenPositionAgeSec)) : null;
   const fastStale = Boolean(!fast && fastFix);
+  const displayFrozen = frozen && !(fast && (fastAge ?? Infinity) <= 30);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-surface">
       <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-2">
         <div>
           <p className="font-mono text-[11px] tracking-widest text-subtle uppercase">{mode.kind === "departure" ? "Departure ground" : "Arrival ground"}</p>
-          <p className="font-display text-base font-semibold">{airport.iata} · {frozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? "holding last FR24 fix" : displayAircraft ? "live movement" : "airport surface"}</p>
+          <p className="font-display text-base font-semibold">{airport.iata} · {displayFrozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? `holding last ${providerLabel} fix` : displayAircraft ? "live movement" : "airport surface"}</p>
         </div>
         <div className="text-right font-mono text-[10px] leading-tight text-muted">
-          {inFlight ? <div>Plane in flight</div> : displayAircraft ? <div>{Math.round(displayAircraft.gsKt ?? 0)} kt · {frozen ? "frozen" : displayAircraft.onGround ? "ground" : `${Math.round(displayAircraft.altFt ?? 0)} ft`}</div> : <div>Awaiting aircraft</div>}
-          <div>{frozen ? "last known ground fix" : inFlight ? "departure complete" : `${provider}${age != null ? ` · ${age}s` : ""}${fastStale ? " · held" : ""}`}</div>
+          {inFlight ? <div>Plane in flight</div> : displayAircraft ? <div>{Math.round(displayAircraft.gsKt ?? 0)} kt · {displayFrozen ? "frozen" : displayAircraft.onGround ? "ground" : `${Math.round(displayAircraft.altFt ?? 0)} ft`}</div> : <div>Awaiting aircraft</div>}
+          <div>{displayFrozen ? "last known ground fix" : inFlight ? "departure complete" : `${providerLabel}${age != null ? ` · ${age}s` : ""}${fastStale ? " · held" : ""}`}</div>
         </div>
       </div>
       <div ref={zoom.boxRef} className="relative min-h-0 flex-1 overflow-hidden bg-bg" style={{ touchAction: "none" }}>
@@ -372,7 +377,7 @@ function GroundMovementMap({
                 </g>
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale})`}>
                   <text x="38" y="-13" className="fill-fg" fontSize="32" fontWeight="900">{story.iata}</text>
-                  <text x="38" y="17" className="fill-muted" fontSize="21" fontWeight="800">{frozen ? "last known" : `${Math.round(displayAircraft.gsKt ?? 0)} kt`}</text>
+                  <text x="38" y="17" className="fill-muted" fontSize="21" fontWeight="800">{displayFrozen ? "last known" : `${Math.round(displayAircraft.gsKt ?? 0)} kt`}</text>
                 </g>
               </>
             ) : null}

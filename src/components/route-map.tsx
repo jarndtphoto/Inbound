@@ -20,7 +20,8 @@ const W = 800;
 const H = 800;
 const PAD = 40;
 const MAX_ROUTE_ZOOM = 12;
-const PAN_WORLD_SCREENS = 24;
+const MIN_FREE_ROUTE_ZOOM = 0.01;
+const PAN_WORLD_SCREENS = 4;
 
 function chopClass(c: Chop, past: boolean) {
   if (past) return "stroke-muted/40";
@@ -202,7 +203,8 @@ function RadarLayer({
 }
 
 function clampView(next: { s: number; x: number; y: number }, mapH = 800, freePan = false) {
-  const s = Math.min(MAX_ROUTE_ZOOM, Math.max(1, next.s));
+  const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
+  const s = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, next.s));
   if (freePan) {
     const xLimit = W * PAN_WORLD_SCREENS * s;
     const yLimit = mapH * PAN_WORLD_SCREENS * s;
@@ -249,7 +251,8 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
 
   const zoomBy = useCallback((factor: number) => {
     const { s, x, y } = viewRef.current;
-    const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, s * factor));
+    const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
+    const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, s * factor));
     const cx = W / 2;
     const cy = H / 2;
     setView(
@@ -276,7 +279,8 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
       e.preventDefault();
       const { s, x, y } = viewRef.current;
       const factor = Math.exp(-e.deltaY * 0.0018);
-      const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, s * factor));
+      const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
+      const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, s * factor));
       const { mx, my } = toSvg(el, e.clientX, e.clientY);
       apply({
         s: ns,
@@ -316,7 +320,8 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
         const p = pinchRef.current;
         if (!p) return;
         const factor = dist(a, b) / p.d;
-        const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(1, p.s * factor));
+        const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
+        const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, p.s * factor));
         const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
         apply({
           s: ns,
@@ -569,7 +574,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const hawaii = freePan ? HAWAII_COASTLINES : HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
   const lakes = freePan ? GREAT_LAKES : GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
   const hazards = upcomingStorms(story.hazards ?? []);
-  const movedFromHome = zoom.s > 1.02 || Math.abs(zoom.x) > 1 || Math.abs(zoom.y) > 1;
+  const movedFromHome = Math.abs(zoom.s - 1) > 0.02 || Math.abs(zoom.x) > 1 || Math.abs(zoom.y) > 1;
 
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-surface", fixedViewport && "flex h-full flex-col items-center")}>

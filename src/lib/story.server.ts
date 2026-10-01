@@ -2491,6 +2491,69 @@ function mergeOfficialAware(base, official: NormalizedFlight | null) {
 		providerEta: official.providerEta
 	};
 }
+function awareFromLiveFr24(flight: NormalizedFlight | null) {
+	const position = flight?.position;
+	const nowSec = Date.now() / 1e3;
+	if (!flight || !position || !flight.origin || !flight.destination) return null;
+	if (nowSec - position.seenAt > 120 || position.seenAt > nowSec + 120) return null;
+	if (!(flight.origin.iata || flight.origin.icao) || !(flight.destination.iata || flight.destination.icao)) return null;
+	const none = { scheduled: null, estimated: null, actual: null };
+	const faTrack = (flight.track ?? []).map((p) => ({
+		t: p.seenAt,
+		lat: p.lat,
+		lon: p.lon,
+		alt: p.altFt,
+		gs: p.gsKt,
+		track: p.track,
+		ground: p.altFt === 0,
+	}));
+	return {
+		flightId: flight.flightId ?? null,
+		ident: flight.callsign ?? position.callsign ?? null,
+		iataIdent: null,
+		status: flight.status ?? "",
+		confirmedAt: Date.now(),
+		originIata: flight.origin.iata ?? null,
+		originIcao: flight.origin.icao ?? null,
+		originName: null,
+		originCity: null,
+		originTz: null,
+		originLat: null,
+		originLon: null,
+		originGate: flight.origin.gate ?? null,
+		destIata: flight.destination.iata ?? null,
+		destIcao: flight.destination.icao ?? null,
+		destName: null,
+		destCity: null,
+		destTz: null,
+		destLat: null,
+		destLon: null,
+		destGate: flight.destination.gate ?? null,
+		gateOut: flight.push ?? { ...none },
+		takeoff: flight.takeoff ?? { ...none },
+		landing: flight.landing ?? { ...none },
+		gateIn: flight.gateIn ?? { ...none },
+		inboundIdent: null,
+		inbound: null,
+		inboundFlightId: null,
+		waypoints: flight.waypoints ?? [],
+		type: flight.type ?? position.type ?? null,
+		tail: flight.registration ?? position.registration ?? null,
+		hex: flight.hex ?? position.hex ?? null,
+		cancelled: false,
+		averageDelaySec: { departure: null, arrival: null },
+		typicalTaxiOutMin: null,
+		typicalTaxiInMin: null,
+		filedTaxiOutMin: null,
+		filedTaxiInMin: null,
+		gsKt: position.gsKt ?? null,
+		heading: position.track ?? null,
+		altFt: position.altFt ?? null,
+		faTrack,
+		providerEta: flight.providerEta ?? null,
+	};
+}
+
 function pointAtFrac(path, frac) {
 	if (!path?.length) return null;
 	const t = Math.max(0, Math.min(1, frac));
@@ -2531,26 +2594,40 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				? safe(adsbByReg(parsed.registration), null)
 				: safe(adsbByCallsign(parsed.callsign), null),
 		(resumed ? Promise.resolve(awareFromResume(resumed.resume, resumed.scope)) : loadAware(parsed.callsign)).catch((err) => {
-			if (parsed.registration) return null;
-			if (err?.name === "TimeoutError" || err?.name === "AbortError") throw new Error("Flight schedule provider is taking too long to respond. Please try again.");
-			throw err;
+			console.warn("[schedule-fallback-unavailable]", {
+				callsign: parsed.callsign,
+				reason: err instanceof Error ? err.message.slice(0, 180) : String(err).slice(0, 180),
+			});
+			return null;
 		}),
 		safe(loadRoute(parsed.callsign), null),
 		loadOfficialFlightData(parsed.callsign)
 	]);
-	const flightawareOfficial = officialAwareCompatible(publicAware, official.flightaware) ? official.flightaware : null;
+	const fr24Aware = publicAware ? null : awareFromLiveFr24(official.fr24);
+	if (fr24Aware) {
+		console.info(JSON.stringify({
+			event: "fr24_live_leg_fallback",
+			requested: parsed.callsign,
+			flightId: fr24Aware.flightId,
+			origin: fr24Aware.originIata ?? fr24Aware.originIcao,
+			destination: fr24Aware.destIata ?? fr24Aware.destIcao,
+		}));
+	}
+	const currentLegAware = publicAware ?? fr24Aware;
+	const flightawareOfficial = officialAwareCompatible(currentLegAware, official.flightaware) ? official.flightaware : null;
 	if (official.flightaware && !flightawareOfficial) {
 		console.log("[flightaware-instance-mismatch]", {
 			requested: parsed.callsign,
-			selectedFlightId: publicAware?.flightId ?? null,
+			selectedFlightId: currentLegAware?.flightId ?? null,
 			officialFlightId: official.flightaware.flightId ?? null,
-			selectedRoute: [publicAware?.originIata ?? publicAware?.originIcao ?? null, publicAware?.destIata ?? publicAware?.destIcao ?? null],
+			selectedRoute: [currentLegAware?.originIata ?? currentLegAware?.originIcao ?? null, currentLegAware?.destIata ?? currentLegAware?.destIcao ?? null],
 			officialRoute: [official.flightaware.origin?.iata ?? official.flightaware.origin?.icao ?? null, official.flightaware.destination?.iata ?? official.flightaware.destination?.icao ?? null]
 		});
 	}
-	const aware = mergeOfficialAware(publicAware, flightawareOfficial);
+	const aware = mergeOfficialAware(currentLegAware, flightawareOfficial);
 	// Flight-number route databases retain old assignments after a number moves
-	// to a different city pair. Require a current, leg-specific schedule feed.
+	// to a different city pair. Require either a current schedule record or a
+	// fresh FR24 live record that identifies both ends of this exact active leg.
 	if (!parsed.registration && (!(aware?.originIata || aware?.originIcao) || !(aware?.destIata || aware?.destIcao))) {
 		throw new Error("Current flight route unavailable. Try again when the flight feed responds.");
 	}

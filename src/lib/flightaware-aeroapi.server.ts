@@ -1,8 +1,9 @@
 import { type FlightTimes, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
+import { flightAwarePaidApiConfigured, flightAwarePaidApiKey } from "./flightaware-config.ts";
 
 const BASE = "https://aeroapi.flightaware.com/aeroapi";
 const cache = new Map<string, { at: number; value: unknown }>();
-const aeroApiKey = () => process.env.FLIGHTAWARE_AEROAPI_KEY?.trim() || process.env.FLIGHTAWARE_API_KEY?.trim() || "";
+const aeroApiKey = flightAwarePaidApiKey;
 const unix = (v: unknown) => typeof v === "string" || typeof v === "number" ? Math.floor(new Date(v).getTime() / 1000) || null : null;
 const times = (f: any, name: string): FlightTimes => ({ scheduled: unix(f[`scheduled_${name}`]), estimated: unix(f[`estimated_${name}`]), actual: unix(f[`actual_${name}`]) });
 
@@ -98,4 +99,4 @@ export async function loadAeroApiFlight(ident: string): Promise<NormalizedFlight
   return normalized;
 }
 
-export const aeroApiConfigured = () => Boolean(aeroApiKey());
+export const aeroApiConfigured = flightAwarePaidApiConfigured;
