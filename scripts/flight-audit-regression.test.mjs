@@ -713,6 +713,14 @@ it('preserves missing weather feeds as unknown while the flight still loads', as
 });
 
 
+describe('stage and ground-map position identity', () => {
+  it('uses the commercial flight number for the stage FR24 lookup', () => {
+    const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(source, /fr24FlightNumber:\s*parsed\.iata/);
+    assert.match(source, /fr24Bounds:\s*fr24GroundBoundsForAware\(publicAware\)/);
+  });
+});
+
 describe('public schedule fallback', () => {
   it('loads an exact route from a FlightStats-style public status page', () => {
     const html = `<html><body><h1>Flight Status</h1><div>UA 3 United Airlines ORD Chicago ZRH Zurich Scheduled On time</div><div>Flight Departure Times Scheduled 15:50 CDT</div><div>Flight Arrival Times Scheduled 07:45 CEST</div></body></html>`;
