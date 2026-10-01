@@ -245,6 +245,35 @@ function GroundMovementMap({
 }) {
   const airport = mode.airport;
   const surfaceQ = useQuery(surfaceQueryOptions(airport));
+  const storyAircraft = story.aircraft;
+  const storyPositionAge = typeof story.providers?.chosenPositionAgeSec === "number"
+    ? Math.max(0, story.providers.chosenPositionAgeSec)
+    : typeof storyAircraft?.seenSec === "number"
+      ? Math.max(0, storyAircraft.seenSec)
+      : null;
+  const storyProvider = story.providers?.chosenPosition;
+  const storyPhysicalProvider = storyProvider === "fr24" || storyProvider === "adsb";
+  const storyNearAirport = Boolean(storyAircraft && Number.isFinite(storyAircraft.lat) && Number.isFinite(storyAircraft.lon)
+    && haversineNm(storyAircraft, airport) <= 20);
+  const storySurfaceLike = Boolean(storyAircraft && (
+    storyAircraft.onGround === true ||
+    ((storyAircraft.altFt ?? 9999) <= 250 && (storyAircraft.gsKt ?? 999) <= 80)
+  ));
+  const storyFast = storyAircraft && storyPhysicalProvider && storyNearAirport && storySurfaceLike
+    && storyPositionAge != null && storyPositionAge <= 12
+    ? {
+        lat: storyAircraft.lat,
+        lon: storyAircraft.lon,
+        altFt: storyAircraft.altFt ?? null,
+        gsKt: storyAircraft.gsKt ?? null,
+        track: storyAircraft.track ?? null,
+        onGround: storyAircraft.onGround === true,
+        seenAt: Date.now() / 1000 - storyPositionAge,
+        registration: storyAircraft.registration ?? null,
+        callsign: storyAircraft.callsign ?? story.callsign ?? null,
+        provider: storyProvider,
+      }
+    : null;
   const groundQ = useQuery({
     queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, aircraft?.registration ?? "", aircraft?.callsign ?? story.callsign],
     queryFn: () => getGroundPosition({ data: {
@@ -254,15 +283,17 @@ function GroundMovementMap({
       airportLat: airport.lat,
       airportLon: airport.lon,
     } }),
-    enabled: !inFlight && Boolean(aircraft?.registration || aircraft?.callsign || story.callsign),
-    refetchInterval: 2_000,
+    enabled: !inFlight && !storyFast && Boolean(aircraft?.registration || aircraft?.callsign || story.callsign),
+    refetchInterval: 3_000,
     refetchIntervalInBackground: true,
     refetchOnReconnect: "always",
     staleTime: 750,
     gcTime: 60_000,
     retry: false,
   });
-  const fast = groundQ.data;
+  const queriedFast = groundQ.data;
+  const queriedFastAge = queriedFast?.seenAt ? Math.max(0, Date.now() / 1000 - queriedFast.seenAt) : null;
+  const fast = storyFast ?? (queriedFast && (queriedFastAge ?? Infinity) <= 30 ? queriedFast : null);
   const fastKey = `${story.flightId ?? story.iata}:${airport.iata}:${mode.kind}`;
   const lastFastRef = useRef<{ key: string; fix: NonNullable<typeof fast> } | null>(null);
   if (fast) lastFastRef.current = { key: fastKey, fix: fast };
