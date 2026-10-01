@@ -21,7 +21,7 @@ const H = 800;
 const PAD = 40;
 const MAX_ROUTE_ZOOM = 12;
 const MIN_FREE_ROUTE_ZOOM = 0.01;
-const PAN_WORLD_SCREENS = 24;
+const PAN_WORLD_SCREENS = 4;
 
 function chopClass(c: Chop, past: boolean) {
   if (past) return "stroke-muted/40";
@@ -206,8 +206,8 @@ function clampView(next: { s: number; x: number; y: number }, mapH = 800, freePa
   const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
   const s = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, next.s));
   if (freePan) {
-    const xLimit = W * PAN_WORLD_SCREENS;
-    const yLimit = mapH * PAN_WORLD_SCREENS;
+    const xLimit = W * PAN_WORLD_SCREENS * s;
+    const yLimit = mapH * PAN_WORLD_SCREENS * s;
     return {
       s,
       x: Math.min(xLimit, Math.max(-xLimit, next.x)),
