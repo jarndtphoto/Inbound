@@ -153,7 +153,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     // If exact filters miss a surface target, make one small, capped airport
     // bounds request and match the commercial flight/callsign/registration in
     // the returned rows. FR24 documents bounds as the more reliable way to
-    // retrieve airport-surface transponders. limit=40 keeps credits bounded.
+    // retrieve airport-surface transponders. limit=40 keeps the fallback bounded.
     const fr24Rows = await loadFr24RowsByBounds(bounds, 40).catch(() => []);
     for (const row of fr24Rows) {
       const position = usableFr24Row(row);
