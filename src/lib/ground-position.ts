@@ -1,10 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { haversineNm } from "./geo";
 import { loadFr24Flight, loadFr24FlightByRegistration } from "./fr24.server";
-import { fetchByCallsign, fetchByReg, fuseProviderLists, type AdsbRaw } from "./adsb-fusion";
+import { fetchAround, fetchByCallsign, fetchByReg, fuseProviderLists, type AdsbRaw } from "./adsb-fusion";
 
 type GroundPositionInput = {
   callsign?: string | null;
+  flightId?: string | null;
   registration?: string | null;
   airportLat: number;
   airportLon: number;
@@ -13,11 +14,12 @@ type GroundPositionInput = {
 export const getGroundPosition = createServerFn({ method: "POST" })
   .validator((input: GroundPositionInput) => {
     const callsign = String(input?.callsign ?? "").trim().toUpperCase() || null;
+    const flightId = String(input?.flightId ?? "").trim().toUpperCase() || null;
     const registration = String(input?.registration ?? "").trim().toUpperCase() || null;
     const airportLat = Number(input?.airportLat);
     const airportLon = Number(input?.airportLon);
     if (!Number.isFinite(airportLat) || !Number.isFinite(airportLon)) throw new Error("Invalid airport position");
-    return { callsign, registration, airportLat, airportLon };
+    return { callsign, flightId, registration, airportLat, airportLon };
   })
   .handler(async ({ data }) => {
     const airport = { lat: data.airportLat, lon: data.airportLon };
@@ -46,6 +48,8 @@ export const getGroundPosition = createServerFn({ method: "POST" })
 
     const normCallsign = (value: unknown) => String(value ?? "").replace(/\s/g, "").toUpperCase();
     const normRegistration = (value: unknown) => String(value ?? "").replace(/[-\s]/g, "").toUpperCase();
+    const flightIdCallsign = data.flightId?.match(/^([A-Z]{2,4}\d{1,4}[A-Z]?)/)?.[1] ?? null;
+    const callsigns = [...new Set([flightIdCallsign, data.callsign].filter(Boolean).map(normCallsign))].slice(0, 2);
     const usableAdsb = (raw: AdsbRaw | null | undefined) => {
       if (!raw || !Number.isFinite(raw.lat) || !Number.isFinite(raw.lon)) return null;
       const point = { lat: raw.lat as number, lon: raw.lon as number };
@@ -77,29 +81,43 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       const position = usable(byRegistration);
       if (position) return position;
     }
-    if (data.callsign) {
-      const byCallsign = await loadFr24Flight(data.callsign).catch(() => null);
+    for (const callsign of callsigns) {
+      const byCallsign = await loadFr24Flight(callsign).catch(() => null);
       const position = usable(byCallsign);
       if (position) return position;
     }
 
-    // FR24 can be unavailable or temporarily miss surface coverage. Fall back
-    // to open ADS-B fusion so the ground map keeps moving.
-    const packs = data.registration
-      ? await fetchByReg(data.registration).catch(() => [])
-      : data.callsign
-        ? await fetchByCallsign(data.callsign).catch(() => [])
-        : [];
-    const fused = fuseProviderLists(packs, { airside: true });
+    // Exact callsign endpoints can omit surface aircraft. Search the airport
+    // neighborhood first, then fall back to exact lookups if needed.
     const wantedReg = normRegistration(data.registration);
-    const wantedCallsign = normCallsign(data.callsign);
-    const candidates = fused.filter((raw) => {
-      if (wantedReg) return normRegistration(raw.r) === wantedReg;
-      if (wantedCallsign) return normCallsign(raw.flight) === wantedCallsign;
-      return false;
-    });
-    candidates.sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
-    for (const candidate of candidates) {
+    const wantedCallsigns = new Set(callsigns);
+    const matchesIdentity = (raw: AdsbRaw) => {
+      const reg = normRegistration(raw.r);
+      const cs = normCallsign(raw.flight);
+      if (wantedReg && reg === wantedReg) return true;
+      return Boolean(cs && wantedCallsigns.has(cs));
+    };
+    const aroundPacks = await fetchAround(airport.lat, airport.lon, 20).catch(() => []);
+    const around = fuseProviderLists(aroundPacks, { airside: true })
+      .filter(matchesIdentity)
+      .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
+    for (const candidate of around) {
+      const position = usableAdsb(candidate);
+      if (position) {
+        console.info("[ground-position]", { provider: "adsb-around", callsign: position.callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+        return position;
+      }
+    }
+
+    const exactPacks = data.registration
+      ? await fetchByReg(data.registration).catch(() => [])
+      : callsigns[0]
+        ? await fetchByCallsign(callsigns[0]).catch(() => [])
+        : [];
+    const exact = fuseProviderLists(exactPacks, { airside: true })
+      .filter(matchesIdentity)
+      .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
+    for (const candidate of exact) {
       const position = usableAdsb(candidate);
       if (position) return position;
     }
