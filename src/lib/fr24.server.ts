@@ -2,27 +2,52 @@ import { emptyTimes, type NormalizedFlight, type NormalizedPosition } from "./fl
 
 const BASE = "https://fr24api.flightradar24.com/api";
 const cache = new Map<string, { at: number; value: unknown }>();
+const pending = new Map<string, Promise<unknown>>();
 const lastGood = new Map<string, { at: number; flight: NormalizedFlight }>();
 const LAST_GOOD_TTL_MS = 25_000;
+const LIVE_POSITION_CACHE_MS = 5_000;
+let rateLimitedUntil = 0;
 const unix = (v: unknown) => typeof v === "number" ? v : typeof v === "string" ? Math.floor(new Date(v).getTime() / 1000) || null : null;
 
 async function get(path: string, ttlMs: number) {
   const token = process.env.FR24_API_TOKEN?.trim();
   if (!token) return null;
+  const now = Date.now();
   const hit = cache.get(path);
-  if (hit && Date.now() - hit.at < ttlMs) return hit.value;
-  const params = new URLSearchParams(path.split("?")[1] ?? "");
-  console.info(JSON.stringify({
-    event: "fr24_upstream_request",
-    timestamp: new Date().toISOString(),
-    callsign: params.get("callsigns"),
-    registration: params.get("registrations"),
-    endpoint: path.split("?")[0],
-    cache: "miss",
-  }));
-  const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, "Accept-Version": "v1", Accept: "application/json" }, signal: AbortSignal.timeout(5500) });
-  if (!res.ok) throw new Error(`FR24 API ${res.status}`);
-  const value = await res.json(); cache.set(path, { at: Date.now(), value }); return value;
+  if (hit && now - hit.at < ttlMs) return hit.value;
+  if (now < rateLimitedUntil) {
+    if (hit && now - hit.at <= LAST_GOOD_TTL_MS) return hit.value;
+    throw new Error("FR24 API 429");
+  }
+  const existing = pending.get(path);
+  if (existing) return existing;
+
+  const request = (async () => {
+    const params = new URLSearchParams(path.split("?")[1] ?? "");
+    console.info(JSON.stringify({
+      event: "fr24_upstream_request",
+      timestamp: new Date().toISOString(),
+      callsign: params.get("callsigns"),
+      registration: params.get("registrations"),
+      endpoint: path.split("?")[0],
+      cache: "miss",
+    }));
+    const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, "Accept-Version": "v1", Accept: "application/json" }, signal: AbortSignal.timeout(5500) });
+    if (!res.ok) {
+      if (res.status === 429) {
+        const retryAfter = Number(res.headers.get("retry-after"));
+        const backoffMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(30_000, retryAfter * 1000) : 8_000;
+        rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + backoffMs);
+      }
+      throw new Error(`FR24 API ${res.status}`);
+    }
+    const value = await res.json();
+    cache.set(path, { at: Date.now(), value });
+    return value;
+  })().finally(() => pending.delete(path));
+
+  pending.set(path, request);
+  return request;
 }
 
 export function normalizeFr24Position(f: any): NormalizedPosition | null {
@@ -67,25 +92,35 @@ async function loadFr24ByFilter(filter: "callsigns" | "registrations", value: st
   if (!process.env.FR24_API_TOKEN?.trim()) return null;
   const normalizedValue = value.trim().toUpperCase();
   const stickyKey = `${filter}:${normalizedValue}`;
-  const data: any = await get(`/live/flight-positions/full?${filter}=${encodeURIComponent(value)}`, 2_500);
+  const previous = () => {
+    const prior = lastGood.get(stickyKey);
+    if (!prior || Date.now() - prior.at > LAST_GOOD_TTL_MS) return null;
+    console.info(JSON.stringify({
+      event: "fr24_last_good_reuse",
+      filter,
+      value: normalizedValue,
+      ageMs: Date.now() - prior.at,
+      flightId: prior.flight.flightId ?? null,
+    }));
+    return prior.flight;
+  };
+
+  let data: any;
+  try {
+    data = await get(`/live/flight-positions/full?${filter}=${encodeURIComponent(value)}`, LIVE_POSITION_CACHE_MS);
+  } catch (error) {
+    const prior = previous();
+    if (prior) return prior;
+    throw error;
+  }
+
   const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
   const flight = await hydrateFr24Flight(rows[0], value);
   if (flight) {
     lastGood.set(stickyKey, { at: Date.now(), flight });
     return flight;
   }
-  const previous = lastGood.get(stickyKey);
-  if (previous && Date.now() - previous.at <= LAST_GOOD_TTL_MS) {
-    console.info(JSON.stringify({
-      event: "fr24_last_good_reuse",
-      filter,
-      value: normalizedValue,
-      ageMs: Date.now() - previous.at,
-      flightId: previous.flight.flightId ?? null,
-    }));
-    return previous.flight;
-  }
-  return null;
+  return previous();
 }
 
 export async function loadFr24Flight(ident: string): Promise<NormalizedFlight | null> {
