@@ -22,7 +22,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
 const { normalizeAeroApiRoute } = await import('../src/lib/flightaware-aeroapi.server.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
@@ -712,6 +712,26 @@ it('preserves missing weather feeds as unknown while the flight still loads', as
   assert.ok(story.weatherCoverage.failedSources.includes('Pilot reports'));
 });
 
+
+describe('public schedule fallback', () => {
+  it('loads an exact route from a FlightStats-style public status page', () => {
+    const html = `<html><body><h1>Flight Status</h1><div>UA 3 United Airlines ORD Chicago ZRH Zurich Scheduled On time</div><div>Flight Departure Times Scheduled 15:50 CDT</div><div>Flight Arrival Times Scheduled 07:45 CEST</div></body></html>`;
+    const record = parseFlightStatsPublicSchedule(html, 'UAL3', '2026-10-01');
+    assert.equal(record?.iataIdent, 'UA3');
+    assert.equal(record?.originIata, 'ORD');
+    assert.equal(record?.destIata, 'ZRH');
+    assert.equal(record?.status, 'scheduled');
+  });
+
+  it('fails closed when the page does not identify two known airports', () => {
+    assert.equal(parseFlightStatsPublicSchedule('<html>Flight Status UA 3 Scheduled</html>', 'UAL3', '2026-10-01'), null);
+  });
+
+  it('allows an exact FR24 leg up to 60 seconds old to establish origin-gate identity', () => {
+    const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(source, /\(live\.seenSec \?\? 999\) <= \(exactFr24Leg \? 60 : 30\)/);
+  });
+});
 
 describe('departure checkpoint survives provider handoff', () => {
   it('rebuilds a provider-actual push latch from the saved checkpoint', () => {
