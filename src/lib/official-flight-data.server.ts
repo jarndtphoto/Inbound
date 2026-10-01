@@ -1,5 +1,5 @@
 import { loadAeroApiFlight, aeroApiConfigured } from "./flightaware-aeroapi.server.ts";
-import { loadFr24Flight, loadFr24FlightByRegistration, fr24Configured } from "./fr24.server.ts";
+import { loadFr24Flight, loadFr24FlightByNumber, loadFr24FlightByRegistration, fr24Configured } from "./fr24.server.ts";
 import type { NormalizedFlight, ProviderState } from "./flight-data.ts";
 
 function stateFor(error: unknown): ProviderState {
@@ -42,9 +42,30 @@ function registrationCandidateMatchesLeg(candidate: NormalizedFlight, authoritat
   return sameAirport(candidate.origin, authoritative.origin) && sameAirport(candidate.destination, authoritative.destination);
 }
 
-export async function loadOfficialFlightData(ident: string) {
+export async function loadOfficialFlightData(
+  ident: string,
+  options?: { fr24FlightNumber?: string | null; fr24Bounds?: string | null },
+) {
   const fa = await probe(aeroApiConfigured(), () => loadAeroApiFlight(ident));
-  let fr = await probe(fr24Configured(), () => loadFr24Flight(ident));
+  const preferredFlightNumber = options?.fr24FlightNumber?.replace(/\s/g, "").trim().toUpperCase() || null;
+  let fr = await probe(fr24Configured(), () =>
+    preferredFlightNumber
+      ? loadFr24FlightByNumber(preferredFlightNumber, options?.fr24Bounds ?? undefined)
+      : loadFr24Flight(ident)
+  );
+  if (fr.flight && preferredFlightNumber) {
+    console.info(JSON.stringify({
+      event: "fr24_flight_number_match",
+      requested: ident,
+      flightNumber: preferredFlightNumber,
+      flightId: fr.flight.flightId ?? null,
+      callsign: fr.flight.callsign ?? null,
+    }));
+  }
+
+  if (fr.state === "NO_MATCH" && preferredFlightNumber) {
+    fr = await probe(fr24Configured(), () => loadFr24Flight(ident));
+  }
 
   if (fr.state === "NO_MATCH" && fa.flight) {
     const operatingIdent = operatingIdentFromFlightAware(fa.flight);
