@@ -1390,12 +1390,126 @@ function stubAwareFromHistory(loc, fallbackIdent) {
 		filedTaxiInMin: null
 	};
 }
+function cleanPublicScheduleHtml(html) {
+	return String(html ?? "")
+		.replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+		.replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+		.replace(/<[^>]+>/g, " ")
+		.replace(/&nbsp;|&#160;/gi, " ")
+		.replace(/&amp;/gi, "&")
+		.replace(/&#39;|&apos;/gi, "'")
+		.replace(/&quot;/gi, '"')
+		.replace(/\s+/g, " ")
+		.trim();
+}
+export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
+	const parsed = parseFlightQuery(callsign);
+	const iataIdent = parsed?.iata;
+	const match = String(iataIdent ?? "").match(/^([A-Z0-9]{2})(\d{1,4}[A-Z]?)$/);
+	if (!match) return null;
+	const text = cleanPublicScheduleHtml(html);
+	if (!/Flight Status/i.test(text)) return null;
+	const compact = text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+	if (!compact.includes(iataIdent.toUpperCase())) return null;
+	const statusStart = text.search(/Flight Status/i);
+	const section = statusStart >= 0 ? text.slice(statusStart, statusStart + 3500) : text.slice(0, 3500);
+	const codes = [];
+	for (const m of section.matchAll(/\b([A-Z]{3})\b/g)) {
+		const code = m[1];
+		if (!airportByIata(code) || codes.includes(code)) continue;
+		codes.push(code);
+		if (codes.length >= 2) break;
+	}
+	if (codes.length < 2 || codes[0] === codes[1]) return null;
+	const origin = airportByIata(codes[0]);
+	const dest = airportByIata(codes[1]);
+	if (!origin || !dest) return null;
+	const none = { scheduled: null, estimated: null, actual: null };
+	const cancelled = /\bCancelled\b/i.test(section);
+	return {
+		ident: parsed.callsign,
+		iataIdent,
+		status: cancelled ? "cancelled" : /\bScheduled\b/i.test(section) ? "scheduled" : "",
+		confirmedAt: Date.now(),
+		originIata: origin.iata,
+		originIcao: origin.icao,
+		originName: origin.name,
+		originCity: origin.city,
+		originLat: origin.lat,
+		originLon: origin.lon,
+		originGate: null,
+		originTz: origin.tz ?? null,
+		destIata: dest.iata,
+		destIcao: dest.icao,
+		destName: dest.name,
+		destCity: dest.city,
+		destLat: dest.lat,
+		destLon: dest.lon,
+		destGate: null,
+		destTz: dest.tz ?? null,
+		takeoff: { ...none },
+		landing: { ...none },
+		gateOut: { ...none },
+		gateIn: { ...none },
+		inboundIdent: null,
+		inbound: null,
+		inboundFlightId: null,
+		waypoints: [],
+		type: null,
+		tail: null,
+		hex: null,
+		cancelled,
+		averageDelaySec: { departure: null, arrival: null },
+		typicalTaxiOutMin: null,
+		typicalTaxiInMin: null,
+		filedTaxiOutMin: null,
+		filedTaxiInMin: null,
+		_publicScheduleSource: "flightstats",
+		_publicScheduleDate: dateKey,
+	};
+}
+async function loadFlightStatsPublic(callsign) {
+	const parsed = parseFlightQuery(callsign);
+	const m = String(parsed?.iata ?? "").match(/^([A-Z0-9]{2})(\d{1,4}[A-Z]?)$/);
+	if (!m) return null;
+	const now = new Date();
+	const dates = [0, -1, 1].map((offset) => {
+		const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offset));
+		return { key: d.toISOString().slice(0, 10), year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+	});
+	return cached(`flightstats-public:${parsed.iata}:${dates[0].key}`, 60_000, async () => {
+		for (const date of dates) {
+			try {
+				const url = `https://www.flightstats.com/v2/flight-tracker/${encodeURIComponent(m[1])}/${encodeURIComponent(m[2])}?year=${date.year}&month=${date.month}&date=${date.day}`;
+				const res = await fetch(url, {
+					headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": UA },
+					signal: AbortSignal.timeout(6500),
+				});
+				if (!res.ok) continue;
+				const html = await res.text();
+				if (html.length > 4_000_000) continue;
+				const record = parseFlightStatsPublicSchedule(html, callsign, date.key);
+				if (record) {
+					console.info("[flightstats-schedule]", { callsign: parsed.callsign, date: date.key, origin: record.originIata, destination: record.destIata });
+					return record;
+				}
+			} catch {
+				/* try adjacent UTC date */
+			}
+		}
+		return null;
+	});
+}
 const awareRejections = new Map();
 async function loadAware(callsign) {
 	const apiRecord = await loadAeroFlight(callsign);
 	if (apiRecord) return apiRecord;
 	const rejected = awareRejections.get(callsign);
-	if (rejected && Date.now() < rejected.until) throw rejected.error;
+	if (rejected && Date.now() < rejected.until) {
+		const fallback = await loadFlightStatsPublic(callsign);
+		if (fallback) return fallback;
+		throw rejected.error;
+	}
 	awareRejections.delete(callsign);
 	try {
 		return await cached(`aware:${callsign}`, 8e3, async () => {
@@ -1407,6 +1521,8 @@ async function loadAware(callsign) {
 			for (const [key, entry] of awareRejections) if (entry.until <= Date.now()) awareRejections.delete(key);
 			if (awareRejections.size >= 100) awareRejections.delete(awareRejections.keys().next().value);
 			awareRejections.set(callsign, { until: Date.now() + 60000, error });
+			const fallback = await loadFlightStatsPublic(callsign);
+			if (fallback) return fallback;
 		}
 		throw error;
 	}
@@ -3586,11 +3702,16 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	}, comfort);
 	const liveTail = String(live?.registration ?? "").replace(/[-\s]/g, "").toUpperCase();
 	const awareTail = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
+	const exactFr24Leg = Boolean(
+		official.fr24?.flightId &&
+		aware?.flightId &&
+		official.fr24.flightId === aware.flightId
+	);
 	const currentFlightSurfaceConfirmed = Boolean(
 		live &&
 		live.onGround &&
 		!live.extrapolated &&
-		(live.seenSec ?? 999) <= 30 &&
+		(live.seenSec ?? 999) <= (exactFr24Leg ? 60 : 30) &&
 		origin &&
 		haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10 &&
 		(flightIdentOk(live.callsign, parsed, aware) || Boolean(awareTail && liveTail && awareTail === liveTail))
