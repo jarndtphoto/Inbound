@@ -22,7 +22,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
 const { normalizeAeroApiRoute } = await import('../src/lib/flightaware-aeroapi.server.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
@@ -712,6 +712,32 @@ it('preserves missing weather feeds as unknown while the flight still loads', as
   assert.ok(story.weatherCoverage.failedSources.includes('Pilot reports'));
 });
 
+
+describe('departure checkpoint survives provider handoff', () => {
+  it('rebuilds a provider-actual push latch from the saved checkpoint', () => {
+    assert.deepEqual(pushLatchFromResume({
+      departureStage: 'push',
+      detectedPushUnix: null,
+      gateOut: { scheduled: 100, estimated: 200, actual: 300 },
+    }), { unix: 300, source: 'provider_actual', live: true, at: 300 });
+  });
+
+  it('prefers a detected physical push timestamp when one exists', () => {
+    assert.deepEqual(pushLatchFromResume({
+      departureStage: 'taxi',
+      detectedPushUnix: 250,
+      gateOut: { scheduled: 100, estimated: 200, actual: 300 },
+    }), { unix: 250, source: 'live_detected', live: true, at: 250 });
+  });
+
+  it('does not turn a scheduled or estimated time into a push checkpoint', () => {
+    assert.equal(pushLatchFromResume({
+      departureStage: 'push',
+      detectedPushUnix: null,
+      gateOut: { scheduled: 100, estimated: 200, actual: null },
+    }), null);
+  });
+});
 
 describe('codeshare operating callsign', () => {
   it('uses the operating callsign encoded in the public flight instance', () => {

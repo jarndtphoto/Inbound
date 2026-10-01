@@ -1032,6 +1032,19 @@ function flightInstanceKey(aware, fallback) {
 	if (id) return `${aware._resumeScope ?? ""}${id}|${aware.originIata ?? ""}|${aware.destIata ?? ""}`;
 	return aware ? origKey(aware) : fallback;
 }
+export function pushLatchFromResume(progressResume) {
+	if (!progressResume || !["push", "taxi", "takeoff_roll"].includes(progressResume.departureStage)) return null;
+	const detected = progressResume.detectedPushUnix;
+	const reportedActual = progressResume.gateOut?.actual;
+	const unix = Number.isFinite(detected) ? detected : Number.isFinite(reportedActual) ? reportedActual : null;
+	if (!Number.isFinite(unix)) return null;
+	return {
+		unix,
+		source: Number.isFinite(detected) ? "live_detected" : "provider_actual",
+		live: true,
+		at: unix,
+	};
+}
 function rememberOrig(aware) {
 	const key = origKey(aware);
 	const prev = origByFlight.get(key);
@@ -2816,8 +2829,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;
 	if (progressResume && progressResume.originIcao === origin.icao && progressResume.destIcao === dest.icao) {
-		if (progressResume.detectedPushUnix && !pushLatchValue) {
-			pushLatchValue = { unix: progressResume.detectedPushUnix, source: "live_detected", live: true, at: progressResume.detectedPushUnix };
+		if (!pushLatchValue) {
+			const resumedPush = pushLatchFromResume(progressResume);
+			if (resumedPush) pushLatchValue = resumedPush;
 		}
 		// Restoring from a resume token means taxiing was previously confirmed,
 		// not that it started this instant -- use the real timestamp the token
