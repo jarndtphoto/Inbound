@@ -53,6 +53,15 @@ export async function loadOfficialFlightData(
       ? loadFr24FlightByNumber(preferredFlightNumber, options?.fr24Bounds ?? undefined)
       : loadFr24Flight(ident)
   );
+  if (fr.flight && preferredFlightNumber) {
+    console.info(JSON.stringify({
+      event: "fr24_flight_number_match",
+      requested: ident,
+      flightNumber: preferredFlightNumber,
+      flightId: fr.flight.flightId ?? null,
+      callsign: fr.flight.callsign ?? null,
+    }));
+  }
 
   if (fr.state === "NO_MATCH" && preferredFlightNumber) {
     fr = await probe(fr24Configured(), () => loadFr24Flight(ident));
