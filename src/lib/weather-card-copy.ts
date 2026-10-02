@@ -18,7 +18,7 @@ export function passengerWeatherCopy(
   if (turbulence) {
     const severity = eventKey?.split(":")[1] || sample.chop;
     const mixed = severity.includes("-");
-    const [low, high] = mixed ? severity.split("-") : [severity, severity];
+    const [, high] = mixed ? severity.split("-") : [severity, severity];
     const headline = severity === "light-moderate"
       ? nearArrival ? `Light to moderate bumps possible${place}` : "Light to moderate bumps ahead"
       : severity === "moderate-severe"
