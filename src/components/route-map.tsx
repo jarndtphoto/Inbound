@@ -574,6 +574,15 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const hawaii = freePan ? HAWAII_COASTLINES : HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
   const lakes = freePan ? GREAT_LAKES : GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
   const hazards = upcomingStorms(story.hazards ?? []);
+  // Numbered weather-event markers already identify route weather. Do not draw
+  // a second convective dot under the same marker; the overlap creates the
+  // large red/white halo seen around event 1 while event 2 stays clean.
+  const visibleHazards = hazards.filter((hazard) => !ticks.some((tick) =>
+    haversineNm(
+      { lat: hazard.lat!, lon: hazard.lon! },
+      { lat: tick.lat, lon: tick.lon },
+    ) <= 12,
+  ));
   const movedFromHome = Math.abs(zoom.s - 1) > 0.02 || Math.abs(zoom.x) > 1 || Math.abs(zoom.y) > 1;
 
   return (
@@ -696,11 +705,11 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           <text y="22" textAnchor="middle" className="fill-fg" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.dest.iata}</text>
         </g>
 
-        {hazards.map((h) => {
+        {visibleHazards.map((h) => {
           const cx = sx(h.lon!);
           const cy = sy(h.lat!);
           return (
-            <g key={h.id} transform={`translate(${cx} ${cy}) scale(${1 / zoom.s})`}>
+            <g key={h.id} data-map-hazard="convective" transform={`translate(${cx} ${cy}) scale(${1 / zoom.s})`}>
               <circle
                 r="10"
                 className="fill-ifr/25 stroke-ifr/70"
