@@ -42,7 +42,7 @@ export async function loadArrivalAtis(icao: string, store: AtisStore = arrivalSt
   cache.set(icao, { expires: Date.now() + TTL, value });
   return value;
 }
-export async function expectedArrivalRunway(icao: string, input: Omit<Parameters<typeof pickArrivalRunway>[0], "ends" | "atis">, store: AtisStore = arrivalStateStore) {
+export async function expectedArrivalRunway(icao: string, input: Omit<Parameters<typeof pickArrivalRunway>[0], "ends" | "atis">, store: AtisStore = arrivalStateStore): Promise<ExpectedArrivalRunway | null> {
   const runways = (ends as Record<string, RunwayEnd[]>)[icao] ?? [];
   if (!runways.length) return null;
   const atis = await loadArrivalAtis(icao, store);
