@@ -561,7 +561,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const movedFromHome = Math.abs(zoom.s - 1) > 0.02 || Math.abs(zoom.x) > 1 || Math.abs(zoom.y) > 1;
   const arrival = story.route.expectedArrival;
   const runwayAhead = arrival ? destPoint(arrival.threshold, arrival.heading, 1) : null;
-  const arrivalZoomAnchor = arrival && story.route.arrivalPatternKind && !landed
+  const arrivalZoomAnchor = arrival && !landed
     ? { x: sx(arrival.threshold.lon), y: sy(arrival.threshold.lat) } : undefined;
   // Include the flown part of the drawn near-field approach, so the label remains
   // useful on short final. The rest of a long trip cannot qualify a tiny airport.
@@ -710,7 +710,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         </g>
       </svg>
 
-      {arrival && runwayAhead && !weatherPreview && !landed && story.route.arrivalPatternKind && <ArrivalRunwayChip
+      {arrival && runwayAhead && !weatherPreview && !landed && <ArrivalRunwayChip
         frameRef={frameRef} geometryRef={geometryRef}
         threshold={{ x: sx(arrival.threshold.lon), y: sy(arrival.threshold.lat) }}
         runwayForward={{ x: sx(runwayAhead.lon) - sx(arrival.threshold.lon), y: sy(runwayAhead.lat) - sy(arrival.threshold.lat) }}
