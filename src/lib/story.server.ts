@@ -1402,6 +1402,54 @@ function cleanPublicScheduleHtml(html) {
 		.replace(/\s+/g, " ")
 		.trim();
 }
+const FLIGHTSTATS_MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+const FLIGHTSTATS_TZ_OFFSET_MIN = {
+	UTC: 0, GMT: 0,
+	EDT: -240, EST: -300, CDT: -300, CST: -360, MDT: -360, MST: -420, PDT: -420, PST: -480,
+	AKDT: -480, AKST: -540, HST: -600,
+	BST: 60, CET: 60, CEST: 120, EET: 120, EEST: 180,
+	JST: 540, KST: 540, IST: 330, GST: 240, AEST: 600, AEDT: 660, AWST: 480, NZST: 720, NZDT: 780,
+};
+function flightStatsTimeUnix(section, label) {
+	const re = new RegExp(`(\\d{2})-([A-Za-z]{3})-(\\d{4})\\s+${label}\\s+(\\d{1,2}):(\\d{2})\\s+([A-Z]{2,5}|[+-]\\d{2})\\b`, "i");
+	const m = String(section ?? "").match(re);
+	if (!m) return null;
+	const month = FLIGHTSTATS_MONTHS[m[2][0].toUpperCase() + m[2].slice(1, 3).toLowerCase()];
+	const hour = Number(m[4]), minute = Number(m[5]), year = Number(m[3]), day = Number(m[1]);
+	if (!Number.isInteger(month) || !Number.isFinite(hour) || !Number.isFinite(minute) || hour > 23 || minute > 59) return null;
+	const zone = m[6].toUpperCase();
+	let offset = FLIGHTSTATS_TZ_OFFSET_MIN[zone];
+	if (offset == null && /^[+-]\d{2}$/.test(zone)) offset = Number(zone) * 60;
+	if (!Number.isFinite(offset)) return null;
+	return Math.floor((Date.UTC(year, month, day, hour, minute) - offset * 60_000) / 1000);
+}
+function flightStatsTimes(section) {
+	return {
+		scheduled: flightStatsTimeUnix(section, "Scheduled"),
+		estimated: flightStatsTimeUnix(section, "Estimated"),
+		actual: flightStatsTimeUnix(section, "Actual"),
+	};
+}
+function flightStatsDetailUrls(html, carrier, number, date) {
+	const escaped = String(html ?? "").replace(/&amp;/gi, "&");
+	const pattern = new RegExp(`(?:https:\\/\\/www\\.flightstats\\.com)?\\/v2\\/flight-tracker\\/${carrier}\\/${number}\\?[^"'<>\\s]*flightId=\\d+[^"'<>\\s]*`, "gi");
+	const urls = [];
+	for (const found of escaped.match(pattern) ?? []) {
+		try {
+			const url = new URL(found.startsWith("http") ? found : `https://www.flightstats.com${found}`);
+			if (Number(url.searchParams.get("year")) !== date.year
+				|| Number(url.searchParams.get("month")) !== date.month
+				|| Number(url.searchParams.get("date")) !== date.day
+				|| !url.searchParams.get("flightId")) continue;
+			const value = url.toString();
+			if (!urls.includes(value)) urls.push(value);
+			if (urls.length >= 6) break;
+		} catch {
+			/* ignore malformed public links */
+		}
+	}
+	return urls;
+}
 export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 	const parsed = parseFlightQuery(callsign);
 	const iataIdent = parsed?.iata;
@@ -1412,9 +1460,15 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 	const compact = text.toUpperCase().replace(/[^A-Z0-9]/g, "");
 	if (!compact.includes(iataIdent.toUpperCase())) return null;
 	const statusStart = text.search(/Flight Status/i);
-	const section = statusStart >= 0 ? text.slice(statusStart, statusStart + 3500) : text.slice(0, 3500);
+	const section = statusStart >= 0 ? text.slice(statusStart, statusStart + 4500) : text.slice(0, 4500);
+	const departureIndex = section.search(/\bFlight Departure Times\b/i);
+	const arrivalIndex = section.search(/\bFlight Arrival Times\b/i);
+	if (departureIndex < 0 || arrivalIndex <= departureIndex) return null;
+	const header = section.slice(0, departureIndex);
+	const departureSection = section.slice(departureIndex, arrivalIndex);
+	const arrivalSection = section.slice(arrivalIndex);
 	const codes = [];
-	for (const m of section.matchAll(/\b([A-Z]{3})\b/g)) {
+	for (const m of header.matchAll(/\b([A-Z]{3})\b/g)) {
 		const code = m[1];
 		if (!airportByIata(code) || codes.includes(code)) continue;
 		codes.push(code);
@@ -1424,12 +1478,16 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 	const origin = airportByIata(codes[0]);
 	const dest = airportByIata(codes[1]);
 	if (!origin || !dest) return null;
+	const gateOut = flightStatsTimes(departureSection);
+	const gateIn = flightStatsTimes(arrivalSection);
 	const none = { scheduled: null, estimated: null, actual: null };
-	const cancelled = /\bCancelled\b/i.test(section);
+	const cancelled = /\bCancelled\b/i.test(header);
+	const arrived = /\bArrived\b|\bLanded\b/i.test(header);
+	const departed = /\bDeparted\b/i.test(header);
 	return {
 		ident: parsed.callsign,
 		iataIdent,
-		status: cancelled ? "cancelled" : /\bScheduled\b/i.test(section) ? "scheduled" : "",
+		status: cancelled ? "cancelled" : arrived ? "arrived" : departed ? "departed" : /\bScheduled\b/i.test(header) ? "scheduled" : "",
 		confirmedAt: Date.now(),
 		originIata: origin.iata,
 		originIcao: origin.icao,
@@ -1449,8 +1507,8 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 		destTz: dest.tz ?? null,
 		takeoff: { ...none },
 		landing: { ...none },
-		gateOut: { ...none },
-		gateIn: { ...none },
+		gateOut,
+		gateIn,
 		inboundIdent: null,
 		inbound: null,
 		inboundFlightId: null,
@@ -1468,6 +1526,24 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 		_publicScheduleDate: dateKey,
 	};
 }
+export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() / 1000) {
+	const usable = (records ?? []).filter(Boolean);
+	if (!usable.length) return null;
+	const score = (record) => {
+		const depart = bestUnix(record.gateOut);
+		const arrive = bestUnix(record.gateIn);
+		if (depart != null && arrive != null && arrive > depart) {
+			if (nowSec >= depart && nowSec <= arrive) return 0;
+			if (nowSec < depart) return depart - nowSec;
+			return (nowSec - arrive) * 0.75;
+		}
+		if (depart != null) return Math.abs(depart - nowSec);
+		if (arrive != null) return Math.abs(arrive - nowSec) * (nowSec >= arrive ? 0.75 : 1);
+		const day = Date.parse(`${record._publicScheduleDate ?? ""}T12:00:00Z`) / 1000;
+		return Number.isFinite(day) ? Math.abs(day - nowSec) + 36 * 3600 : Number.POSITIVE_INFINITY;
+	};
+	return usable.slice().sort((a, b) => score(a) - score(b))[0] ?? null;
+}
 async function loadFlightStatsPublic(callsign) {
 	const parsed = parseFlightQuery(callsign);
 	const m = String(parsed?.iata ?? "").match(/^([A-Z0-9]{2})(\d{1,4}[A-Z]?)$/);
@@ -1477,27 +1553,58 @@ async function loadFlightStatsPublic(callsign) {
 		const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offset));
 		return { key: d.toISOString().slice(0, 10), year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
 	});
-	return cached(`flightstats-public:${parsed.iata}:${dates[0].key}`, 60_000, async () => {
-		for (const date of dates) {
+	return cached(`flightstats-public-v2:${parsed.iata}:${dates[0].key}`, 60_000, async () => {
+		const pages = (await Promise.all(dates.map(async (date) => {
 			try {
 				const url = `https://www.flightstats.com/v2/flight-tracker/${encodeURIComponent(m[1])}/${encodeURIComponent(m[2])}?year=${date.year}&month=${date.month}&date=${date.day}`;
 				const res = await fetch(url, {
 					headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": UA },
 					signal: AbortSignal.timeout(6500),
 				});
-				if (!res.ok) continue;
+				if (!res.ok) return null;
 				const html = await res.text();
-				if (html.length > 4_000_000) continue;
-				const record = parseFlightStatsPublicSchedule(html, callsign, date.key);
-				if (record) {
-					console.info("[flightstats-schedule]", { callsign: parsed.callsign, date: date.key, origin: record.originIata, destination: record.destIata });
-					return record;
-				}
+				if (html.length > 4_000_000) return null;
+				return { date, html, direct: parseFlightStatsPublicSchedule(html, callsign, date.key) };
 			} catch {
-				/* try adjacent UTC date */
+				return null;
 			}
+		}))).filter(Boolean);
+		const directRecords = pages.map((page) => page.direct).filter(Boolean);
+		let candidates = directRecords.slice();
+		const bestDirect = chooseFlightStatsScheduleCandidate(directRecords);
+		const bestPage = bestDirect ? pages.find((page) => page.direct === bestDirect) : null;
+		if (bestPage) {
+			const detailUrls = flightStatsDetailUrls(bestPage.html, m[1], m[2], bestPage.date);
+			const details = await Promise.all(detailUrls.map(async (url) => {
+				try {
+					const res = await fetch(url, {
+						headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": UA },
+						signal: AbortSignal.timeout(6500),
+					});
+					if (!res.ok) return null;
+					const html = await res.text();
+					if (html.length > 4_000_000) return null;
+					return parseFlightStatsPublicSchedule(html, callsign, bestPage.date.key);
+				} catch {
+					return null;
+				}
+			}));
+			candidates = candidates.concat(details.filter(Boolean));
 		}
-		return null;
+		const selected = chooseFlightStatsScheduleCandidate(candidates);
+		if (selected) {
+			console.info("[flightstats-schedule]", {
+				callsign: parsed.callsign,
+				date: selected._publicScheduleDate,
+				origin: selected.originIata,
+				destination: selected.destIata,
+				status: selected.status,
+				gateOut: bestUnix(selected.gateOut),
+				gateIn: bestUnix(selected.gateIn),
+				candidates: candidates.length,
+			});
+		}
+		return selected;
 	});
 }
 const awareRejections = new Map();
@@ -2733,15 +2840,6 @@ function awareFromResume(resume, scope) {
 		typicalTaxiOutMin: null, typicalTaxiInMin: null, filedTaxiOutMin: null, filedTaxiInMin: null,
 	};
 }
-function fr24GroundBoundsForAware(aware) {
-	const known = aware?.originIata ? airportByIata(aware.originIata) : aware?.originIcao ? airportByIcao(aware.originIcao) : null;
-	const lat = Number.isFinite(aware?.originLat) ? aware.originLat : known?.lat;
-	const lon = Number.isFinite(aware?.originLon) ? aware.originLon : known?.lon;
-	if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-	const latPad = 0.12;
-	const lonPad = Math.min(0.2, latPad / Math.max(0.45, Math.cos(lat * Math.PI / 180)));
-	return [lat + latPad, lat - latPad, lon - lonPad, lon + lonPad].map((v) => v.toFixed(4)).join(",");
-}
 async function buildStory(query, resumed = null, progressResume = null) {
 	const parsed = parseFlightQuery(query);
 	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
@@ -2766,7 +2864,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	]);
 	const initialOfficial = await loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
-		fr24Bounds: fr24GroundBoundsForAware(publicAware),
+		fr24OriginIata: publicAware?.originIata ?? null,
+		fr24DestIata: publicAware?.destIata ?? null,
 	});
 	let official = initialOfficial;
 	// Codeshare/public flight-number pages can identify the operating ATC

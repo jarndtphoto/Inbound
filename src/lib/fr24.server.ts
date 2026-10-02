@@ -140,6 +140,33 @@ export async function loadFr24FlightByNumber(flightNumber: string, bounds?: stri
   return loadFr24ByFilter("flights", flight, extra);
 }
 
+export async function loadFr24FlightByNumberAndRoute(
+  flightNumber: string,
+  originIata: string,
+  destIata: string,
+): Promise<NormalizedFlight | null> {
+  if (!process.env.FR24_API_TOKEN?.trim()) return null;
+  const flight = flightNumber.replace(/\s/g, "").trim().toUpperCase();
+  const origin = originIata.trim().toUpperCase();
+  const destination = destIata.trim().toUpperCase();
+  if (!flight || !/^[A-Z]{3}$/.test(origin) || !/^[A-Z]{3}$/.test(destination)) return null;
+
+  // Combining the flight-number filter with inbound/outbound airport filters
+  // keeps this cheap while distinguishing through-flights that reuse the same
+  // number on multiple legs (for example AA2966 ORD→SEA then SEA→ORD).
+  const airportFilter = `outbound:${origin},inbound:${destination}`;
+  const path = `/live/flight-positions/full?flights=${encodeURIComponent(flight)}&airports=${encodeURIComponent(airportFilter)}&limit=5`;
+  const data: any = await get(path, LIVE_POSITION_CACHE_MS);
+  const rows = (Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [])
+    .filter((row: any) =>
+      String(row?.flight ?? "").replace(/\s/g, "").toUpperCase() === flight
+      && String(row?.orig_iata ?? "").trim().toUpperCase() === origin
+      && String(row?.dest_iata ?? "").trim().toUpperCase() === destination
+    )
+    .sort((a: any, b: any) => (unix(b?.timestamp) ?? 0) - (unix(a?.timestamp) ?? 0));
+  return hydrateFr24Flight(rows[0], flight);
+}
+
 export async function loadFr24RecentArrivalIdentity(
   flightNumber: string,
   originIata: string,
