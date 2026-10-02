@@ -26,14 +26,15 @@ export function rideOutlook(s: FlightStory): string {
   const events = routeWeatherEvents(samples, s.route.progress);
   const strongest = events.reduce<(typeof events)[number] | null>((best, event) => {
     if (!best) return event;
-    const eventRank = rank[event.start.chop] + (event.start.convective ? 0.5 : 0);
-    const bestRank = rank[best.start.chop] + (best.start.convective ? 0.5 : 0);
+    const eventRank = rank[event.strongestChop ?? event.start.chop] + (event.start.convective ? 0.5 : 0);
+    const bestRank = rank[best.strongestChop ?? best.start.chop] + (best.start.convective ? 0.5 : 0);
     return eventRank > bestRank || (eventRank === bestRank && event.startEtaMin < best.startEtaMin) ? event : best;
   }, null);
   if (strongest) {
-    const severity = strongest.start.chop === "severe" ? "Quite bumpy air"
-      : strongest.start.chop === "moderate" ? "Moderate turbulence"
-        : strongest.start.chop === "light" ? "Light turbulence"
+    const strongestChop = strongest.strongestChop ?? strongest.start.chop;
+    const severity = strongestChop === "severe" ? "Quite bumpy air"
+      : strongestChop === "moderate" ? "Moderate turbulence"
+        : strongestChop === "light" ? "Light turbulence"
           : "Storms near the route";
     const minutes = Math.max(0, Math.round(strongest.startEtaMin));
     text += minutes <= 1

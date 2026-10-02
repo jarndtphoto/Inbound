@@ -75,6 +75,13 @@ describe('zoom-stable route presentation', () => {
     for (const stroke of strokes) assert.match(stroke, /vectorEffect="non-scaling-stroke"/);
   });
 
+  it('uses butt caps on route runs so weather entry markers do not get a bullseye halo', () => {
+    const routeRunLines = source.split('\n').filter(line => line.includes('data-route-stroke='));
+    for (const stroke of routeRunLines.filter(line => !line.includes('"weather"'))) {
+      assert.match(stroke, /strokeLinecap="butt"/);
+    }
+  });
+
   it('counter-scales route decorations and the aircraft inside the zoom group', () => {
     assert.match(source, /data-filed-fix[\s\S]{0,300}scale\(\$\{1 \/ zoom\.s\}\)|scale\(\$\{1 \/ zoom\.s\}\)[\s\S]{0,300}data-filed-fix/);
     assert.match(source, /WeatherEventMarker[^>]+inverseScale=\{1 \/ zoom\.s\}/);
@@ -122,6 +129,7 @@ describe('weather card copy hierarchy', () => {
 
   it('keeps compact labels across turbulence, storms, and clouds', () => {
     assert.equal(passengerWeatherCopy({ ...sample, chop: 'moderate' }, false, 'Chicago', 'turbulence:moderate').mapLabel, 'Moderate bumps');
+    assert.equal(passengerWeatherCopy({ ...sample, chop: 'light' }, false, 'Chicago', 'turbulence:light-moderate').mapLabel, 'Light to moderate bumps');
     assert.equal(passengerWeatherCopy({ ...sample, chop: 'smooth', convective: true }, false, 'Chicago', 'convective').mapLabel, 'Thunderstorms');
     assert.equal(passengerWeatherCopy({ ...sample, chop: 'smooth', cloud: true }, true, 'Chicago', 'cloud').mapLabel, 'Low clouds near Chicago');
   });
@@ -1045,5 +1053,21 @@ describe('AAL3197 weather entry rendering', () => {
     const [range] = routeWeatherEvents(continuous, 0.50);
     assert.equal(range.startFrac, 0.60);
     assert.equal(range.endFrac, 0.72);
+  });
+
+  it('combines contiguous light and moderate turbulence into one passenger event', () => {
+    const mixed = [
+      sample(0.60, 21, 'light', { note: 'PIREP light turbulence' }),
+      sample(0.64, 23, 'moderate', { note: 'PIREP moderate turbulence' }),
+      sample(0.70, 26, 'moderate', { note: 'PIREP moderate turbulence' }),
+      sample(0.74, 29, 'smooth')
+    ];
+    const events = routeWeatherEvents(mixed, 0.50);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].key, 'turbulence:light-moderate');
+    assert.equal(events[0].weakestChop, 'light');
+    assert.equal(events[0].strongestChop, 'moderate');
+    assert.equal(events[0].startEtaMin, 21);
+    assert.equal(events[0].endEtaMin, 26);
   });
 });
