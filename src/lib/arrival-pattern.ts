@@ -40,7 +40,14 @@ export function arrivalPattern(aircraft: Coord & { track?: number | null }, runw
   return { points: dense, lengthNm: polylineLengthNm(dense), kind: aligned ? "straight-in" as const : "downwind-base" as const, side };
 }
 
-export function canProjectArrival(live: (Coord & { onGround?: boolean; extrapolated?: boolean; seenSec?: number | null; phase?: string; vertFpm?: number | null }) | null, dest: Coord, landed: boolean, approachEvidence = false) {
+export function canProjectArrival(live: (Coord & { onGround?: boolean; extrapolated?: boolean; seenSec?: number | null; phase?: string; vertFpm?: number | null; altFt?: number | null }) | null, dest: Coord & { elevationFt?: number | null }, landed: boolean, approachEvidence = false, derivedVertFpm: number | null = null) {
+  const elevation = dest.elevationFt ?? 0;
+  const altitudeCeiling = Math.max(12_000, elevation + 10_000);
+  const knownAltitude = Number.isFinite(live?.altFt);
+  const rate = Number.isFinite(live?.vertFpm) ? live!.vertFpm! : derivedVertFpm;
+  const altitudeEvidence = !!live && knownAltitude && haversineNm(live, dest) <= 40
+    && live.altFt! <= altitudeCeiling && (live.altFt! - elevation < 6_000 || (rate ?? 0) < -300);
   return Boolean(!landed && live && !live.onGround && !live.extrapolated && (live.seenSec ?? Infinity) <= 60 &&
-    haversineNm(live, dest) <= 55 && ((live.vertFpm ?? 0) < -100 || live.phase === "descent" || live.phase === "approach" || approachEvidence));
+    (!knownAltitude || live.altFt! <= altitudeCeiling) && haversineNm(live, dest) <= 55 &&
+    (altitudeEvidence || (live.vertFpm ?? 0) < -100 || live.phase === "descent" || live.phase === "approach" || approachEvidence));
 }

@@ -55,7 +55,8 @@ export function normalizeFr24Position(f: any): NormalizedPosition | null {
   const seenAt = unix(f.timestamp) ?? Date.now() / 1000;
   const altFt = Number.isFinite(f.alt) ? f.alt : null;
   return { provider: "fr24", flightId: f.fr24_id ?? null, callsign: f.callsign ?? f.flight ?? null, lat: f.lat, lon: f.lon,
-    altFt, gsKt: Number.isFinite(f.gspeed) ? f.gspeed : Number.isFinite(f.speed) ? f.speed : null,
+    altFt, vertFpm: Number.isFinite(f.vspeed) ? f.vspeed : null,
+    gsKt: Number.isFinite(f.gspeed) ? f.gspeed : Number.isFinite(f.speed) ? f.speed : null,
     track: Number.isFinite(f.track) ? f.track : Number.isFinite(f.heading) ? f.heading : null,
     onGround: typeof f.on_ground === "boolean" ? f.on_ground : altFt === 0, seenAt,
     registration: f.reg ?? f.registration ?? null, type: f.type ?? f.aircraft_type ?? null, hex: f.hex ?? null, confidence: "high" };

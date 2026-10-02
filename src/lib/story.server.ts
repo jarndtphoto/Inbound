@@ -43,8 +43,8 @@ import {
 } from "./wx-brief";
 import { faAltFt, hasAirborneEvidence, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
 import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
-import { canProjectArrival } from "./arrival-pattern.ts";
-import { updateArrivalProjection } from "./arrival-projection-state.ts";
+import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
+import { arrivalFuturePoints } from "./arrival-path.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
@@ -637,6 +637,8 @@ function toLive(raw) {
 		gsKt,
 		track: typeof raw.track === "number" ? raw.track : null,
 		vertFpm,
+		// Arrival-only raw rate fallback. Existing phaseOf inputs stay unchanged.
+		arrivalVertFpm: Number.isFinite(raw.baro_rate) ? raw.baro_rate : Number.isFinite(raw.geom_rate) ? raw.geom_rate : null,
 		onGround,
 		extrapolated: Boolean(raw.extrapolated ?? raw._fusion?.extrapolated),
 		seenSec,
@@ -2725,6 +2727,7 @@ function normalizedAdsb(live): NormalizedPosition | null {
 		lat: live.lat,
 		lon: live.lon,
 		altFt: live.altFt ?? null,
+		vertFpm: live.arrivalVertFpm ?? live.vertFpm ?? null,
 		gsKt: live.gsKt ?? null,
 		track: live.track ?? null,
 		onGround: Boolean(live.onGround),
@@ -3378,11 +3381,13 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const stageRemainingNm = remainingNm;
 	let expectedArrival = null;
 	let arrivalPatternKind = null;
+	// Preserve normalized stage inputs; provider/derived rates are arrival-only.
+	const arrivalLive = live ? { ...live, vertFpm: positionChoice.chosen?.vertFpm ?? live.arrivalVertFpm ?? live.vertFpm ?? null } : null;
 	const arrivalInput = {
-		live, dest: end, landed: ourLanded,
+		live: arrivalLive, dest: { ...end, elevationFt: fieldElev(dest) }, landed: ourLanded,
 		approachEvidence: Boolean(live && isFinalApproach(live, dest)), now: Date.now()
 	};
-	const arrivalEntry = canProjectArrival(live, end, ourLanded, arrivalInput.approachEvidence);
+	const arrivalEntry = arrivalEntryEvidence(loadedArrival.state, arrivalInput).entryGate;
 	let selectedArrival = loadedArrival.state.runway;
 	if (arrivalEntry || loadedArrival.state.startedAt || ourLanded) {
 		selectedArrival = await expectedArrivalRunway(dest.icao, {
@@ -3400,8 +3405,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		arrivalPersistence = saved.status;
 	}
 	expectedArrival = arrivalState.runway;
-	const pattern = !ourLanded && !live?.onGround && arrivalState.active && arrivalState.kind && arrivalState.points.length >= 2
-		? { points: arrivalState.points, lengthNm: polylineLengthNm(arrivalState.points), kind: arrivalState.kind } : null;
+	const futureArrivalPoints = live ? arrivalFuturePoints(arrivalState.points, live) : arrivalState.points;
+	// Only this response's display path gets the observed aircraft anchor.
+	const displayArrivalPoints = live ? [{ lat: live.lat, lon: live.lon }, ...futureArrivalPoints] : [];
+	const pattern = !ourLanded && !live?.onGround && arrivalState.active && arrivalState.kind && displayArrivalPoints.length >= 2
+		? { points: displayArrivalPoints, lengthNm: polylineLengthNm(displayArrivalPoints), kind: arrivalState.kind } : null;
 	if (pattern) {
 		arrivalPatternKind = pattern.kind;
 		// Preserve observed history; only the future display path changes.
@@ -3423,7 +3431,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		loadedVersion: loadedArrival.version, hadPrevious: Boolean(loadedArrival.state.startedAt),
 		runway: expectedArrival?.runway ?? null, source: expectedArrival?.source ?? null,
 		side: arrivalState.side, active: arrivalState.active, startedAt: arrivalState.startedAt,
-		offPathStreak: arrivalState.offPathStreak, vertFpm: live?.vertFpm ?? null,
+		offPathStreak: arrivalState.offPathStreak, vertFpm: arrivalUpdate.vertFpm,
+		verticalRateSource: arrivalUpdate.verticalRateSource, stageVertFpm: live?.vertFpm ?? null,
+		cursorNm: arrivalState.cursorNm, plannedPoints: arrivalState.points.length,
+		directToThresholdNm: live && expectedArrival ? haversineNm(live, expectedArrival.threshold) : null,
 		phase: live?.phase ?? null, extrapolated: live?.extrapolated ?? false, seenSec: live?.seenSec ?? null,
 		kind: arrivalPatternKind, remainingNm, stageRemainingNm
 	});
