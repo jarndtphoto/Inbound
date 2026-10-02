@@ -1038,7 +1038,7 @@ function StatusCard({
   return (
     <div className={cn("timing-value", prominent && "timing-value-prominent")}>
       <p className="timing-label">{title}</p>
-      <p className="timing-number">{value ?? "—"}</p>
+      <p className={cn("timing-number", /\b(?:AM|PM)\b/.test(value ?? "") && "timing-number-clock")}>{value ?? "—"}</p>
       {detail ? <p className="timing-detail">{detail}</p> : null}
     </div>
   );
