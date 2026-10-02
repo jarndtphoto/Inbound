@@ -585,6 +585,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         style={{ touchAction: fixedViewport ? "none" : "pan-y",  }}
       >
       <svg
+        data-route-map
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="xMidYMid meet"
         className={fixedViewport ? "block h-full w-full" : "block aspect-square h-auto w-full"}
@@ -633,11 +634,9 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           {lakes.map((lake) => (
             <path
               key={lake.name}
-              data-map-water="great-lake"
               d={lake.rings.map((ring) => `${ring.map(([lo, la], i) => `${i ? "L" : "M"}${sx(lo).toFixed(1)} ${sy(la).toFixed(1)}`).join(" ")} Z`).join(" ")}
               fillRule="evenodd"
-              className="stroke-fg/35"
-              style={{ fill: "var(--journey-water)" }}
+              className="fill-bg/95 stroke-fg/35"
               strokeWidth="1.25"
             />
           ))}
