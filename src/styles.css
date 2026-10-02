@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-.expected-runway-chip { max-width: calc(100% - 24px); width: 250px; line-height: 1.4; }
+.expected-runway-chip { width: max-content; font-size: 11px; line-height: 1.35; }
 
 @theme {
   --color-bg: #08090c;
