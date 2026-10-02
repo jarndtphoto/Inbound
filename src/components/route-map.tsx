@@ -563,9 +563,9 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const runwayAhead = arrival ? destPoint(arrival.threshold, arrival.heading, 1) : null;
   const arrivalZoomAnchor = arrival && story.route.arrivalPatternKind && !landed
     ? { x: sx(arrival.threshold.lon), y: sy(arrival.threshold.lat) } : undefined;
-  // Only the drawn upcoming arrival area determines whether the label is useful;
-  // a long flown trip must not make a tiny approach qualify at overview zoom.
-  const approachSamples = arrival ? samples.filter(sample => sample.frac >= progress && haversineNm(sample, arrival.threshold) <= 40) : [];
+  // Include the flown part of the drawn near-field approach, so the label remains
+  // useful on short final. The rest of a long trip cannot qualify a tiny airport.
+  const approachSamples = arrival ? samples.filter(sample => haversineNm(sample, arrival.threshold) <= 40) : [];
 
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-surface", fixedViewport && "flex h-full flex-col items-center")}>
