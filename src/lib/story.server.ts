@@ -2840,15 +2840,6 @@ function awareFromResume(resume, scope) {
 		typicalTaxiOutMin: null, typicalTaxiInMin: null, filedTaxiOutMin: null, filedTaxiInMin: null,
 	};
 }
-function fr24GroundBoundsForAware(aware) {
-	const known = aware?.originIata ? airportByIata(aware.originIata) : aware?.originIcao ? airportByIcao(aware.originIcao) : null;
-	const lat = Number.isFinite(aware?.originLat) ? aware.originLat : known?.lat;
-	const lon = Number.isFinite(aware?.originLon) ? aware.originLon : known?.lon;
-	if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-	const latPad = 0.12;
-	const lonPad = Math.min(0.2, latPad / Math.max(0.45, Math.cos(lat * Math.PI / 180)));
-	return [lat + latPad, lat - latPad, lon - lonPad, lon + lonPad].map((v) => v.toFixed(4)).join(",");
-}
 async function buildStory(query, resumed = null, progressResume = null) {
 	const parsed = parseFlightQuery(query);
 	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
@@ -2873,7 +2864,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	]);
 	const initialOfficial = await loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
-		fr24Bounds: fr24GroundBoundsForAware(publicAware),
+		fr24OriginIata: publicAware?.originIata ?? null,
+		fr24DestIata: publicAware?.destIata ?? null,
 	});
 	let official = initialOfficial;
 	// Codeshare/public flight-number pages can identify the operating ATC
