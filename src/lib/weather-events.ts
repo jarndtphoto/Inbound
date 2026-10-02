@@ -1,4 +1,4 @@
-import type { RouteSample } from "./types.ts";
+import type { Chop, RouteSample } from "./types.ts";
 
 export type RouteWeatherEvent = {
   key: string;
@@ -11,16 +11,38 @@ export type RouteWeatherEvent = {
   ranges: { from: number; to: number }[];
   gaps: boolean;
   note: string | null;
+  weakestChop: Chop;
+  strongestChop: Chop;
 };
 
+const CHOP_RANK: Record<Chop, number> = {
+  smooth: 0,
+  light: 1,
+  moderate: 2,
+  severe: 3,
+};
+
+function minChop(a: Chop, b: Chop): Chop {
+  return CHOP_RANK[a] <= CHOP_RANK[b] ? a : b;
+}
+
+function maxChop(a: Chop, b: Chop): Chop {
+  return CHOP_RANK[a] >= CHOP_RANK[b] ? a : b;
+}
+
 function conditionKey(sample: RouteSample): string | null {
-  // Passenger ranges follow the condition that controls the visible route
-  // treatment. Storm/cloud detail may change inside one continuous turbulence
-  // stretch without creating a false new "bumpy" entry near its end.
-  if (sample.chop !== "smooth") return `turbulence:${sample.chop}`;
+  // All contiguous turbulence intensities are one passenger weather event.
+  // The route line may still vary sample-by-sample, but a light→moderate
+  // stretch should read as one area instead of several back-to-back alerts.
+  if (sample.chop !== "smooth") return "turbulence";
   if (sample.convective) return "storms";
   if (sample.cloud) return "clouds";
   return null;
+}
+
+function turbulenceDisplayKey(event: RouteWeatherEvent): string {
+  if (event.weakestChop === event.strongestChop) return `turbulence:${event.strongestChop}`;
+  return `turbulence:${event.weakestChop}-${event.strongestChop}`;
 }
 
 function mergeNotes(a: string | null, b: string | null): string | null {
@@ -38,10 +60,12 @@ export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity,
     .filter((sample) => Number.isFinite(sample.frac) && sample.frac >= progress)
     .slice()
     .sort((a, b) => a.frac - b.frac);
+
   const runs: Array<RouteWeatherEvent | { key: null; start: RouteSample; end: RouteSample }> = [];
   for (const sample of ordered) {
     const key = conditionKey(sample);
     const previous = runs[runs.length - 1];
+
     if (previous && previous.key === key) {
       previous.end = sample;
       if (key) {
@@ -50,13 +74,17 @@ export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity,
         event.endEtaMin = sample.etaMin;
         event.ranges[event.ranges.length - 1].to = sample.frac;
         event.note = mergeNotes(event.note, sample.note);
+        event.weakestChop = minChop(event.weakestChop, sample.chop);
+        event.strongestChop = maxChop(event.strongestChop, sample.chop);
       }
       continue;
     }
+
     if (!key) {
       runs.push({ key: null, start: sample, end: sample });
       continue;
     }
+
     runs.push({
       key,
       start: sample,
@@ -67,7 +95,9 @@ export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity,
       endEtaMin: sample.etaMin,
       ranges: [{ from: sample.frac, to: sample.frac }],
       gaps: false,
-      note: sample.note
+      note: sample.note,
+      weakestChop: sample.chop,
+      strongestChop: sample.chop,
     });
   }
 
@@ -85,14 +115,20 @@ export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity,
       a.ranges.push(...b.ranges);
       a.gaps = true;
       a.note = mergeNotes(a.note, b.note);
+      a.weakestChop = minChop(a.weakestChop, b.weakestChop);
+      a.strongestChop = maxChop(a.strongestChop, b.strongestChop);
       runs.splice(i + 1, 2);
     } else {
       i++;
     }
   }
-  return runs.filter((run): run is RouteWeatherEvent => run.key !== null);
-}
 
+  return runs
+    .filter((run): run is RouteWeatherEvent => run.key !== null)
+    .map((event) => event.key === "turbulence"
+      ? { ...event, key: turbulenceDisplayKey(event) }
+      : event);
+}
 
 export function weatherEventMarker(event: RouteWeatherEvent) {
   return { lat: event.start.lat, lon: event.start.lon, frac: event.startFrac, etaMin: event.startEtaMin };
