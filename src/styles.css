@@ -369,3 +369,30 @@ html[data-theme="sunset"] { color-scheme: dark; }
 
 .journey-header.header-without-brand { justify-content: flex-end; }
 .journey-header > div > p:first-child { margin-top: 0; }
+
+/* Weather and Briefing continue the Overview's single information surface. */
+.inbound-redesign #panel-Weather,
+.inbound-redesign #panel-Briefing { padding: 0 24px 20px; min-width: 0; }
+.inbound-redesign .weather-heading,
+.inbound-redesign .briefing-panel { padding-top: 20px; }
+.inbound-redesign .weather-heading { padding-bottom: 20px; }
+.inbound-redesign .weather-section { padding: 20px 0; border-top: 1px solid var(--color-border); min-width: 0; }
+.inbound-redesign .weather-route-heading { padding: 20px 0; border-top: 1px solid var(--color-border); }
+.inbound-redesign .weather-events { margin: 0; padding: 0; list-style: none; }
+.inbound-redesign .weather-event-heading { display: flex; align-items: flex-start; gap: 8px; }
+.inbound-redesign .weather-event-heading h4 { min-width: 0; }
+.inbound-redesign .weather-event-number { width: 26px; height: 26px; flex-shrink: 0; }
+.inbound-redesign .weather-event-map > div { border: 0; border-radius: 0; }
+.inbound-redesign .weather-coverage { display: flex; gap: 8px; padding: 16px 0; line-height: 1.5; }
+.inbound-redesign .weather-disclosure > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; cursor: pointer; }
+.inbound-redesign .weather-disclosure > summary::-webkit-details-marker { display: none; }
+.inbound-redesign .weather-disclosure > summary::marker { content: ""; }
+.inbound-redesign .weather-disclosure > summary svg { transition: transform .2s ease; }
+.inbound-redesign .weather-disclosure[open] > summary svg { transform: rotate(180deg); }
+.inbound-redesign .weather-sources { border-top: 1px solid var(--color-border); padding: 8px 0; }
+.inbound-redesign .weather-disclosure p { overflow-wrap: anywhere; }
+.inbound-redesign .briefing-timeline { padding-left: 12px; border-left: 1px solid var(--color-border); }
+.inbound-redesign .briefing-timeline li { padding: 12px 0; }
+.inbound-redesign .briefing-timeline li + li { border-top: 1px solid var(--color-border); }
+.inbound-redesign .briefing-panel .home-submit { height: auto; font-size: 16px; }
+@media (prefers-reduced-motion: reduce) { .inbound-redesign .weather-disclosure > summary svg { transition: none; } }
