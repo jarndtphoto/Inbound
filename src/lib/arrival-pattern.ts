@@ -15,14 +15,18 @@ export function arrivalPattern(aircraft: Coord & { track?: number | null }, runw
     points = here.x < -9 ? [aircraft, faf, runway.threshold] : [aircraft, runway.threshold];
   } else {
     const offset = 5, radius = offset / 2;
-    const startX = Math.max(here.x, -9);
-    points = [aircraft, project(startX, side * offset), project(-9, side * offset)];
+    const startX = here.x;
+    // A westbound downwind already beyond the nominal FAF must continue
+    // outward before base, rather than reverse toward the field.
+    const baseX = Math.min(-9, here.x - 1);
+    points = [aircraft, project(startX, side * offset), project(baseX, side * offset)];
     // A tangent semicircular base turn joins the downwind to final without a hard corner.
     for (let i = 1; i <= 24; i++) {
       const angle = (90 + i * 180 / 24) * Math.PI / 180;
-      points.push(project(-9 + radius * Math.cos(angle), side * (radius + radius * Math.sin(angle))));
+      points.push(project(baseX + radius * Math.cos(angle), side * (radius + radius * Math.sin(angle))));
     }
-    points[points.length - 1] = faf;
+    points[points.length - 1] = project(baseX, 0);
+    if (baseX < -9) points.push(faf);
     points.push(runway.threshold);
   }
   // Preserve exact entry/threshold points and sample legs at <= 1nm for weather and display.

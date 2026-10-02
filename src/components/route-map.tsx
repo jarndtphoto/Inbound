@@ -670,11 +670,6 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         <g transform={`translate(${sx(story.route.expectedArrival?.threshold.lon ?? dest.lon)} ${sy(story.route.expectedArrival?.threshold.lat ?? dest.lat)}) scale(${1 / zoom.s})`}>
           <circle r="5.5" className="fill-fg stroke-bg" strokeWidth="2" vectorEffect="non-scaling-stroke" />
           <text y="22" textAnchor="middle" className="fill-fg" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.dest.iata}</text>
-          {story.route.expectedArrival && !weatherPreview && <g aria-label={`Expected runway ${story.route.expectedArrival.runway}, ${story.route.expectedArrival.source}${story.route.expectedArrival.estimated ? ", estimate" : ""}`}>
-            <rect x={sx(dest.lon) > W / 2 ? -224 : 0} y="29" width="224" height="36" rx="4" className="fill-bg/90 stroke-border" />
-            <text x={sx(dest.lon) > W / 2 ? -112 : 112} y="43" textAnchor="middle" className="fill-fg" fontSize="12">{story.route.expectedArrival.source === "provider" ? "Reported" : "Expected"} Rwy {story.route.expectedArrival.runway} · {story.route.expectedArrival.source}</text>
-            <text x={sx(dest.lon) > W / 2 ? -112 : 112} y="57" textAnchor="middle" className="fill-muted" fontSize="10">{story.route.expectedArrival.estimated ? "Estimated runway and approach" : "Projected approach"}</text>
-          </g>}
         </g>
 
         {visibleHazards.map((h) => {
@@ -703,6 +698,15 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
 
         </g>
       </svg>
+
+      {story.route.expectedArrival && !weatherPreview && <div
+        data-expected-runway-label
+        className="expected-runway-chip pointer-events-none absolute rounded-sm border border-border bg-bg/90 px-2 py-1 text-fg"
+        style={{ left: `clamp(12px, calc(${(sx(story.route.expectedArrival.threshold.lon) * zoom.s + zoom.x) / W * 100}% - 125px), calc(100% - 262px))`,
+          top: `${Math.max(18, Math.min(72, (sy(story.route.expectedArrival.threshold.lat) * zoom.s + zoom.y) / H * 100 + 4))}%` }}>
+        <span className="block text-sm font-medium">{story.route.expectedArrival.source === "provider" ? "Reported" : "Expected"} Rwy {story.route.expectedArrival.runway} · {story.route.expectedArrival.source}</span>
+        <span className="block text-xs text-muted">{story.route.expectedArrival.estimated ? "Estimated runway and approach" : "Projected approach"}</span>
+      </div>}
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
