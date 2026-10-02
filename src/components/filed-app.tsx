@@ -1,3 +1,4 @@
+import { AppearanceControl } from "@/components/appearance-control";
 import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { TravelerCompanion } from "@/components/traveler-companion";
 import { BaggageStatus, useBaggageStatus } from "@/components/baggage-status";
@@ -824,14 +825,15 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   }, [story, query, flightTab]);
 
   return (
-    <div className="pwa-flight-shell flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg" style={shellStyle}>
+    <div className={cn("pwa-flight-shell", (flightTab === "Overview" || flightTab === "Route") && "inbound-redesign", "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg")} style={shellStyle}>
+      {story && (flightTab === "Overview" || flightTab === "Route") && <header className="journey-header"><div><h1>Inbound</h1><p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p></div><AppearanceControl /></header>}
       {story && <FlightWelcome open={briefPopupOpen} onClose={() => setBriefPopupOpen(false)} story={story} brief={shownBrief} />}
       <ScreenErrorBoundary>
       <main
         ref={mainRef}
-        className={cn("min-h-0 min-w-0 flex-1 overflow-x-hidden overscroll-y-contain px-4 pt-1 lg:px-8 lg:pt-4", flightTab === "Route" ? "overflow-y-hidden" : "overflow-y-auto")}
+        className={cn("journey-main min-h-0 min-w-0 flex-1 overflow-x-hidden overscroll-y-contain px-4 pt-1 lg:px-8 lg:pt-4", flightTab === "Route" ? "overflow-y-hidden" : "overflow-y-auto")}
       >
-        <div className={cn("mx-auto min-w-0 max-w-6xl overflow-x-hidden", flightTab === "Route" ? "flex h-full flex-col pb-2" : "pb-6")}>
+        <div className={cn("journey-content mx-auto min-w-0 max-w-6xl overflow-x-hidden", flightTab === "Route" ? "flex h-full flex-col pb-2" : "pb-6")}>
         {story ? (
           <div
             className="flex flex-col items-center justify-end overflow-hidden text-muted"
@@ -872,14 +874,15 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         {!story && !storyQ.isError && <Skeleton query={query || "the flight"} />}
 
         {story && (
-          <div key={normFlight(query)} className={cn("min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
-            <section id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
+          <div key={normFlight(query)} className={cn("journey-body min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
+            <div className={cn("journey-map", flightTab === "Route" && "journey-map-expanded")} hidden={flightTab !== "Overview" && flightTab !== "Route"}><RouteMap story={story} fixedViewport />{(story.route?.samples?.length ?? 0) < 2 && <p className="map-unavailable">Route map unavailable</p>}</div>
+            <section className="journey-panel" id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
-              <TravelerCompanion story={story} failed={storyQ.isError || Boolean(refreshErr)} onTrackInbound={openFlight} />
               <OverviewDetails story={story} />
+              <TravelerCompanion story={story} failed={storyQ.isError || Boolean(refreshErr)} onTrackInbound={openFlight} />
             </section>
             <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
-              <RouteMap story={story} fixedViewport />
+              <p className="sr-only">Interactive flight map above. Use the map controls to zoom or reset.</p>
             </section>
             <section id="panel-Weather" role="tabpanel" aria-labelledby="tab-Weather" hidden={flightTab !== "Weather"}>
               <WeatherTimeline story={story} />
@@ -1030,7 +1033,7 @@ function statusProgressIndex(stage: StageId) {
 function FlightStatusProgress({ story }: { story: FlightStory }) {
   const active = statusProgressIndex(displayStage(story));
   return (
-    <div className="mt-4" aria-label={`Flight progress: ${STATUS_PROGRESS[active]}`}>
+    <div className="flight-progress mt-4" aria-label={`Flight progress: ${STATUS_PROGRESS[active]}`}>
       <div className="grid grid-cols-6 gap-1">
         {STATUS_PROGRESS.map((label, index) => {
           const complete = index < active;
@@ -1038,9 +1041,9 @@ function FlightStatusProgress({ story }: { story: FlightStory }) {
           return (
             <div key={`${label}-${index}`} className="min-w-0 text-center">
               <div className={cn(
-                "mx-auto h-1.5 w-full rounded-full",
+                "progress-dot mx-auto h-1.5 w-full rounded-full",
                 complete || current ? "bg-accent" : "bg-border",
-                current && "ring-2 ring-accent/20 ring-offset-1 ring-offset-surface",
+                current && "progress-current ring-2 ring-accent/20 ring-offset-1 ring-offset-surface",
               )} />
               <p className={cn(
                 "mt-1 truncate font-mono text-[9px] tracking-wide uppercase",
@@ -1094,17 +1097,18 @@ function FlightHead({
   onRefresh: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-surface p-4">
+    <div className="flight-summary rounded-xl border border-border bg-surface p-4">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2">
         <div className="min-w-0">
-          <p className="font-mono text-xs tracking-wide text-muted">{headStatus(story)}</p>
-          <h2 className="font-display text-[clamp(1.8rem,7vw,4.25rem)] font-semibold leading-none">{story.iata}</h2>
+          <p className="summary-airline text-sm text-muted">{headStatus(story)}</p>
+          <h2 className="summary-stage font-display font-semibold leading-none">{stageHeadline(story)}</h2>
         </div>
         <div className="max-w-36 text-right">
-          <p className="font-mono text-xs tracking-widest text-muted uppercase">Stage</p>
-          <p className="font-display text-xl font-semibold leading-tight sm:text-2xl">{stageHeadline(story)}</p>
+          <p className="text-xs text-muted">{story.times.gateKind === "actual" ? "ARRIVED" : "ARRIVES"}</p>
+          <p className="summary-arrival font-display font-semibold leading-tight">{story.times.gate ?? "—"}</p>
+          <p className="text-xs text-muted">{kindLabel(story.times.gateKind) || "Time unavailable"}</p>
         </div>
-        <p className="col-span-2 text-lg text-fg">
+        <p className="summary-route col-span-2 text-sm text-muted">
           {story.origin.city} <span className="text-muted">{story.origin.iata}</span>
           <span className="mx-2 text-subtle">→</span>
           {story.dest.city} <span className="text-muted">{story.dest.iata}</span>
@@ -1202,7 +1206,8 @@ function OverviewDetails({ story }: { story: FlightStory }) {
       : story.times.pushKind === "estimated" ? "Estimated" : null;
   const takeoffActualLabel = story.times.takeoffKind === "actual" ? "Actual"
     : story.times.takeoffKind === "estimated" ? "Estimated" : null;
-  return <section className="mt-4 rounded-xl border border-border bg-surface px-4" aria-label="More flight information">
+  return <section className="overview-details mt-4 rounded-xl border border-border bg-surface px-4" aria-label="More flight information">
+    <dl className="arrival-details"><div><dt>Airport</dt><dd>{story.dest.iata}</dd><p>{story.dest.city}</p></div><div><dt>Gate</dt><dd>{story.times.destGate ?? "—"}</dd><p>{story.times.destGate ? "Arrival gate" : "Not assigned"}</p></div><div><dt>Baggage</dt><dd>{baggage.result?.status === "posted" && baggage.result.carousel ? baggage.result.carousel : "—"}</dd><p>{baggageSummary(baggage.result)}</p></div></dl>
     <OverviewDisclosure id="flight" title="Flight details" summary={`${story.iata} · ${story.origin.iata} → ${story.dest.iata}`} open={open.flight} onToggle={toggle}>
       <dl>
         <DetailRow label="Airline" value={story.airline} />
@@ -1325,7 +1330,7 @@ function TimesStrip({
   const preDepartureTakeoffPrimary = shownStage === "push" || shownStage === "taxi";
 
   return (
-    <div className="mt-3 border-t border-border pt-3">
+    <div className="flight-times mt-3 border-t border-border pt-3">
       <div className="flex min-w-0 flex-col gap-3">
         {airborne ? (
           <div className="grid min-w-0 grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)] gap-3">
