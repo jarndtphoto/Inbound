@@ -1,4 +1,5 @@
 import type { Chop, RouteSample } from "./types.ts";
+import { orderedWeatherSamples, sampleWeather } from "./route-weather-segments.ts";
 
 export type RouteWeatherEvent = {
   key: string;
@@ -34,10 +35,8 @@ function conditionKey(sample: RouteSample): string | null {
   // All contiguous turbulence intensities are one passenger weather event.
   // The route line may still vary sample-by-sample, but a light→moderate
   // stretch should read as one area instead of several back-to-back alerts.
-  if (sample.chop !== "smooth") return "turbulence";
-  if (sample.convective) return "storms";
-  if (sample.cloud) return "clouds";
-  return null;
+  const kind = sampleWeather(sample).kind;
+  return kind === "smooth" ? null : kind;
 }
 
 function turbulenceDisplayKey(event: RouteWeatherEvent): string {
@@ -53,13 +52,10 @@ function mergeNotes(a: string | null, b: string | null): string | null {
  * Build passenger weather ranges once. start/startFrac/startEtaMin always mean
  * entry into the affected area; end fields always mean exit.
  */
-export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity, mergeGapMin = 5): RouteWeatherEvent[] {
+export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity, mergeGapMin = 0): RouteWeatherEvent[] {
   // Real story.route.samples were verified origin → destination: both frac and
   // ETA-from-now increase in direction of travel. Never trust caller array order.
-  const ordered = samples
-    .filter((sample) => Number.isFinite(sample.frac) && sample.frac >= progress)
-    .slice()
-    .sort((a, b) => a.frac - b.frac);
+  const ordered = orderedWeatherSamples(samples).filter(sample => sample.frac >= progress);
 
   const runs: Array<RouteWeatherEvent | { key: null; start: RouteSample; end: RouteSample }> = [];
   for (const sample of ordered) {
@@ -106,7 +102,7 @@ export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity,
     const gap = runs[i + 1];
     const next = runs[i + 2];
     const gapMinutes = next.start.etaMin - first.end.etaMin;
-    if (first.key && gap.key === null && next.key === first.key && gapMinutes >= 0 && gapMinutes <= mergeGapMin) {
+    if (mergeGapMin > 0 && first.key && gap.key === null && next.key === first.key && gapMinutes >= 0 && gapMinutes <= mergeGapMin) {
       const a = first as RouteWeatherEvent;
       const b = next as RouteWeatherEvent;
       a.end = b.end;
@@ -132,4 +128,8 @@ export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity,
 
 export function weatherEventMarker(event: RouteWeatherEvent) {
   return { lat: event.start.lat, lon: event.start.lon, frac: event.startFrac, etaMin: event.startEtaMin };
+}
+
+export function weatherEventNumber(events: RouteWeatherEvent[], event: RouteWeatherEvent) {
+  return event.key.startsWith("turbulence:") ? events.slice(0, events.indexOf(event) + 1).filter(e => e.key.startsWith("turbulence:")).length : 0;
 }

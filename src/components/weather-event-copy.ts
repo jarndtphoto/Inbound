@@ -1,5 +1,14 @@
 import { createElement } from "react";
 import type { PassengerWeatherCopy } from "../lib/weather-card-copy";
+import { turbulenceBand, turbulenceWords, type TurbulenceIntensity } from "../lib/route-weather-segments.ts";
+
+export function WeatherIntensityLabel({ intensity }: { intensity: string }) {
+  const parts = intensity.split("-");
+  return createElement("span", { className: "font-semibold" }, parts.flatMap((part, i) => [
+    ...(i ? [createElement("span", { key: `join-${i}`, className: "text-muted" }, " to ")] : []),
+    createElement("span", { key: part, className: turbulenceBand(part as TurbulenceIntensity) === "light" ? "text-turbulence-light" : "text-turbulence-moderate" }, turbulenceWords(part as TurbulenceIntensity))
+  ]));
+}
 
 export function WeatherEventHeadline({ copy }: { copy: PassengerWeatherCopy }) {
   return createElement("h4", { className: "text-lg font-semibold" }, copy.headline);

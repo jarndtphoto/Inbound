@@ -14,6 +14,10 @@
   --color-mvfr: #c4b37a;
   --color-ifr: #c4877a;
   --color-ring: #9eb6c4;
+  --color-turbulence-smooth: var(--color-accent);
+  --color-turbulence-light: #f6cf54;
+  --color-turbulence-moderate: #ff7882;
+  --color-weather-atmosphere: #c5a4ed;
 
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Barlow Condensed", "IBM Plex Sans", sans-serif;
@@ -222,6 +226,9 @@ html, .inbound-redesign {
   --journey-land: #193346;
 }
 html[data-theme="sunrise"], html[data-theme="sunrise"] .inbound-redesign {
+  --color-turbulence-light: #8a6500;
+  --color-turbulence-moderate: #b42332;
+  --color-weather-atmosphere: #78519a;
   --color-bg: #fcfaf5;
   --color-surface: #fcfaf5;
   --color-surface-2: #f1f3ed;

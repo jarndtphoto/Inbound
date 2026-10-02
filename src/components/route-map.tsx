@@ -1,11 +1,11 @@
 import { formatDuration, formatMiles, haversineNm } from "@/lib/geo";
 import { upcomingStorms } from "@/lib/route-hazards";
-import { routeWeatherEvents } from "@/lib/weather-events";
+import { routeWeatherEvents, weatherEventNumber } from "@/lib/weather-events";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
-import { WeatherPreviewLabel } from "@/components/weather-event-copy";
+import { WeatherPreviewLabel, WeatherIntensityLabel } from "@/components/weather-event-copy";
 import { passengerWeatherCopy } from "@/lib/weather-card-copy";
 import { useFiled } from "@/lib/store";
-import type { Chop, FlightStory, RouteSample } from "@/lib/types";
+import type { FlightStory, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
 import { GREAT_LAKES } from "@/lib/great-lakes";
 import { HAWAII_COASTLINES } from "@/lib/hawaii-coastlines";
@@ -16,6 +16,8 @@ import { useQuery } from "@tanstack/react-query";
 import { CloudRain } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { routeWeatherSegments, sampleWeather } from "@/lib/route-weather-segments";
+
 const W = 800;
 const H = 800;
 const PAD = 40;
@@ -23,10 +25,9 @@ const MAX_ROUTE_ZOOM = 12;
 const MIN_FREE_ROUTE_ZOOM = 0.01;
 const PAN_WORLD_SCREENS = 4;
 
-function chopClass(c: Chop, past: boolean) {
+function weatherStroke(band: string, past: boolean) {
   if (past) return "stroke-muted/40";
-  if (c === "severe" || c === "moderate" || c === "light") return "stroke-ifr";
-  return "stroke-accent";
+  return band === "light" ? "stroke-turbulence-light" : band === "moderate" ? "stroke-turbulence-moderate" : "stroke-turbulence-smooth";
 }
 
 function mercX(lon: number) {
@@ -381,41 +382,6 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
   return { boxRef, s: view.s, x: view.x, y: view.y, reset, zoomBy };
 }
 
-function pathRuns(samples: RouteSample[], progress: number) {
-  type Run = { chop: Chop; past: boolean; pts: { x: number; y: number }[] };
-  return {
-    build: (sx: (lon: number) => number, sy: (lat: number) => number) => {
-      const out: Run[] = [];
-      let cur: Run | null = null;
-      for (let i = 0; i < samples.length; i++) {
-        const s = samples[i]!;
-        const pt = { x: sx(s.lon), y: sy(s.lat) };
-        const past = s.frac < progress;
-        const chop = s.chop;
-        if (!cur) {
-          cur = { chop, past, pts: [pt] };
-          continue;
-        }
-        // Split only at the longitude seam; zoom can make valid adjacent
-        // route samples hundreds of screen pixels apart.
-        const crossesSeam = Math.abs(s.lon - samples[i - 1]!.lon) > 180;
-        if (cur.chop === chop && cur.past === past && !crossesSeam) {
-          cur.pts.push(pt);
-        } else {
-          // Weather begins at the first affected sample and ends at the last
-          // affected sample. Share that exact boundary with the adjacent run.
-          const enteringWeather: boolean = cur.chop === "smooth" && chop !== "smooth" && cur.past === past;
-          if (!crossesSeam && enteringWeather) cur.pts.push(pt);
-          if (cur.pts.length >= 2) out.push(cur);
-          const boundary: { x: number; y: number } = enteringWeather ? pt : cur.pts[cur.pts.length - 1]!;
-          cur = { chop, past, pts: !crossesSeam ? [boundary, pt] : [pt] };
-        }
-      }
-      if (cur && cur.pts.length >= 2) out.push(cur);
-      return out;
-    },
-  };
-}
 
 function ringHits(
   ring: [number, number][],
@@ -454,7 +420,7 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] } }) {
+export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { intensity?: string; eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] } }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [mapHeight, setMapHeight] = useState(800);
   useEffect(() => {
@@ -544,9 +510,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
     ? (story.times.landUnix - takeoffAt) / 60 : null;
   const mapEvents = routeWeatherEvents(samples, progress);
-  useEffect(() => {
-    if (/^AA\s*(5012|3959)$/.test(story.query)) console.info("route-weather-baseline", JSON.stringify({ flight: story.query, capturedAt: story.fetchedAt, samples: samples.map(({ frac, chop, convective, cloud }) => ({ frac, chop, convective, cloud })), events: mapEvents, story }));
-  }, [story.fetchedAt]);
+  useEffect(() => { if (!weatherPreview) console.info("route-weather-preview-capture", JSON.stringify(story)); }, [story.fetchedAt]);
   // Both the full map and preview pin the event's entry point. The affected
   // route line still spans every range through the event's exit.
   const ticks = weatherPreview
@@ -555,14 +519,16 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         ...samples.reduce((best, sample) =>
           Math.abs(sample.frac - weatherPreview.startFrac) < Math.abs(best.frac - weatherPreview.startFrac) ? sample : best, samples[0]),
         alertLabel: weatherPreview.label,
+        intensity: weatherPreview.intensity,
         durationMin: weatherPreview.endEtaMin - weatherPreview.startEtaMin,
         intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + weatherPreview.startEtaMin
           : plannedMinutes == null ? null : weatherPreview.startFrac * plannedMinutes
       }]
     : mapEvents.map((event, index) => ({
-        eventNumber: index + 1,
+        eventNumber: weatherEventNumber(mapEvents, event),
         ...event.start,
         alertLabel: weatherLabel(event.start, event.key, event.note),
+        intensity: event.key.startsWith("turbulence:") ? event.key.slice(11) : undefined,
         durationMin: airborneNow ? event.endEtaMin - event.startEtaMin
           : plannedMinutes == null ? null : (event.endFrac - event.startFrac) * plannedMinutes,
         intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + event.startEtaMin
@@ -574,7 +540,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   // while zooming. Route samples still drive geometry, ETA, and weather.
   const filedStep = Math.max(1, Math.ceil(allFiledFixes.length / 24));
   const filedFixes = allFiledFixes.filter((_, index) => index % filedStep === 0);
-  const runs = pathRuns(samples, progress).build(sx, sy);
+  const runs = routeWeatherSegments(samples, progress).map(segment => ({ ...segment, pts: segment.points.map(s => ({ x: sx(s.lon), y: sy(s.lat) })) }));
   const countries = freePan ? WORLD_COUNTRY_RINGS : WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
   const admin1 = freePan ? ADMIN1_RINGS : ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
   const hawaii = freePan ? HAWAII_COASTLINES : HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
@@ -686,22 +652,16 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
 
         {runs.map((run, i) => {
           const d = run.pts.map((p, j) => `${j === 0 ? "M" : "L"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-          const w = run.past ? 3.2 : run.chop === "smooth" ? 5.2 : 6.4;
+          const w = run.past ? 3.2 : run.band === "smooth" ? 5.2 : 6.4;
           return (
-            <g key={`run-${i}`}>
-              <path d={d} data-route-stroke="outline" className="fill-none stroke-bg" strokeWidth={w + 3.4} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
-              <path d={d} data-route-stroke={run.past ? "flown" : "projected"} className={cn("fill-none", chopClass(run.chop, run.past))} strokeWidth={w} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+            <g key={`run-${i}`} data-weather-intensity={run.intensity} data-segment-start-frac={run.points[0].frac}>
+              <path d={d} data-route-stroke="outline" className="fill-none stroke-bg" strokeWidth={w + 5} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+              {run.pts.length === 1 && run.band !== "smooth" && <circle cx={run.pts[0].x} cy={run.pts[0].y} r={w / 2 / zoom.s} className={run.band === "light" ? "fill-turbulence-light" : "fill-turbulence-moderate"} />}
+              <path d={d} data-route-stroke={run.past ? "flown" : "projected"} className={cn("fill-none", weatherStroke(run.band, run.past))} data-segment-start-lat={run.points[0].lat} data-segment-start-lon={run.points[0].lon} strokeWidth={w} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
             </g>
           );
         })}
 
-        {weatherPreview && (weatherPreview.ranges ?? [{ from: weatherPreview.startFrac, to: weatherPreview.endFrac }]).map((range, index) => {
-          const section = samples.filter(s => s.frac >= range.from && s.frac <= range.to);
-          return <g key={index} aria-label="Weather area for this forecast">
-            <polyline data-route-stroke="weather" points={section.map(s => `${sx(s.lon)},${sy(s.lat)}`).join(" ")} fill="none" className="stroke-ifr" strokeWidth="18" opacity="0.55" vectorEffect="non-scaling-stroke" />
-            {section.length === 1 && <circle cx={sx(section[0].lon)} cy={sy(section[0].lat)} r={12 / zoom.s} className="fill-ifr" opacity="0.65" />}
-          </g>;
-        })}
         <g transform={`translate(${sx(origin.lon)} ${sy(origin.lat)}) scale(${1 / zoom.s})`}>
           <circle r="5.5" className="fill-accent stroke-bg" strokeWidth="2" vectorEffect="non-scaling-stroke" />
           <text y="22" textAnchor="middle" className="fill-muted" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.origin.iata}</text>
@@ -728,7 +688,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
 
         {ticks.map((s) => (
           <WeatherEventMarker key={s.frac} eventNumber={s.eventNumber} inverseScale={1 / zoom.s}
-            entry={{ lat: s.lat, lon: s.lon }} x={sx(s.lon)} y={sy(s.lat)} />
+            entry={{ lat: s.lat, lon: s.lon }} x={sx(s.lon)} y={sy(s.lat)} kind={sampleWeather(s).kind} band={sampleWeather(s).band} label={s.alertLabel} />
         ))}
 
         {hasFix && <g transform={`translate(${ax} ${ay}) scale(${1 / zoom.s}) rotate(${rot})`}>
@@ -784,7 +744,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         <details className="group">
           <summary className="cursor-pointer py-3 font-semibold">Weather alerts</summary>
           <div className="absolute inset-x-0 bottom-full max-h-48 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
-            {ticks.map((s) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{s.eventNumber}</span><div><p className="font-semibold">{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
+            {ticks.map((s) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{s.eventNumber || (s.convective ? "⚡" : "☁")}</span><div>{s.intensity && <p><WeatherIntensityLabel intensity={s.intensity} /> turbulence</p>}<p className={sampleWeather(s).band === "light" ? "font-semibold text-turbulence-light" : sampleWeather(s).band === "moderate" ? "font-semibold text-turbulence-moderate" : "font-semibold"}>{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
             
             {!ticks.length && <p>No map alerts shown. Coverage may be incomplete.</p>}
           </div>
@@ -793,9 +753,10 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           <summary className="cursor-pointer py-3 font-semibold">Map details</summary>
           <div className="absolute inset-x-0 bottom-full max-h-48 space-y-3 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
             <div className="flex flex-wrap gap-3">
-              <Legend swatch="bg-accent" label="Smooth" />
-              <Legend swatch="bg-ifr" label="Light / moderate turbulence" />
-              <span>○ Thunderstorms</span>
+              <Legend swatch="bg-turbulence-smooth" label="Smooth" />
+              <Legend swatch="bg-turbulence-light" label="Light–moderate" />
+              <Legend swatch="bg-turbulence-moderate" label="Moderate–severe" />
+              <span>⚡ Thunderstorms · ☁ Clouds</span>
             </div>
             {(weatherOn || weatherPreview) && <RadarStatus />}
             {story.hazards.filter(h => h.remaining && h.validity).map(h => <p key={h.id}>{h.label} · {h.validity}</p>)}
