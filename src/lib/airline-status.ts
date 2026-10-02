@@ -21,5 +21,5 @@ export function flightDepartureDate(s: FlightStory) {
       date = part("year")+"-"+part("month")+"-"+part("day");
     } catch {}
   }
-  return date;
+  return date ?? s.schedule?.serviceDate ?? null;
 }
