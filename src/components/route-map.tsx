@@ -544,6 +544,9 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
     ? (story.times.landUnix - takeoffAt) / 60 : null;
   const mapEvents = routeWeatherEvents(samples, progress);
+  useEffect(() => {
+    if (/^AA\s*(5012|3959)$/.test(story.query)) console.info("route-weather-baseline", JSON.stringify({ flight: story.query, capturedAt: story.fetchedAt, samples: samples.map(({ frac, chop, convective, cloud }) => ({ frac, chop, convective, cloud })), events: mapEvents, story }));
+  }, [story.fetchedAt]);
   // Both the full map and preview pin the event's entry point. The affected
   // route line still spans every range through the event's exit.
   const ticks = weatherPreview
