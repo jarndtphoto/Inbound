@@ -102,6 +102,18 @@ describe('zoom-stable route presentation', () => {
     assert.doesNotMatch(stylesSource, /\.journey-map svg > rect \{ fill: var\(--journey-water\); \}/);
   });
 
+  it('fills the actual lake path with ocean water while retaining the shoreline', () => {
+    // Inspect the lake element itself: an unrelated water style elsewhere in
+    // the component must not conceal a reverted lake fill.
+    const lakePath = source.match(/<path\s+key=\{lake\.name\}[\s\S]*?\/>/)?.[0];
+    assert.ok(lakePath, 'Great Lakes path exists');
+    assert.match(lakePath, /data-map-water="great-lake"/);
+    assert.match(lakePath, /style=\{\{ fill: "var\(--journey-water\)" \}\}/);
+    assert.match(lakePath, /className="stroke-fg\/35"/);
+    assert.doesNotMatch(lakePath, /fill-bg/);
+    assert.match(lakePath, /fillRule="evenodd"/);
+  });
+
   it('fits the initial ground-map view to the loaded airport surface', () => {
     assert.match(groundSource, /fitGroundSurfaceView/);
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
