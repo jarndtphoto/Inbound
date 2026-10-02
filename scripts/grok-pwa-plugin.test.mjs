@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import test from "node:test";
+import test, { after } from "node:test";
 import {
   appNameFromHost,
-  createHeadInjector,
+  createHeadInjector as createHeadInjectorFromWorkspace,
   grokXCreatorHeadTags,
-  injectGrokPwaHead,
+  injectGrokPwaHead as injectGrokPwaHeadFromWorkspace,
   isDocumentPath,
   isInstallQuery,
   publicAppHost,
@@ -18,6 +18,12 @@ import {
   stripInstallParams,
 } from "./grok-pwa-shared.mjs";
 import { renderInstallPage } from "./grok-pwa-plugin.mjs";
+
+// Generic platform tests must not inherit this app's site.json or public/og.jpg.
+const emptyWorkspace = mkdtempSync(join(tmpdir(), "inbound-pwa-fixture-"));
+after(() => rmSync(emptyWorkspace, { recursive: true, force: true }));
+const injectGrokPwaHead = (html, ctx = {}) => injectGrokPwaHeadFromWorkspace(html, { cwd: emptyWorkspace, ...ctx });
+const createHeadInjector = (ctx = {}) => createHeadInjectorFromWorkspace({ cwd: emptyWorkspace, ...ctx });
 
 const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
