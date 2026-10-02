@@ -78,6 +78,11 @@ describe('zoom-stable route presentation', () => {
     assert.match(source, /WeatherEventMarker[^>]+inverseScale=\{1 \/ zoom\.s\}/);
     assert.match(source, /hasFix[^>]+scale\(\$\{1 \/ zoom\.s\}\)/);
   });
+
+  it('renders the Great Lakes with the same water fill as the ocean', () => {
+    assert.match(source, /data-map-water="great-lake"/);
+    assert.match(source, /style=\{\{ fill: "var\(--journey-water\)" \}\}/);
+  });
 });
 
 describe('weather card copy hierarchy', () => {
