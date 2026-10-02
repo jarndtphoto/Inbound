@@ -49,6 +49,7 @@ export async function loadOfficialFlightData(
     fr24Bounds?: string | null;
     fr24OriginIata?: string | null;
     fr24DestIata?: string | null;
+    fr24Registration?: string | null;
   },
 ) {
   const fa = await probe(aeroApiConfigured(), () => loadAeroApiFlight(ident));
@@ -74,6 +75,41 @@ export async function loadOfficialFlightData(
 
   if (fr.state === "NO_MATCH" && preferredFlightNumber && !(routeOrigin && routeDestination)) {
     fr = await probe(fr24Configured(), () => loadFr24Flight(ident));
+  }
+
+  const publicRegistration = options?.fr24Registration?.trim().toUpperCase() || null;
+  const currentAge = fr.flight?.position?.seenAt != null ? Math.max(0, Date.now() / 1000 - fr.flight.position.seenAt) : Number.POSITIVE_INFINITY;
+  if ((fr.state === "NO_MATCH" || (fr.state === "ACTIVE" && currentAge > 12)) && publicRegistration) {
+    const registrationFr = await probe(fr24Configured(), () => loadFr24FlightByRegistration(publicRegistration));
+    const candidate = registrationFr.flight;
+    const candidateAge = candidate?.position?.seenAt != null ? Math.max(0, Date.now() / 1000 - candidate.position.seenAt) : Number.POSITIVE_INFINITY;
+    const routeMatches = Boolean(
+      candidate &&
+      (!routeOrigin || candidate.origin?.iata?.trim().toUpperCase() === routeOrigin) &&
+      (!routeDestination || candidate.destination?.iata?.trim().toUpperCase() === routeDestination)
+    );
+    if (candidate && routeMatches && candidateAge < currentAge) {
+      console.info(JSON.stringify({
+        event: "fr24_public_registration_fresher",
+        requested: ident,
+        registration: publicRegistration,
+        routeOrigin,
+        routeDestination,
+        previousAgeSec: Number.isFinite(currentAge) ? Math.round(currentAge) : null,
+        candidateAgeSec: Number.isFinite(candidateAge) ? Math.round(candidateAge) : null,
+      }));
+      fr = registrationFr;
+    } else if (candidate && !routeMatches) {
+      console.warn(JSON.stringify({
+        event: "fr24_public_registration_wrong_leg_rejected",
+        requested: ident,
+        registration: publicRegistration,
+        routeOrigin,
+        routeDestination,
+        candidateOrigin: candidate.origin?.iata ?? candidate.origin?.icao ?? null,
+        candidateDestination: candidate.destination?.iata ?? candidate.destination?.icao ?? null,
+      }));
+    }
   }
 
   if (fr.state === "NO_MATCH" && fa.flight) {
