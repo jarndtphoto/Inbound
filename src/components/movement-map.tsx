@@ -280,15 +280,23 @@ function GroundMovementMap({
   // arrival ground lookup; it is never used as a position by itself.
   const identityRegistration = aircraft?.registration ?? storyAircraft?.registration ?? story.resume?.tail ?? null;
   const identityCallsign = aircraft?.callsign ?? storyAircraft?.callsign ?? story.callsign;
+  const identityKey = `${story.flightId ?? story.iata}:${airport.iata}:${mode.kind}`;
+  const groundIdentityRef = useRef<{ key: string; registration: string | null }>({ key: identityKey, registration: identityRegistration });
+  if (groundIdentityRef.current.key !== identityKey) {
+    groundIdentityRef.current = { key: identityKey, registration: identityRegistration };
+  } else if (identityRegistration) {
+    groundIdentityRef.current.registration = identityRegistration;
+  }
   const groundQ = useQuery({
-    queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, identityRegistration ?? "", identityCallsign],
+    queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, mode.kind, identityRegistration ?? "", identityCallsign],
     queryFn: () => getGroundPosition({ data: {
       callsign: identityCallsign,
       flightId: story.flightId ?? null,
       flightNumber: story.iata ?? null,
-      registration: identityRegistration,
+      registration: groundIdentityRef.current.registration ?? identityRegistration,
       originIata: story.origin.iata ?? null,
       destIata: story.dest.iata ?? null,
+      movementKind: mode.kind,
       airportLat: airport.lat,
       airportLon: airport.lon,
     } }),
@@ -301,9 +309,10 @@ function GroundMovementMap({
     retry: false,
   });
   const queriedFast = groundQ.data;
+  if (queriedFast?.registration) groundIdentityRef.current.registration = queriedFast.registration;
   const queriedFastAge = queriedFast?.seenAt ? Math.max(0, Date.now() / 1000 - queriedFast.seenAt) : null;
   const fast = storyFast ?? (queriedFast && (queriedFastAge ?? Infinity) <= 30 ? queriedFast : null);
-  const fastKey = `${story.flightId ?? story.iata}:${airport.iata}:${mode.kind}`;
+  const fastKey = identityKey;
   const lastFastRef = useRef<{ key: string; fix: NonNullable<typeof fast> } | null>(null);
   if (fast) lastFastRef.current = { key: fastKey, fix: fast };
 
