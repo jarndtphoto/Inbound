@@ -2954,16 +2954,19 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		: await safe(adsbByCallsign(parsed.callsign), null);
 	const liveCs = parsed.callsign;
 	const adsbLive = rawAc ? toLive(rawAc) : null;
-	const positionChoice = choosePosition(
-		[normalizedAdsb(adsbLive), official.fr24?.position, flightawareOfficial?.position],
-		{ callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean), registration: aware?.tail ?? null, hex: knownHex ?? aware?.hex ?? null }
-	);
-	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen) : adsbLive ?? liveFromAware(aware);
 	let [origin, dest] = await Promise.all([
     resolveFlightField(aware, "origin", route?.origin),
     resolveFlightField(aware, "dest", route?.destination),
   ]);
 	if (!origin || !dest) throw new Error("Flight route unavailable. Try again when the flight feeds respond.");
+	const frGround = official.fr24?.position;
+	const surfaceField = frGround?.onGround === true && haversineNm(frGround, dest) < haversineNm(frGround, origin) ? dest : origin;
+	const positionChoice = choosePosition(
+		[normalizedAdsb(adsbLive), official.fr24?.position, flightawareOfficial?.position],
+		{ callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean), registration: aware?.tail ?? null, hex: knownHex ?? aware?.hex ?? null },
+		Date.now() / 1000, fieldElev(surfaceField)
+	);
+	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen) : adsbLive ?? liveFromAware(aware);
 	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
 	live = asOnGround(live, origin);

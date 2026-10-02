@@ -37,8 +37,9 @@ export type NormalizedFlight = {
 };
 
 const PROVIDER_WEIGHT: Record<FlightProvider, number> = { fr24: 24, adsb: 20, flightaware: 16 };
+export const FR24_SURFACE_FRESH_SEC = 30;
 export function positionAgeSec(position: NormalizedPosition, now = Date.now() / 1000): number { return Math.max(0, now - position.seenAt); }
-export function identityCompatible(position: NormalizedPosition, expected: { callsigns?: string[]; registration?: string | null; hex?: string | null }): boolean {
+export function identityCompatible(position: { callsign?: string | null; registration?: string | null; hex?: string | null }, expected: { callsigns?: string[]; registration?: string | null; hex?: string | null }): boolean {
   const norm = (v: string | null | undefined) => String(v ?? "").replace(/[-\s]/g, "").toUpperCase();
   const lockedHex = norm(expected.hex), lockedReg = norm(expected.registration);
   if (lockedHex && position.hex && norm(position.hex) !== lockedHex) return false;
@@ -48,24 +49,36 @@ export function identityCompatible(position: NormalizedPosition, expected: { cal
   const actual = norm(position.callsign), actualNum = actual.match(/\d+/)?.[0]?.replace(/^0+/, "");
   return wanted.some((candidate) => { if (candidate === actual) return true; const number = candidate.match(/\d+/)?.[0]?.replace(/^0+/, ""); return Boolean(number && actualNum && number === actualNum); });
 }
+export function airborneFixSupersedesGround(position: Pick<NormalizedPosition, "onGround" | "altFt" | "gsKt">, ageSec: number, groundAgeSec: number, groundElevationFt = 0): boolean {
+  return position.onGround === false && ageSec <= 45 && groundAgeSec - ageSec > 10
+    && ((position.altFt != null && position.altFt - groundElevationFt > 500) || (position.gsKt ?? 0) > 80);
+}
 export type PositionChoice = { chosen: NormalizedPosition | null; disagreementNm: number | null; candidates: Partial<Record<FlightProvider, NormalizedPosition>>; };
-export function choosePosition(positions: Array<NormalizedPosition | null | undefined>, expected: { callsigns?: string[]; registration?: string | null; hex?: string | null } = {}, now = Date.now() / 1000): PositionChoice {
-  const usable = positions.filter((p): p is NormalizedPosition => Boolean(p && identityCompatible(p, expected) && positionAgeSec(p, now) <= (p.onGround ? 60 : 45)));
+export function choosePosition(positions: Array<NormalizedPosition | null | undefined>, expected: { callsigns?: string[]; registration?: string | null; hex?: string | null } = {}, now = Date.now() / 1000, groundElevationFt = 0): PositionChoice {
+  // Use the same FR24 surface freshness limit as the story wrapper. Retaining
+  // an older ground fix here would exclude a fresh airborne fix from scoring.
+  const usable = positions.filter((p): p is NormalizedPosition => Boolean(p && identityCompatible(p, expected)
+    && positionAgeSec(p, now) <= (p.onGround ? p.provider === "fr24" ? FR24_SURFACE_FRESH_SEC : 60 : 45)));
   const candidates: Partial<Record<FlightProvider, NormalizedPosition>> = {};
   for (const p of usable) if (!candidates[p.provider] || positionAgeSec(p, now) < positionAgeSec(candidates[p.provider]!, now)) candidates[p.provider] = p;
   let disagreementNm: number | null = null;
   for (let i = 0; i < usable.length; i++) for (let j = i + 1; j < usable.length; j++) { const d = haversineNm(usable[i]!, usable[j]!); disagreementNm = disagreementNm == null ? d : Math.max(disagreementNm, d); }
 
-  // FR24 remains the preferred surface source when it has a fresh, validated
-  // on-ground fix. If FR24 is missing or stale, do not throw away other fresh,
-  // identity-compatible ground positions; score those providers instead.
+  // Prefer validated FR24 ground telemetry unless a clearly airborne fix is
+  // more than ten seconds newer. Ground-only scoring must not undo that guard.
   const frGround = candidates.fr24;
-  if (frGround?.onGround === true && positionAgeSec(frGround, now) <= 45) {
+  const surfaceIdentity = { callsigns: frGround?.callsign ? [frGround.callsign] : [], registration: frGround?.registration, hex: frGround?.hex };
+  const newerAirborne = Boolean(frGround?.onGround === true && usable.some((p) =>
+    identityCompatible(p, surfaceIdentity)
+    && airborneFixSupersedesGround(p, positionAgeSec(p, now), positionAgeSec(frGround, now), groundElevationFt)));
+  if (frGround?.onGround === true && !newerAirborne) {
     return { chosen: frGround, disagreementNm, candidates };
   }
 
-  let scoringPool = usable;
-  if (usable.some((p) => p.onGround === true)) {
+  // Retain the superseded surface fix in diagnostics, but not in scoring where
+  // ground consensus could otherwise select it again after takeoff.
+  let scoringPool = newerAirborne ? usable.filter((p) => !(p.provider === "fr24" && p.onGround === true)) : usable;
+  if (!newerAirborne && usable.some((p) => p.onGround === true)) {
     const groundPool = usable.filter((p) => p.onGround === true);
     if (groundPool.length) scoringPool = groundPool;
   }
