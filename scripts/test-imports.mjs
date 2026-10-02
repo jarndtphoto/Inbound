@@ -4,7 +4,8 @@ import { registerHooks } from 'node:module';
 // Each test worker gets the same hook; it never changes application imports.
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith('.') && !/\.(?:[cm]?[jt]sx?|json)$/.test(specifier)) {
+    if (context.parentURL?.includes('/src/') && /\.tsx?$/.test(context.parentURL)
+      && specifier.startsWith('.') && !/\.(?:[cm]?[jt]sx?|json)$/.test(specifier)) {
       try { return nextResolve(specifier + '.ts', context); }
       catch (error) {
         if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
