@@ -785,6 +785,45 @@ describe('stage and ground-map position identity', () => {
 });
 
 describe('public schedule fallback', () => {
+  const datedPage = (departure, arrival) => `<html><body><h1>Flight Status</h1><div>AA 536 American Airlines CLT Charlotte ORD Chicago Arrived</div><div>Flight Departure Times ${departure}</div><div>Flight Arrival Times ${arrival}</div></body></html>`;
+
+  it('shares each section date across Scheduled, Estimated and Actual labels', () => {
+    const record = parseFlightStatsPublicSchedule(datedPage(
+      '01-Oct-2026 Scheduled 16:18 EDT Estimated 16:20 EDT Actual 16:24 EDT',
+      '02-Oct-2026 Scheduled 00:10 CDT Estimated 00:15 CDT Actual 00:12 CDT',
+    ), 'AAL536', '2026-10-01');
+    assert.deepEqual(record.gateOut, { scheduled: Date.UTC(2026, 9, 1, 20, 18) / 1000, estimated: Date.UTC(2026, 9, 1, 20, 20) / 1000, actual: Date.UTC(2026, 9, 1, 20, 24) / 1000 });
+    assert.deepEqual(record.gateIn, { scheduled: Date.UTC(2026, 9, 2, 5, 10) / 1000, estimated: Date.UTC(2026, 9, 2, 5, 15) / 1000, actual: Date.UTC(2026, 9, 2, 5, 12) / 1000 });
+  });
+
+  it('honors explicit later dates across midnight and month rollover', () => {
+    const record = parseFlightStatsPublicSchedule(datedPage(
+      '31-Oct-2026 Scheduled 23:50 EDT 01-Nov-2026 Estimated 00:10 EDT Actual 00:15 EDT',
+      '01-Nov-2026 Scheduled 02:30 CST Actual 02:25 CST',
+    ), 'AAL536', '2026-10-31');
+    assert.equal(record.gateOut.scheduled, Date.UTC(2026, 10, 1, 3, 50) / 1000);
+    assert.equal(record.gateOut.actual, Date.UTC(2026, 10, 1, 4, 15) / 1000);
+    assert.equal(record.gateIn.actual, Date.UTC(2026, 10, 1, 8, 25) / 1000);
+  });
+
+  it('keeps labels without a preceding section date unconfirmed', () => {
+    const record = parseFlightStatsPublicSchedule(datedPage(
+      'Scheduled 16:18 EDT Actual 16:24 EDT',
+      '01-Oct-2026 Scheduled 17:38 CDT Actual 17:31 CDT',
+    ), 'AAL536', '2026-10-01');
+    assert.deepEqual(record.gateOut, { scheduled: null, estimated: null, actual: null });
+    assert.equal(record.gateIn.actual, Date.UTC(2026, 9, 1, 22, 31) / 1000);
+  });
+
+  it('still rejects invalid clocks and unknown timezone abbreviations', () => {
+    const record = parseFlightStatsPublicSchedule(datedPage(
+      '01-Oct-2026 Scheduled 24:18 EDT Estimated 16:60 EDT Actual 16:24 XYZ',
+      '01-Oct-2026 Scheduled 17:38 CDT',
+    ), 'AAL536', '2026-10-01');
+    assert.deepEqual(record.gateOut, { scheduled: null, estimated: null, actual: null });
+    assert.equal(record.gateIn.actual, null);
+  });
+
   it('loads an exact route from a FlightStats-style public status page', { todo: "Held #6: unknown-airport route support — https://github.com/jarndtphoto/Inbound/blob/codex/test-suite-cleanup/docs/test-cleanup-held-bugs.md#6-zrh--unknown-airport-public-route-support" }, () => {
     const html = `<html><body><h1>Flight Status</h1><div>UA 3 United Airlines ORD Chicago ZRH Zurich Scheduled On time</div><div>Flight Departure Times Scheduled 15:50 CDT</div><div>Flight Arrival Times Scheduled 07:45 CEST</div></body></html>`;
     const record = parseFlightStatsPublicSchedule(html, 'UAL3', '2026-10-01');
@@ -794,7 +833,7 @@ describe('public schedule fallback', () => {
     assert.equal(record?.status, 'scheduled');
   });
 
-  it('parses public scheduled and actual gate times when FlightStats exposes them', { todo: "Separate follow-up #7: shared-date times — https://github.com/jarndtphoto/Inbound/blob/codex/test-suite-cleanup/docs/test-cleanup-held-bugs.md#7-one-date-followed-by-multiple-public-time-labels" }, () => {
+  it('parses public scheduled and actual gate times when FlightStats exposes them', () => {
     const html = `<html><body><h1>Flight Status</h1><div>AA 536 American Airlines CLT Charlotte ORD Chicago Arrived On time</div><div>Flight Departure Times 01-Oct-2026 Scheduled 16:18 EDT Actual 16:24 EDT Terminal N/A Gate B12</div><div>Flight Arrival Times 01-Oct-2026 Scheduled 17:38 CDT Actual 17:31 CDT Terminal 3 Gate K8 Baggage 4</div></body></html>`;
     const record = parseFlightStatsPublicSchedule(html, 'AAL536', '2026-10-01');
     assert.equal(record?.status, 'arrived');
