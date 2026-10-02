@@ -2894,34 +2894,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		}),
 		safe(loadRoute(parsed.callsign), null),
 	]);
-	const initialOfficial = await loadOfficialFlightData(parsed.callsign, {
+	const operatingIdent = operatingIdentFromSchedule(publicAware, parsed.callsign);
+	const official = await loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
 		fr24OriginIata: publicAware?.originIata ?? null,
 		fr24DestIata: publicAware?.destIata ?? null,
 		fr24Registration: publicAware?.tail ?? null,
+		fr24OperatingCallsign: operatingIdent,
 	});
-	let official = initialOfficial;
-	// Codeshare/public flight-number pages can identify the operating ATC
-	// callsign even when the requested marketing callsign has no FR24 match.
-	// The ground map already uses this identity from flightId; use the same
-	// identity in the main story so stage detection sees the same aircraft.
-	const operatingIdent = operatingIdentFromSchedule(publicAware, parsed.callsign);
-	if (!official.fr24 && official.status.fr24 === "NO_MATCH" && operatingIdent) {
-		const operatingOfficial = await loadOfficialFlightData(operatingIdent);
-		if (operatingOfficial.fr24) {
-			console.info(JSON.stringify({
-				event: "fr24_public_operating_callsign_match",
-				requested: parsed.callsign,
-				operating: operatingIdent,
-				flightId: publicAware?.flightId ?? null,
-			}));
-			official = {
-				...official,
-				fr24: operatingOfficial.fr24,
-				status: { ...official.status, fr24: operatingOfficial.status.fr24 },
-			};
-		}
-	}
 	const fr24Aware = publicAware ? null : awareFromLiveFr24(official.fr24);
 	if (fr24Aware) {
 		console.info(JSON.stringify({

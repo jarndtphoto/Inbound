@@ -2,6 +2,8 @@ import { RouteMap } from "./route-map";
 import { getAirportSurfaceCached } from "@/lib/airport-surface";
 import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.server";
 import { haversineNm } from "@/lib/geo";
+import { flightPollingComplete, groundPollingEnabled } from "@/lib/flight-polling";
+import { usePageVisible } from "@/lib/use-page-visible";
 import { getGroundPosition } from "@/lib/ground-position";
 import type { FlightStory } from "@/lib/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -268,6 +270,7 @@ function GroundMovementMap({
   aircraft,
   frozen = false,
   inFlight = false,
+  active = true,
 }: {
   story: FlightStory;
   mode: GroundMode;
@@ -275,7 +278,9 @@ function GroundMovementMap({
   aircraft: AircraftSnapshot | null;
   frozen?: boolean;
   inFlight?: boolean;
+  active?: boolean;
 }) {
+  const pageVisible = usePageVisible();
   const airport = mode.airport;
   const surfaceQ = useQuery(surfaceQueryOptions(airport));
   const storyAircraft = story.aircraft;
@@ -333,11 +338,13 @@ function GroundMovementMap({
       airportLat: airport.lat,
       airportLon: airport.lon,
     } }),
-    enabled: !inFlight && !storyFast && Boolean(identityRegistration || identityCallsign),
-    refetchInterval: 3_000,
-    refetchIntervalInBackground: true,
+    enabled: groundPollingEnabled(active, pageVisible, flightPollingComplete(story), inFlight, Boolean(storyFast), Boolean(identityRegistration || identityCallsign)),
+    refetchInterval: () => active && document.visibilityState === "visible" && !flightPollingComplete(story) ? 3_000 : false,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
-    staleTime: 750,
+    // Re-enabling a visible Map must fetch immediately, even after a short hide.
+    staleTime: 0,
     gcTime: 60_000,
     retry: false,
   });
@@ -544,7 +551,7 @@ function initialTab(story: FlightStory): MapTab {
   return "flight";
 }
 
-export function MovementMap({ story }: { story: FlightStory }) {
+export function MovementMap({ story, active = true }: { story: FlightStory; active?: boolean }) {
   const queryClient = useQueryClient();
   const trail = useMovementTrail(story);
   const flightKey = `${story.iata}:${story.origin.iata}:${story.dest.iata}`;
@@ -665,6 +672,7 @@ export function MovementMap({ story }: { story: FlightStory }) {
       <div className="min-h-0 flex-1">
         {tab === "departure" ? (
           <GroundMovementMap
+            active={active}
             story={story}
             mode={{ kind: "departure", airport: story.origin }}
             trail={departureTrail}
@@ -674,6 +682,7 @@ export function MovementMap({ story }: { story: FlightStory }) {
           />
         ) : tab === "arrival" ? (
           <GroundMovementMap
+            active={active}
             story={story}
             mode={{ kind: "arrival", airport: story.dest }}
             trail={arrivalTrail}
