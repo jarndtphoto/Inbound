@@ -1919,11 +1919,14 @@ function comfortOf(samples, hazards, dest, origin, progress, times, inboundStatu
 	const grade = letterOf(score);
 	const label = "";
 	const weatherEvents = arriving ? [] : routeWeatherEvents(ahead);
-	const bumpEvent = weatherEvents.find((event) => event.start.chop !== "smooth" && event.startEtaMin > 4);
+	const bumpEvent = weatherEvents.find((event) => (event.strongestChop ?? event.start.chop) !== "smooth" && event.startEtaMin > 4);
 	const bump = bumpEvent?.start ?? null;
 	const reasons = [];
 	if (inboundOpen && (originDelayed || originLow)) reasons.push(`Inbound isn’t at the gate yet, and ${origin.iata} weather/delays are already in the trip grade.`);
-	if (bumpEvent) reasons.push(`${bumpEvent.start.chop === "light" ? "Light turbulence" : bumpEvent.start.chop === "moderate" ? "Moderate turbulence" : "Quite bumpy air"} is possible in about ${formatDuration(bumpEvent.startEtaMin)}${bumpEvent.note ? ` — ${bumpEvent.note}` : ""}.`);
+	if (bumpEvent) {
+		const bumpChop = bumpEvent.strongestChop ?? bumpEvent.start.chop;
+		reasons.push(`${bumpChop === "light" ? "Light turbulence" : bumpChop === "moderate" ? "Moderate turbulence" : "Quite bumpy air"} is possible in about ${formatDuration(bumpEvent.startEtaMin)}${bumpEvent.note ? ` — ${bumpEvent.note}` : ""}.`);
+	}
 	if (convAny) reasons.push("Storms clip part of this corridor. The rest can still be a sitting-still ride.");
 	if (originLow) reasons.push(`Low weather at ${origin.iata} — inbound and the taxi both feel that.`);
 	if (destLow) reasons.push(`Low weather into ${dest.iata} — arrival and the ramp.`);
@@ -1942,7 +1945,7 @@ function comfortOf(samples, hazards, dest, origin, progress, times, inboundStatu
 	const strongest = lateWorst === "severe" || worstAhead === "severe" ? "severe"
 		: lateWorst === "moderate" || worstAhead === "moderate" ? "moderate"
 			: bump?.chop === "light" || worstAhead === "light" ? "light" : "smooth";
-	const timedSentenceCarriesStrongest = Boolean(bumpEvent && bumpEvent.start.chop === strongest);
+	const timedSentenceCarriesStrongest = Boolean(bumpEvent && (bumpEvent.strongestChop ?? bumpEvent.start.chop) === strongest);
 	if (strongest === "severe") ride = timedSentenceCarriesStrongest ? "Choppy ride" : "Severe chop";
 	else if (strongest === "moderate") ride = timedSentenceCarriesStrongest ? "Choppy ride" : "Moderate chop";
 	else if (strongest === "light") ride = timedSentenceCarriesStrongest ? "Mostly smooth ride" : "Light chop";
