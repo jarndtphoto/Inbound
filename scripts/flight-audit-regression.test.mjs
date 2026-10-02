@@ -551,7 +551,7 @@ describe('first-class pushback and taxi-out stages', () => {
 
   it('shows sustained 8–20 kt movement as Taxiing out', () => {
     const live = { ...origin, onGround: true, gsKt: 14, seenSec: 1 };
-    assert.equal(currentStageOf({ ...base, live, pushed: true, distPark: 0.12 }), 'taxi');
+    assert.equal(currentStageOf({ ...base, live, pushed: true, distPark: 0.12, taxiHint: true }), 'taxi');
   });
 
   it('does not return to At gate through a stale surface gap', () => {
@@ -624,7 +624,7 @@ describe('on the move evidence', () => {
     assert.equal(taxiing.currentStage, 'taxi');
     assert.equal(taxiing.times.pushUnix, 1789231020, 'taxi out retains first live-detected push time');
     assert.equal(taxiing.times.pushSource, 'live_detected');
-    assert.match(nextStep(taxiing, taxiing.fetchedAt).body, /Pushback was detected from live movement around/);
+    assert.match(nextStep(taxiing, taxiing.fetchedAt).body, /The aircraft has left the gate area and is heading toward the runway/);
 
     now += 40_000;
     record.gateDepartureTimes.actual = 1789231080; // Provider later reports 9:38.
@@ -704,7 +704,7 @@ describe('on the move evidence', () => {
     assert.equal(taxiing.times.pushSource, 'live_detected');
     assert.equal(taxiing.times.pushUnix, observedPushUnix);
     const passenger = nextStep(taxiing, taxiing.fetchedAt);
-    assert.match(passenger.body, /Pushback was detected from live movement around/);
+    assert.match(passenger.body, /The aircraft has left the gate area and is heading toward the runway/);
     assert.doesNotMatch(passenger.body, /not yet confirmed|never confirmed/i);
 
     for (const update of [

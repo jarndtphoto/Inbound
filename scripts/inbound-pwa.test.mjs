@@ -25,7 +25,7 @@ describe("Inbound iPhone Home Screen app", () => {
   it("declares Apple standalone metadata and edge-to-edge safe-area support", () => {
     assert.match(root, /apple-mobile-web-app-capable.*yes/);
     assert.match(root, /apple-mobile-web-app-title.*Inbound/);
-    assert.match(root, /apple-mobile-web-app-status-bar-style.*default/);
+    assert.match(root, /apple-mobile-web-app-status-bar-style.*black-translucent/);
     assert.match(root, /viewport-fit=cover/);
     assert.match(root, /apple-touch-icon.*inbound-icon-180\.png/);
     assert.doesNotMatch(root, /apple-touch-startup-image/, "legacy black launch images must not override the light app background");

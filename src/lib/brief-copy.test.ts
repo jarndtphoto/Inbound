@@ -387,11 +387,12 @@ describe("Overview record migration", () => {
     assert.doesNotMatch(source, /function RecordCard|function recordRows|<RecordCard/);
   });
 
-  it("keeps live priorities visible and puts only secondary facts in informative disclosures", () => {
+  it("keeps live timing and arrival facts visible while secondary facts stay in disclosures", () => {
     const source = readFileSync(new URL("../components/filed-app.tsx", import.meta.url), "utf8");
     const overview = source.slice(source.indexOf('id="panel-Overview"'), source.indexOf('id="panel-Route"'));
     assert.ok(overview.indexOf("<FlightHead") < overview.indexOf("<OverviewDetails"));
-    assert.ok(overview.indexOf("<TravelerCompanion") < overview.indexOf("<OverviewDetails"));
+    assert.ok(overview.indexOf("<OverviewDetails") < overview.indexOf("<TravelerCompanion"));
+    assert.match(overview, /timing=\{<TimesStrip/);
     for (const title of ["Flight details", "Aircraft", "Airport details", "Baggage"]) {
       assert.match(source, new RegExp(`title="${title}"`));
     }
@@ -400,16 +401,20 @@ describe("Overview record migration", () => {
     assert.match(source, /summary={`\$\{originStop\} → \$\{destStop\}`}/);
     assert.match(source, /summary=\{baggageSummary\(baggage\.result\)\}/);
     const details = source.slice(source.indexOf("function OverviewDetails"), source.indexOf("function kindLabel"));
+    assert.ok(details.indexOf("{timing}") < details.indexOf("<OverviewDisclosure"));
+    assert.match(details, /className="arrival-details"/);
     assert.doesNotMatch(details, /callsign|chosenPosition|seenSec|hex/i);
     const traveler = readFileSync(new URL("../components/traveler-companion.tsx", import.meta.url), "utf8");
     assert.doesNotMatch(traveler, /BaggageStatus|Baggage carousel/);
   });
 
-  it("groups the unchanged live altitude and speed bar above Refresh", () => {
+  it("keeps guarded live altitude and speed in the timing section and Refresh in the summary", () => {
     const source = readFileSync(new URL("../components/filed-app.tsx", import.meta.url), "utf8");
     const strip = source.slice(source.indexOf("function TimesStrip"), source.indexOf("function Freshness"));
-    assert.ok(strip.indexOf('label="Live flight"') > strip.indexOf("{airborne ? ("));
-    assert.ok(strip.indexOf('label="Live flight"') < strip.indexOf("<Freshness"));
+    assert.match(strip, /showLiveFlight \? \([\s\S]*className="timing-position"[\s\S]*Altitude[\s\S]*ac\?\.gsKt/);
+    assert.doesNotMatch(strip, /<Freshness/);
+    const head = source.slice(source.indexOf("function FlightHead"), source.indexOf("function DetailRow"));
+    assert.match(head, /<Freshness/);
     assert.match(strip, /liveFix\(story\).*flightAirborne\(story\).*ac.*!ac\.onGround.*ac\.altFt \|\| ac\.gsKt/);
   });
 });
