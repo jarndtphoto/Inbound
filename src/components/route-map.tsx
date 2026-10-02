@@ -703,7 +703,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         data-expected-runway-label
         className="expected-runway-chip pointer-events-none absolute rounded-sm border border-border bg-bg/90 px-2 py-1 text-fg"
         style={{ left: `clamp(12px, calc(${(sx(story.route.expectedArrival.threshold.lon) * zoom.s + zoom.x) / W * 100}% - 125px), calc(100% - 262px))`,
-          top: `${Math.max(18, Math.min(72, (sy(story.route.expectedArrival.threshold.lat) * zoom.s + zoom.y) / H * 100 + 4))}%` }}>
+          top: `clamp(64px, calc(${(sy(story.route.expectedArrival.threshold.lat) * zoom.s + zoom.y) / H * 100}% - 72px), calc(100% - 112px))` }}>
         <span className="block text-sm font-medium">{story.route.expectedArrival.source === "provider" ? "Reported" : "Expected"} Rwy {story.route.expectedArrival.runway} · {story.route.expectedArrival.source}</span>
         <span className="block text-xs text-muted">{story.route.expectedArrival.estimated ? "Estimated runway and approach" : "Projected approach"}</span>
       </div>}

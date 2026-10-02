@@ -5,7 +5,8 @@ import { arrivalStateStore } from "./arrival-state-store.server.ts";
 const TTL = 5 * 60_000;
 const cache = new Map<string, { expires: number; value: Promise<AtisEntry[]> }>();
 export function clearArrivalAtisMemoryCache() { cache.clear(); }
-export async function loadArrivalAtis(icao: string, store = arrivalStateStore): Promise<AtisEntry[]> {
+type AtisStore = Pick<typeof arrivalStateStore, "loadAtis" | "saveAtis">;
+export async function loadArrivalAtis(icao: string, store: AtisStore = arrivalStateStore): Promise<AtisEntry[]> {
   if (!/^[A-Z0-9]{4}$/.test(icao)) return [];
   const existing = cache.get(icao);
   if (existing && existing.expires > Date.now()) return existing.value;
@@ -41,7 +42,7 @@ export async function loadArrivalAtis(icao: string, store = arrivalStateStore): 
   cache.set(icao, { expires: Date.now() + TTL, value });
   return value;
 }
-export async function expectedArrivalRunway(icao: string, input: Omit<Parameters<typeof pickArrivalRunway>[0], "ends" | "atis">, store = arrivalStateStore) {
+export async function expectedArrivalRunway(icao: string, input: Omit<Parameters<typeof pickArrivalRunway>[0], "ends" | "atis">, store: AtisStore = arrivalStateStore) {
   const runways = (ends as Record<string, RunwayEnd[]>)[icao] ?? [];
   if (!runways.length) return null;
   const atis = await loadArrivalAtis(icao, store);
@@ -50,6 +51,7 @@ export async function expectedArrivalRunway(icao: string, input: Omit<Parameters
   // An explicitly reported runway supersedes an estimate. Missing ATIS or
   // changing wind cannot revoke an already selected arrival runway.
   if (reported) return pickArrivalRunway({ ...input, ends: runways, actualLanding: true });
-  if (input.previous && (!arrivals.length || arrivals.includes(input.previous.runway))) return input.previous;
+  if (input.previous && !arrivals.length) return input.previous;
+  if (input.previous && arrivals.includes(input.previous.runway)) return { ...input.previous, source: "ATIS", estimated: true };
   return pickArrivalRunway({ ...input, ends: runways, atis });
 }

@@ -46,6 +46,10 @@ test("durable runway/side across cold instances, optimistic race, ATIS last-good
     assert.equal(noAtis!.runway, "10R");
     const provider = await expectedArrivalRunway("KORD", { previous: state.runway, providerRunway:"10C" }, store());
     assert.equal(provider!.runway, "10C"); assert.equal(provider!.source, "provider");
+    await store().saveAtis("KORD", [{ ...atis[0], datis: `ATIS ${hhmm}Z. LDG RWY 9L.` }]);
+    clearArrivalAtisMemoryCache();
+    const changed = await expectedArrivalRunway("KORD", { previous: state.runway }, store());
+    assert.equal(changed!.runway, "9L", "a new arrival assignment invalidates the held runway");
     const broken = createArrivalStateStore(async () => { throw Error("DB down"); });
     assert.equal((await broken.load("x")).status, "read_failed");
     assert.equal((await broken.save("x", state, 0)).status, "write_failed");

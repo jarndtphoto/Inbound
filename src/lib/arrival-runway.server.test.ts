@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { clearArrivalAtisMemoryCache, loadArrivalAtis } from "./arrival-runway.server.ts";
 test('five-minute airport cache coalesces calls and rejects stale/failed bulletins',async()=>{
- const store={loadAtis:async()=>[],saveAtis:async()=>{}} as any; clearArrivalAtisMemoryCache();
+ const store={loadAtis:async()=>[],saveAtis:async()=>{}}; clearArrivalAtisMemoryCache();
  const load=(icao:string)=>loadArrivalAtis(icao,store);
  const saved=globalThis.fetch; let calls=0;
  const date=new Date(), hhmm=String(date.getUTCHours()).padStart(2,'0')+String(date.getUTCMinutes()).padStart(2,'0');
