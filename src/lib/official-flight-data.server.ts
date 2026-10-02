@@ -1,5 +1,5 @@
 import { loadAeroApiFlight, aeroApiConfigured } from "./flightaware-aeroapi.server.ts";
-import { loadFr24Flight, loadFr24FlightByNumber, loadFr24FlightByRegistration, fr24Configured } from "./fr24.server.ts";
+import { loadFr24Flight, loadFr24FlightByNumber, loadFr24FlightByNumberAndRoute, loadFr24FlightByRegistration, fr24Configured } from "./fr24.server.ts";
 import type { NormalizedFlight, ProviderState } from "./flight-data.ts";
 
 function stateFor(error: unknown): ProviderState {
@@ -44,14 +44,23 @@ function registrationCandidateMatchesLeg(candidate: NormalizedFlight, authoritat
 
 export async function loadOfficialFlightData(
   ident: string,
-  options?: { fr24FlightNumber?: string | null; fr24Bounds?: string | null },
+  options?: {
+    fr24FlightNumber?: string | null;
+    fr24Bounds?: string | null;
+    fr24OriginIata?: string | null;
+    fr24DestIata?: string | null;
+  },
 ) {
   const fa = await probe(aeroApiConfigured(), () => loadAeroApiFlight(ident));
   const preferredFlightNumber = options?.fr24FlightNumber?.replace(/\s/g, "").trim().toUpperCase() || null;
+  const routeOrigin = options?.fr24OriginIata?.trim().toUpperCase() || null;
+  const routeDestination = options?.fr24DestIata?.trim().toUpperCase() || null;
   let fr = await probe(fr24Configured(), () =>
-    preferredFlightNumber
-      ? loadFr24FlightByNumber(preferredFlightNumber, options?.fr24Bounds ?? undefined)
-      : loadFr24Flight(ident)
+    preferredFlightNumber && routeOrigin && routeDestination
+      ? loadFr24FlightByNumberAndRoute(preferredFlightNumber, routeOrigin, routeDestination)
+      : preferredFlightNumber
+        ? loadFr24FlightByNumber(preferredFlightNumber, options?.fr24Bounds ?? undefined)
+        : loadFr24Flight(ident)
   );
   if (fr.flight && preferredFlightNumber) {
     console.info(JSON.stringify({
@@ -63,7 +72,7 @@ export async function loadOfficialFlightData(
     }));
   }
 
-  if (fr.state === "NO_MATCH" && preferredFlightNumber) {
+  if (fr.state === "NO_MATCH" && preferredFlightNumber && !(routeOrigin && routeDestination)) {
     fr = await probe(fr24Configured(), () => loadFr24Flight(ident));
   }
 
