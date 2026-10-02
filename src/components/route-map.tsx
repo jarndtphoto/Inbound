@@ -20,8 +20,10 @@ const W = 800;
 const H = 800;
 const PAD = 40;
 const MAX_ROUTE_ZOOM = 12;
-const MIN_FREE_ROUTE_ZOOM = 0.01;
-const PAN_WORLD_SCREENS = 4;
+const MIN_FREE_ROUTE_ZOOM = 0.75;
+// Explore the geography around the route, rather than scrolling indefinitely.
+// Full country/state geometry is rendered in this buffered route area.
+const ROUTE_PAN_BUFFER = 0.5;
 
 function chopClass(c: Chop, past: boolean) {
   if (past) return "stroke-muted/40";
@@ -206,12 +208,14 @@ function clampView(next: { s: number; x: number; y: number }, mapH = 800, freePa
   const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
   const s = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, next.s));
   if (freePan) {
-    const xLimit = W * PAN_WORLD_SCREENS * s;
-    const yLimit = mapH * PAN_WORLD_SCREENS * s;
+    const maxX = W * ROUTE_PAN_BUFFER * s;
+    const maxY = mapH * ROUTE_PAN_BUFFER * s;
+    const minX = W - W * (1 + ROUTE_PAN_BUFFER) * s;
+    const minY = mapH - mapH * (1 + ROUTE_PAN_BUFFER) * s;
     return {
       s,
-      x: Math.min(xLimit, Math.max(-xLimit, next.x)),
-      y: Math.min(yLimit, Math.max(-yLimit, next.y)),
+      x: Math.min(maxX, Math.max(minX, next.x)),
+      y: Math.min(maxY, Math.max(minY, next.y)),
     };
   }
   if (s <= 1.001) return { s: 1, x: 0, y: 0 };
@@ -306,7 +310,8 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
           my: mid.my,
         };
         dragRef.current = null;
-      } else if (e.touches.length === 1 && freePan) {
+      } else if (e.touches.length === 1 && freePan &&
+          !(e.target instanceof Element && e.target.closest("button, summary, a"))) {
         const t = e.touches[0]!;
         dragRef.current = { px: t.clientX, py: t.clientY, x: viewRef.current.x, y: viewRef.current.y };
       }
@@ -345,6 +350,30 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
       if (e.touches.length === 0) dragRef.current = null;
     };
 
+    // Touch gestures retain pinch support. Mouse/pen use pointer capture so a
+    // drag continues smoothly even when the cursor leaves the map briefly.
+    let pointerDrag: { id: number; px: number; py: number; x: number; y: number } | null = null;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!freePan || e.pointerType === "touch" || e.button !== 0 ||
+          (e.target instanceof Element && e.target.closest("button, summary, a"))) return;
+      e.preventDefault();
+      pointerDrag = { id: e.pointerId, px: e.clientX, py: e.clientY, x: viewRef.current.x, y: viewRef.current.y };
+      el.setPointerCapture(e.pointerId);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!pointerDrag || pointerDrag.id !== e.pointerId) return;
+      const r = el.getBoundingClientRect();
+      apply({
+        s: viewRef.current.s,
+        x: pointerDrag.x + ((e.clientX - pointerDrag.px) / Math.max(1, r.width)) * W,
+        y: pointerDrag.y + ((e.clientY - pointerDrag.py) / Math.max(1, r.height)) * H,
+      });
+    };
+    const onPointerEnd = (e: PointerEvent) => {
+      if (pointerDrag?.id !== e.pointerId) return;
+      pointerDrag = null;
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    };
     const blockPageZoom = (e: Event) => e.preventDefault();
     const blockPageGesture = (e: Event) => {
       const t = e.target as Node | null;
@@ -352,6 +381,11 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
       e.preventDefault();
     };
 
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", onPointerEnd);
+    el.addEventListener("pointercancel", onPointerEnd);
+    el.addEventListener("lostpointercapture", onPointerEnd);
     el.addEventListener("wheel", onWheel, { passive: false });
     el.addEventListener("touchstart", onTouchStart, { passive: false });
     el.addEventListener("touchmove", onTouchMove, { passive: false });
@@ -364,6 +398,11 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
     document.addEventListener("gesturechange", blockPageGesture, { passive: false });
     document.addEventListener("gestureend", blockPageGesture, { passive: false });
     return () => {
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerEnd);
+      el.removeEventListener("pointercancel", onPointerEnd);
+      el.removeEventListener("lostpointercapture", onPointerEnd);
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
@@ -582,7 +621,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         ref={(node) => { zoom.boxRef.current = node; frameRef.current = node; }}
         data-map-box
         className={cn("relative overflow-hidden select-none", fixedViewport && "w-full min-h-0 flex-1")}
-        style={{ touchAction: fixedViewport ? "none" : "pan-y",  }}
+        style={{ touchAction: fixedViewport ? "none" : "pan-y", cursor: freePan ? "grab" : undefined }}
       >
       <svg
         viewBox={`0 0 ${W} ${H}`}
