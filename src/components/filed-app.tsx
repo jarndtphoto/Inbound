@@ -24,7 +24,7 @@ import { sampleWeather } from "@/lib/route-weather-segments";
 import { WeatherEventBody, WeatherEventHeadline, WeatherIntensityLabel } from "@/components/weather-event-copy";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Clock, Gauge, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, House, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, Info } from "lucide-react";
+import { Clock, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, House, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, Info } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type ReactNode } from "react";
 
 const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
@@ -1038,16 +1038,10 @@ function StatusCard({
   prominent?: boolean;
 }) {
   return (
-    <div className={cn(
-      "min-w-0 rounded-md border border-border bg-bg",
-      prominent ? "flex min-h-28 flex-col justify-center px-4 py-3" : "flex min-h-20 flex-col justify-center px-3 py-2",
-    )}>
-      <p className="font-mono text-xs tracking-widest text-subtle uppercase">{title}</p>
-      <p className={cn(
-        "mt-1 break-words font-display font-semibold leading-none",
-        prominent ? "text-3xl" : "text-xl",
-      )}>{value ?? "—"}</p>
-      {detail ? <p className={cn("mt-1 text-muted", prominent ? "text-sm" : "text-xs")}>{detail}</p> : null}
+    <div className={cn("timing-value", prominent && "timing-value-prominent")}>
+      <p className="timing-label">{title}</p>
+      <p className={cn("timing-number", /\b(?:AM|PM)\b/.test(value ?? "") && "timing-number-clock")}>{value ?? "—"}</p>
+      {detail ? <p className="timing-detail">{detail}</p> : null}
     </div>
   );
 }
@@ -1177,6 +1171,7 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
   const takeoffActualLabel = story.times.takeoffKind === "actual" ? "Actual"
     : story.times.takeoffKind === "estimated" ? "Estimated" : null;
   return <section className="overview-details mt-4 rounded-xl border border-border bg-surface px-4" aria-label="More flight information">
+    {timing}
     <dl className="arrival-details"><div><dt>Terminal</dt><dd>{baggage.result?.terminal ?? "—"}</dd><p>{story.dest.city} ({story.dest.iata})</p></div><div><dt>Gate</dt><dd>{story.times.destGate ?? "—"}</dd><p>{story.times.destGate ? "Arrival gate" : "Not assigned"}</p></div><div><dt>Baggage</dt><dd>{baggage.result?.status === "posted" && baggage.result.carousel ? baggage.result.carousel : "—"}</dd><p>{baggageSummary(baggage.result)}</p></div></dl>
     <OverviewDisclosure id="flight" title="Flight details" summary={`${story.iata} · ${story.origin.iata} → ${story.dest.iata}`} open={open.flight} onToggle={toggle}>
       <dl>
@@ -1194,7 +1189,6 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
         <DetailRow label="Scheduled landing" value={formatLocalUnix(story.times.origLandUnix, story.dest.tz) ?? story.times.landWas} />
         <DetailRow label="Planned flight time" value={plannedDuration(story)} />
       </dl>
-      {timing}
     </OverviewDisclosure>
     <OverviewDisclosure id="aircraft" title="Aircraft" summary={aircraftSummary} open={open.aircraft} onToggle={toggle}>
       <dl>
@@ -1289,11 +1283,10 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
   const preDepartureTakeoffPrimary = shownStage === "push" || shownStage === "taxi";
 
   return (
-    <div className="flight-times mt-3 border-t border-border pt-3">
-      <h3 className="mb-3 font-semibold">Live timing & position</h3>
+    <section className="flight-times" aria-label="Live timing and position">
       <div className="flex min-w-0 flex-col gap-3">
         {airborne ? (
-          <div className="grid min-w-0 grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)] gap-3">
+          <div className="timing-values">
             <StatusCard
               prominent
               title="Remaining"
@@ -1307,7 +1300,7 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
             />
           </div>
         ) : down ? (
-          <div className="grid min-w-0 grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)] gap-3">
+          <div className="timing-values">
             <StatusCard
               prominent
               title={parked ? "At the gate" : "Gate ETA"}
@@ -1321,7 +1314,7 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
             />
           </div>
         ) : (
-          <div className="grid min-w-0 grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)] gap-3">
+          <div className="timing-values">
             {preDepartureTakeoffPrimary ? (
               <>
                 <StatusCard
@@ -1355,18 +1348,14 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
         )}
 
         {showLiveFlight ? (
-          <dl className="grid grid-cols-1 gap-3">
-            <Stat
-              icon={Gauge}
-              label="Live flight"
-              value={ac?.altFt ? feetPretty(ac.altFt) : "—"}
-              sub={ac?.gsKt ? `${Math.round(ac.gsKt)} kt` : ""}
-            />
-          </dl>
+          <p className="timing-position">
+            <span>Altitude {ac?.altFt ? feetPretty(ac.altFt) : "—"}</span>
+            {ac?.gsKt ? <><span aria-hidden="true"> · </span><span>{Math.round(ac.gsKt)} kt</span></> : null}
+          </p>
         ) : null}
 
       </div>
-    </div>
+    </section>
   );
 }
 
