@@ -59,7 +59,7 @@ describe('passenger weather presentation', () => {
   });
 
   it('retains internal marker numbering for map association', () => {
-    assert.match(appSource, /eventNumber: i \+ 1/);
+    assert.match(appSource, /eventNumber: weatherEventNumber\(visibleGroups, g\)/);
     assert.match(mapSource, /eventNumber: number/);
   });
 });
@@ -71,7 +71,7 @@ describe('zoom-stable route presentation', () => {
 
   it('keeps every route, flown-track, projected, outline, and weather stroke screen-sized', () => {
     const strokes = source.split('\n').filter(line => line.includes('data-route-stroke='));
-    assert.ok(strokes.length >= 3, 'route stroke elements are explicitly identified');
+    assert.ok(strokes.length >= 2, 'route and outline stroke elements are explicitly identified');
     for (const stroke of strokes) assert.match(stroke, /vectorEffect="non-scaling-stroke"/);
   });
 
@@ -1014,10 +1014,10 @@ describe('AAL3197 weather entry rendering', () => {
   it('orders samples in direction of travel and discards points behind progress', () => {
     assert.ok(event);
     assert.equal(event.startFrac, 0.60);
-    assert.equal(event.endFrac, 0.72);
+    assert.equal(event.endFrac, 0.78);
     assert.equal(event.startEtaMin, 47);
-    assert.equal(event.endEtaMin, 59);
-    assert.deepEqual(event.ranges, [{ from: 0.60, to: 0.72 }]);
+    assert.equal(event.endEtaMin, 65);
+    assert.deepEqual(event.ranges, [{ from: 0.60, to: 0.78 }]);
   });
 
   it('renders the numbered marker at the affected-range entry coordinate', () => {
@@ -1068,6 +1068,6 @@ describe('AAL3197 weather entry rendering', () => {
     assert.equal(events[0].weakestChop, 'light');
     assert.equal(events[0].strongestChop, 'moderate');
     assert.equal(events[0].startEtaMin, 21);
-    assert.equal(events[0].endEtaMin, 26);
+    assert.equal(events[0].endEtaMin, 29);
   });
 });

@@ -1965,14 +1965,14 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
         const technical = technicalWeatherProducts(g.note);
         return <li key={i} className="rounded-xl border border-border bg-surface p-4">
           <WeatherEventHeadline copy={copy} />
-          {g.key.startsWith("turbulence:") && <p className="mt-1 text-sm"><WeatherIntensityLabel intensity={g.key.slice(11)} /> turbulence</p>}
+          {g.key.startsWith("turbulence:") && <p className="mt-1 text-sm"><WeatherIntensityLabel intensity={g.key.slice(11)} band={g.intensities.length === 1 && g.intensities[0] === "light-moderate" ? "light" : undefined} /> turbulence</p>}
           <p className="mt-2 flex items-center gap-2 text-sm font-medium"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
           <WeatherEventBody copy={copy} />
           {g.gaps && <p className="mt-2 text-sm text-muted">This may come and go briefly along the highlighted stretch.</p>}
           <p className="mt-3 text-sm font-medium">{source}{technical ? <span className="ml-1 text-xs font-normal text-muted">· {technical}</span> : null}</p>
           {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
             <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={title}>
-              <RouteMap story={story} fixedViewport weatherPreview={{ intensity: g.key.startsWith("turbulence:") ? g.key.slice(11) : undefined, eventNumber: weatherEventNumber(visibleGroups, g), label: copy.mapLabel, startFrac: g.startFrac, endFrac: g.endFrac, startEtaMin: g.startEtaMin, endEtaMin: g.endEtaMin, ranges: g.ranges }} />
+              <RouteMap story={story} fixedViewport weatherPreview={{ intensityBand: g.intensities.length === 1 && g.intensities[0] === "light-moderate" ? "light" : undefined, intensity: g.key.startsWith("turbulence:") ? g.key.slice(11) : undefined, eventNumber: weatherEventNumber(visibleGroups, g), label: copy.mapLabel, startFrac: g.startFrac, endFrac: g.endFrac, startEtaMin: g.startEtaMin, endEtaMin: g.endEtaMin, ranges: g.ranges }} />
             </div>
             <figcaption className="mt-2 text-xs text-muted">Highlighted: where these conditions overlap the route. Radar colors show recent precipitation; conditions may change before the flight reaches this area. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
           </figure>}

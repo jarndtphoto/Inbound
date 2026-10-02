@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { routeWeatherSegments, sampleWeather, turbulenceBand } from "./route-weather-segments.ts";
 import { routeWeatherEvents, weatherEventMarker, weatherEventNumber } from "./weather-events.ts";
 import type { Chop, RouteSample } from "./types.ts";
+import { readFileSync } from "node:fs";
 
 const sample = (i: number, chop: Chop, extras = {}): RouteSample => ({ lat: 40 + i / 10, lon: -88 + i / 10, frac: i / 10, distNm: i, remainingNm: 10 - i, etaMin: i, chop, cloud: false, convective: false, note: null, fix: false, ...extras });
 
@@ -56,5 +57,25 @@ test("each marker is exactly the first point of its segment, including unsorted 
       assert.equal(marker.lat, segment.points[0].lat);
       assert.equal(marker.lon, segment.points[0].lon);
     }
+  }
+});
+
+test("explicit light-to-moderate retains its yellow range label instead of becoming plain moderate", () => {
+  const samples = [sample(0, "moderate", { note: "PIREP LIGHT-MODERATE" }), sample(1, "smooth")];
+  assert.equal(routeWeatherEvents(samples)[0].key, "turbulence:light-moderate");
+  assert.equal(routeWeatherSegments(samples)[0].band, "light");
+});
+
+test("yellow and red tokens contrast with both themes and the radar outline background", () => {
+  const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+  const luminance = (hex: string) => hex.match(/[\da-f]{2}/gi)!.map(c => parseInt(c, 16) / 255).map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4).reduce((v, c, i) => v + c * [0.2126, 0.7152, 0.0722][i], 0);
+  const contrast = (a: string, b: string) => (Math.max(luminance(a), luminance(b)) + 0.05) / (Math.min(luminance(a), luminance(b)) + 0.05);
+  const tokens = (name: string) => [...css.matchAll(new RegExp(`--color-${name}: (#[\\da-f]{6});`, "gi"))].map(m => m[1]);
+  for (const name of ["turbulence-light", "turbulence-moderate"]) {
+    const [dark, light] = tokens(name);
+    assert.ok(contrast(dark, "081725") >= 4.5, `${name} dark text and outline`);
+    assert.ok(contrast(light, "fcfaf5") >= 4.5, `${name} light text and outline`);
+    assert.ok(contrast(dark, "193346") >= 3, `${name} dark terrain`);
+    assert.ok(contrast(light, "e9eee1") >= 3, `${name} light terrain`);
   }
 });

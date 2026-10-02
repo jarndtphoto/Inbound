@@ -27,8 +27,8 @@ export type RouteWeatherSegment = ReturnType<typeof sampleWeather> & { past: boo
 export function routeWeatherSegments(samples: RouteSample[], progress = -Infinity): RouteWeatherSegment[] {
   const ordered = orderedWeatherSamples(samples), segments: RouteWeatherSegment[] = [];
   ordered.forEach((sample, i) => {
-    const next = ordered[i + 1];
-    if (next && Math.abs(next.lon - sample.lon) > 180) return;
+    const candidate = ordered[i + 1];
+    const next = candidate && Math.abs(candidate.lon - sample.lon) <= 180 ? candidate : undefined;
     const weather = sampleWeather(sample), past = sample.frac < progress;
     const previous = segments.at(-1);
     if (previous && previous.intensity === weather.intensity && previous.kind === weather.kind && previous.past === past && previous.points.at(-1) === sample) {

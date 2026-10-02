@@ -1,0 +1,106 @@
+{
+  "flight": "AA5012",
+  "capturedAt": 1790951650698,
+  "progress": 1,
+  "samples": [
+    {
+      "frac": 0,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.08940798792164831,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.1876772658813986,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.285364356494624,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3868864966499761,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.4895587122942328,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6023795664173185,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7152004205404041,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8304879718492544,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": true
+    },
+    {
+      "frac": 0.9472701816348905,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 1,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    }
+  ],
+  "visibleEvents": [],
+  "fullRouteEvents": [
+    {
+      "key": "turbulence:moderate",
+      "startFrac": 0.1876772658813986,
+      "endFrac": 0.6023795664173185,
+      "gaps": false,
+      "ranges": [
+        {
+          "from": 0.1876772658813986,
+          "to": 0.6023795664173185
+        }
+      ],
+      "startChop": "moderate",
+      "weakest": "moderate",
+      "strongest": "moderate"
+    },
+    {
+      "key": "clouds",
+      "startFrac": 0.8304879718492544,
+      "endFrac": 0.8304879718492544,
+      "gaps": false,
+      "ranges": [
+        {
+          "from": 0.8304879718492544,
+          "to": 0.8304879718492544
+        }
+      ],
+      "startChop": "smooth",
+      "weakest": "smooth",
+      "strongest": "smooth"
+    }
+  ]
+}

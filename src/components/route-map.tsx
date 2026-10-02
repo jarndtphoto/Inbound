@@ -420,7 +420,7 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { intensity?: string; eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] } }) {
+export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { intensityBand?: string; intensity?: string; eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] } }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [mapHeight, setMapHeight] = useState(800);
   useEffect(() => {
@@ -510,7 +510,6 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
     ? (story.times.landUnix - takeoffAt) / 60 : null;
   const mapEvents = routeWeatherEvents(samples, progress);
-  useEffect(() => { if (!weatherPreview) console.info("route-weather-preview-capture", JSON.stringify(story)); }, [story.fetchedAt]);
   // Both the full map and preview pin the event's entry point. The affected
   // route line still spans every range through the event's exit.
   const ticks = weatherPreview
@@ -520,6 +519,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           Math.abs(sample.frac - weatherPreview.startFrac) < Math.abs(best.frac - weatherPreview.startFrac) ? sample : best, samples[0]),
         alertLabel: weatherPreview.label,
         intensity: weatherPreview.intensity,
+        intensityBand: weatherPreview.intensityBand,
         durationMin: weatherPreview.endEtaMin - weatherPreview.startEtaMin,
         intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + weatherPreview.startEtaMin
           : plannedMinutes == null ? null : weatherPreview.startFrac * plannedMinutes
@@ -528,6 +528,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         eventNumber: weatherEventNumber(mapEvents, event),
         ...event.start,
         alertLabel: weatherLabel(event.start, event.key, event.note),
+        intensityBand: event.intensities.length === 1 && event.intensities[0] === "light-moderate" ? "light" : undefined,
         intensity: event.key.startsWith("turbulence:") ? event.key.slice(11) : undefined,
         durationMin: airborneNow ? event.endEtaMin - event.startEtaMin
           : plannedMinutes == null ? null : (event.endFrac - event.startFrac) * plannedMinutes,
@@ -744,7 +745,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         <details className="group">
           <summary className="cursor-pointer py-3 font-semibold">Weather alerts</summary>
           <div className="absolute inset-x-0 bottom-full max-h-48 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
-            {ticks.map((s) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{s.eventNumber || (s.convective ? "⚡" : "☁")}</span><div>{s.intensity && <p><WeatherIntensityLabel intensity={s.intensity} /> turbulence</p>}<p className={sampleWeather(s).band === "light" ? "font-semibold text-turbulence-light" : sampleWeather(s).band === "moderate" ? "font-semibold text-turbulence-moderate" : "font-semibold"}>{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
+            {ticks.map((s) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{s.eventNumber || (s.convective ? "⚡" : "☁")}</span><div>{s.intensity && <p><WeatherIntensityLabel intensity={s.intensity} band={s.intensityBand} /> turbulence</p>}<p className={sampleWeather(s).band === "light" ? "font-semibold text-turbulence-light" : sampleWeather(s).band === "moderate" ? "font-semibold text-turbulence-moderate" : "font-semibold"}>{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
             
             {!ticks.length && <p>No map alerts shown. Coverage may be incomplete.</p>}
           </div>
