@@ -585,6 +585,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         style={{ touchAction: fixedViewport ? "none" : "pan-y",  }}
       >
       <svg
+        data-route-map
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="xMidYMid meet"
         className={fixedViewport ? "block h-full w-full" : "block aspect-square h-auto w-full"}
