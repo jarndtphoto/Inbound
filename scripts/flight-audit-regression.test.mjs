@@ -22,7 +22,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
 const { normalizeAeroApiRoute } = await import('../src/lib/flightaware-aeroapi.server.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
@@ -730,6 +730,41 @@ describe('public schedule fallback', () => {
     assert.equal(record?.originIata, 'ORD');
     assert.equal(record?.destIata, 'ZRH');
     assert.equal(record?.status, 'scheduled');
+  });
+
+  it('parses public scheduled and actual gate times when FlightStats exposes them', () => {
+    const html = `<html><body><h1>Flight Status</h1><div>AA 536 American Airlines CLT Charlotte ORD Chicago Arrived On time</div><div>Flight Departure Times 01-Oct-2026 Scheduled 16:18 EDT Actual 16:24 EDT Terminal N/A Gate B12</div><div>Flight Arrival Times 01-Oct-2026 Scheduled 17:38 CDT Actual 17:31 CDT Terminal 3 Gate K8 Baggage 4</div></body></html>`;
+    const record = parseFlightStatsPublicSchedule(html, 'AAL536', '2026-10-01');
+    assert.equal(record?.status, 'arrived');
+    assert.equal(record?.gateOut?.scheduled, Date.UTC(2026, 9, 1, 20, 18) / 1000);
+    assert.equal(record?.gateIn?.actual, Date.UTC(2026, 9, 1, 22, 31) / 1000);
+  });
+
+  it('chooses the active return leg instead of the earlier same-number segment', () => {
+    const outbound = parseFlightStatsPublicSchedule(
+      `<html><body><h1>Flight Status</h1><div>AA 2966 American Airlines ORD Chicago SEA Seattle Arrived</div><div>Flight Departure Times 01-Oct-2026 Scheduled 10:00 CDT Actual 10:05 CDT</div><div>Flight Arrival Times 01-Oct-2026 Scheduled 12:50 PDT Actual 12:45 PDT</div></body></html>`,
+      'AAL2966', '2026-10-01'
+    );
+    const inbound = parseFlightStatsPublicSchedule(
+      `<html><body><h1>Flight Status</h1><div>AA 2966 American Airlines SEA Seattle ORD Chicago Departed</div><div>Flight Departure Times 01-Oct-2026 Scheduled 13:40 PDT Actual 13:47 PDT</div><div>Flight Arrival Times 01-Oct-2026 Scheduled 20:15 CDT Estimated 20:10 CDT</div></body></html>`,
+      'AAL2966', '2026-10-01'
+    );
+    const now = Date.UTC(2026, 9, 2, 0, 33) / 1000;
+    assert.equal(chooseFlightStatsScheduleCandidate([outbound, inbound], now)?.originIata, 'SEA');
+    assert.equal(chooseFlightStatsScheduleCandidate([outbound, inbound], now)?.destIata, 'ORD');
+  });
+
+  it('prefers a recently arrived local-date flight over tomorrow UTC-date schedule', () => {
+    const landed = parseFlightStatsPublicSchedule(
+      `<html><body><h1>Flight Status</h1><div>AA 536 American Airlines CLT Charlotte ORD Chicago Arrived</div><div>Flight Departure Times 01-Oct-2026 Scheduled 16:18 EDT Actual 16:24 EDT</div><div>Flight Arrival Times 01-Oct-2026 Scheduled 17:38 CDT Actual 17:31 CDT</div></body></html>`,
+      'AAL536', '2026-10-01'
+    );
+    const tomorrow = parseFlightStatsPublicSchedule(
+      `<html><body><h1>Flight Status</h1><div>AA 536 American Airlines CLT Charlotte ORD Chicago Scheduled</div><div>Flight Departure Times 02-Oct-2026 Scheduled 16:18 EDT</div><div>Flight Arrival Times 02-Oct-2026 Scheduled 17:38 CDT</div></body></html>`,
+      'AAL536', '2026-10-02'
+    );
+    const now = Date.UTC(2026, 9, 2, 0, 34) / 1000;
+    assert.equal(chooseFlightStatsScheduleCandidate([tomorrow, landed], now)?._publicScheduleDate, '2026-10-01');
   });
 
   it('fails closed when the page does not identify two known airports', () => {
