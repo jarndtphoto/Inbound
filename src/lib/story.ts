@@ -2,12 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { loadFlightStory, loadLiveBoard } from "./story.server";
 import { readFlightResume, type DepartureStageCheckpoint, type FlightResume } from "./flight-resume";
 import { haversineNm } from "./geo";
-import { identityCompatible, normalizedToLive, positionAgeSec } from "./flight-data";
+import { FR24_SURFACE_FRESH_SEC, identityCompatible, normalizedToLive, positionAgeSec } from "./flight-data";
 import type { FlightStory } from "./types";
 
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
 const SURFACE_STAGES = new Set(["origin_gate", "push", "taxi", "taxi_in", "gate"]);
-const FR24_SURFACE_FRESH_SEC = 30;
 const ALT_SURFACE_FRESH_SEC = 120;
 const TAKEOFF_ROLL_STAGE = "Takeoff roll";
 

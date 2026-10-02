@@ -37,6 +37,7 @@ export type NormalizedFlight = {
 };
 
 const PROVIDER_WEIGHT: Record<FlightProvider, number> = { fr24: 24, adsb: 20, flightaware: 16 };
+export const FR24_SURFACE_FRESH_SEC = 30;
 export function positionAgeSec(position: NormalizedPosition, now = Date.now() / 1000): number { return Math.max(0, now - position.seenAt); }
 export function identityCompatible(position: NormalizedPosition, expected: { callsigns?: string[]; registration?: string | null; hex?: string | null }): boolean {
   const norm = (v: string | null | undefined) => String(v ?? "").replace(/[-\s]/g, "").toUpperCase();
@@ -50,7 +51,10 @@ export function identityCompatible(position: NormalizedPosition, expected: { cal
 }
 export type PositionChoice = { chosen: NormalizedPosition | null; disagreementNm: number | null; candidates: Partial<Record<FlightProvider, NormalizedPosition>>; };
 export function choosePosition(positions: Array<NormalizedPosition | null | undefined>, expected: { callsigns?: string[]; registration?: string | null; hex?: string | null } = {}, now = Date.now() / 1000): PositionChoice {
-  const usable = positions.filter((p): p is NormalizedPosition => Boolean(p && identityCompatible(p, expected) && positionAgeSec(p, now) <= (p.onGround ? 60 : 45)));
+  // Use the same FR24 surface freshness limit as the story wrapper. Retaining
+  // an older ground fix here would exclude a fresh airborne fix from scoring.
+  const usable = positions.filter((p): p is NormalizedPosition => Boolean(p && identityCompatible(p, expected)
+    && positionAgeSec(p, now) <= (p.onGround ? p.provider === "fr24" ? FR24_SURFACE_FRESH_SEC : 60 : 45)));
   const candidates: Partial<Record<FlightProvider, NormalizedPosition>> = {};
   for (const p of usable) if (!candidates[p.provider] || positionAgeSec(p, now) < positionAgeSec(candidates[p.provider]!, now)) candidates[p.provider] = p;
   let disagreementNm: number | null = null;
@@ -60,7 +64,7 @@ export function choosePosition(positions: Array<NormalizedPosition | null | unde
   // on-ground fix. If FR24 is missing or stale, do not throw away other fresh,
   // identity-compatible ground positions; score those providers instead.
   const frGround = candidates.fr24;
-  if (frGround?.onGround === true && positionAgeSec(frGround, now) <= 45) {
+  if (frGround?.onGround === true && positionAgeSec(frGround, now) <= FR24_SURFACE_FRESH_SEC) {
     return { chosen: frGround, disagreementNm, candidates };
   }
 

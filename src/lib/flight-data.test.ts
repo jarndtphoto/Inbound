@@ -57,10 +57,32 @@ describe("position confidence fusion", () => {
     const fa = groundPos("flightaware", 41.785, -87.753, 2, 7);
     assert.equal(choosePosition([adsb, fa], { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "adsb");
   });
-  it("does not use a stale FR24 surface fix and resumes normal fusion once airborne", { todo: "Separate follow-up #24: stale surface fusion — https://github.com/jarndtphoto/Inbound/blob/codex/test-suite-cleanup/docs/test-cleanup-held-bugs.md#24-stale-fr24-surface-fusion" }, () => {
+  it("does not use a stale FR24 surface fix and resumes normal fusion once airborne", () => {
     const staleFr = groundPos("fr24", 41.786, -87.752, 50, 0);
     const airborneAdsb = pos("adsb", 41.79, -87.74, 1);
     assert.equal(choosePosition([staleFr, airborneAdsb], { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "adsb");
+  });
+  it("shares the 30-second surface boundary with the story wrapper", () => {
+    const air = pos("adsb", 41.79, -87.74, 1);
+    for (const age of [29, 30]) {
+      assert.equal(choosePosition([groundPos("fr24", 41.786, -87.752, age), air], {}, 10_000).chosen?.provider, "fr24");
+    }
+    for (const age of [30.01, 40, 45, 50, 60]) {
+      const stale = groundPos("fr24", 41.786, -87.752, age);
+      for (const positions of [[stale, air], [air, stale]]) {
+        const choice = choosePosition(positions, {}, 10_000);
+        assert.equal(choice.chosen?.provider, "adsb", `surface age ${age}`);
+        assert.equal(choice.candidates.fr24, undefined);
+      }
+    }
+  });
+  it("does not resurrect stale ground data when airborne data is absent or invalid", () => {
+    const stale = groundPos("fr24", 41.786, -87.752, 50);
+    assert.equal(choosePosition([stale], {}, 10_000).chosen, null);
+    assert.equal(choosePosition([stale, pos("adsb", 41.79, -87.74, 46)], {}, 10_000).chosen, null);
+    const wrong = { ...pos("adsb", 41.79, -87.74), hex: "999999" };
+    assert.equal(choosePosition([stale, wrong], { hex: "abc123" }, 10_000).chosen, null);
+    assert.equal(choosePosition([stale, groundPos("adsb", 41.784, -87.754, 50)], {}, 10_000).chosen?.provider, "adsb");
   });
 });
 
