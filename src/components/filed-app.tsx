@@ -875,10 +875,10 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
         {story && (
           <div key={normFlight(query)} className={cn("journey-body min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
-            <div className={cn("journey-map", flightTab === "Route" && "journey-map-expanded")} hidden={flightTab !== "Overview" && flightTab !== "Route"}><RouteMap story={story} fixedViewport />{(story.route?.samples?.length ?? 0) < 2 && <p className="map-unavailable">Route map unavailable</p>}</div>
+            <div className={cn("journey-map", flightTab === "Overview" && "journey-map-overview", flightTab === "Route" && "journey-map-expanded")} hidden={flightTab !== "Overview" && flightTab !== "Route"}><RouteMap story={story} fixedViewport />{(story.route?.samples?.length ?? 0) < 2 && <p className="map-unavailable">Route map unavailable</p>}</div>
             <section className="journey-panel" id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
-              <OverviewDetails story={story} />
+              <OverviewDetails story={story} timing={<TimesStrip story={story} failed={storyQ.isError || Boolean(refreshErr)} />} />
               <TravelerCompanion story={story} failed={storyQ.isError || Boolean(refreshErr)} onTrackInbound={openFlight} />
             </section>
             <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
@@ -1101,11 +1101,12 @@ function FlightHead({
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2">
         <div className="min-w-0">
           <p className="summary-airline text-sm text-muted">{headStatus(story)}</p>
-          <h2 className="summary-stage font-display font-semibold leading-none">{stageHeadline(story)}</h2>
+          <h2 className="summary-stage font-display font-semibold leading-none">{displayStage(story) === "ride" ? "In flight" : stageHeadline(story)}</h2>
         </div>
         <div className="max-w-36 text-right">
           <p className="text-xs text-muted">{story.times.gateKind === "actual" ? "ARRIVED" : "ARRIVES"}</p>
-          <p className="summary-arrival font-display font-semibold leading-tight">{story.times.gate ?? "—"}</p>
+          <p className="summary-arrival font-display font-semibold leading-tight">{story.times.gate?.replace(/\s+(?:[A-Z]{2,5}|GMT[+-]\d+(?::\d+)?)$/, "") ?? "—"}</p>
+          <p className="text-xs text-muted">{story.times.gate?.match(/\s+([A-Z]{2,5}|GMT[+-]\d+(?::\d+)?)$/)?.[1] ?? ""}</p>
           <p className="text-xs text-muted">{kindLabel(story.times.gateKind) || "Time unavailable"}</p>
         </div>
         <p className="summary-route col-span-2 text-sm text-muted">
@@ -1115,7 +1116,7 @@ function FlightHead({
         </p>
       </div>
       <FlightStatusProgress story={story} />
-      <TimesStrip failed={failed} story={story} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
+      <Freshness failed={failed} partial={story.schedule?.status === "saved"} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
     </div>
   );
 }
@@ -1178,7 +1179,7 @@ function OverviewDisclosure({
   </div>;
 }
 
-function OverviewDetails({ story }: { story: FlightStory }) {
+function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactNode }) {
   const storageKey = `inbound-overview-details:${origMemKey(story)}`;
   const [open, setOpen] = useState<Record<OverviewDetailKey, boolean>>(CLOSED_OVERVIEW_DETAILS);
   useEffect(() => {
@@ -1207,7 +1208,7 @@ function OverviewDetails({ story }: { story: FlightStory }) {
   const takeoffActualLabel = story.times.takeoffKind === "actual" ? "Actual"
     : story.times.takeoffKind === "estimated" ? "Estimated" : null;
   return <section className="overview-details mt-4 rounded-xl border border-border bg-surface px-4" aria-label="More flight information">
-    <dl className="arrival-details"><div><dt>Airport</dt><dd>{story.dest.iata}</dd><p>{story.dest.city}</p></div><div><dt>Gate</dt><dd>{story.times.destGate ?? "—"}</dd><p>{story.times.destGate ? "Arrival gate" : "Not assigned"}</p></div><div><dt>Baggage</dt><dd>{baggage.result?.status === "posted" && baggage.result.carousel ? baggage.result.carousel : "—"}</dd><p>{baggageSummary(baggage.result)}</p></div></dl>
+    <dl className="arrival-details"><div><dt>Terminal</dt><dd>{baggage.result?.terminal ?? "—"}</dd><p>{story.dest.city} ({story.dest.iata})</p></div><div><dt>Gate</dt><dd>{story.times.destGate ?? "—"}</dd><p>{story.times.destGate ? "Arrival gate" : "Not assigned"}</p></div><div><dt>Baggage</dt><dd>{baggage.result?.status === "posted" && baggage.result.carousel ? baggage.result.carousel : "—"}</dd><p>{baggageSummary(baggage.result)}</p></div></dl>
     <OverviewDisclosure id="flight" title="Flight details" summary={`${story.iata} · ${story.origin.iata} → ${story.dest.iata}`} open={open.flight} onToggle={toggle}>
       <dl>
         <DetailRow label="Airline" value={story.airline} />
@@ -1224,6 +1225,7 @@ function OverviewDetails({ story }: { story: FlightStory }) {
         <DetailRow label="Scheduled landing" value={formatLocalUnix(story.times.origLandUnix, story.dest.tz) ?? story.times.landWas} />
         <DetailRow label="Planned flight time" value={plannedDuration(story)} />
       </dl>
+      {timing}
     </OverviewDisclosure>
     <OverviewDisclosure id="aircraft" title="Aircraft" summary={aircraftSummary} open={open.aircraft} onToggle={toggle}>
       <dl>
@@ -1276,19 +1278,7 @@ function ClockCell({
   );
 }
 
-function TimesStrip({
-  story,
-  fetching,
-  refreshing,
-  failed = false,
-  onRefresh,
-}: {
-  story: FlightStory;
-  fetching: boolean;
-  refreshing: boolean;
-  failed?: boolean;
-  onRefresh: () => void;
-}) {
+function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: boolean }) {
   const t = story.times;
   const down = wheelsDown(story);
   const shownStage = displayStage(story);
@@ -1331,6 +1321,7 @@ function TimesStrip({
 
   return (
     <div className="flight-times mt-3 border-t border-border pt-3">
+      <h3 className="mb-3 font-semibold">Live timing & position</h3>
       <div className="flex min-w-0 flex-col gap-3">
         {airborne ? (
           <div className="grid min-w-0 grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)] gap-3">
@@ -1405,7 +1396,6 @@ function TimesStrip({
           </dl>
         ) : null}
 
-        <Freshness failed={failed} partial={story.schedule?.status === "saved"} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
       </div>
     </div>
   );
@@ -1432,7 +1422,7 @@ function Freshness({
     return () => window.clearInterval(id);
   }, []);
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    <div className="flight-freshness flex flex-col items-end gap-1.5">
       <button
         type="button"
         onClick={onRefresh}
