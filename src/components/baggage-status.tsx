@@ -8,7 +8,7 @@ export type BaggageStatusState = {
   loading: boolean;
 };
 
-const FALLBACK_AIRPORTS = new Set(["HNL", "LAX", "ORD", "MDW", "MCO"]);
+const FALLBACK_AIRPORTS = new Set(["HNL", "LAX", "ORD", "MDW", "MCO", "BOS"]);
 
 export function useBaggageStatus({flight,origin,destination,date}:{flight:string;origin:string;destination:string;date:string|null}): BaggageStatusState {
   const key=[flight,origin,destination,date].join("/");
