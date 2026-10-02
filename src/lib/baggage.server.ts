@@ -50,10 +50,10 @@ async function fetchBoard(key: string, url: string, recognizable: (html: string)
       signal: AbortSignal.timeout(8000),
       headers: {
         Accept: "text/html,application/xhtml+xml",
-        "User-Agent": "Inbound/1.0 (passenger flight companion)",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       },
     });
-    if (!response.ok) throw new Error("Baggage board unavailable");
+    if (!response.ok) throw new Error(`Baggage board HTTP ${response.status}`);
     const html = await response.text();
     if (html.length > 4000000 || !recognizable(html)) throw new Error("Unrecognized baggage board");
     const value = { html, at: Date.now() };
@@ -194,7 +194,14 @@ async function tryFlightView(leg: BaggageLeg): Promise<BaggageResult | null> {
     const page = await fetchBoard(`FV:${leg.flight}:${leg.origin}:${leg.destination}:${leg.date}`, flightViewUrl, (html) => /flight status/i.test(html) && /arrival/i.test(html));
     const result = withSource(parseFlightViewBaggage(page.html, leg, page.at), "FlightView by OAG", flightViewUrl);
     return result.status === "unavailable" ? null : result;
-  } catch {
+  } catch (error) {
+    console.warn("[baggage-flightview]", {
+      flight: leg.flight,
+      origin: leg.origin,
+      destination: leg.destination,
+      date: leg.date,
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 }
