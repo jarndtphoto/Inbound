@@ -19,10 +19,12 @@ import { getFlightStory } from "@/lib/story";
 import type { Comfort, FlightStory, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
+import { WeatherEventMarker } from "@/components/weather-event-marker";
+import { sampleWeather } from "@/lib/route-weather-segments";
 import { WeatherEventBody, WeatherEventHeadline, WeatherIntensityLabel } from "@/components/weather-event-copy";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Clock, Gauge, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, House, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { Clock, Gauge, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, House, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, Info } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type ReactNode } from "react";
 
 const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
@@ -1460,11 +1462,9 @@ function BreakdownCard({
     : null;
   const log = briefing?.log ?? [];
   return (
-    <div className="mt-4 rounded-xl border border-accent/35 bg-surface p-4">
-      <p className="font-mono text-xs tracking-widest text-muted uppercase">Briefing</p>
-      <h3 className="font-display text-title font-semibold text-balance">
-        {briefing ? "Briefing" : "Brief the whole flight"}
-      </h3>
+    <div className="briefing-panel">
+      <h2 className="text-xl font-semibold">Briefing</h2>
+      {asOf ? <p className="mt-1 text-sm text-muted">Updated {asOf}</p> : null}
       {!briefing && (
         <p className="mt-1 text-sm text-muted">
           One brief before you push — then it updates as the trip changes.
@@ -1472,22 +1472,19 @@ function BreakdownCard({
       )}
       {briefing && (
         <div className="mt-3 space-y-3">
-          {asOf ? (
-            <p className="font-mono text-xs tracking-wide text-subtle uppercase">Briefing updated {asOf}</p>
-          ) : null}
           <p className="text-sm leading-relaxed text-fg whitespace-pre-wrap">{briefing.lead}</p>
           {log.length > 0 ? (
             <div className="border-t border-border pt-3">
-              <p className="font-mono text-xs tracking-widest text-subtle uppercase">Updates</p>
-              <ol className="mt-2 space-y-2">
+              <p className="text-base font-semibold">Updates</p>
+              <ol className="briefing-timeline mt-2">
                 {log.map((entry, i) => (
                   <li key={`${entry.at}-${i}`} className="text-sm leading-snug">
-                    <p className="font-mono text-[11px] tracking-wide text-subtle uppercase">
+                    <p className="text-xs text-muted">
                       {new Date(entry.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                       {" · "}
                       {briefLogLabel(entry)}
                     </p>
-                    <p className="text-muted">{briefLogText(entry)}.</p>
+                    <p className="mt-1">{briefLogText(entry)}.</p>
                   </li>
                 ))}
               </ol>
@@ -1495,7 +1492,7 @@ function BreakdownCard({
           ) : null}
         </div>
       )}
-      <Button type="button" className="mt-4 w-full" disabled={pending} onClick={onCompile}>
+      <Button type="button" className="home-submit mt-4 w-full" disabled={pending} onClick={onCompile}>
         {pending ? "Updating…" : briefing ? "Update briefing" : "Compile briefing"}
       </Button>
       {feedback === "no_change" ? <p role="status" className="mt-2 text-center text-sm text-muted">No new updates right now.</p> : null}
@@ -1945,43 +1942,48 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     const intoFlight = airborne && story.times.airborne && takeoff ? Math.max(0, (story.fetchedAt / 1000 - takeoff) / 60) + from : from;
     return <span>{start}{airborne && <span className="block">Around {formatMinutes(intoFlight)} into flight</span>}{span > 0 && <span className="block">{group.gaps ? "Intermittent areas over about " : "Continues for about "}{formatMinutes(span)}</span>}</span>;
   };
-  const fieldCard = (field: FlightStory["origin"], title: string) => <article className="rounded-xl border border-border bg-surface p-4">
-    <p className="text-sm text-muted">{title}</p>
-    <h3 className="mt-1 text-lg font-semibold">{field.iata}</h3>
+  const fieldCard = (field: FlightStory["origin"], title: string) => <article className="weather-section">
+    <h3 className="text-lg font-semibold">{title.split(" · ")[0]} · {field.iata}</h3>
+    <p className="mt-1 text-sm text-muted">{title.split(" · ")[1]}</p>
     <p className="mt-3 text-sm leading-relaxed">{field.decoded?.summary || "Current observation unavailable."}</p>
     <p className="mt-3 text-sm leading-relaxed">Forecast: {field.taf || "Unavailable."}</p>
-    <details className="mt-3 text-sm"><summary className="cursor-pointer py-2">Current airport weather <span className="text-xs text-muted">· METAR</span></summary><p className="break-words font-mono text-muted">{field.rawMetar || "Observation unavailable."}</p></details>
+    <details className="weather-disclosure mt-3 text-sm"><summary><span>Current airport weather <span className="text-xs text-muted">· METAR</span></span><ChevronDown className="size-5 shrink-0 text-muted" aria-hidden="true" /></summary><p className="break-words font-mono text-muted">{field.rawMetar || "Observation unavailable."}</p></details>
   </article>;
-  return <div className="space-y-4">
-    <div><h2 className="text-xl font-semibold">Weather through your flight</h2></div>
+  return <div className="weather-timeline">
+    <div className="weather-heading"><h2 className="text-xl font-semibold">Weather through your flight</h2></div>
     {!landed && fieldCard(story.origin, "Takeoff · departure conditions")}
-    {(!story.weatherCoverage || story.weatherCoverage.failedSources.length > 0) && <p role="status" className="rounded-xl border border-border p-4 text-sm">Weather coverage is incomplete. Missing feeds do not mean smooth conditions. {story.weatherCoverage?.failedSources.join(" · ")}</p>}
-    <h3 className="text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
-    {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="space-y-3">
+    {(!story.weatherCoverage || story.weatherCoverage.failedSources.length > 0) && <p role="status" className="weather-coverage text-sm text-muted"><Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>Weather coverage is incomplete. Missing feeds do not mean smooth conditions. {story.weatherCoverage?.failedSources.join(" · ")}</span></p>}
+    <h3 className="weather-route-heading text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
+    {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="weather-events">
       {visibleGroups.map((g, i) => {
         const copy = passengerWeatherCopy(g.start, g.endFrac >= 0.85, story.dest.city || story.dest.iata, g.key);
         const title = copy.headline;
         const source = passengerWeatherSource(g.note);
         const technical = technicalWeatherProducts(g.note);
-        return <li key={i} className="rounded-xl border border-border bg-surface p-4">
-          <WeatherEventHeadline copy={copy} />
+        return <li key={i} className="weather-section">
+          <div className="weather-event-heading">
+            <svg className="weather-event-number" viewBox="-13 -13 26 26" role="img" aria-label={g.key.startsWith("turbulence:") ? `Weather marker ${weatherEventNumber(visibleGroups, g)}` : g.key === "storms" ? "Thunderstorm marker" : "Cloud marker"}>
+              <WeatherEventMarker eventNumber={weatherEventNumber(visibleGroups, g)} entry={g.start} x={0} y={0} kind={sampleWeather(g.start).kind} band={sampleWeather(g.start).band} label={copy.mapLabel} />
+            </svg>
+            <WeatherEventHeadline copy={copy} />
+          </div>
           {g.key.startsWith("turbulence:") && <p className="mt-1 text-sm"><WeatherIntensityLabel intensity={g.key.slice(11)} band={g.intensities.length === 1 && g.intensities[0] === "light-moderate" ? "light" : undefined} /> turbulence</p>}
           <p className="mt-2 flex items-center gap-2 text-sm font-medium"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
           <WeatherEventBody copy={copy} />
           {g.gaps && <p className="mt-2 text-sm text-muted">This may come and go briefly along the highlighted stretch.</p>}
           <p className="mt-3 text-sm font-medium">{source}{technical ? <span className="ml-1 text-xs font-normal text-muted">· {technical}</span> : null}</p>
           {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
-            <div className="pointer-events-none h-80 overflow-hidden rounded-xl" aria-label={title}>
+            <div className="weather-event-map pointer-events-none h-80 overflow-hidden rounded-md" aria-label={title}>
               <RouteMap story={story} fixedViewport weatherPreview={{ intensityBand: g.intensities.length === 1 && g.intensities[0] === "light-moderate" ? "light" : undefined, intensity: g.key.startsWith("turbulence:") ? g.key.slice(11) : undefined, eventNumber: weatherEventNumber(visibleGroups, g), label: copy.mapLabel, startFrac: g.startFrac, endFrac: g.endFrac, startEtaMin: g.startEtaMin, endEtaMin: g.endEtaMin, ranges: g.ranges }} />
             </div>
             <figcaption className="mt-2 text-xs text-muted">Highlighted: where these conditions overlap the route. Radar colors show recent precipitation; conditions may change before the flight reaches this area. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
           </figure>}
-          {g.note && <details className="mt-2 text-sm text-muted"><summary className="cursor-pointer py-2">Technical details</summary><p>{g.note}</p></details>}
+          {g.note && <details className="weather-disclosure mt-2 text-sm text-muted"><summary><span>Technical details</span><ChevronDown className="size-5 shrink-0 text-muted" aria-hidden="true" /></summary><p>{g.note}</p></details>}
         </li>;
       })}
     </ol> : <p className="text-sm text-muted">{samples.length ? "No significant conditions flagged in the available route forecast. This does not guarantee a smooth ride." : "Route weather data unavailable."}</p>}
     {fieldCard(story.dest, "Landing · arrival conditions")}
-    <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer py-2">Weather sources and timing</summary>
+    <details className="weather-disclosure weather-sources"><summary><span>Weather sources and timing</span><ChevronDown className="size-5 shrink-0 text-muted" aria-hidden="true" /></summary>
       <div className="mt-3 space-y-2 text-sm text-muted">
         <p>Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters. Unflagged areas may have incomplete coverage.</p>
         <p className="text-xs">Flight data fetched {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Weather observation and advisory times are shown in their source details.</p>
