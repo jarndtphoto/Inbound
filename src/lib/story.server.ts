@@ -8,6 +8,7 @@ import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
 import { routeWeatherEvents } from "./weather-events";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
 import { AIRPORT_BY_ICAO, airportByIata, airportByIcao } from "./airports";
+import { loadAirportSurface, runwayDistanceNm } from "./airport-surface.server";
 import { IATA_TO_ICAO, displayIata, parseFlightQuery } from "./flight-parse";
 import {
   densifyPath,
@@ -3556,7 +3557,21 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	let times = timesOf(awareWithEffectiveGateOut, origin, dest);
 	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
-	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30 && !pushLatchValue && !times.pushed) {
+	const freshOriginSurface = Boolean(
+		live && atOrigLive && live.onGround && !live.extrapolated && (live.seenSec ?? 999) <= 30
+	);
+	let runwayDistance = null;
+	let runwayPosition = false;
+	// A stationary aircraft at a runway/hold-short point has unquestionably
+	// left the gate, even if the provider currently reports 0 kt. Without this
+	// check, the first position we see can be mistaken for the parked stand and
+	// the stage stays At gate while the ground map clearly shows the runway.
+	if (freshOriginSurface && (live.gsKt ?? 0) < 4 && !pushLatchValue && !times.pushed && origin?.icao) {
+		const surface = await safe(loadAirportSurface({ airport: origin.icao, lat: origin.lat, lon: origin.lon }), null);
+		runwayDistance = runwayDistanceNm(surface, { lat: live.lat, lon: live.lon });
+		runwayPosition = runwayDistance != null && runwayDistance <= 0.08;
+	}
+	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30 && !pushLatchValue && !times.pushed && !runwayPosition) {
 		const prev = parkByFlight.get(landKey);
 		if (!prev) parkByFlight.set(landKey, { lat: live.lat, lon: live.lon, at: Date.now() });
 		else if (haversineNm({ lat: live.lat, lon: live.lon }, prev) < 0.03) {
@@ -3592,14 +3607,16 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const leftGate = Boolean(
 		!ourLanded &&
 		(
+			runwayPosition ||
 			(freshSurface && (distPark >= 0.05 || (live.gsKt ?? 0) >= 4)) ||
 			motion.pushed ||
 			motion.taxiing
 		)
 	);
-	// Pushback begins on the first validated movement evidence. Taxi begins only
-	// once a fresh on-ground fix reaches 6 kt for the first time.
-	const taxiHint = Boolean(freshSurface && (live.gsKt ?? 0) >= 6);
+	// A fresh runway/hold-short location is stronger phase evidence than a
+	// momentary 0 kt stop. It means the aircraft has already completed pushback
+	// and is in the taxi-to-runway phase.
+	const taxiHint = Boolean(freshSurface && ((live.gsKt ?? 0) >= 6 || runwayPosition));
 	// Do not let one sparse surface update create Pushback and Taxi at once.
 	// If this is the first movement evidence for the leg, expose Pushback for
 	// this response; a later confirmed movement update may advance to Taxi.
@@ -3617,6 +3634,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		parkedObservedSec >= 12
 	);
 	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && park
+		&& !runwayPosition
 		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) < 1.2
 		&& distPark < 0.025 && !pushLatchValue
 		&& stationaryEvidenceBeatsGateOut);
@@ -3885,7 +3903,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			onGround: live?.onGround ?? null,
 			distanceFromParkedNm: park && live ? distPark : null,
 			positionAgeSec: finalPositionAgeSec,
-			positionSource: finalPositionSource
+			positionSource: finalPositionSource,
+			runwayDistanceNm: runwayDistance,
+			runwayPosition
 		});
 		console.log("[push-evidence] " + JSON.stringify({
 			callsignRequested: query,
