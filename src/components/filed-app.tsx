@@ -408,7 +408,7 @@ export function FiledApp() {
     setPage("flight");
   };
   if (!entered) return <main className="inbound-welcome inbound-redesign">
-    <header className="journey-header"><span className="home-brand"><Plane aria-hidden="true" />Inbound</span><AppearanceControl /></header>
+    <header className="journey-header header-without-brand"><AppearanceControl /></header>
     <div className="inbound-welcome-content">
       <Plane className="welcome-plane" aria-hidden="true" />
       <h1>Inbound</h1>
@@ -421,7 +421,7 @@ export function FiledApp() {
   </main>;
   if (page === "flight") return <FlightPages onHome={() => setPage("home")} />;
   return <main className="inbound-home inbound-redesign">
-    <header className="journey-header"><span className="home-brand"><Plane aria-hidden="true" />Inbound</span><AppearanceControl /></header>
+    <header className="journey-header header-without-brand"><AppearanceControl /></header>
     <div className="home-content">
       <section className="home-search">
         <p className="home-eyebrow">Live flight tracking</p>
@@ -793,7 +793,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
   return (
     <div className={cn("pwa-flight-shell", "inbound-redesign", "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg")} style={shellStyle}>
-      <header className="journey-header"><div><h1>Inbound</h1>{story ? <p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p> : <p>{query || "Preparing your flight…"}</p>}</div><AppearanceControl /></header>
+      <header className="journey-header"><div>{story ? <p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p> : <p>{query || "Preparing your flight…"}</p>}</div><AppearanceControl /></header>
       {story && <FlightWelcome open={briefPopupOpen} onClose={() => setBriefPopupOpen(false)} story={story} brief={shownBrief} />}
       <ScreenErrorBoundary>
       <main

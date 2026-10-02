@@ -351,3 +351,6 @@ html[data-theme="sunset"] { color-scheme: dark; }
 .flight-loading dl { margin-top: 32px; }
 .flight-loading dl > div { border-top: 1px solid var(--color-border); padding: 20px 0; }
 .flight-loading dt { font-weight: 600; }
+
+.journey-header.header-without-brand { justify-content: flex-end; }
+.journey-header > div > p:first-child { margin-top: 0; }
