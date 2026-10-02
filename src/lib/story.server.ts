@@ -43,6 +43,8 @@ import {
 } from "./wx-brief";
 import { faAltFt, hasAirborneEvidence, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
 import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
+import { arrivalPattern, canProjectArrival } from "./arrival-pattern.ts";
+import { expectedArrivalRunway, rememberArrivalSide } from "./arrival-runway.server.ts";
 import { loadOfficialFlightData } from "./official-flight-data.server.ts";
 import {
 	fetchAround,
@@ -3335,7 +3337,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		});
 		if ((filed.flown?.length ?? 0) >= 2) pathSource = "track";
 	}
-	const totalNm = Math.max(1, polylineLengthNm(path));
+	let totalNm = Math.max(1, polylineLengthNm(path));
 	let remainingNm;
 	let routeRemainingNm;
 	let progress;
@@ -3367,6 +3369,39 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		: directToDestNm != null && directToDestNm <= 25
 		? directToDestNm
 		: routeRemainingNm;
+	// Preserve the original distance input to stage classification. Runway
+	// projection changes display/weather distance and ETA, never flight phases.
+	const stageRemainingNm = remainingNm;
+	let expectedArrival = null;
+	let arrivalPatternKind = null;
+	const projectArrival = canProjectArrival(live, end, ourLanded, Boolean(live && isFinalApproach(live, dest)));
+	if (projectArrival || ourLanded) {
+		const reported = official.fr24?.runway?.landing ?? flightawareOfficial?.runway?.landing ?? null;
+		const selected = await expectedArrivalRunway(dest.icao, routeTrackKey, {
+			aircraft: live, providerRunway: reported,
+			actualLanding: Boolean(official.fr24?.landing?.actual || flightawareOfficial?.landing?.actual),
+			windDir: hydDest.windDir, windKt: hydDest.windKt
+		});
+		expectedArrival = selected.runway;
+		if (projectArrival && live && expectedArrival) {
+			const pattern = arrivalPattern(live, expectedArrival, selected.side);
+			rememberArrivalSide(routeTrackKey, pattern.side);
+			arrivalPatternKind = pattern.kind;
+			// Retain the observed history only, then splice in the current-position
+			// pattern. Avoid closest-segment ambiguity on a looping approach.
+			let join = 0, nearest = Infinity;
+			for (let i = 0; i < path.length; i++) {
+				const distance = haversineNm(path[i], live);
+				if (distance < nearest) { nearest = distance; join = i; }
+			}
+			const behind = path.slice(0, join);
+			path = [...behind, ...pattern.points];
+			totalNm = Math.max(1, polylineLengthNm(path));
+			remainingNm = pattern.lengthNm;
+			routeRemainingNm = pattern.lengthNm;
+			progress = Math.max(0, 1 - remainingNm / totalNm);
+		}
+	}
 	const etaMin = remainingEtaMin(remainingNm, directToDestNm, live, aware);
 	const heading = ourLanded
 		? initialBearing(path[Math.max(0, path.length - 2)] ?? start, end)
@@ -3856,7 +3891,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	);
 	const current = currentStageOf({
 		live,
-		remainingNm,
+		remainingNm: stageRemainingNm,
 		dest,
 		origin,
 		ourTakeoffActual: aware?.takeoff.actual ?? null,
@@ -4145,6 +4180,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		origin,
 		dest,
 		route: {
+			expectedArrival,
+			arrivalPatternKind,
 			totalNm,
 			remainingNm,
 			routeRemainingNm,
