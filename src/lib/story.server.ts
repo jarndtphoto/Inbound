@@ -679,6 +679,27 @@ function stillOnField(live, origin) {
 	if (gs < 70 && agl < 400) return true;
 	return false;
 }
+
+// Midway's airport reference point sits near the runway complex, not the
+// passenger terminal. If the first fresh fix arrives only after pushback, using
+// that point as the "parked stand" baseline can incorrectly keep the stage at
+// Gate all the way to the runway. This small terminal envelope lets a fresh
+// physical fix prove the airplane has already left the passenger-gate area.
+const PASSENGER_GATE_AREAS = {
+	MDW: { lat: 41.7866, lon: -87.7434, radiusNm: 0.55 },
+};
+export function departureSurfaceLocationHint(live, origin, gateOut, nowSec = Date.now() / 1e3) {
+	if (!live || !origin || live.onGround !== true || !stillOnField(live, origin)) return { awayFromPassengerGateArea: false };
+	const area = PASSENGER_GATE_AREAS[origin.iata];
+	if (!area) return { awayFromPassengerGateArea: false };
+	const planned = gateOut?.actual ?? gateOut?.estimated ?? gateOut?.scheduled ?? null;
+	if (planned != null && (nowSec < planned - 30 * 60 || nowSec > planned + 3 * 60 * 60)) {
+		return { awayFromPassengerGateArea: false };
+	}
+	return {
+		awayFromPassengerGateArea: haversineNm({ lat: live.lat, lon: live.lon }, area) > area.radiusNm,
+	};
+}
 function flightBegun(live, origin) {
 	if (!live) return false;
 	// Ground speed alone cannot establish takeoff: surface receivers regularly
@@ -2866,6 +2887,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		fr24FlightNumber: parsed.iata,
 		fr24OriginIata: publicAware?.originIata ?? null,
 		fr24DestIata: publicAware?.destIata ?? null,
+		fr24Registration: publicAware?.tail ?? null,
 	});
 	let official = initialOfficial;
 	// Codeshare/public flight-number pages can identify the operating ATC
@@ -3556,7 +3578,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	let times = timesOf(awareWithEffectiveGateOut, origin, dest);
 	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
-	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30 && !pushLatchValue && !times.pushed) {
+	const { awayFromPassengerGateArea } = departureSurfaceLocationHint(live, origin, effectiveGateOut);
+	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30
+		&& !awayFromPassengerGateArea && !pushLatchValue && !times.pushed) {
 		const prev = parkByFlight.get(landKey);
 		if (!prev) parkByFlight.set(landKey, { lat: live.lat, lon: live.lon, at: Date.now() });
 		else if (haversineNm({ lat: live.lat, lon: live.lon }, prev) < 0.03) {
@@ -3592,19 +3616,19 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const leftGate = Boolean(
 		!ourLanded &&
 		(
-			(freshSurface && (distPark >= 0.05 || (live.gsKt ?? 0) >= 4)) ||
+			(freshSurface && (awayFromPassengerGateArea || distPark >= 0.05 || (live.gsKt ?? 0) >= 4)) ||
 			motion.pushed ||
 			motion.taxiing
 		)
 	);
 	// Pushback begins on the first validated movement evidence. Taxi begins only
 	// once a fresh on-ground fix reaches 6 kt for the first time.
-	const taxiHint = Boolean(freshSurface && (live.gsKt ?? 0) >= 6);
+	const taxiHint = Boolean(freshSurface && ((live.gsKt ?? 0) >= 6 || awayFromPassengerGateArea));
 	// Do not let one sparse surface update create Pushback and Taxi at once.
 	// If this is the first movement evidence for the leg, expose Pushback for
 	// this response; a later confirmed movement update may advance to Taxi.
 	const firstDepartureMovement = Boolean(leftGate && !departureProgressKnownBeforeMovement && !times.pushed);
-	const stageTaxiHint = taxiHint && !firstDepartureMovement;
+	const stageTaxiHint = taxiHint && (!firstDepartureMovement || awayFromPassengerGateArea);
 	// Airport reference coordinates are not gate coordinates. Only a stand
 	// observed before departure can contradict a reported gate-out, and the
 	// position itself must be fresh and newer than that report.
@@ -3616,7 +3640,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		(park && park.at / 1e3 < gateOutUnix && fixUnix >= gateOutUnix) ||
 		parkedObservedSec >= 12
 	);
-	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && park
+	const stationaryAtStand = Boolean(live && surfaceFixAtOrigin && park && !awayFromPassengerGateArea
 		&& (live.seenSec ?? 999) <= 30 && (live.gsKt ?? 0) < 1.2
 		&& distPark < 0.025 && !pushLatchValue
 		&& stationaryEvidenceBeatsGateOut);
@@ -3879,6 +3903,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			taxiThresholdKt: 6,
 			parkedObservedSec,
 			stationaryAtStand,
+			awayFromPassengerGateArea,
 			providerGateOut: effectiveGateOut ?? null,
 			providerGateOutPublic: aware?.gateOut ?? null,
 			groundspeedKt: live?.gsKt ?? null,
