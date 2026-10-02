@@ -43,8 +43,11 @@ import {
 } from "./wx-brief";
 import { faAltFt, hasAirborneEvidence, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
 import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
-import { arrivalPattern, canProjectArrival } from "./arrival-pattern.ts";
-import { expectedArrivalRunway, rememberArrivalSide } from "./arrival-runway.server.ts";
+import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
+import { arrivalFuturePoints } from "./arrival-path.ts";
+import { arrivalStateStore } from "./arrival-state-store.server.ts";
+const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
+import { expectedArrivalRunway } from "./arrival-runway.server.ts";
 import { loadOfficialFlightData } from "./official-flight-data.server.ts";
 import {
 	fetchAround,
@@ -634,6 +637,8 @@ function toLive(raw) {
 		gsKt,
 		track: typeof raw.track === "number" ? raw.track : null,
 		vertFpm,
+		// Arrival-only raw rate fallback. Existing phaseOf inputs stay unchanged.
+		arrivalVertFpm: Number.isFinite(raw.baro_rate) ? raw.baro_rate : Number.isFinite(raw.geom_rate) ? raw.geom_rate : null,
 		onGround,
 		extrapolated: Boolean(raw.extrapolated ?? raw._fusion?.extrapolated),
 		seenSec,
@@ -2722,6 +2727,7 @@ function normalizedAdsb(live): NormalizedPosition | null {
 		lat: live.lat,
 		lon: live.lon,
 		altFt: live.altFt ?? null,
+		vertFpm: live.arrivalVertFpm ?? live.vertFpm ?? null,
 		gsKt: live.gsKt ?? null,
 		track: live.track ?? null,
 		onGround: Boolean(live.onGround),
@@ -3079,6 +3085,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// Maps). Loaded once here, mutated locally exactly as the old Maps were,
 	// written back once near the end of this function.
 	const loadedPhase = await loadPhaseState(landKey);
+	const loadedArrival = await arrivalStateStore.load(landKey);
 	let pushLatchValue = loadedPhase.state.push;
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;
@@ -3374,34 +3381,65 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const stageRemainingNm = remainingNm;
 	let expectedArrival = null;
 	let arrivalPatternKind = null;
-	const projectArrival = canProjectArrival(live, end, ourLanded, Boolean(live && isFinalApproach(live, dest)));
-	if (projectArrival || ourLanded) {
-		const reported = official.fr24?.runway?.landing ?? flightawareOfficial?.runway?.landing ?? null;
-		const selected = await expectedArrivalRunway(dest.icao, routeTrackKey, {
-			aircraft: live, providerRunway: reported,
+	// Preserve normalized stage inputs; provider/derived rates are arrival-only.
+	const arrivalLive = live ? { ...live, vertFpm: positionChoice.chosen?.vertFpm ?? live.arrivalVertFpm ?? live.vertFpm ?? null } : null;
+	const arrivalInput = {
+		live: arrivalLive, dest: { ...end, elevationFt: fieldElev(dest) }, landed: ourLanded,
+		approachEvidence: Boolean(live && isFinalApproach(live, dest)), now: Date.now()
+	};
+	const arrivalEntry = arrivalEntryEvidence(loadedArrival.state, arrivalInput).entryGate;
+	let selectedArrival = loadedArrival.state.runway;
+	if (arrivalEntry || loadedArrival.state.startedAt || ourLanded) {
+		selectedArrival = await expectedArrivalRunway(dest.icao, {
+			aircraft: live, providerRunway: official.fr24?.runway?.landing ?? flightawareOfficial?.runway?.landing ?? null,
 			actualLanding: Boolean(official.fr24?.landing?.actual || flightawareOfficial?.landing?.actual),
-			windDir: hydDest.windDir, windKt: hydDest.windKt
+			windDir: hydDest.windDir, windKt: hydDest.windKt, previous: loadedArrival.state.runway
 		});
-		expectedArrival = selected.runway;
-		if (projectArrival && live && expectedArrival) {
-			const pattern = arrivalPattern(live, expectedArrival, selected.side);
-			rememberArrivalSide(routeTrackKey, pattern.side);
-			arrivalPatternKind = pattern.kind;
-			// Retain the observed history only, then splice in the current-position
-			// pattern. Avoid closest-segment ambiguity on a looping approach.
-			let join = 0, nearest = Infinity;
-			for (let i = 0; i < path.length; i++) {
-				const distance = haversineNm(path[i], live);
-				if (distance < nearest) { nearest = distance; join = i; }
-			}
-			const behind = path.slice(0, join);
-			path = [...behind, ...pattern.points];
-			totalNm = Math.max(1, polylineLengthNm(path));
-			remainingNm = pattern.lengthNm;
-			routeRemainingNm = pattern.lengthNm;
-			progress = Math.max(0, 1 - remainingNm / totalNm);
-		}
 	}
+	const arrivalUpdate = updateArrivalProjection(loadedArrival.state, { ...arrivalInput, runway: selectedArrival });
+	let arrivalState = arrivalUpdate.state;
+	let arrivalPersistence: string = loadedArrival.status;
+	if (JSON.stringify(arrivalState) !== JSON.stringify(loadedArrival.state)) {
+		const saved = await arrivalStateStore.save(landKey, arrivalState, loadedArrival.version);
+		arrivalState = saved.state;
+		arrivalPersistence = saved.status;
+	}
+	expectedArrival = arrivalState.runway;
+	const futureArrivalPoints = live ? arrivalFuturePoints(arrivalState.points, live) : arrivalState.points;
+	// Only this response's display path gets the observed aircraft anchor.
+	const displayArrivalPoints = live ? [{ lat: live.lat, lon: live.lon }, ...futureArrivalPoints] : [];
+	// A consumed suffix is still an active zero-distance projection until landing;
+	// do not fall back to the airport reference point after passing the threshold.
+	const pattern = !ourLanded && !live?.onGround && arrivalState.active && arrivalState.kind && displayArrivalPoints.length >= 1
+		? { points: displayArrivalPoints, lengthNm: polylineLengthNm(displayArrivalPoints), kind: arrivalState.kind } : null;
+	if (pattern) {
+		arrivalPatternKind = pattern.kind;
+		// Preserve observed history; only the future display path changes.
+		let join = 0, nearest = Infinity;
+		const entry = pattern.points[0];
+		for (let i = 0; i < path.length; i++) {
+			const distance = haversineNm(path[i], entry);
+			if (distance < nearest) { nearest = distance; join = i; }
+		}
+		path = [...path.slice(0, join), ...pattern.points];
+		totalNm = Math.max(1, polylineLengthNm(path));
+		remainingNm = pattern.lengthNm;
+		routeRemainingNm = pattern.lengthNm;
+		progress = Math.max(0, 1 - remainingNm / totalNm);
+	}
+	if (arrivalEntry || loadedArrival.state.startedAt || ourLanded) console.info("[arrival-projection]", {
+		flight: parsed.callsign, landKey, routeTrackKey, instance: ARRIVAL_INSTANCE,
+		entryGate: arrivalEntry, reason: arrivalUpdate.reason, persistence: arrivalPersistence,
+		loadedVersion: loadedArrival.version, hadPrevious: Boolean(loadedArrival.state.startedAt),
+		runway: expectedArrival?.runway ?? null, source: expectedArrival?.source ?? null,
+		side: arrivalState.side, active: arrivalState.active, startedAt: arrivalState.startedAt,
+		offPathStreak: arrivalState.offPathStreak, vertFpm: arrivalUpdate.vertFpm,
+		verticalRateSource: arrivalUpdate.verticalRateSource, stageVertFpm: live?.vertFpm ?? null,
+		cursorNm: arrivalState.cursorNm, plannedPoints: arrivalState.points.length,
+		directToThresholdNm: live && expectedArrival ? haversineNm(live, expectedArrival.threshold) : null,
+		phase: live?.phase ?? null, extrapolated: live?.extrapolated ?? false, seenSec: live?.seenSec ?? null,
+		kind: arrivalPatternKind, remainingNm, stageRemainingNm
+	});
 	const etaMin = remainingEtaMin(remainingNm, directToDestNm, live, aware);
 	const heading = ourLanded
 		? initialBearing(path[Math.max(0, path.length - 2)] ?? start, end)

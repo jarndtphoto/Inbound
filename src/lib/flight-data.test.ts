@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { choosePosition, finalApproachEtaMin, passengerEtaMin, type NormalizedPosition } from "./flight-data.ts";
+import { choosePosition, finalApproachEtaMin, normalizedToLive, passengerEtaMin, type NormalizedPosition } from "./flight-data.ts";
 import { normalizeAeroApiFlight, selectCurrentAeroApiFlight } from "./flightaware-aeroapi.server.ts";
 import { normalizeFr24Position } from "./fr24.server.ts";
 
@@ -17,6 +17,15 @@ describe("official provider normalization", () => {
   it("normalizes FR24 live kinematics", () => {
     const p = normalizeFr24Position({ fr24_id: "f1", callsign: "AAL2668", lat: 32.9, lon: -97.0, alt: 800, gspeed: 145, track: 180, on_ground: false, timestamp: 10_000 });
     assert.equal(p?.provider, "fr24"); assert.equal(p?.altFt, 800); assert.equal(p?.gsKt, 145);
+  });
+  it("retains FR24 vertical rate for arrival use without altering normalized stage inputs", () => {
+    for (const vspeed of [-640, 0]) {
+      const p = normalizeFr24Position({ lat: 41.95, lon: -88.1, alt: 4000, vspeed, on_ground: false, timestamp: Date.now() / 1000 })!;
+      assert.equal(p.vertFpm, vspeed);
+      const stageLive = normalizedToLive(p);
+      assert.equal(stageLive.vertFpm, null); assert.equal(stageLive.phase, "cruise");
+    }
+    assert.equal(normalizeFr24Position({ lat: 41.95, lon: -88.1, alt: 4000, vspeed: NaN })!.vertFpm, null);
   });
   it("normalizes AeroAPI operational times and position", () => {
     const f = normalizeAeroApiFlight({ fa_flight_id: "AAL2668-1", ident: "AAL2668", last_position: { latitude: 32.9, longitude: -97, altitude: 8, groundspeed: 140, heading: 180, timestamp: "1970-01-01T02:46:40Z" }, scheduled_out: "2026-09-14T10:00:00Z", gate_destination: "C12" });

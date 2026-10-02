@@ -1,4 +1,5 @@
-import { formatDuration, formatMiles, haversineNm } from "@/lib/geo";
+import { destPoint, formatDuration, formatMiles, haversineNm } from "@/lib/geo";
+import { ArrivalRunwayChip } from "./arrival-runway-chip";
 import { upcomingStorms } from "@/lib/route-hazards";
 import { routeWeatherEvents, weatherEventNumber } from "@/lib/weather-events";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
@@ -250,12 +251,12 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
     };
   };
 
-  const zoomBy = useCallback((factor: number) => {
+  const zoomBy = useCallback((factor: number, anchor?: { x: number; y: number }) => {
     const { s, x, y } = viewRef.current;
     const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
     const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, s * factor));
-    const cx = W / 2;
-    const cy = H / 2;
+    const cx = anchor ? anchor.x * s + x : W / 2;
+    const cy = anchor ? anchor.y * s + y : H / 2;
     setView(
       clampView({
         s: ns,
@@ -422,6 +423,7 @@ function ringFillable(ring: [number, number][]) {
 
 export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { intensityBand?: string; intensity?: string; eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] } }) {
   const frameRef = useRef<HTMLDivElement>(null);
+  const geometryRef = useRef<SVGGElement>(null);
   const [mapHeight, setMapHeight] = useState(800);
   useEffect(() => {
     const frame = frameRef.current;
@@ -557,6 +559,13 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     ) <= 12,
   ));
   const movedFromHome = Math.abs(zoom.s - 1) > 0.02 || Math.abs(zoom.x) > 1 || Math.abs(zoom.y) > 1;
+  const arrival = story.route.expectedArrival;
+  const runwayAhead = arrival ? destPoint(arrival.threshold, arrival.heading, 1) : null;
+  const arrivalZoomAnchor = arrival && !landed
+    ? { x: sx(arrival.threshold.lon), y: sy(arrival.threshold.lat) } : undefined;
+  // Include the flown part of the drawn near-field approach, so the label remains
+  // useful on short final. The rest of a long trip cannot qualify a tiny airport.
+  const approachSamples = arrival ? samples.filter(sample => haversineNm(sample, arrival.threshold) <= 40) : [];
 
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-surface", fixedViewport && "flex h-full flex-col items-center")}>
@@ -575,7 +584,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         aria-label={`Route ${story.origin.iata} to ${story.dest.iata}`}
       >
         <rect width={W} height={H} className="fill-bg" />
-        <g transform={`translate(${zoom.x} ${zoom.y}) scale(${zoom.s})`} strokeLinejoin="round" strokeLinecap="round">
+        <g ref={geometryRef} transform={`translate(${zoom.x} ${zoom.y}) scale(${zoom.s})`} strokeLinejoin="round" strokeLinecap="round">
 
 
         <g>
@@ -616,9 +625,11 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           {lakes.map((lake) => (
             <path
               key={lake.name}
+              data-map-water="great-lake"
               d={lake.rings.map((ring) => `${ring.map(([lo, la], i) => `${i ? "L" : "M"}${sx(lo).toFixed(1)} ${sy(la).toFixed(1)}`).join(" ")} Z`).join(" ")}
               fillRule="evenodd"
-              className="fill-bg/95 stroke-fg/35"
+              className="stroke-fg/35"
+              style={{ fill: "var(--journey-water)" }}
               strokeWidth="1.25"
             />
           ))}
@@ -663,18 +674,13 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           );
         })}
 
-        <g transform={`translate(${sx(origin.lon)} ${sy(origin.lat)}) scale(${1 / zoom.s})`}>
+        <g data-map-obstacle transform={`translate(${sx(origin.lon)} ${sy(origin.lat)}) scale(${1 / zoom.s})`}>
           <circle r="5.5" className="fill-accent stroke-bg" strokeWidth="2" vectorEffect="non-scaling-stroke" />
           <text y="22" textAnchor="middle" className="fill-muted" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.origin.iata}</text>
         </g>
-        <g transform={`translate(${sx(story.route.expectedArrival?.threshold.lon ?? dest.lon)} ${sy(story.route.expectedArrival?.threshold.lat ?? dest.lat)}) scale(${1 / zoom.s})`}>
+        <g data-map-obstacle data-arrival-threshold transform={`translate(${sx(story.route.expectedArrival?.threshold.lon ?? dest.lon)} ${sy(story.route.expectedArrival?.threshold.lat ?? dest.lat)}) scale(${1 / zoom.s})`}>
           <circle r="5.5" className="fill-fg stroke-bg" strokeWidth="2" vectorEffect="non-scaling-stroke" />
           <text y="22" textAnchor="middle" className="fill-fg" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.dest.iata}</text>
-          {story.route.expectedArrival && !weatherPreview && <g aria-label={`Expected runway ${story.route.expectedArrival.runway}, ${story.route.expectedArrival.source}${story.route.expectedArrival.estimated ? ", estimate" : ""}`}>
-            <rect x={sx(dest.lon) > W / 2 ? -224 : 0} y="29" width="224" height="36" rx="4" className="fill-bg/90 stroke-border" />
-            <text x={sx(dest.lon) > W / 2 ? -112 : 112} y="43" textAnchor="middle" className="fill-fg" fontSize="12">{story.route.expectedArrival.source === "provider" ? "Reported" : "Expected"} Rwy {story.route.expectedArrival.runway} · {story.route.expectedArrival.source}</text>
-            <text x={sx(dest.lon) > W / 2 ? -112 : 112} y="57" textAnchor="middle" className="fill-muted" fontSize="10">{story.route.expectedArrival.estimated ? "Estimated runway and approach" : "Projected approach"}</text>
-          </g>}
         </g>
 
         {visibleHazards.map((h) => {
@@ -697,14 +703,24 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
             entry={{ lat: s.lat, lon: s.lon }} x={sx(s.lon)} y={sy(s.lat)} kind={sampleWeather(s).kind} band={sampleWeather(s).band} label={s.alertLabel} />
         ))}
 
-        {hasFix && <g transform={`translate(${ax} ${ay}) scale(${1 / zoom.s}) rotate(${rot})`}>
+        {hasFix && <g data-map-obstacle data-map-aircraft transform={`translate(${ax} ${ay}) scale(${1 / zoom.s}) rotate(${rot})`}>
           <polygon points="0,-10 8,11 -8,11" className="fill-fg stroke-bg" strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
         </g>}
 
         </g>
       </svg>
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
+      {arrival && runwayAhead && !weatherPreview && !landed && <ArrivalRunwayChip
+        frameRef={frameRef} geometryRef={geometryRef}
+        threshold={{ x: sx(arrival.threshold.lon), y: sy(arrival.threshold.lat) }}
+        runwayForward={{ x: sx(runwayAhead.lon) - sx(arrival.threshold.lon), y: sy(runwayAhead.lat) - sy(arrival.threshold.lat) }}
+        approach={approachSamples.map(sample => ({ x: sx(sample.lon), y: sy(sample.lat) }))}
+        route={samples.map(sample => ({ x: sx(sample.lon), y: sy(sample.lat) }))}
+        runway={arrival.runway} reported={arrival.source === "provider"}
+        viewKey={`${zoom.s}:${zoom.x}:${zoom.y}:${H}`}
+      />}
+
+      <div data-map-obstacle className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
         <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
           {weatherPreview ? <WeatherPreviewLabel label={weatherPreview.label} /> : story.route.source === "track" ? "TRACK + PROJECTED ROUTE" : "PROJECTED ROUTE"}
         </p>
@@ -715,6 +731,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       {weatherPreview && ticks[0] ? <WeatherPreviewLocation lat={ticks[0].lat} lon={ticks[0].lon} /> : null}
         {weatherPreview ? null : movedFromHome ? (
           <button
+            data-map-obstacle
             type="button"
             onClick={zoom.reset}
             className="absolute bottom-3 left-3 z-10 h-9 rounded-sm border border-border bg-bg/90 px-2.5 font-mono text-xs tracking-wide text-fg"
@@ -722,15 +739,15 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
             Reset map
           </button>
         ) : (
-          <p className="pointer-events-none absolute bottom-3 left-3 font-mono text-xs tracking-wide text-subtle">
+          <p data-map-obstacle className="pointer-events-none absolute bottom-3 left-3 font-mono text-xs tracking-wide text-subtle">
             Pinch to zoom · drag to pan
           </p>
         )}
-        <div style={weatherPreview ? { display: "none" } : undefined} className="absolute right-3 bottom-3 z-10 flex gap-1">
+        <div data-map-obstacle style={weatherPreview ? { display: "none" } : undefined} className="absolute right-3 bottom-3 z-10 flex gap-1">
           <button
             type="button"
             aria-label="Zoom in"
-            onClick={() => zoom.zoomBy(1.4)}
+            onClick={() => zoom.zoomBy(1.4, arrivalZoomAnchor)}
             className="flex h-11 w-11 items-center justify-center rounded-sm border border-border bg-bg/90 font-display text-xl text-fg"
           >
             +
@@ -738,7 +755,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           <button
             type="button"
             aria-label="Zoom out"
-            onClick={() => zoom.zoomBy(1 / 1.4)}
+            onClick={() => zoom.zoomBy(1 / 1.4, arrivalZoomAnchor)}
             className="flex h-11 w-11 items-center justify-center rounded-sm border border-border bg-bg/90 font-display text-xl text-fg"
           >
             −

@@ -11,6 +11,8 @@ export type NormalizedPosition = {
   lat: number;
   lon: number;
   altFt: number | null;
+  /** Source vertical rate retained for arrival projection only. */
+  vertFpm?: number | null;
   gsKt: number | null;
   track: number | null;
   onGround: boolean | null;
