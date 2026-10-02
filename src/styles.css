@@ -254,7 +254,7 @@ html[data-theme="sunrise"], html[data-theme="sunrise"] .inbound-redesign {
 .inbound-redesign .journey-body:has(.journey-map-expanded:not([hidden])) { height: 100%; display: flex; flex-direction: column; }
 .inbound-redesign #panel-Route { height: 0; flex: none; }
 .inbound-redesign .journey-map > div { border: 0; border-radius: 0; width: 100%; }
-.inbound-redesign .journey-map svg > rect { fill: var(--journey-water); }
+.inbound-redesign .journey-map .route-map-background { fill: var(--journey-water); }
 .inbound-redesign .journey-map svg polygon.fill-fg\/10 { fill: var(--journey-land); }
 .map-unavailable { display: grid; place-items: center; height: 100%; color: var(--color-muted); background: var(--color-surface-2); }
 .inbound-redesign .journey-panel { background: var(--color-bg); }

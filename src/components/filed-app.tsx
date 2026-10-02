@@ -29,7 +29,7 @@ const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
 
 const STAGES: { id: StageId; label: string }[] = [
   { id: "inbound", label: "Inbound" },
-  { id: "origin_gate", label: "At gate" },
+  { id: "origin_gate", label: "Awaiting departure" },
   { id: "push", label: "Pushback" },
   { id: "taxi", label: "Taxiing out" },
   { id: "ride", label: "Flight" },
@@ -932,7 +932,9 @@ function stageHeadline(story: FlightStory) {
   if (stage === "taxi_in") return "Taxiing in";
   if (stage === "final_approach") return "Final approach";
   if (stage === "arrival" && wheelsDown(story)) return "Landed";
-  if (stage === "origin_gate") return "At the gate";
+  // A stationary first fix may already be after pushback. This stage does
+  // not contain evidence that the aircraft is still at its assigned stand.
+  if (stage === "origin_gate") return "Awaiting departure";
   if (stage === "push") return "Pushback";
   if (stage === "taxi") return "Taxiing out";
   return STAGES.find((s) => s.id === stage)?.label ?? stage;
@@ -976,7 +978,7 @@ function headStatus(story: FlightStory) {
   if (story.currentStage === "gate") return airline ?? "Parked";
   if (story.currentStage === "taxi_in") return airline ? `Taxiing in · ${airline}` : "Taxiing in";
   if (wheelsDown(story)) return airline ? `Landed · ${airline}` : "Landed";
-  if (story.currentStage === "origin_gate") return airline ? `At the gate · ${airline}` : "At the gate";
+  if (story.currentStage === "origin_gate") return airline ? `Departure not confirmed · ${airline}` : "Departure not confirmed";
   if (story.currentStage === "push") return airline ? `Pushback · ${airline}` : "Pushback";
   if (story.currentStage === "taxi") return airline ? `Taxiing out · ${airline}` : "Taxiing out";
   if (story.currentStage === "final_approach") return airline ? `Final approach · ${airline}` : "Final approach";

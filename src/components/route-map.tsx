@@ -591,7 +591,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         role="img"
         aria-label={`Route ${story.origin.iata} to ${story.dest.iata}`}
       >
-        <rect width={W} height={H} className="fill-bg" />
+        <rect width={W} height={H} className="route-map-background fill-bg" />
         <g transform={`translate(${zoom.x} ${zoom.y}) scale(${zoom.s})`} strokeLinejoin="round" strokeLinecap="round">
 
 
