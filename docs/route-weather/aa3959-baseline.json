@@ -1,0 +1,1193 @@
+{
+  "flight": "AA3959",
+  "capturedAt": 1790951705804,
+  "progress": 0.8467759520868245,
+  "samples": [
+    {
+      "frac": 0,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.0031532628061558565,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.006155502873074207,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.009620734472965667,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.012667225904842943,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.015786349131180315,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.018762778524315387,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.02189000899433733,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.02507319057492148,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.028472486580505645,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.032201796754956734,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.03530520985632852,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.03876964383277194,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.04227352421821514,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.04523310801917282,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.048537868174431426,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.05195950082962521,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.05549072756546517,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.05952351689272695,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.06459295241694185,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.06952277169358526,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.07435530284494053,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.07873553423413288,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.08174042469282296,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.08475695512581764,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.08778162256091371,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.09091550722864915,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.09440152616885457,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.09763055978507283,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.10205930734765421,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.10620918039924206,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.11010275318327771,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.11394182813304056,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.11754902970319937,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.12091036975809431,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.12404990910197981,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.12707892806899745,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.13059751368677777,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.13389696274950674,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.13726525533545308,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.1406215216489825,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.14464710684702886,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.1484907528081717,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.15342666758343512,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.15668707674971422,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.16098139826639485,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.1644401011348113,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.16806520719585888,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.1714731442797751,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.17483755540768925,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.1788880346867265,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.18195910665875298,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.18561994928832648,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.18867762809299726,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.19314787685870197,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.19634136290974685,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.1993037962352106,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.2036705261689305,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.20784263453829468,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.2141381873175374,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.22054286185970307,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.2268497224503714,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.23167845463034173,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.23474633198215544,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.2376885176603654,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.24131977501404187,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.24601015688260244,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.25197568672554277,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.25774438170180375,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.2638092882077621,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.2695441268619656,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.2754002797314137,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.28154200484431785,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.2879470513419467,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.2938580807232879,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.30001079918930323,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3061302971638631,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3122824145331824,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3180724715534159,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3237610405353258,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3297503608384633,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.33318735994243404,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3362338783151296,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3422433916639762,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.348209024555978,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.35428501227305975,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3606794880399908,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3664294358636713,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3725700329716994,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.37881143035872633,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.38519356783140285,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3915392119570567,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.3979476988300247,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.40457613669599074,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.41123980289847395,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.4176996821032914,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.4240694440131131,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.4305009848900438,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.43689426968605233,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.44027920581804453,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.443849058115949,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.45222855300256426,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.4559199455569051,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.4630365373283238,
+      "chop": "moderate",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.4698286204801006,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.47435997761985804,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.4785741824368945,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.4818384346632122,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.48548091984198183,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.49341878258281935,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.49782598927618077,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5013758198255169,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5048299155656222,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5087315842570483,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.514258287238917,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5206725744624854,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5266853690885052,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5325789143508686,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5387189465244001,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5450732595893627,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5513500320654277,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5576001980094795,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.563615208723909,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5696545012224802,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5747123910802753,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5823022673015942,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5883820079372832,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.5950752610937144,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.601078591600767,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6071989848785101,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6104270902926867,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6135386309522124,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.619758805484125,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6240834757796192,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6283380846159874,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.632146835011383,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.635475878852748,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6384122967413506,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6418295387180091,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6449855465051246,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6480909796560035,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6513788149559311,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.657926631870322,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6608782597302308,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6646012317039811,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6709192606488646,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6772847769510768,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.68391662902173,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6900287954185953,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.6967144259987491,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7030335541978995,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7098240044860824,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7161596056126045,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7228082240206692,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7295186686665049,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7361884859730088,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7427245330625619,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7467076458662586,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7510377873837714,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7553410695064338,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7586152732806086,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7616736947151548,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7658010879022299,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7724031069811239,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7754666051515566,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7786163901984426,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7836876591043346,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7867769873078269,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7917118357880779,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7946548763596746,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.7978658281646475,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8009309209256803,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8041857895440483,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8076163990161531,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8111819058592201,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8152306500202258,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8199745402840228,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8249631580446882,
+      "chop": "light",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8284963687757372,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8320087507327631,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8370179601694556,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8421004355518913,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8467759520868245,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8624785029057621,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8781810537246995,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.8938836045436377,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.9095861553625751,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.9227951783584966,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.9360042013544178,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.9492132243503376,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.9624222473462597,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.9756312703421804,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 0.9878156351710895,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    },
+    {
+      "frac": 1,
+      "chop": "smooth",
+      "convective": false,
+      "cloud": false
+    }
+  ],
+  "visibleEvents": [],
+  "fullRouteEvents": [
+    {
+      "key": "turbulence:light-moderate",
+      "startFrac": 0.10205930734765421,
+      "endFrac": 0.8249631580446882,
+      "gaps": true,
+      "ranges": [
+        {
+          "from": 0.10205930734765421,
+          "to": 0.4630365373283238
+        },
+        {
+          "from": 0.6772847769510768,
+          "to": 0.8249631580446882
+        }
+      ],
+      "startChop": "moderate",
+      "weakest": "light",
+      "strongest": "moderate"
+    }
+  ]
+}

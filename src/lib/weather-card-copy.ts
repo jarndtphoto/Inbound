@@ -1,4 +1,5 @@
 import type { RouteSample } from "./types";
+import { sampleWeather } from "./route-weather-segments";
 
 export type PassengerWeatherCopy = {
   headline: string;
@@ -16,7 +17,8 @@ export function passengerWeatherCopy(
   const turbulence = eventKey?.startsWith("turbulence:") || sample.chop !== "smooth";
 
   if (turbulence) {
-    const severity = eventKey?.split(":")[1] || sample.chop;
+    const eventSeverity = eventKey?.split(":")[1];
+    const severity = !eventSeverity || eventSeverity === sample.chop ? sampleWeather(sample).intensity : eventSeverity;
     const mixed = severity.includes("-");
     const [, high] = mixed ? severity.split("-") : [severity, severity];
     const headline = severity === "light-moderate"
@@ -26,7 +28,7 @@ export function passengerWeatherCopy(
         : severity === "light-severe"
           ? nearArrival ? `Light to severe bumps possible${place}` : "Light to severe bumps ahead"
           : high === "severe"
-            ? nearArrival ? `Quite bumpy air possible${place}` : "Quite bumpy stretch ahead"
+            ? nearArrival ? `Severe bumps possible${place}` : "Severe bumps ahead"
             : high === "moderate"
               ? nearArrival ? `Bumpy air possible${place}` : "Bumpy stretch ahead"
               : nearArrival ? `A few light bumps possible${place}` : "Possible light bumps";
@@ -37,7 +39,7 @@ export function passengerWeatherCopy(
         : severity === "light-severe"
           ? "Light to severe bumps"
           : high === "severe"
-            ? "Quite bumpy air"
+            ? "Severe bumps"
             : high === "moderate" ? "Moderate bumps" : "Light bumps";
     return {
       headline,
