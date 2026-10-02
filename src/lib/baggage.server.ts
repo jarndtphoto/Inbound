@@ -160,6 +160,12 @@ export function parseFlightStatsBaggage(html: string, leg: BaggageLeg, checkedAt
   const arrival = section.slice(arrivalIndex - statusIndex);
   if (!new RegExp(`\\b${leg.origin}\\b`, "i").test(beforeDeparture)) return { status: "unavailable", checkedAt };
   if (!new RegExp(`\\b${leg.destination}\\b`, "i").test(betweenDepartureAndArrival)) return { status: "unavailable", checkedAt };
+  const [year, month, day] = leg.date.split("-").map(Number);
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const dateLabel = Number.isFinite(year) && month >= 1 && month <= 12 && day >= 1 && day <= 31
+    ? `${String(day).padStart(2, "0")}-${months[month - 1]}-${year}`
+    : "";
+  if (dateLabel && (!betweenDepartureAndArrival.includes(dateLabel) || !arrival.includes(dateLabel))) return { status: "unavailable", checkedAt };
 
   const baggageMatch = arrival.match(/\bBaggage\s+(N\/?A|--|[A-Za-z0-9-]{1,16})\b/i);
   const terminalMatch = arrival.match(/\bTerminal\s+(N\/?A|--|[A-Za-z0-9-]{1,12})\b/i);
@@ -219,6 +225,31 @@ function flightStatsStatusUrl(leg: BaggageLeg) {
   return `${FLIGHTSTATS_ROOT}/${airline}/${number}?year=${year}&month=${Number(month)}&date=${Number(day)}`;
 }
 
+export function flightStatsDetailUrls(html: string, leg: BaggageLeg) {
+  const match = leg.flight.toUpperCase().match(/^([A-Z0-9]{2})(\d{1,4})$/);
+  if (!match) return [];
+  const [, airline, number] = match;
+  const [year, month, day] = leg.date.split("-").map(Number);
+  const escaped = String(html ?? "").replace(/&amp;/gi, "&");
+  const pattern = new RegExp(`(?:https:\\/\\/www\\.flightstats\\.com)?\\/v2\\/flight-tracker\\/${airline}\\/${number}\\?[^"'<>\\s]*flightId=\\d+[^"'<>\\s]*`, "gi");
+  const urls: string[] = [];
+  for (const found of escaped.match(pattern) ?? []) {
+    try {
+      const url = new URL(found.startsWith("http") ? found : `https://www.flightstats.com${found}`);
+      if (Number(url.searchParams.get("year")) !== year
+        || Number(url.searchParams.get("month")) !== month
+        || Number(url.searchParams.get("date")) !== day
+        || !url.searchParams.get("flightId")) continue;
+      const value = url.toString();
+      if (!urls.includes(value)) urls.push(value);
+      if (urls.length >= 8) break;
+    } catch {
+      // Ignore malformed public-page links.
+    }
+  }
+  return urls;
+}
+
 async function tryHnl(leg: BaggageLeg): Promise<BaggageResult | null> {
   if (leg.destination !== "HNL") return null;
   try {
@@ -246,12 +277,25 @@ async function tryFlightStats(leg: BaggageLeg): Promise<BaggageResult | null> {
   const url = flightStatsStatusUrl(leg);
   if (!url) return null;
   try {
-    const page = await fetchBoard(`FS:${leg.flight}:${leg.origin}:${leg.destination}:${leg.date}`, url, (html) => /flight status/i.test(html) && /flight arrival times/i.test(html));
-    const result = withSource(parseFlightStatsBaggage(page.html, leg, page.at), "FlightStats", url);
-    if (result.status !== "unavailable") {
-      console.info("[baggage-flightstats]", { flight: leg.flight, origin: leg.origin, destination: leg.destination, date: leg.date, status: result.status, carousel: result.carousel ?? null });
+    const page = await fetchBoard(`FS:${leg.flight}:${leg.origin}:${leg.destination}:${leg.date}`, url, (html) => /flight status/i.test(html) || /past and upcoming flights/i.test(html));
+    const direct = withSource(parseFlightStatsBaggage(page.html, leg, page.at), "FlightStats", url);
+    if (direct.status !== "unavailable") {
+      console.info("[baggage-flightstats]", { flight: leg.flight, origin: leg.origin, destination: leg.destination, date: leg.date, status: direct.status, carousel: direct.carousel ?? null, detail: false });
+      return direct;
+    }
+
+    // Some flight numbers operate multiple segments on the same day. The
+    // generic FlightStats URL may open the later segment (UA457 ORD→CLE) even
+    // when we need the earlier LAX→ORD arrival. Follow only same-day detail
+    // links and let the strict flight/origin/destination/date parser choose.
+    for (const detailUrl of flightStatsDetailUrls(page.html, leg)) {
+      const detail = await fetchBoard(`FSID:${detailUrl}`, detailUrl, (html) => /flight status/i.test(html) && /flight arrival times/i.test(html));
+      const result = withSource(parseFlightStatsBaggage(detail.html, leg, detail.at), "FlightStats", detailUrl);
+      if (result.status === "unavailable") continue;
+      console.info("[baggage-flightstats]", { flight: leg.flight, origin: leg.origin, destination: leg.destination, date: leg.date, status: result.status, carousel: result.carousel ?? null, detail: true });
       return result;
     }
+    console.warn("[baggage-flightstats]", { flight: leg.flight, origin: leg.origin, destination: leg.destination, date: leg.date, reason: "No exact same-day segment matched" });
   } catch (error) {
     console.warn("[baggage-flightstats]", {
       flight: leg.flight,

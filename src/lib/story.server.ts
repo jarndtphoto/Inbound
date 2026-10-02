@@ -3951,6 +3951,13 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const detectedPush = pushLatchValue;
 	const storyResume = baseResume ? {
 		...baseResume,
+		// Preserve the live aircraft identity independently of the schedule feed.
+		// Some providers drop the completed flight-number record immediately after
+		// landing (especially on same-number through flights), but the tail/hex we
+		// observed in flight is still the safest key for taxi-in ground tracking.
+		tail: baseResume.tail ?? aircraft?.registration ?? null,
+		hex: baseResume.hex ?? aircraft?.hex ?? null,
+		type: baseResume.type ?? aircraft?.type ?? null,
 		departureStage: taxiOutLatched ? "taxi" : pushLatchValue ? "push" : null,
 		detectedPushUnix: detectedPush && typeof detectedPush === "object" && detectedPush.source === "live_detected"
 			? detectedPush.unix

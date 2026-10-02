@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseBaggage,parseLaxBaggage,parseFlightViewBaggage,parseFlightStatsBaggage,parseAlaskaBaggage,loadBaggage} from '../src/lib/baggage.server.ts';
+import {parseBaggage,parseLaxBaggage,parseFlightViewBaggage,parseFlightStatsBaggage,flightStatsDetailUrls,parseAlaskaBaggage,loadBaggage} from '../src/lib/baggage.server.ts';
 import {parseCiriumBaggage} from '../src/lib/cirium-baggage.server.ts';
 import {baggageSummary} from '../src/lib/baggage-copy.ts';
 import {flightDepartureDate} from '../src/lib/airline-status.ts';
@@ -30,6 +30,16 @@ test('LAX blank carousel is not posted',()=>assert.equal(parseLaxBaggage(laxRow(
 
 const flightViewPage=({origin='DFW',destination='ORD',terminal='3',bag='34'}={})=>`<html><body><h1>FLIGHT STATUS</h1><section>Departure Airport | Dallas Fort Worth Intl (${origin}) Scheduled Time: 1:00 PM</section><section>Arrival Airport | Chicago O Hare Intl (${destination}) Scheduled Time: 3:00 PM At Gate Time: 3:10 PM Terminal: ${terminal} Gate: H11B ${bag?`Baggage: ${bag} `:''}More airport info: Arrivals Weather Delays</section><section>Flight Details Aircraft Boeing 737</section></body></html>`;
 const flightStatsPage=({flight='UA 1156',origin='LGA',destination='ORD',terminal='1',bag='6'}={})=>`<html><body><h1>Flight Status</h1><div>${flight} United Airlines ${origin} New York ${destination} Chicago Scheduled On time</div><div>${origin} New York, NY, US New York LaGuardia Airport</div><h2>Flight Departure Times</h2><div>01-Oct-2026 Scheduled 16:25 EDT Estimated 16:25 EDT Terminal B Gate 47</div><div>${destination} Chicago, IL, US Chicago O'Hare International Airport</div><h2>Flight Arrival Times</h2><div>01-Oct-2026 Scheduled 18:09 CDT Estimated 18:09 CDT Terminal ${terminal} Gate N/A Baggage ${bag}</div><div>VIEW FLIGHT DETAILS SET UP FLIGHT ALERTS</div></body></html>`;
+const ua457Leg={flight:'UA457',origin:'LAX',destination:'ORD',date:'2026-10-01'};
+const ua457Listing=`<html><body><h1>Flight Status</h1><div>UA 457 United Airlines ORD Chicago CLE Cleveland</div><h2>Flight Departure Times</h2><div>01-Oct-2026</div><div>CLE Cleveland</div><h2>Flight Arrival Times</h2><div>01-Oct-2026 Baggage 9</div><a href="/v2/flight-tracker/UA/457?date=1&amp;flightId=1411571632&amp;month=10&amp;year=2026">12:45 PDT LAX Los Angeles ORD Chicago 19:05 CDT</a><a href="/v2/flight-tracker/UA/457?date=1&amp;flightId=1411571633&amp;month=10&amp;year=2026">21:30 CDT ORD Chicago CLE Cleveland 23:59 EDT</a></body></html>`;
+test('FlightStats finds same-day detail links for a reused flight number',()=>{
+  const urls=flightStatsDetailUrls(ua457Listing,ua457Leg);
+  assert.equal(urls.length,2);
+  assert.match(urls[0],/flightId=1411571632/);
+});
+const ua457Detail=flightStatsPage({flight:'UA 457',origin:'LAX',destination:'ORD',terminal:'1',bag:'4'});
+test('FlightStats exact UA457 LAX to ORD detail supplies baggage 4',()=>assert.deepEqual(parseFlightStatsBaggage(ua457Detail,ua457Leg,905),{status:'posted',carousel:'4',terminal:'1',checkedAt:905}));
+
 const ordUaLeg={flight:'UA1156',origin:'LGA',destination:'ORD',date:'2026-10-01'};
 test('FlightStats exact ORD arrival supplies baggage',()=>assert.deepEqual(parseFlightStatsBaggage(flightStatsPage(),ordUaLeg,903),{status:'posted',carousel:'6',terminal:'1',checkedAt:903}));
 test('FlightStats wrong route fails closed',()=>assert.equal(parseFlightStatsBaggage(flightStatsPage({destination:'MDW'}),ordUaLeg,903).status,'unavailable'));
