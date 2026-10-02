@@ -19,6 +19,7 @@ import { getFlightStory } from "@/lib/story";
 import type { Comfort, FlightStory, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
+import { flightPollingComplete } from "@/lib/flight-polling";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
 import { sampleWeather } from "@/lib/route-weather-segments";
 import { WeatherEventBody, WeatherEventHeadline, WeatherIntensityLabel } from "@/components/weather-event-copy";
@@ -539,6 +540,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return false;
       if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
+      if (s && flightPollingComplete(s)) return 60_000;
       if (q.state.status === "error") return /HTTP 402\b/.test(String(q.state.error?.message ?? "")) ? 60_000 : 15_000;
       if (!s) return 5_000;
       if (s.live || s.currentStage === "push" || s.currentStage === "taxi") return 3_000;
@@ -844,7 +846,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
         {story && (
           <div key={normFlight(query)} className={cn("journey-body min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
-            <div className="journey-map journey-map-expanded" hidden={flightTab !== "Route"}><RouteMap story={story} fixedViewport />{(story.route?.samples?.length ?? 0) < 2 && <p className="map-unavailable">Route map unavailable</p>}</div>
+            <div className="journey-map journey-map-expanded" hidden={flightTab !== "Route"}><RouteMap story={story} fixedViewport active={flightTab === "Route"} />{(story.route?.samples?.length ?? 0) < 2 && <p className="map-unavailable">Route map unavailable</p>}</div>
             <section className="journey-panel" id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
               <OverviewDetails story={story} timing={<TimesStrip story={story} failed={storyQ.isError || Boolean(refreshErr)} />} />
