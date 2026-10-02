@@ -98,6 +98,17 @@ test("UAL2207 cursor never moves backward across JSON cold-instance reloads", ()
     assert.equal(poll.state.pointAlongNm.length, poll.state.points.length);
   }
 });
+test("passing the threshold keeps a consumed projection at zero until landing", () => {
+  const last = replayUal2207().at(-1)!;
+  const aircraft = { ...last.aircraft, ...destPoint(fixture.runway.threshold, 90, .2), track: 90 };
+  const result = updateArrivalProjection(JSON.parse(JSON.stringify(last.state)), { live: aircraft, runway: fixture.runway,
+    dest: fixture.destination, landed: false, now: Date.parse(`${fixture.date}T17:14:00Z`) });
+  assert.equal(result.state.active, true);
+  assert.deepEqual(result.state.points, []);
+  assert.equal(result.pattern!.lengthNm, 0, "an empty suffix is consumed, not missing");
+  assert.equal(polylineLengthNm([aircraft, ...arrivalFuturePoints(result.state.points, aircraft)]), 0);
+  assert.equal(updateArrivalProjection(result.state, { ...input, live: { ...aircraft, onGround: true } }).pattern, null);
+});
 test("short planned legs use perpendicular distance, not distance to their start", () => {
   const a = runway.threshold, b = destPoint(a, 270, .5), midpoint = destPoint(a, 270, .25);
   const p = projectArrivalSegment(midpoint, a, b);

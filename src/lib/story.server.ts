@@ -3408,7 +3408,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const futureArrivalPoints = live ? arrivalFuturePoints(arrivalState.points, live) : arrivalState.points;
 	// Only this response's display path gets the observed aircraft anchor.
 	const displayArrivalPoints = live ? [{ lat: live.lat, lon: live.lon }, ...futureArrivalPoints] : [];
-	const pattern = !ourLanded && !live?.onGround && arrivalState.active && arrivalState.kind && displayArrivalPoints.length >= 2
+	// A consumed suffix is still an active zero-distance projection until landing;
+	// do not fall back to the airport reference point after passing the threshold.
+	const pattern = !ourLanded && !live?.onGround && arrivalState.active && arrivalState.kind && displayArrivalPoints.length >= 1
 		? { points: displayArrivalPoints, lengthNm: polylineLengthNm(displayArrivalPoints), kind: arrivalState.kind } : null;
 	if (pattern) {
 		arrivalPatternKind = pattern.kind;

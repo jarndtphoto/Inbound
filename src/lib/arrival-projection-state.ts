@@ -80,7 +80,7 @@ function consume(state: ArrivalProjectionState, live: ArrivalFix) {
   return projection.distanceNm;
 }
 
-const patternFromState = (state: ArrivalProjectionState) => state.active && state.kind && state.points.length && state.cursorPoint
+const patternFromState = (state: ArrivalProjectionState) => state.active && state.kind && state.cursorPoint
   ? { points: state.points, kind: state.kind, side: state.side!, lengthNm: polylineLengthNm([state.cursorPoint, ...state.points]) } : null;
 
 /** Entry is strict; continuation is independent of phase/vertical speed.
@@ -113,7 +113,7 @@ export function updateArrivalProjection(previous: ArrivalProjectionState, input:
     const local = runwayCoordinates(live, end);
     const turnDelta = live.track == null ? 0 : Math.abs(((live.track - state.runway.heading + 540) % 360) - 180);
     const farthestX = Math.min(...state.points.map(p => runwayCoordinates(p, end).x));
-    if (state.kind === "downwind-base" && turnDelta >= 120 && local.x < farthestX + 1) {
+    if (state.points.length && state.kind === "downwind-base" && turnDelta >= 120 && local.x < farthestX + 1) {
       installPlan(state, arrivalPattern(live, state.runway, state.side ?? undefined).points);
       consume(state, live);
     }
