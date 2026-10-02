@@ -393,83 +393,50 @@ export function FiledApp() {
   const [ready, setReady] = useState(false);
   const [entered, setEntered] = useState(false);
   const [page, setPage] = useState<"home" | "flight">("home");
-  const [theme, setTheme] = useState<"sunset" | "sunrise">("sunrise");
-  const [themeSettingsOpen, setThemeSettingsOpen] = useState(false);
   const [flight, setFlight] = useState("");
   const recents = useFiled(s => s.recents);
   const hydrate = useFiled(s => s.hydrate);
   const setQuery = useFiled(s => s.setQuery);
   useEffect(() => {
     hydrate();
-    let saved: "sunset" | "sunrise" = "sunrise";
-    try { if (localStorage.getItem("inbound-theme") === "sunset") saved = "sunset"; } catch { /* storage optional */ }
-    setTheme(saved);
-    document.documentElement.dataset.theme = saved;
     setReady(true);
   }, [hydrate]);
-  const chooseTheme = (next: "sunset" | "sunrise") => {
-    setTheme(next);
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("inbound-theme", next); } catch { /* storage optional */ }
-  };
   const start = (value: string) => {
     const q = value.trim();
     if (!q) return;
     setQuery(q);
     setPage("flight");
   };
-  if (!entered) return <main className="inbound-welcome">
+  if (!entered) return <main className="inbound-welcome inbound-redesign">
+    <header className="journey-header"><span className="home-brand"><Plane aria-hidden="true" />Inbound</span><AppearanceControl /></header>
     <div className="inbound-welcome-content">
-      <img className="inbound-welcome-art" src="/inbound-welcome.svg" alt="An aircraft approaching a runway through a glowing gold halo" width={768} height={768} fetchPriority="high" />
-      <h1 className="font-display text-6xl">Inbound</h1>
-      <p className="inbound-welcome-tagline">Your all in one flight information app</p>
-      <p className="inbound-welcome-description">From your gate to your destination.</p>
-      <button type="button" className="inbound-welcome-button" disabled={!ready} onClick={() => setEntered(true)}>
+      <Plane className="welcome-plane" aria-hidden="true" />
+      <h1>Inbound</h1>
+      <p className="inbound-welcome-tagline">Your flight, from gate to gate.</p>
+      <p className="inbound-welcome-description">Follow your aircraft. Know what’s ahead.</p>
+      <button type="button" className="home-submit" disabled={!ready} onClick={() => setEntered(true)}>
         {ready ? "Track my flight" : "Preparing your journey…"}
       </button>
     </div>
   </main>;
   if (page === "flight") return <FlightPages onHome={() => setPage("home")} />;
-  return <main className="h-dvh overflow-hidden bg-bg px-5 pt-safe pb-safe text-fg sm:px-8">
-    <div className="mx-auto flex h-full max-w-2xl flex-col gap-4 py-3 sm:py-5">
-      <header className="flex shrink-0 items-center justify-between gap-3">
-        <span className="flex items-center gap-2 font-semibold"><Plane className="h-5 w-5 text-accent" aria-hidden="true" /> Inbound</span>
-        <button type="button" onClick={() => setThemeSettingsOpen(true)} className="rounded-lg border border-border px-4 py-2.5 text-sm font-semibold">Theme settings</button>
-      </header>
-
-      <section className="flex min-h-0 flex-1 flex-col justify-center rounded-2xl border border-border bg-surface p-5 sm:p-8">
-        <p className="text-sm font-medium text-muted">Live flight tracking from gate to gate</p>
-        <h1 className="mt-2 font-display text-4xl leading-[0.95] sm:text-6xl">Know what’s happening<br />with your flight.</h1>
-        <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted sm:text-base">Follow the aircraft, see the route and weather ahead, and stay current as the flight moves.</p>
-        <form className="mt-5 space-y-2.5" onSubmit={e => { e.preventDefault(); start(flight); }}>
-          <label htmlFor="home-flight" className="block text-sm font-semibold">Flight number</label>
-          <input id="home-flight" required maxLength={16} value={flight} onChange={e => setFlight(e.target.value)} placeholder="For example, AA1114" autoCapitalize="characters" autoComplete="off" spellCheck={false} className="w-full rounded-xl border border-border bg-bg px-4 py-3.5 text-lg outline-none focus:ring-2 focus:ring-accent" />
-          <button type="submit" disabled={!flight.trim()} className="w-full rounded-xl bg-accent px-5 py-3.5 font-semibold text-accent-fg disabled:opacity-50">Track my flight →</button>
+  return <main className="inbound-home inbound-redesign">
+    <header className="journey-header"><span className="home-brand"><Plane aria-hidden="true" />Inbound</span><AppearanceControl /></header>
+    <div className="home-content">
+      <section className="home-search">
+        <p className="home-eyebrow">Live flight tracking</p>
+        <h1>Know what’s happening with your flight.</h1>
+        <p className="home-description">Follow the aircraft, see the route and weather ahead, and stay current as the flight moves.</p>
+        <form onSubmit={e => { e.preventDefault(); start(flight); }}>
+          <label htmlFor="home-flight">Flight number</label>
+          <input id="home-flight" required maxLength={16} value={flight} onChange={e => setFlight(e.target.value)} placeholder="For example, AA1114" autoCapitalize="characters" autoComplete="off" spellCheck={false} />
+          <button type="submit" className="home-submit" disabled={!flight.trim()}>Track my flight →</button>
         </form>
       </section>
-
-      {recents.length > 0 && <section className="shrink-0" aria-label="Recent flights">
-        <div className="mb-2 flex items-center justify-between gap-3"><h2 className="text-sm font-semibold">Recent flights</h2><span className="text-xs text-muted">Tap to reopen</span></div>
-        <div className="grid grid-cols-3 gap-2">{recents.slice(0, 3).map(q => <button key={q} type="button" onClick={() => start(q)} className="min-w-0 truncate rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-semibold">{q}</button>)}</div>
+      {recents.length > 0 && <section className="home-recents" aria-label="Recent flights">
+        <div><h2>Recent flights</h2><span>Tap to reopen</span></div>
+        {recents.slice(0, 3).map(q => <button key={q} type="button" onClick={() => start(q)}><strong>{q}</strong><span aria-hidden="true">→</span></button>)}
       </section>}
-
-      {themeSettingsOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-5 py-safe" role="presentation" onMouseDown={e => { if (e.currentTarget === e.target) setThemeSettingsOpen(false); }}>
-        <section role="dialog" aria-modal="true" aria-labelledby="theme-settings-title" className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 text-fg shadow-2xl">
-          <div className="flex items-start justify-between gap-3">
-            <div><h2 id="theme-settings-title" className="text-xl font-semibold">Theme settings</h2><p className="mt-1 text-sm text-muted">Choose how Inbound looks on this device.</p></div>
-            <button type="button" aria-label="Close theme settings" onClick={() => setThemeSettingsOpen(false)} className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border text-xl">×</button>
-          </div>
-          <fieldset className="mt-5"><legend className="sr-only">Appearance</legend><div className="grid grid-cols-2 gap-3">
-            {(["sunrise", "sunset"] as const).map(mode => <button key={mode} type="button" aria-pressed={theme === mode} onClick={() => chooseTheme(mode)} className={cn("rounded-xl border-2 p-4 text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent", theme === mode ? "ring-2 ring-accent ring-offset-2 ring-offset-bg" : "")} style={{ background: mode === "sunrise" ? "#fff3ce" : "#172238", color: mode === "sunrise" ? "#30230c" : "#f4f6ff", borderColor: mode === "sunrise" ? "#ad7415" : "#748cb5" }}>
-              <span aria-hidden="true" className="mb-3 block text-2xl">{mode === "sunset" ? "☾" : "☀"}</span>
-              <span className="block font-semibold">{mode === "sunset" ? "Sunset" : "Sunrise"}</span>
-              <span className="mt-1 block text-sm">{mode === "sunset" ? "Dark & calm" : "Light & bright"}</span>
-              <span className="mt-3 block text-xs font-semibold">{theme === mode ? "✓ Selected" : "Choose theme"}</span>
-            </button>)}
-          </div></fieldset>
-          <p className="mt-4 text-xs text-muted">Your preference is saved on this device and used throughout the app.</p>
-        </section>
-      </div>}
     </div>
   </main>;
 }
@@ -527,7 +494,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     if (!meta) return;
     meta.setAttribute(
       "content",
-      "width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no",
+      "width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover",
     );
   }, []);
 
@@ -825,8 +792,8 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   }, [story, query, flightTab]);
 
   return (
-    <div className={cn("pwa-flight-shell", (flightTab === "Overview" || flightTab === "Route") && "inbound-redesign", "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg")} style={shellStyle}>
-      {story && (flightTab === "Overview" || flightTab === "Route") && <header className="journey-header"><div><h1>Inbound</h1><p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p></div><AppearanceControl /></header>}
+    <div className={cn("pwa-flight-shell", "inbound-redesign", "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg")} style={shellStyle}>
+      <header className="journey-header"><div><h1>Inbound</h1>{story ? <p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p> : <p>{query || "Preparing your flight…"}</p>}</div><AppearanceControl /></header>
       {story && <FlightWelcome open={briefPopupOpen} onClose={() => setBriefPopupOpen(false)} story={story} brief={shownBrief} />}
       <ScreenErrorBoundary>
       <main
@@ -875,7 +842,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
         {story && (
           <div key={normFlight(query)} className={cn("journey-body min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
-            <div className={cn("journey-map", flightTab === "Overview" && "journey-map-overview", flightTab === "Route" && "journey-map-expanded")} hidden={flightTab !== "Overview" && flightTab !== "Route"}><RouteMap story={story} fixedViewport />{(story.route?.samples?.length ?? 0) < 2 && <p className="map-unavailable">Route map unavailable</p>}</div>
+            <div className="journey-map journey-map-expanded" hidden={flightTab !== "Route"}><RouteMap story={story} fixedViewport />{(story.route?.samples?.length ?? 0) < 2 && <p className="map-unavailable">Route map unavailable</p>}</div>
             <section className="journey-panel" id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
               <OverviewDetails story={story} timing={<TimesStrip story={story} failed={storyQ.isError || Boolean(refreshErr)} />} />
@@ -1926,33 +1893,11 @@ function WxBlock({
 function Skeleton({ query }: { query: string }) {
   const label = query.trim() || "the flight";
   return (
-    <div>
-      <p className="mb-3 flex items-center gap-2 font-mono text-xs tracking-widest text-muted uppercase">
-        <RefreshCw className="size-3.5 animate-spin text-accent" />
-        Getting {label}
-      </p>
-      <div className="grid min-w-0 gap-5 lg:grid-cols-12">
-        <section className="min-w-0 lg:col-span-7">
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <p className="font-mono text-xs tracking-wide text-muted">Live position</p>
-            <h2 className="font-display text-display font-semibold leading-none">{label}</h2>
-            <p className="mt-3 text-sm text-muted">Getting times, weather, and the map…</p>
-          </div>
-          <div className="mt-4 flex h-64 items-center justify-center rounded-xl border border-border bg-surface-2">
-            <p className="text-sm text-muted">Loading map…</p>
-          </div>
-        </section>
-        <section className="min-w-0 lg:col-span-5">
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <p className="font-mono text-xs tracking-widest text-subtle uppercase">Times</p>
-            <p className="mt-3 text-sm text-muted">Scheduled and estimated clocks load with the flight.</p>
-          </div>
-          <div className="mt-4 rounded-xl border border-border bg-surface p-4">
-            <p className="font-mono text-xs tracking-widest text-subtle uppercase">Briefing</p>
-            <p className="mt-3 text-sm text-muted">Ride notes appear as soon as weather is in.</p>
-          </div>
-        </section>
-      </div>
+    <div className="flight-loading" role="status">
+      <RefreshCw className="size-6 animate-spin text-accent" aria-hidden="true" />
+      <h2>Getting {label}</h2>
+      <p>Getting times, weather, and the map…</p>
+      <dl><div><dt>Times</dt><dd>Scheduled and estimated clocks load with the flight.</dd></div><div><dt>Briefing</dt><dd>Ride notes appear as soon as weather is in.</dd></div></dl>
     </div>
   );
 }

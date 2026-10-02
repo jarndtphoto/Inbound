@@ -6,6 +6,7 @@ const KEY = "inbound-appearance";
 
 export function AppearanceControl() {
   const [mode, setMode] = useState<Appearance>("auto");
+  const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
   const [dark, setDark] = useState(false);
   useEffect(() => {
@@ -17,19 +18,24 @@ export function AppearanceControl() {
       else if (localStorage.getItem("inbound-theme") === "sunrise") saved = "light";
     } catch { /* Appearance works without storage. */ }
     setMode(saved);
+    setLoaded(true);
   }, []);
   useEffect(() => {
+    if (!loaded) return;
     const apply = () => {
       const hour = new Date().getHours();
       const night = mode === "dark" || (mode === "auto" && (hour < 7 || hour >= 19));
       document.documentElement.dataset.theme = night ? "sunset" : "sunrise";
+      document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]').forEach(meta => { meta.content = night ? "#081725" : "#fcfaf5"; });
+      document.querySelectorAll<HTMLMetaElement>('meta[name="apple-mobile-web-app-status-bar-style"]').forEach(meta => { meta.content = "black-translucent"; });
+      document.documentElement.style.colorScheme = night ? "dark" : "light";
       setDark(night);
     };
     apply();
     const timer = window.setInterval(apply, 30_000);
     document.addEventListener("visibilitychange", apply);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", apply); };
-  }, [mode]);
+  }, [mode, loaded]);
   return <div className="appearance-control">
     <button type="button" aria-label="Appearance" aria-expanded={open} onClick={() => setOpen(!open)}>
       {dark ? <Moon aria-hidden="true" /> : <Sun aria-hidden="true" />}
