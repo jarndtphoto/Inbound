@@ -251,12 +251,12 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
     };
   };
 
-  const zoomBy = useCallback((factor: number) => {
+  const zoomBy = useCallback((factor: number, anchor?: { x: number; y: number }) => {
     const { s, x, y } = viewRef.current;
     const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
     const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, s * factor));
-    const cx = W / 2;
-    const cy = H / 2;
+    const cx = anchor ? anchor.x * s + x : W / 2;
+    const cy = anchor ? anchor.y * s + y : H / 2;
     setView(
       clampView({
         s: ns,
@@ -561,6 +561,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const movedFromHome = Math.abs(zoom.s - 1) > 0.02 || Math.abs(zoom.x) > 1 || Math.abs(zoom.y) > 1;
   const arrival = story.route.expectedArrival;
   const runwayAhead = arrival ? destPoint(arrival.threshold, arrival.heading, 1) : null;
+  const arrivalZoomAnchor = arrival && story.route.arrivalPatternKind && !landed
+    ? { x: sx(arrival.threshold.lon), y: sy(arrival.threshold.lat) } : undefined;
   // Only the drawn upcoming arrival area determines whether the label is useful;
   // a long flown trip must not make a tiny approach qualify at overview zoom.
   const approachSamples = arrival ? samples.filter(sample => sample.frac >= progress && haversineNm(sample, arrival.threshold) <= 40) : [];
@@ -745,7 +747,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           <button
             type="button"
             aria-label="Zoom in"
-            onClick={() => zoom.zoomBy(1.4)}
+            onClick={() => zoom.zoomBy(1.4, arrivalZoomAnchor)}
             className="flex h-11 w-11 items-center justify-center rounded-sm border border-border bg-bg/90 font-display text-xl text-fg"
           >
             +
@@ -753,7 +755,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           <button
             type="button"
             aria-label="Zoom out"
-            onClick={() => zoom.zoomBy(1 / 1.4)}
+            onClick={() => zoom.zoomBy(1 / 1.4, arrivalZoomAnchor)}
             className="flex h-11 w-11 items-center justify-center rounded-sm border border-border bg-bg/90 font-display text-xl text-fg"
           >
             −
