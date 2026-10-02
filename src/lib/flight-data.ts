@@ -1,4 +1,5 @@
 import { haversineNm } from "./geo.ts";
+import type { LiveAircraft } from "./types.ts";
 
 export type FlightProvider = "fr24" | "flightaware" | "adsb";
 export type Confidence = "high" | "medium" | "low";
@@ -77,7 +78,7 @@ export function choosePosition(positions: Array<NormalizedPosition | null | unde
   }
   return { chosen, disagreementNm, candidates };
 }
-export function normalizedToLive(position: NormalizedPosition) {
+export function normalizedToLive(position: NormalizedPosition): LiveAircraft & { seenAt: number; source: FlightProvider; confidence: Confidence } {
   return { hex: position.hex ?? "", callsign: position.callsign, registration: position.registration, type: position.type, typeName: position.type, year: null, operator: null,
     lat: position.lat, lon: position.lon, altFt: position.altFt, gsKt: position.gsKt, track: position.track, vertFpm: null, onGround: Boolean(position.onGround),
     phase: position.onGround ? ((position.gsKt ?? 0) > 5 ? "taxi" : "parked") : "cruise", extrapolated: false, seenSec: positionAgeSec(position), seenAt: position.seenAt, source: position.provider, confidence: position.confidence };

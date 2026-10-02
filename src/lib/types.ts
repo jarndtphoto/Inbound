@@ -1,4 +1,5 @@
 import type { DecodedField, Metar, Taf } from "./metar";
+import type { NormalizedPosition, ProviderState } from "./flight-data";
 
 export type Traffic = {
   hex: string;
@@ -243,7 +244,21 @@ export type FlightStory = {
   providers?: {
     chosenPosition?: string | null;
     chosenPositionAgeSec?: number | null;
-    [key: string]: unknown;
+    chosenPositionSeenAt?: number | null;
+    configured?: { flightaware: boolean; fr24: boolean };
+    status?: { flightaware: ProviderState; fr24: ProviderState };
+    fr24Position?: NormalizedPosition | null;
+    flightawarePosition?: NormalizedPosition | null;
+    adsbPosition?: NormalizedPosition | null;
+    disagreementNm?: number | null;
+    providerDistancesNm?: Partial<Record<"flightaware" | "fr24" | "adsb", number | null>>;
+    filedRouteDeviationNm?: number | null;
+    providerEta?: { flightaware: number | null; fr24: number | null };
+    remainingNm?: number;
+    etaMin?: number;
+    landed?: boolean;
+    phaseStatePersistence?: string;
+    surfaceTelemetryStale?: boolean;
   };
   aircraft: LiveAircraft | null;
   origin: FieldBrief;
