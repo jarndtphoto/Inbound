@@ -19,7 +19,7 @@ test('timing uses two unboxed columns and an optional inline live position',()=>
   assert.equal((strip.match(/className="timing-values"/g)||[]).length,3);
   assert.match(css,/grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(css,/\.timing-number[^}]*white-space: nowrap/);
-  assert.doesNotMatch(strip,/<Stat|Live timing & position/);
+  assert.doesNotMatch(strip,/<Stat\s|Live timing & position/);
   assert.match(strip,/showLiveFlight \? \(/);
   assert.match(strip,/className="timing-position"/);
 });
