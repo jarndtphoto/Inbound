@@ -2,7 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { loadFlightStory, loadLiveBoard } from "./story.server";
 import { readFlightResume, type DepartureStageCheckpoint, type FlightResume } from "./flight-resume";
 import { haversineNm } from "./geo";
-import { FR24_SURFACE_FRESH_SEC, identityCompatible, normalizedToLive, positionAgeSec } from "./flight-data";
+import { FR24_SURFACE_FRESH_SEC, airborneFixSupersedesGround, identityCompatible, normalizedToLive, positionAgeSec } from "./flight-data";
+import { airportByIata, airportByIcao } from "./airports";
 import type { FlightStory } from "./types";
 
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
@@ -27,10 +28,19 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
   };
   const departureContext = DEPARTURE_SURFACE_STAGES.has(story.currentStage)
     || priorStage === "push" || priorStage === "taxi" || priorStage === "takeoff_roll";
+  const surfaceField = candidate && haversineNm(candidate, story.dest) < haversineNm(candidate, story.origin) ? story.dest : story.origin;
+  const elevationFt = (surfaceField?.icao ? airportByIcao(surfaceField.icao)?.elevationFt : null)
+    ?? (surfaceField?.iata ? airportByIata(surfaceField.iata)?.elevationFt : null) ?? 0;
+  const selectedAge = story.providers?.chosenPositionAgeSec ?? story.aircraft?.seenSec ?? Infinity;
+  const newerAirborne = Boolean(candidate?.onGround === true && story.aircraft && !story.aircraft.extrapolated
+    && identityCompatible(story.aircraft, expected)
+    && identityCompatible(story.aircraft, { callsigns: candidate.callsign ? [candidate.callsign] : [], registration: candidate.registration, hex: candidate.hex })
+    && airborneFixSupersedesGround(story.aircraft, selectedAge, positionAgeSec(candidate), elevationFt));
   const freshFrDeparture = Boolean(candidate
     && candidate.provider === "fr24"
     && positionAgeSec(candidate) <= FR24_SURFACE_FRESH_SEC
     && identityCompatible(candidate, expected)
+    && !newerAirborne
     && (candidate.onGround === true || departureContext));
 
   if (freshFrDeparture && candidate) {

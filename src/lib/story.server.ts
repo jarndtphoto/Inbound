@@ -1439,13 +1439,19 @@ const FLIGHTSTATS_TZ_OFFSET_MIN = {
 	JST: 540, KST: 540, IST: 330, GST: 240, AEST: 600, AEDT: 660, AWST: 480, NZST: 720, NZDT: 780,
 };
 function flightStatsTimeUnix(section, label) {
-	const re = new RegExp(`(\\d{2})-([A-Za-z]{3})-(\\d{4})\\s+${label}\\s+(\\d{1,2}):(\\d{2})\\s+([A-Z]{2,5}|[+-]\\d{2})\\b`, "i");
-	const m = String(section ?? "").match(re);
+	const text = String(section ?? "");
+	const re = new RegExp(`\\b${label}\\s+(\\d{1,2}):(\\d{2})\\s+([A-Z]{2,5}|[+-]\\d{2})\\b`, "i");
+	const m = re.exec(text);
 	if (!m) return null;
-	const month = FLIGHTSTATS_MONTHS[m[2][0].toUpperCase() + m[2].slice(1, 3).toLowerCase()];
-	const hour = Number(m[4]), minute = Number(m[5]), year = Number(m[3]), day = Number(m[1]);
+	// A section can publish one date followed by Scheduled, Estimated and Actual
+	// times. An explicit later date starts a new context (including midnight).
+	const dates = [...text.slice(0, m.index).matchAll(/\b(\d{2})-([A-Za-z]{3})-(\d{4})\b/g)];
+	const date = dates.at(-1);
+	if (!date) return null;
+	const month = FLIGHTSTATS_MONTHS[date[2][0].toUpperCase() + date[2].slice(1, 3).toLowerCase()];
+	const hour = Number(m[1]), minute = Number(m[2]), year = Number(date[3]), day = Number(date[1]);
 	if (!Number.isInteger(month) || !Number.isFinite(hour) || !Number.isFinite(minute) || hour > 23 || minute > 59) return null;
-	const zone = m[6].toUpperCase();
+	const zone = m[3].toUpperCase();
 	let offset = FLIGHTSTATS_TZ_OFFSET_MIN[zone];
 	if (offset == null && /^[+-]\d{2}$/.test(zone)) offset = Number(zone) * 60;
 	if (!Number.isFinite(offset)) return null;
@@ -2948,16 +2954,19 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		: await safe(adsbByCallsign(parsed.callsign), null);
 	const liveCs = parsed.callsign;
 	const adsbLive = rawAc ? toLive(rawAc) : null;
-	const positionChoice = choosePosition(
-		[normalizedAdsb(adsbLive), official.fr24?.position, flightawareOfficial?.position],
-		{ callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean), registration: aware?.tail ?? null, hex: knownHex ?? aware?.hex ?? null }
-	);
-	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen) : adsbLive ?? liveFromAware(aware);
 	let [origin, dest] = await Promise.all([
     resolveFlightField(aware, "origin", route?.origin),
     resolveFlightField(aware, "dest", route?.destination),
   ]);
 	if (!origin || !dest) throw new Error("Flight route unavailable. Try again when the flight feeds respond.");
+	const frGround = official.fr24?.position;
+	const surfaceField = frGround?.onGround === true && haversineNm(frGround, dest) < haversineNm(frGround, origin) ? dest : origin;
+	const positionChoice = choosePosition(
+		[normalizedAdsb(adsbLive), official.fr24?.position, flightawareOfficial?.position],
+		{ callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean), registration: aware?.tail ?? null, hex: knownHex ?? aware?.hex ?? null },
+		Date.now() / 1000, fieldElev(surfaceField)
+	);
+	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen) : adsbLive ?? liveFromAware(aware);
 	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
 	live = asOnGround(live, origin);

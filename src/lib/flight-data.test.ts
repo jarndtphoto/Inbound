@@ -65,7 +65,7 @@ describe("position confidence fusion", () => {
   it("shares the 30-second surface boundary with the story wrapper", () => {
     const air = pos("adsb", 41.79, -87.74, 1);
     for (const age of [29, 30]) {
-      assert.equal(choosePosition([groundPos("fr24", 41.786, -87.752, age), air], {}, 10_000).chosen?.provider, "fr24");
+      assert.equal(choosePosition([groundPos("fr24", 41.786, -87.752, age)], {}, 10_000).chosen?.provider, "fr24");
     }
     for (const age of [30.01, 40, 45, 50, 60]) {
       const stale = groundPos("fr24", 41.786, -87.752, age);
@@ -76,6 +76,20 @@ describe("position confidence fusion", () => {
       }
     }
   });
+  it("lets a much newer airborne fix beat a 25-second FR24 ground fix", () => {
+    const ground = groundPos("fr24", 41.786, -87.752, 25);
+    const air = pos("adsb", 41.79, -87.74, 1);
+    for (const positions of [[ground, air], [air, ground]]) {
+      assert.equal(choosePosition(positions, { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "adsb");
+    }
+  });
+  it("retains the FR24 ground preference when its fix is only two seconds older", () => {
+    const ground = groundPos("fr24", 41.786, -87.752, 3);
+    const air = pos("adsb", 41.79, -87.74, 1);
+    for (const positions of [[ground, air], [air, ground]]) {
+      assert.equal(choosePosition(positions, { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "fr24");
+    }
+  });
   it("does not resurrect stale ground data when airborne data is absent or invalid", () => {
     const stale = groundPos("fr24", 41.786, -87.752, 50);
     assert.equal(choosePosition([stale], {}, 10_000).chosen, null);
@@ -83,6 +97,19 @@ describe("position confidence fusion", () => {
     const wrong = { ...pos("adsb", 41.79, -87.74), hex: "999999" };
     assert.equal(choosePosition([stale, wrong], { hex: "abc123" }, 10_000).chosen, null);
     assert.equal(choosePosition([stale, groundPos("adsb", 41.784, -87.754, 50)], {}, 10_000).chosen?.provider, "adsb");
+  });
+  it("requires matching identity, clear airborne evidence, and more than ten seconds of freshness advantage", () => {
+    const ground = groundPos("fr24", 39.86, -104.67, 25);
+    const air = { ...pos("adsb", 39.87, -104.66, 1), altFt: 5500, gsKt: 20 };
+    const expected = { registration: "N123AA", hex: "abc123" };
+    assert.equal(choosePosition([ground, air], expected, 10_000, 5434).chosen?.provider, "fr24", "MSL altitude is not AGL");
+    assert.equal(choosePosition([ground, { ...air, altFt: 6000 }], expected, 10_000, 5434).chosen?.provider, "adsb", "above 500 ft AGL");
+    assert.equal(choosePosition([ground, { ...air, gsKt: 81 }], expected, 10_000, 5434).chosen?.provider, "adsb", "above 80 kt");
+    assert.equal(choosePosition([ground, { ...air, gsKt: 81, hex: "999999" }], expected, 10_000, 5434).chosen?.provider, "fr24", "wrong aircraft");
+    assert.equal(choosePosition([ground, { ...air, gsKt: 81, hex: "999999" }], {}, 10_000, 5434).chosen?.provider, "fr24", "surface identity remains required without a saved lock");
+    assert.equal(choosePosition([groundPos("fr24", 39.86, -104.67, 11), { ...air, gsKt: 81 }], expected, 10_000, 5434).chosen?.provider, "fr24", "exactly ten seconds newer");
+    const otherGround = groundPos("flightaware", 39.86, -104.67, 25);
+    assert.equal(choosePosition([ground, otherGround, { ...air, gsKt: 81 }], expected, 10_000, 5434).chosen?.provider, "adsb", "ground scoring cannot restore the old fix");
   });
 });
 
