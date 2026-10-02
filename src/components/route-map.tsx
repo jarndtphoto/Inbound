@@ -528,12 +528,15 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       ? sy(ac!.lat)
       : sy(origin.lat);
   const rot = landed ? 0 : story.route.heading;
-  const weatherLabel = (sample: RouteSample, eventKey?: string) => passengerWeatherCopy(
-    sample,
-    sample.frac >= 0.85,
-    story.dest.city || story.dest.iata,
-    eventKey,
-  ).mapLabel;
+  const weatherLabel = (sample: RouteSample, eventKey?: string, note?: string | null) => {
+    const label = passengerWeatherCopy(
+      sample,
+      sample.frac >= 0.85,
+      story.dest.city || story.dest.iata,
+      eventKey,
+    ).mapLabel;
+    return /\b(?:PIREP|REPORTED)\b/i.test(note ?? "") ? `${label} reported` : label;
+  };
   const takeoffAt = story.times.takeoffUnix;
   const airborneNow = story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach";
   const elapsedMin = airborneNow && story.times.takeoffKind === "actual" && takeoffAt != null
@@ -556,7 +559,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     : mapEvents.map((event, index) => ({
         eventNumber: index + 1,
         ...event.start,
-        alertLabel: weatherLabel(event.start, event.key),
+        alertLabel: weatherLabel(event.start, event.key, event.note),
         durationMin: airborneNow ? event.endEtaMin - event.startEtaMin
           : plannedMinutes == null ? null : (event.endFrac - event.startFrac) * plannedMinutes,
         intoMin: airborneNow ? elapsedMin == null ? null : elapsedMin + event.startEtaMin
@@ -683,8 +686,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           const w = run.past ? 3.2 : run.chop === "smooth" ? 5.2 : 6.4;
           return (
             <g key={`run-${i}`}>
-              <path d={d} data-route-stroke="outline" className="fill-none stroke-bg" strokeWidth={w + 3.4} vectorEffect="non-scaling-stroke" />
-              <path d={d} data-route-stroke={run.past ? "flown" : "projected"} className={cn("fill-none", chopClass(run.chop, run.past))} strokeWidth={w} vectorEffect="non-scaling-stroke" />
+              <path d={d} data-route-stroke="outline" className="fill-none stroke-bg" strokeWidth={w + 3.4} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+              <path d={d} data-route-stroke={run.past ? "flown" : "projected"} className={cn("fill-none", chopClass(run.chop, run.past))} strokeWidth={w} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
             </g>
           );
         })}
