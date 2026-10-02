@@ -24,6 +24,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
 const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
+const { runwayDistanceNm } = await import('../src/lib/airport-surface.server.ts');
 const { normalizeAeroApiRoute } = await import('../src/lib/flightaware-aeroapi.server.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
 const { rideOutlook, RideOutlookText, nextStep } = await import('../src/lib/traveler.ts');
@@ -712,6 +713,35 @@ it('preserves missing weather feeds as unknown while the flight still loads', as
   assert.ok(story.weatherCoverage.failedSources.includes('Pilot reports'));
 });
 
+
+describe('runway position departure evidence', () => {
+  const surface = {
+    airport: 'KMDW',
+    checkedAt: 1,
+    source: 'OpenStreetMap',
+    features: [
+      { id: 1, kind: 'runway', points: [
+        { lat: 41.7780, lon: -87.7600 },
+        { lat: 41.7900, lon: -87.7440 },
+      ] },
+    ],
+  };
+
+  it('recognizes a stopped aircraft on or immediately beside a runway', () => {
+    assert.ok(runwayDistanceNm(surface, { lat: 41.7792, lon: -87.7584 }) < 0.08);
+  });
+
+  it('does not call a remote gate-area point a runway position', () => {
+    assert.ok(runwayDistanceNm(surface, { lat: 41.7855, lon: -87.7520 }) > 0.08);
+  });
+
+  it('uses runway position as push/taxi evidence without changing speed thresholds', () => {
+    const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(source, /runwayPosition \|\|/);
+    assert.match(source, /\(live\.gsKt \?\? 0\) >= 6 \|\| runwayPosition/);
+    assert.match(source, /stationaryAtStand[\s\S]{0,220}!runwayPosition/);
+  });
+});
 
 describe('stage and ground-map position identity', () => {
   it('uses the commercial flight number for the stage FR24 lookup', () => {
