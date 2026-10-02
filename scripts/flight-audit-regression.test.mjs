@@ -66,6 +66,8 @@ describe('passenger weather presentation', () => {
 
 describe('zoom-stable route presentation', () => {
   const source = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
+  const groundSource = readFileSync(new URL('../src/components/movement-map.tsx', import.meta.url), 'utf8');
+  const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
   it('keeps every route, flown-track, projected, outline, and weather stroke screen-sized', () => {
     const strokes = source.split('\n').filter(line => line.includes('data-route-stroke='));
@@ -79,9 +81,17 @@ describe('zoom-stable route presentation', () => {
     assert.match(source, /hasFix[^>]+scale\(\$\{1 \/ zoom\.s\}\)/);
   });
 
-  it('renders the Great Lakes with the same water fill as the ocean', () => {
-    assert.match(source, /data-map-water="great-lake"/);
-    assert.match(source, /style=\{\{ fill: "var\(--journey-water\)" \}\}/);
+  it('keeps route water styling scoped away from the airport ground map', () => {
+    assert.match(source, /data-route-map/);
+    assert.match(groundSource, /data-ground-map/);
+    assert.match(stylesSource, /svg\[data-route-map\] > rect \{ fill: var\(--journey-water\); \}/);
+    assert.doesNotMatch(stylesSource, /\.journey-map svg > rect \{ fill: var\(--journey-water\); \}/);
+  });
+
+  it('fits the initial ground-map view to the loaded airport surface', () => {
+    assert.match(groundSource, /fitGroundSurfaceView/);
+    assert.match(groundSource, /zoom\.fitPoints\(points\)/);
+    assert.match(groundSource, /resetViewRef\.current = next/);
   });
 });
 
