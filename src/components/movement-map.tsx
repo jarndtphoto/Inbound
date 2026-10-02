@@ -20,6 +20,27 @@ const overviewView = (): View => ({
   y: (H - H * MIN_GROUND_ZOOM) / 2,
 });
 
+export function fitGroundSurfaceView(points: Array<{ x: number; y: number }>, padding = 24): View {
+  const usable = points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (usable.length < 2) return overviewView();
+  const minX = Math.min(...usable.map((p) => p.x));
+  const maxX = Math.max(...usable.map((p) => p.x));
+  const minY = Math.min(...usable.map((p) => p.y));
+  const maxY = Math.max(...usable.map((p) => p.y));
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const availableW = Math.max(1, W - padding * 2);
+  const availableH = Math.max(1, H - padding * 2);
+  const scale = Math.max(MIN_GROUND_ZOOM, Math.min(INITIAL_GROUND_ZOOM, availableW / width, availableH / height));
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  return clampView({
+    scale,
+    x: W / 2 - cx * scale,
+    y: H / 2 - cy * scale,
+  });
+}
+
 type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
 type MapTab = "departure" | "flight" | "arrival";
@@ -80,10 +101,15 @@ function useGroundZoom(resetKey: string) {
   const [view, setView] = useState<View>(() => overviewView());
   const viewRef = useRef(view);
   viewRef.current = view;
+  const resetViewRef = useRef<View>(overviewView());
   const pinchRef = useRef<{ distance: number; view: View; mx: number; my: number } | null>(null);
   const dragRef = useRef<{ cx: number; cy: number; x: number; y: number } | null>(null);
 
-  useEffect(() => setView(overviewView()), [resetKey]);
+  useEffect(() => {
+    const next = overviewView();
+    resetViewRef.current = next;
+    setView(next);
+  }, [resetKey]);
 
   const toSvg = (el: HTMLElement, cx: number, cy: number) => {
     const r = el.getBoundingClientRect();
@@ -107,6 +133,12 @@ function useGroundZoom(resetKey: string) {
       x: W / 2 - x * nextScale,
       y: H / 2 - y * nextScale,
     }));
+  };
+
+  const fitPoints = (points: Array<{ x: number; y: number }>) => {
+    const next = fitGroundSurfaceView(points);
+    resetViewRef.current = next;
+    setView(next);
   };
 
   useEffect(() => {
@@ -175,9 +207,10 @@ function useGroundZoom(resetKey: string) {
     boxRef,
     view,
     focusOn,
+    fitPoints,
     zoomIn: () => zoomAt(2.5),
     zoomOut: () => zoomAt(1 / 2.5),
-    reset: () => setView(overviewView()),
+    reset: () => setView(resetViewRef.current),
   };
 }
 
@@ -362,6 +395,17 @@ function GroundMovementMap({
     return [...unique.entries()].slice(0, 120);
   }, [features]);
   const plane = displayAircraft ? project(displayAircraft) : null;
+  const surfaceFitRef = useRef("");
+  useEffect(() => {
+    if (!features.length) return;
+    const key = `${story.iata}:${airport.iata}:${mode.kind}`;
+    if (surfaceFitRef.current === key) return;
+    const points = features.flatMap((feature) => feature.points.map(project));
+    if (points.length < 2) return;
+    surfaceFitRef.current = key;
+    zoom.fitPoints(points);
+  }, [story.iata, airport.iata, mode.kind, features]);
+
   useEffect(() => {
     if (!plane || !displayAircraft) return;
     const key = `${story.iata}:${airport.iata}:${mode.kind}`;
@@ -392,7 +436,7 @@ function GroundMovementMap({
         </div>
       </div>
       <div ref={zoom.boxRef} className="relative min-h-0 flex-1 overflow-hidden bg-bg" style={{ touchAction: "none" }}>
-        <svg viewBox={`0 0 ${W} ${H}`} className="block h-full w-full" role="img" aria-label={`${airport.iata} airport surface${displayAircraft ? " and aircraft position" : ""}`}>
+        <svg data-ground-map viewBox={`0 0 ${W} ${H}`} className="block h-full w-full" role="img" aria-label={`${airport.iata} airport surface${displayAircraft ? " and aircraft position" : ""}`}>
           <rect width={W} height={H} className="fill-bg" />
           <g transform={`translate(${zoom.view.x} ${zoom.view.y}) scale(${zoom.view.scale})`}>
             <g opacity="0.12">
