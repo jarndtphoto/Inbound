@@ -1,0 +1,42 @@
+import { destPoint, haversineNm, polylineLengthNm, type Coord } from "./geo.ts";
+import { runwayCoordinates, type ExpectedArrivalRunway } from "./arrival-runway.ts";
+
+export function arrivalPattern(aircraft: Coord & { track?: number | null }, runway: ExpectedArrivalRunway, heldSide?: number) {
+  const end = { ...runway.threshold, ident: runway.runway, heading: runway.heading };
+  const here = runwayCoordinates(aircraft, end);
+  const headingDelta = aircraft.track == null ? Infinity : Math.abs(((aircraft.track - runway.heading + 540) % 360) - 180);
+  const aligned = here.x < 0 && Math.abs(here.y) <= 2 && headingDelta <= 30;
+  const project = (x: number, y: number): Coord => destPoint(runway.threshold, runway.heading + Math.atan2(y, x) * 180 / Math.PI, Math.hypot(x, y));
+  const faf = project(-9, 0);
+  const side = heldSide ?? (here.y < 0 ? -1 : 1);
+  let points: Coord[];
+  if (aligned) {
+    // Do not send an aircraft already inside the FAF back out to it.
+    points = here.x < -9 ? [aircraft, faf, runway.threshold] : [aircraft, runway.threshold];
+  } else {
+    const offset = 5, radius = offset / 2;
+    const startX = Math.max(here.x, -9);
+    points = [aircraft, project(startX, side * offset), project(-9, side * offset)];
+    // A tangent semicircular base turn joins the downwind to final without a hard corner.
+    for (let i = 1; i <= 24; i++) {
+      const angle = (90 + i * 180 / 24) * Math.PI / 180;
+      points.push(project(-9 + radius * Math.cos(angle), side * (radius + radius * Math.sin(angle))));
+    }
+    points[points.length - 1] = faf;
+    points.push(runway.threshold);
+  }
+  // Preserve exact entry/threshold points and sample legs at <= 1nm for weather and display.
+  const dense: Coord[] = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1], b = points[i];
+    const steps = Math.max(1, Math.ceil(haversineNm(a, b)));
+    for (let j = 1; j < steps; j++) dense.push({ lat: a.lat + (b.lat - a.lat) * j / steps, lon: a.lon + (b.lon - a.lon) * j / steps });
+    dense.push(b);
+  }
+  return { points: dense, lengthNm: polylineLengthNm(dense), kind: aligned ? "straight-in" as const : "downwind-base" as const, side };
+}
+
+export function canProjectArrival(live: (Coord & { onGround?: boolean; extrapolated?: boolean; seenSec?: number | null; phase?: string; vertFpm?: number | null }) | null, dest: Coord, landed: boolean, approachEvidence = false) {
+  return Boolean(!landed && live && !live.onGround && !live.extrapolated && (live.seenSec ?? Infinity) <= 60 &&
+    haversineNm(live, dest) <= 55 && ((live.vertFpm ?? 0) < -100 || live.phase === "descent" || live.phase === "approach" || approachEvidence));
+}

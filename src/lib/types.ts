@@ -249,6 +249,8 @@ export type FlightStory = {
   origin: FieldBrief;
   dest: FieldBrief;
   route: {
+    expectedArrival?: import("./arrival-runway").ExpectedArrivalRunway | null;
+    arrivalPatternKind?: "straight-in" | "downwind-base" | null;
     totalNm: number;
     remainingNm: number;
     flownNm: number;

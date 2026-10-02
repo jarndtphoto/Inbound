@@ -658,7 +658,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
             <g key={`run-${i}`} data-weather-intensity={run.intensity} data-segment-start-frac={run.points[0].frac}>
               <path d={d} data-route-stroke="outline" className="fill-none stroke-bg" strokeWidth={w + 5} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
               {run.pts.length === 1 && run.band !== "smooth" && <circle cx={run.pts[0].x} cy={run.pts[0].y} r={w / 2 / zoom.s} className={run.band === "light" ? "fill-turbulence-light" : "fill-turbulence-moderate"} />}
-              <path d={d} data-route-stroke={run.past ? "flown" : "projected"} className={cn("fill-none", weatherStroke(run.band, run.past))} data-segment-start-lat={run.points[0].lat} data-segment-start-lon={run.points[0].lon} strokeWidth={w} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+              <path d={d} data-route-stroke={run.past ? "flown" : "projected"} className={cn("fill-none", weatherStroke(run.band, run.past))} data-segment-start-lat={run.points[0].lat} data-segment-start-lon={run.points[0].lon} strokeWidth={w} strokeDasharray={!run.past && story.route.arrivalPatternKind ? "8 5" : undefined} opacity={!run.past && story.route.arrivalPatternKind ? 0.8 : 1} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
             </g>
           );
         })}
@@ -667,9 +667,14 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           <circle r="5.5" className="fill-accent stroke-bg" strokeWidth="2" vectorEffect="non-scaling-stroke" />
           <text y="22" textAnchor="middle" className="fill-muted" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.origin.iata}</text>
         </g>
-        <g transform={`translate(${sx(dest.lon)} ${sy(dest.lat)}) scale(${1 / zoom.s})`}>
+        <g transform={`translate(${sx(story.route.expectedArrival?.threshold.lon ?? dest.lon)} ${sy(story.route.expectedArrival?.threshold.lat ?? dest.lat)}) scale(${1 / zoom.s})`}>
           <circle r="5.5" className="fill-fg stroke-bg" strokeWidth="2" vectorEffect="non-scaling-stroke" />
           <text y="22" textAnchor="middle" className="fill-fg" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.dest.iata}</text>
+          {story.route.expectedArrival && !weatherPreview && <g aria-label={`Expected runway ${story.route.expectedArrival.runway}, ${story.route.expectedArrival.source}${story.route.expectedArrival.estimated ? ", estimate" : ""}`}>
+            <rect x={sx(dest.lon) > W / 2 ? -224 : 0} y="29" width="224" height="36" rx="4" className="fill-bg/90 stroke-border" />
+            <text x={sx(dest.lon) > W / 2 ? -112 : 112} y="43" textAnchor="middle" className="fill-fg" fontSize="12">{story.route.expectedArrival.source === "provider" ? "Reported" : "Expected"} Rwy {story.route.expectedArrival.runway} · {story.route.expectedArrival.source}</text>
+            <text x={sx(dest.lon) > W / 2 ? -112 : 112} y="57" textAnchor="middle" className="fill-muted" fontSize="10">{story.route.expectedArrival.estimated ? "Estimated runway and approach" : "Projected approach"}</text>
+          </g>}
         </g>
 
         {visibleHazards.map((h) => {
