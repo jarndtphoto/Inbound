@@ -147,4 +147,40 @@ export async function loadFr24RowsByBounds(bounds: string, limit = 40): Promise<
   return Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
 }
 
+export async function loadFr24RecentArrivalIdentity(
+  flightNumber: string,
+  originIata: string,
+  destIata: string,
+): Promise<{ flightId: string | null; registration: string; callsign: string | null; hex: string | null; type: string | null; landedAt: number } | null> {
+  if (!process.env.FR24_API_TOKEN?.trim()) return null;
+  const flight = flightNumber.replace(/\s/g, "").trim().toUpperCase();
+  const origin = originIata.trim().toUpperCase();
+  const destination = destIata.trim().toUpperCase();
+  if (!flight || !/^[A-Z]{3}$/.test(origin) || !/^[A-Z]{3}$/.test(destination)) return null;
+
+  const now = Date.now();
+  const from = new Date(now - 12 * 60 * 60_000).toISOString().slice(0, 19);
+  const to = new Date(now + 5 * 60_000).toISOString().slice(0, 19);
+  const path = `/flight-summary/light?flight_datetime_from=${encodeURIComponent(from)}&flight_datetime_to=${encodeURIComponent(to)}&flights=${encodeURIComponent(flight)}&routes=${encodeURIComponent(`${origin}-${destination}`)}&limit=5&sort=desc`;
+  const data: any = await get(path, 10 * 60_000).catch(() => null);
+  const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+  const nowSec = now / 1000;
+  for (const row of rows) {
+    if (String(row?.flight ?? "").replace(/\s/g, "").toUpperCase() !== flight) continue;
+    const registration = String(row?.reg ?? row?.registration ?? "").trim().toUpperCase();
+    if (!registration) continue;
+    const landedAt = unix(row?.datetime_landed) ?? unix(row?.last_seen);
+    if (!landedAt || landedAt > nowSec + 10 * 60 || nowSec - landedAt > 2 * 60 * 60) continue;
+    return {
+      flightId: row?.fr24_id ?? null,
+      registration,
+      callsign: row?.callsign ?? null,
+      hex: row?.hex ?? null,
+      type: row?.type ?? null,
+      landedAt,
+    };
+  }
+  return null;
+}
+
 export const fr24Configured = () => Boolean(process.env.FR24_API_TOKEN?.trim());
