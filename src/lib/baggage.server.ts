@@ -15,7 +15,6 @@ const ALASKA_STATUS_ROOT = "https://www.alaskaair.com/status";
 const FLIGHTVIEW_ROOT = "https://www.flightview.com/flight-tracker";
 const FLIGHTSTATS_ROOT = "https://www.flightstats.com/v2/flight-tracker";
 const FLIGHTVIEW_BAGGAGE_AIRPORTS = new Set(["LAX", "ORD", "MDW", "MCO"]);
-const FLIGHTSTATS_BAGGAGE_AIRPORTS = new Set(["ORD", "MDW"]);
 
 type CachedHtml = { html: string; at: number };
 const htmlCache = new Map<string, CachedHtml>();
@@ -273,7 +272,6 @@ async function tryLaxBoard(leg: BaggageLeg): Promise<BaggageResult | null> {
 }
 
 async function tryFlightStats(leg: BaggageLeg): Promise<BaggageResult | null> {
-  if (!FLIGHTSTATS_BAGGAGE_AIRPORTS.has(leg.destination)) return null;
   const url = flightStatsStatusUrl(leg);
   if (!url) return null;
   try {

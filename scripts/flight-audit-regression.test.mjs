@@ -22,7 +22,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
 const { normalizeAeroApiRoute } = await import('../src/lib/flightaware-aeroapi.server.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
@@ -712,6 +712,26 @@ it('preserves missing weather feeds as unknown while the flight still loads', as
   assert.ok(story.weatherCoverage.failedSources.includes('Pilot reports'));
 });
 
+
+describe('MDW fresh ground position can advance the stage', () => {
+  const origin = { iata: 'MDW', icao: 'KMDW', lat: 41.7868, lon: -87.7522, elevationFt: 620 };
+  const gateOut = { scheduled: 1790898300, estimated: 1790901720, actual: null };
+
+  it('recognizes WN1266 runway-area fix as already away from the passenger gates', () => {
+    const live = { lat: 41.77917, lon: -87.75752, onGround: true, gsKt: 0, altFt: 0 };
+    assert.equal(departureSurfaceLocationHint(live, origin, gateOut, 1790902272).awayFromPassengerGateArea, true);
+  });
+
+  it('does not call a terminal-side stationary fix away from the gate area', () => {
+    const live = { lat: 41.7865, lon: -87.7435, onGround: true, gsKt: 0, altFt: 0 };
+    assert.equal(departureSurfaceLocationHint(live, origin, gateOut, 1790902272).awayFromPassengerGateArea, false);
+  });
+
+  it('does not infer movement from a remote position hours before the departure window', () => {
+    const live = { lat: 41.77917, lon: -87.75752, onGround: true, gsKt: 0, altFt: 0 };
+    assert.equal(departureSurfaceLocationHint(live, origin, gateOut, 1790890000).awayFromPassengerGateArea, false);
+  });
+});
 
 describe('stage and ground-map position identity', () => {
   it('uses the commercial flight number for the stage FR24 lookup', () => {
