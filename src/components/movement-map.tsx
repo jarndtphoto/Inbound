@@ -274,19 +274,25 @@ function GroundMovementMap({
         provider: storyProvider,
       }
     : null;
+  // The live flight-number identity can disappear immediately after landing,
+  // especially when the same flight number continues on another segment.
+  // Keep using the leg-specific resume tail/hex as an identity hint for the
+  // arrival ground lookup; it is never used as a position by itself.
+  const identityRegistration = aircraft?.registration ?? storyAircraft?.registration ?? story.resume?.tail ?? null;
+  const identityCallsign = aircraft?.callsign ?? storyAircraft?.callsign ?? story.callsign;
   const groundQ = useQuery({
-    queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, aircraft?.registration ?? "", aircraft?.callsign ?? story.callsign],
+    queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, identityRegistration ?? "", identityCallsign],
     queryFn: () => getGroundPosition({ data: {
-      callsign: aircraft?.callsign ?? story.callsign,
+      callsign: identityCallsign,
       flightId: story.flightId ?? null,
       flightNumber: story.iata ?? null,
-      registration: aircraft?.registration ?? null,
+      registration: identityRegistration,
       originIata: story.origin.iata ?? null,
       destIata: story.dest.iata ?? null,
       airportLat: airport.lat,
       airportLon: airport.lon,
     } }),
-    enabled: !inFlight && !storyFast && Boolean(aircraft?.registration || aircraft?.callsign || story.callsign),
+    enabled: !inFlight && !storyFast && Boolean(identityRegistration || identityCallsign),
     refetchInterval: 3_000,
     refetchIntervalInBackground: true,
     refetchOnReconnect: "always",
