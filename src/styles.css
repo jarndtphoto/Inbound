@@ -187,24 +187,6 @@ html[data-theme="sunrise"] {
   --color-ring: #315e74;
 }
 
-/* Gold-halo welcome screen */
-.inbound-welcome {
-  --welcome-bg: #030f20;
-  --welcome-fg: #fff5db;
-  --welcome-muted: #c6cbd4;
-  --welcome-gold: #ffd65b;
-  min-height: 100dvh; overflow-y: auto; background: var(--welcome-bg);
-  color: var(--welcome-fg); display: grid; place-items: center;
-  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
-}
-.inbound-welcome-content { width: 100%; max-width: 420px; text-align: center; }
-.inbound-welcome-art { display: block; width: min(100%, 42dvh); height: auto; margin: 0 auto 16px; border-radius: 24px; }
-.inbound-welcome-tagline { font-size: 22px; margin-top: 12px; }
-.inbound-welcome-description { color: var(--welcome-muted); margin-top: 8px; }
-.inbound-welcome-button { width: 100%; min-height: 56px; margin-top: 28px; padding: 16px 24px; border-radius: 16px; background: var(--welcome-gold); color: var(--welcome-bg); font-weight: 600; cursor: pointer; }
-.inbound-welcome-button:focus-visible { outline: 3px solid var(--welcome-fg); outline-offset: 5px; }
-.inbound-welcome-button:disabled { opacity: .65; cursor: wait; }
-
 /* Keep route fixes visible across terrain and radar in Sunrise. */
 html[data-theme="sunrise"] .route-fix-marker {
   fill: #fff;
@@ -225,7 +207,7 @@ html[data-theme="sunrise"] [data-route-stroke="flown"] {
 }
 
 /* Overview and Map preview: a single surface with shared day/night geometry. */
-.inbound-redesign {
+html, .inbound-redesign {
   --font-display: var(--font-sans);
   --color-bg: #081725;
   --color-surface: #0e2030;
@@ -239,7 +221,7 @@ html[data-theme="sunrise"] [data-route-stroke="flown"] {
   --journey-water: #071c30;
   --journey-land: #193346;
 }
-html[data-theme="sunrise"] .inbound-redesign {
+html[data-theme="sunrise"], html[data-theme="sunrise"] .inbound-redesign {
   --color-bg: #fcfaf5;
   --color-surface: #fcfaf5;
   --color-surface-2: #f1f3ed;
@@ -269,7 +251,7 @@ html[data-theme="sunrise"] .inbound-redesign {
 .inbound-redesign .journey-content { padding-bottom: 0; max-width: 1100px; }
 .inbound-redesign .journey-map { height: 240px; flex: none; position: relative; }
 .inbound-redesign .journey-map-expanded { height: auto; min-height: 0; flex: 1; }
-.inbound-redesign .journey-body:has(.journey-map-expanded) { height: 100%; display: flex; flex-direction: column; }
+.inbound-redesign .journey-body:has(.journey-map-expanded:not([hidden])) { height: 100%; display: flex; flex-direction: column; }
 .inbound-redesign #panel-Route { height: 0; flex: none; }
 .inbound-redesign .journey-map > div { border: 0; border-radius: 0; width: 100%; }
 .inbound-redesign .journey-map svg > rect { fill: var(--journey-water); }
@@ -333,3 +315,42 @@ html[data-theme="sunrise"] .inbound-redesign {
 .inbound-redesign .flight-summary > .flight-freshness { flex-direction: row-reverse; justify-content: space-between; align-items: center; gap: 8px; }
 .inbound-redesign .flight-summary > .flight-freshness button { border: 0; background: transparent; min-height: 44px; }
 .inbound-redesign .flight-summary > .flight-freshness p { font-family: var(--font-sans); letter-spacing: 0; text-transform: none; font-size: 12px; }
+
+/* Shared document, safe areas, welcome and search surfaces. */
+html[data-theme="sunset"] { color-scheme: dark; }
+.pwa-flight-shell { padding-top: env(safe-area-inset-top, 0px); }
+.inbound-home, .inbound-welcome { height: 100dvh; overflow-y: auto; background: var(--color-bg); color: var(--color-fg); padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) max(24px, env(safe-area-inset-bottom, 0px)) env(safe-area-inset-left, 0px); }
+.home-brand { display: flex; align-items: center; gap: 10px; font-size: 24px; font-weight: 650; letter-spacing: -.6px; }
+.home-brand svg { width: 24px; height: 24px; color: var(--color-accent); }
+.home-content { max-width: 560px; margin: 0 auto; padding: 36px 24px 24px; }
+.home-eyebrow { font-size: 14px; color: var(--color-muted); }
+.home-search h1 { font-size: 36px; font-weight: 650; line-height: 1.12; letter-spacing: -1px; margin-top: 12px; }
+.home-description { font-size: 15px; color: var(--color-muted); line-height: 1.6; margin-top: 20px; }
+.home-search form { margin-top: 32px; }
+.home-search label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.home-search input { width: 100%; min-width: 0; min-height: 56px; border: 1px solid var(--color-border); border-radius: 8px; padding: 12px 16px; background: var(--color-surface); color: var(--color-fg); font-size: 18px; }
+.home-search input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.home-submit { display: block; width: 100%; min-height: 56px; margin-top: 12px; border-radius: 8px; padding: 12px 16px; background: var(--color-accent); color: var(--color-accent-fg); font-weight: 600; }
+.home-submit:disabled { opacity: .5; }
+.home-recents { margin-top: 40px; }
+.home-recents > div { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }
+.home-recents h2 { font-size: 15px; font-weight: 600; }
+.home-recents span { color: var(--color-muted); font-size: 12px; }
+.home-recents button { width: 100%; min-height: 56px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--color-border); }
+.inbound-welcome { display: flex; flex-direction: column; }
+.inbound-welcome-content { width: 100%; max-width: 440px; margin: auto; padding: 40px 24px; text-align: center; }
+.welcome-plane { width: 72px; height: 72px; color: var(--color-accent); margin: 0 auto 32px; stroke-width: 1.25; }
+.inbound-welcome h1 { font-size: 48px; font-weight: 650; letter-spacing: -1.5px; line-height: 1.1; }
+.inbound-welcome-tagline { font-size: 22px; margin-top: 24px; }
+.inbound-welcome-description { font-size: 15px; color: var(--color-muted); margin-top: 12px; }
+.inbound-welcome .home-submit { margin-top: 36px; }
+
+.flight-loading { padding: 48px 24px; max-width: 560px; margin: 0 auto; }
+.flight-loading h2 { font-size: 28px; font-weight: 600; margin-top: 20px; }
+.flight-loading p, .flight-loading dd { color: var(--color-muted); margin-top: 8px; font-size: 14px; }
+.flight-loading dl { margin-top: 32px; }
+.flight-loading dl > div { border-top: 1px solid var(--color-border); padding: 20px 0; }
+.flight-loading dt { font-weight: 600; }
+
+.journey-header.header-without-brand { justify-content: flex-end; }
+.journey-header > div > p:first-child { margin-top: 0; }

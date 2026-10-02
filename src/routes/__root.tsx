@@ -21,12 +21,12 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" },
       { title: APP_NAME },
       { name: "description", content: "Your flight, stage by stage — inbound aircraft, route weather, turbulence, delays, and the gate." },
-      { name: "theme-color", content: "#faf7f1" },
+      { name: "theme-color", content: "#fcfaf5" },
       { name: "color-scheme", content: "light dark" },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-title", content: "Inbound" },
-      { name: "apple-mobile-web-app-status-bar-style", content: "default" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
       { name: "format-detection", content: "telephone=no" },
     ],
     links: [
@@ -45,16 +45,17 @@ export const Route = createRootRoute({
       lang="en"
       className="h-full antialiased"
       data-theme="sunrise"
-      style={{ background: "#faf7f1", height: "100%" }}
+      style={{ background: "#fcfaf5", height: "100%" }}
       suppressHydrationWarning
     >
       <head>
         <HeadContent />
+        <script dangerouslySetInnerHTML={{ __html: `(() => { let mode = "auto"; try { mode = localStorage.getItem("inbound-appearance") || (localStorage.getItem("inbound-theme") === "sunset" ? "dark" : localStorage.getItem("inbound-theme") === "sunrise" ? "light" : "auto"); } catch {} const hour = new Date().getHours(); const dark = mode === "dark" || (mode !== "light" && (hour < 7 || hour >= 19)); document.documentElement.dataset.theme = dark ? "sunset" : "sunrise"; document.documentElement.style.colorScheme = dark ? "dark" : "light"; document.querySelectorAll('meta[name="theme-color"]').forEach(meta => { meta.content = dark ? "#081725" : "#fcfaf5"; }); })();` }} />
         {typeof appCssInline === "string" && appCssInline.length > 0 ? (
           <style id="inbound-css" dangerouslySetInnerHTML={{ __html: appCssInline }} />
         ) : null}
       </head>
-      <body className="h-full bg-bg text-fg" style={{ background: "#faf7f1", margin: 0, height: "100%" }} suppressHydrationWarning>
+      <body className="h-full bg-bg text-fg" style={{ background: "#fcfaf5", margin: 0, height: "100%" }} suppressHydrationWarning>
         <PreviewHostBridge />
         <AuthProvider>
           <AppProviders>

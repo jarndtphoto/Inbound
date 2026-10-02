@@ -194,7 +194,7 @@ function RadarLayer({
     .filter((t): t is NonNullable<typeof t> => t != null);
 
   return (
-    <g opacity="0.7">
+    <g data-radar-layer opacity="0.7">
       {tiles.map((t) => (
         <image key={t.key} href={t.href} x={t.x} y={t.y} width={t.w} height={t.h} preserveAspectRatio="none" />
       ))}
@@ -593,9 +593,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       >
         <rect width={W} height={H} className="fill-bg" />
         <g transform={`translate(${zoom.x} ${zoom.y}) scale(${zoom.s})`} strokeLinejoin="round" strokeLinecap="round">
-        {(weatherOn || weatherPreview) && (
-          <RadarLayer minLon={minLon} maxLon={maxLon} minLat={minLat} maxLat={maxLat} sx={sx} sy={sy} />
-        )}
+
 
         <g>
           {countries.map((ring, i) => {
@@ -653,6 +651,9 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           ))}
         </g>
 
+        {(weatherOn || weatherPreview) && (
+          <RadarLayer minLon={minLon} maxLon={maxLon} minLat={minLat} maxLat={maxLat} sx={sx} sy={sy} />
+        )}
         <g aria-label="Filed flight-plan fixes" opacity="0.58">
           {filedFixes.map((fix, index) => (
             <g key={`filed-${index}-${fix.lat}-${fix.lon}`} data-filed-fix={fix.label ?? "filed fix"}
