@@ -717,7 +717,8 @@ describe('stage and ground-map position identity', () => {
   it('uses the commercial flight number for the stage FR24 lookup', () => {
     const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
     assert.match(source, /fr24FlightNumber:\s*parsed\.iata/);
-    assert.match(source, /fr24Bounds:\s*fr24GroundBoundsForAware\(publicAware\)/);
+    assert.match(source, /fr24OriginIata:\s*publicAware\?\.originIata/);
+    assert.match(source, /fr24DestIata:\s*publicAware\?\.destIata/);
   });
 });
 
