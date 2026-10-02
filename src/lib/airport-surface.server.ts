@@ -30,6 +30,50 @@ type OverpassElement = {
   members?: OverpassMember[];
 };
 
+export function runwayDistanceNm(surface: AirportSurface | null | undefined, point: SurfacePoint): number | null {
+  if (!surface || !Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return null;
+
+  const cosLat = Math.max(0.2, Math.cos(point.lat * Math.PI / 180));
+  const xy = (p: SurfacePoint) => ({
+    x: (p.lon - point.lon) * 60 * cosLat,
+    y: (p.lat - point.lat) * 60,
+  });
+  const segmentDistance = (a: SurfacePoint, b: SurfacePoint) => {
+    const p0 = { x: 0, y: 0 };
+    const aa = xy(a), bb = xy(b);
+    const dx = bb.x - aa.x, dy = bb.y - aa.y;
+    const denom = dx * dx + dy * dy;
+    const t = denom > 0 ? Math.max(0, Math.min(1, ((p0.x - aa.x) * dx + (p0.y - aa.y) * dy) / denom)) : 0;
+    const qx = aa.x + t * dx, qy = aa.y + t * dy;
+    return Math.hypot(qx, qy);
+  };
+  const insidePolygon = (ring: SurfacePoint[]) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[i]!, b = ring[j]!;
+      const crosses = ((a.lat > point.lat) !== (b.lat > point.lat))
+        && point.lon < (b.lon - a.lon) * (point.lat - a.lat) / ((b.lat - a.lat) || 1e-12) + a.lon;
+      if (crosses) inside = !inside;
+    }
+    return inside;
+  };
+
+  let best = Infinity;
+  for (const feature of surface.features) {
+    if (feature.kind !== "runway" && feature.kind !== "runway_area") continue;
+    if (feature.kind === "runway_area" && feature.points.length >= 3 && insidePolygon(feature.points)) return 0;
+    if (feature.points.length === 1) {
+      const p = xy(feature.points[0]!);
+      best = Math.min(best, Math.hypot(p.x, p.y));
+      continue;
+    }
+    for (let i = 1; i < feature.points.length; i++) {
+      best = Math.min(best, segmentDistance(feature.points[i - 1]!, feature.points[i]!));
+    }
+  }
+  return Number.isFinite(best) ? best : null;
+}
+
 type CacheEntry = { value: AirportSurface; at: number };
 const cache = new Map<string, CacheEntry>();
 const pending = new Map<string, Promise<AirportSurface>>();
