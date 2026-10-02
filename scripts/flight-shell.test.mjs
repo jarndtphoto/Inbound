@@ -6,9 +6,11 @@ const source=readFileSync(new URL('../src/components/filed-app.tsx',import.meta.
 const styles=readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
 const flightPages=source.slice(source.indexOf('function FlightPages'),source.indexOf('function wheelsDown'));
 
-test('tracked-flight shell has no header, back control, or reserved header space',()=>{
-  assert.doesNotMatch(flightPages,/<header|aria-label="Back to flight search"/);
-  assert.doesNotMatch(flightPages,/Home & settings|story\.callsign|story\.origin\.iata} → \{story\.dest\.iata/);
+test('tracked-flight shell identifies the flight with appearance controls and uses Home navigation',()=>{
+  assert.match(flightPages, /<header className="journey-header">/);
+  assert.match(flightPages, /<strong>\{story\.iata\}<\/strong>/);
+  assert.match(flightPages, /<AppearanceControl/);
+  assert.doesNotMatch(flightPages, /aria-label="Back to flight search"|Home & settings|story\.callsign/);
 });
 
 test('tracked-flight search and recent chips remain off the flight shell',()=>{
