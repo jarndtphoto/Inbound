@@ -81,6 +81,13 @@ describe('zoom-stable route presentation', () => {
     assert.match(source, /hasFix[^>]+scale\(\$\{1 \/ zoom\.s\}\)/);
   });
 
+  it('does not stack a convective halo underneath a numbered weather event', () => {
+    assert.match(source, /const visibleHazards = hazards\.filter/);
+    assert.match(source, /haversineNm[\s\S]{0,260}<= 12/);
+    assert.match(source, /visibleHazards\.map/);
+    assert.match(source, /data-map-hazard="convective"/);
+  });
+
   it('keeps route water styling scoped away from the airport ground map', () => {
     assert.match(source, /data-route-map/);
     assert.match(groundSource, /data-ground-map/);
