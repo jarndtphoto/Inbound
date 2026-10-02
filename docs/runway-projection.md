@@ -1,0 +1,11 @@
+# Expected arrival runway / passenger projection
+
+This is an estimated passenger display, not an ATC clearance or navigation procedure. No stage/phase rules are changed. The stage classifier retains its pre-projection distance input.
+
+D-ATIS: https://datis.clowd.io/api/:icao is the compatible public JSON feed for https://atis.info/api (the former home URL redirects to atis.info). API documentation exposes keyless airport/station endpoints and says not to use for real-world flight planning or navigation. Checked 2026-10-02: KORD arrivals 9L/10C/10R; KMDW ILS 4R; KMCO arrivals 17L/18L (departure bulletin excluded). Five-minute per-airport cache, concurrent requests coalesced, 5s timeout. Unknown/stale bulletin timestamps (90 minutes) and errors fall through to the already-reported provider runway, then non-calm METAR wind, then the existing projection. Confirmed actual provider landing runway overrides ATIS.
+
+Geometry: OurAirports public-domain runways.csv, https://ourairports.com/data/ and https://ourairports.com/help/data-dictionary.html, downloaded 2026-10-02. CSV SHA256 c1f34a692be3fde018f82b2ebe8b2f3e427684f6cec4d2437d547321009bb7e7. The snapshot includes 264 open runway ends at 32 airports already in src/lib/airports.ts, with finite endpoint latitude, longitude and true heading. Displaced thresholds are moved forward by the published displacement. Unknown geometry retains existing behavior; there is no runtime geometry download.
+
+Near-airport gate: <=55nm, fresh airborne position, descending/approach evidence. Straight-in: behind threshold, <=2nm lateral displacement, track <=30 degrees from runway heading. FAF 9nm; an aircraft inside it proceeds to threshold directly. Otherwise: 5nm lateral downwind offset on the aircraft's side, tangent semicircular base with 24 samples, FAF, threshold. Projection is dashed and labelled estimated. Distance and ETA use its path length.
+
+A still-listed runway and chosen base-turn side are retained in a short-lived per-flight process cache to reduce flip-flops. Validity never depends on that cache; a cold process can choose again. A changed bulletin or confirmed actual runway can legitimately change the estimate. This is not a multi-instance runway lock. It does not promise the ATC-assigned runway or actual vectoring.
