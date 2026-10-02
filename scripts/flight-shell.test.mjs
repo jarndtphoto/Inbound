@@ -6,9 +6,11 @@ const source=readFileSync(new URL('../src/components/filed-app.tsx',import.meta.
 const styles=readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
 const flightPages=source.slice(source.indexOf('function FlightPages'),source.indexOf('function wheelsDown'));
 
-test('tracked-flight shell has no header, back control, or reserved header space',()=>{
-  assert.doesNotMatch(flightPages,/<header|aria-label="Back to flight search"/);
-  assert.doesNotMatch(flightPages,/Home & settings|story\.callsign|story\.origin\.iata} → \{story\.dest\.iata/);
+test('tracked-flight shell identifies the flight with appearance controls and uses Home navigation',()=>{
+  assert.match(flightPages, /<header className="journey-header">/);
+  assert.match(flightPages, /<strong>\{story\.iata\}<\/strong>/);
+  assert.match(flightPages, /<AppearanceControl/);
+  assert.doesNotMatch(flightPages, /aria-label="Back to flight search"|Home & settings|story\.callsign/);
 });
 
 test('tracked-flight search and recent chips remain off the flight shell',()=>{
@@ -40,8 +42,8 @@ test('briefing uses the page scroller and the welcome dialog keeps symmetric saf
 });
 
 test('tracked-flight polling pauses while hidden and refreshes stale state on return',()=>{
-  assert.match(flightPages,/document\\.visibilityState !== "visible"\\) return false/);
-  assert.match(flightPages,/addEventListener\\("visibilitychange", refreshWhenVisible\\)/);
-  assert.match(flightPages,/Date\\.now\\(\\) - storyQ\\.dataUpdatedAt > 2_500/);
-  assert.match(flightPages,/void storyQ\\.refetch\\(\\)/);
+  assert.match(flightPages,/document\.visibilityState !== "visible"\) return false/);
+  assert.match(flightPages,/addEventListener\("visibilitychange", refreshWhenVisible\)/);
+  assert.match(flightPages,/Date\.now\(\) - storyQ\.dataUpdatedAt > 2_500/);
+  assert.match(flightPages,/void storyQ\.refetch\(\)/);
 });

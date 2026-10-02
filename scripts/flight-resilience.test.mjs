@@ -115,14 +115,14 @@ describe("schedule outage resilience", { concurrency: false }, () => {
     assert.ok(flying.fetchedAt > first.fetchedAt);
   });
   it("does not invent a new flight's route from the ADS-B route database", async () => {
-    await assert.rejects(server.loadFlightStory("WN1111"), /HTTP 402/);
+    await assert.rejects(server.loadFlightStory("WN1111"), /Current flight route unavailable/);
   });
   it("rejects another flight, expired context, and future actual events", async () => {
-    await assert.rejects(server.loadFlightStory("WN1112", { resume: resume() }), /HTTP 402/);
-    await assert.rejects(server.loadFlightStory("WN1111", { resume: { ...resume(), confirmedAt: now - 3 * 3600_000 } }), /HTTP 402/);
+    await assert.rejects(server.loadFlightStory("WN1112", { resume: resume() }), /Current flight route unavailable/);
+    await assert.rejects(server.loadFlightStory("WN1111", { resume: { ...resume(), confirmedAt: now - 3 * 3600_000 } }), /Current flight route unavailable/);
     const invalid = resume();
     invalid.takeoff.actual = now / 1000 + 600;
-    await assert.rejects(server.loadFlightStory("WN1111", { resume: invalid }), /HTTP 402/);
+    await assert.rejects(server.loadFlightStory("WN1111", { resume: invalid }), /Current flight route unavailable/);
     assert.equal(readFlightResume({ ...resume(), confirmedAt: now + 3600_000 }, "WN1111"), undefined);
     assert.equal(readFlightResume({ ...resume(), destIcao: "../../metadata" }, "WN1111"), undefined);
     assert.equal(readFlightResume({ ...resume(), destIcao: "KZZZ", destIata: "ZZZ", destLat: Infinity }, "WN1111"), undefined);
@@ -137,7 +137,7 @@ describe("schedule outage resilience", { concurrency: false }, () => {
     const partial = await server.loadFlightStory("WN1111", { resume: saved });
     assert.equal(partial.schedule.status, "saved");
     assert.equal(partial.currentStage, "push");
-    await assert.rejects(server.loadFlightStory("WN1111"), /HTTP 402/);
+    await assert.rejects(server.loadFlightStory("WN1111"), /Current flight route unavailable/);
     now += 61_000;
     upstream = 200;
     const fresh = await server.loadFlightStory("WN1111", { resume: saved, fresh: true });
@@ -166,7 +166,7 @@ describe("schedule outage resilience", { concurrency: false }, () => {
     assert.equal(later.schedule.confirmedAt, saved.confirmedAt);
     now += 61 * 60_000;
     assert.equal(resumeFromStory(later, "WN1111"), undefined);
-    await assert.rejects(server.loadFlightStory("WN1111", { resume: later.resume, fresh: true }), /HTTP 402/);
+    await assert.rejects(server.loadFlightStory("WN1111", { resume: later.resume, fresh: true }), /Current flight route unavailable/);
   });
   it("migrates legacy saved data without upgrading inferred event times to reported actuals", async () => {
     upstream = 200;

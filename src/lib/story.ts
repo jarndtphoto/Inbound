@@ -1,8 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { loadFlightStory, loadLiveBoard } from "./story.server";
-import { readFlightResume, type FlightResume } from "./flight-resume";
+import { readFlightResume, type DepartureStageCheckpoint, type FlightResume } from "./flight-resume";
 import { haversineNm } from "./geo";
-import { identityCompatible, normalizedToLive, positionAgeSec, type NormalizedPosition } from "./flight-data";
+import { identityCompatible, normalizedToLive, positionAgeSec } from "./flight-data";
 import type { FlightStory } from "./types";
 
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
@@ -16,8 +16,7 @@ function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
 }
 
 export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResume): FlightStory {
-  const providers = story.providers as (Record<string, unknown> | undefined);
-  const candidate = providers?.fr24Position as NormalizedPosition | null | undefined;
+  const candidate = story.providers?.fr24Position;
   const sameLeg = sameResumeLeg(story, prior);
   const priorStage = sameLeg ? prior?.departureStage ?? null : null;
   const departureConfirmed = priorStage === "push" || priorStage === "taxi" || priorStage === "takeoff_roll";
@@ -152,7 +151,7 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
     ? haversineNm({ lat: parkedLat, lon: parkedLon }, { lat: live!.lat, lon: live!.lon }) : 0;
   if (freshSurface && (stage === "origin_gate" || stage === "inbound") && displacedNm >= 0.006) stage = "push";
 
-  const durableStage = stage === "taxi"
+  const durableStage: DepartureStageCheckpoint | null = stage === "taxi"
     ? "taxi"
     : stage === "push" || priorStage === "push"
       ? "push"
