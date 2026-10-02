@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseBaggage,parseLaxBaggage,parseFlightViewBaggage,parseAlaskaBaggage,loadBaggage} from '../src/lib/baggage.server.ts';
+import {parseBaggage,parseLaxBaggage,parseFlightViewBaggage,parseFlightStatsBaggage,parseAlaskaBaggage,loadBaggage} from '../src/lib/baggage.server.ts';
 import {parseCiriumBaggage} from '../src/lib/cirium-baggage.server.ts';
 import {baggageSummary} from '../src/lib/baggage-copy.ts';
 import {flightDepartureDate} from '../src/lib/airline-status.ts';
@@ -29,6 +29,12 @@ test('LAX ambiguous duplicate rows fail closed',()=>assert.equal(parseLaxBaggage
 test('LAX blank carousel is not posted',()=>assert.equal(parseLaxBaggage(laxRow('AA123',''),laxLeg,456).status,'not-posted'));
 
 const flightViewPage=({origin='DFW',destination='ORD',terminal='3',bag='34'}={})=>`<html><body><h1>FLIGHT STATUS</h1><section>Departure Airport | Dallas Fort Worth Intl (${origin}) Scheduled Time: 1:00 PM</section><section>Arrival Airport | Chicago O Hare Intl (${destination}) Scheduled Time: 3:00 PM At Gate Time: 3:10 PM Terminal: ${terminal} Gate: H11B ${bag?`Baggage: ${bag} `:''}More airport info: Arrivals Weather Delays</section><section>Flight Details Aircraft Boeing 737</section></body></html>`;
+const flightStatsPage=({flight='UA 1156',origin='LGA',destination='ORD',terminal='1',bag='6'}={})=>`<html><body><h1>Flight Status</h1><div>${flight} United Airlines ${origin} New York ${destination} Chicago Scheduled On time</div><div>${origin} New York, NY, US New York LaGuardia Airport</div><h2>Flight Departure Times</h2><div>01-Oct-2026 Scheduled 16:25 EDT Estimated 16:25 EDT Terminal B Gate 47</div><div>${destination} Chicago, IL, US Chicago O'Hare International Airport</div><h2>Flight Arrival Times</h2><div>01-Oct-2026 Scheduled 18:09 CDT Estimated 18:09 CDT Terminal ${terminal} Gate N/A Baggage ${bag}</div><div>VIEW FLIGHT DETAILS SET UP FLIGHT ALERTS</div></body></html>`;
+const ordUaLeg={flight:'UA1156',origin:'LGA',destination:'ORD',date:'2026-10-01'};
+test('FlightStats exact ORD arrival supplies baggage',()=>assert.deepEqual(parseFlightStatsBaggage(flightStatsPage(),ordUaLeg,903),{status:'posted',carousel:'6',terminal:'1',checkedAt:903}));
+test('FlightStats wrong route fails closed',()=>assert.equal(parseFlightStatsBaggage(flightStatsPage({destination:'MDW'}),ordUaLeg,903).status,'unavailable'));
+test('FlightStats N/A baggage is not posted',()=>assert.deepEqual(parseFlightStatsBaggage(flightStatsPage({bag:'N/A'}),ordUaLeg,904),{status:'not-posted',terminal:'1',checkedAt:904}));
+
 const ordLeg={flight:'AA1339',origin:'DFW',destination:'ORD',date:'2026-09-16'};
 test('FlightView exact ORD arrival supplies terminal and baggage',()=>assert.deepEqual(parseFlightViewBaggage(flightViewPage(),ordLeg,900),{status:'posted',carousel:'34',terminal:'3',checkedAt:900}));
 test('FlightView wrong destination fails closed',()=>assert.equal(parseFlightViewBaggage(flightViewPage({destination:'MCO'}),ordLeg,900).status,'unavailable'));
