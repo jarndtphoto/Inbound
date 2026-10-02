@@ -140,13 +140,6 @@ export async function loadFr24FlightByNumber(flightNumber: string, bounds?: stri
   return loadFr24ByFilter("flights", flight, extra);
 }
 
-export async function loadFr24RowsByBounds(bounds: string, limit = 40): Promise<any[]> {
-  if (!process.env.FR24_API_TOKEN?.trim()) return [];
-  const safeLimit = Math.max(1, Math.min(100, Math.round(limit)));
-  const data: any = await get(`/live/flight-positions/full?bounds=${encodeURIComponent(bounds)}&limit=${safeLimit}`, LIVE_POSITION_CACHE_MS);
-  return Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
-}
-
 export async function loadFr24RecentArrivalIdentity(
   flightNumber: string,
   originIata: string,
