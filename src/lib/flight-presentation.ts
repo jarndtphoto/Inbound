@@ -68,4 +68,3 @@ export function elapsedFlight(story: FlightStory) {
     estimated: story.times?.takeoffKind !== "actual",
   };
 }
-
