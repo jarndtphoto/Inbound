@@ -21,7 +21,7 @@ const mocks = new Map([
 let browser, server;
 const results = [];
 try {
-  await writeFile(join(directory, 'index.html'), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/entry.tsx"></script></body></html>');
+  await writeFile(join(directory, 'index.html'), '<!doctype html><html lang="en" style="height:100%"><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body style="height:100%;margin:0"><div id="root" style="height:100%"></div><script type="module" src="/entry.tsx"></script></body></html>');
   await writeFile(join(directory, 'entry.tsx'), `
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
@@ -97,6 +97,7 @@ try {
     };
     const screenshot = async label => {
       if (!process.env.FLIGHT_SEARCH_EVIDENCE_DIR) return;
+      assert.ok((await page.locator('.journey-header').boundingBox()).y >= 0, 'flight header stays visible');
       await mkdir(process.env.FLIGHT_SEARCH_EVIDENCE_DIR, { recursive: true });
       await page.screenshot({ path: join(process.env.FLIGHT_SEARCH_EVIDENCE_DIR, `${name}-${label}.png`) });
     };
