@@ -1,3 +1,4 @@
+import { createPhaseHistory } from "./aircraft-phase.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { AIRPORT_BY_ICAO, airportByIcao } from "./airports";
 import { airframeOf, airlineOf, isVehicleType, isWidebody, isInterestingAircraft } from "./aircraft";
@@ -30,7 +31,9 @@ async function fetchJson<T>(url: string, ms = 8000): Promise<T> {
   return (await res.json()) as T;
 }
 
-function toTraffic(raw: AdsbRaw, airport: { lat: number; lon: number }): Traffic | null {
+const observePhase = createPhaseHistory();
+
+export function toTraffic(raw: AdsbRaw, airport: { lat: number; lon: number; elevationFt?: number }): Traffic | null {
   const hex = (raw.hex ?? "").toLowerCase();
   if (!hex) return null;
   if (isVehicleType(raw.t, raw.category, raw.ownOp)) return null;
@@ -57,7 +60,9 @@ function toTraffic(raw: AdsbRaw, airport: { lat: number; lon: number }): Traffic
   const interesting = isInterestingAircraft(type, year);
 
   const gsKt = typeof raw.gs === "number" ? raw.gs : null;
-  const vertFpm = typeof raw.baro_rate === "number" ? raw.baro_rate : null;
+  const vertFpm = Number.isFinite(raw.baro_rate) ? raw.baro_rate! : Number.isFinite(raw.geom_rate) ? raw.geom_rate! : null;
+  const seenSec = raw._fusion?.ageSec ?? raw.seen_pos ?? raw.seen ?? 0;
+  const phase = observePhase(`${airport.lat}|${airport.lon}|${hex}|${callsign}`, { lat: lat ?? undefined, lon: lon ?? undefined, altFt, onGround, gsKt, vertFpm, seenSec, seenAt: Date.now() / 1000 - seenSec, extrapolated: raw.extrapolated ?? raw._fusion?.extrapolated }, { dest: airport }).phase;
 
   return {
     hex,
@@ -80,7 +85,7 @@ function toTraffic(raw: AdsbRaw, airport: { lat: number; lon: number }): Traffic
     category: raw.category ?? null,
     widebody,
     interesting,
-    phase: phaseOf({ onGround, gsKt, altFt, vertFpm }),
+    phase,
     extrapolated: Boolean(raw.extrapolated ?? raw._fusion?.extrapolated),
     seenSec: raw._fusion?.ageSec ?? (typeof raw.seen_pos === "number" ? raw.seen_pos : typeof raw.seen === "number" ? raw.seen : null),
   };

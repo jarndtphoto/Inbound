@@ -61,7 +61,9 @@ export type LogEntry = {
 
 export type TabId = "sky" | "field" | "seat" | "log";
 
-export type StageId = "inbound" | "origin_gate" | "push" | "taxi" | "ride" | "arrival" | "final_approach" | "taxi_in" | "gate";
+export type StageId = "inbound" | "origin_gate" | "push" | "taxi" | "takeoff_roll" | "ride" | "arrival" | "final_approach" | "taxi_in" | "gate";
+export type StageStepId = Exclude<StageId, "takeoff_roll">;
+export type FlightScheduleSource = "flightaware_api" | "flightaware_public" | "flightstats_public" | "fr24_live" | "saved_resume" | "unavailable" | "unknown";
 
 export type Chop = "smooth" | "light" | "moderate" | "severe";
 
@@ -133,6 +135,10 @@ export type LiveAircraft = {
   vertFpm: number | null;
   onGround: boolean;
   phase: Traffic["phase"];
+  /** Sustained/derived rate used for stages; raw vertFpm remains a measurement. */
+  phaseVertFpm?: number | null;
+  phaseRateWindowSec?: number;
+  phaseRateSource?: "altitude-delta" | "sustained-provider" | null;
   callsign?: string | null;
   extrapolated?: boolean;
   seenSec?: number | null;
@@ -163,7 +169,7 @@ export type Comfort = {
   reasons: string[];
   trend?: "up" | "down" | "steady";
   trendWhy?: string | null;
-  segments?: Record<StageId, { grade: "A" | "B" | "C" | "D" | "F"; note: string | null }>;
+  segments?: Record<StageStepId, { grade: "A" | "B" | "C" | "D" | "F"; note: string | null }>;
 };
 
 export type FlightTimes = {
@@ -248,6 +254,7 @@ export type FlightStory = {
   currentStage: StageId;
   arrivalStatus?: "airborne" | "landed" | "taxi_in" | "gate";
   providers?: {
+    scheduleSource?: FlightScheduleSource;
     flightStateKey?: string | null;
     canonicalKey?: string | null;
     canonicalKeyFailure?: "missing_scheduled" | "route_mismatch" | "service_date_mismatch" | "no_ident" | null;
@@ -267,6 +274,7 @@ export type FlightStory = {
     etaMin?: number;
     landed?: boolean;
     phaseStatePersistence?: string;
+    routeMemoryPersistence?: string;
     surfaceTelemetryStale?: boolean;
   };
   aircraft: LiveAircraft | null;
@@ -275,9 +283,18 @@ export type FlightStory = {
   route: {
     expectedArrival?: import("./arrival-runway").ExpectedArrivalRunway | null;
     arrivalPatternKind?: "straight-in" | "downwind-base" | null;
+    arrivalProjectionStale?: boolean;
+    arrivalGeometrySource?: "observed_fix" | "last_known_fix" | "held_cursor" | null;
+    filedRouteFingerprint?: string | null;
+    filedRouteObservedAt?: number | null;
     totalNm: number;
     remainingNm: number;
     flownNm: number;
+    /** Distance along observed sector track, excluding projected geometry. */
+    observedFlownNm?: number | null;
+    progressSource?: "observed" | "last_known" | "unknown" | "landed";
+    /** Time of the real fix behind progress, never the time of a gap poll. */
+    progressObservedAt?: number | null;
     etaMin: number;
     progress: number;
     heading: number;
@@ -297,7 +314,7 @@ export type FlightStory = {
   };
   times: FlightTimes;
   stages: Record<
-    StageId,
+    StageStepId,
     {
       state: "done" | "now" | "next";
       title: string;

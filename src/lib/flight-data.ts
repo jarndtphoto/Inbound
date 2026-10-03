@@ -1,3 +1,4 @@
+import { phaseOf, verticalTrend, type PhaseContext } from "./aircraft-phase.ts";
 import { haversineNm } from "./geo.ts";
 import type { LiveAircraft } from "./types.ts";
 
@@ -12,7 +13,7 @@ export type NormalizedPosition = {
   lat: number;
   lon: number;
   altFt: number | null;
-  /** Source vertical rate retained for arrival projection only. */
+  /** Source vertical rate retained for display and sustained phase evidence. */
   vertFpm?: number | null;
   gsKt: number | null;
   track: number | null;
@@ -91,10 +92,11 @@ export function choosePosition(positions: Array<NormalizedPosition | null | unde
   }
   return { chosen, disagreementNm, candidates };
 }
-export function normalizedToLive(position: NormalizedPosition): LiveAircraft & { seenAt: number; source: FlightProvider; confidence: Confidence } {
-  return { hex: position.hex ?? "", callsign: position.callsign, registration: position.registration, type: position.type, typeName: position.type, year: null, operator: null,
-    lat: position.lat, lon: position.lon, altFt: position.altFt, gsKt: position.gsKt, track: position.track, vertFpm: null, onGround: Boolean(position.onGround),
-    phase: position.onGround ? ((position.gsKt ?? 0) > 5 ? "taxi" : "parked") : "cruise", extrapolated: false, seenSec: positionAgeSec(position), seenAt: position.seenAt, source: position.provider, confidence: position.confidence };
+export function normalizedToLive(position: NormalizedPosition, context: PhaseContext = {}): LiveAircraft & { seenAt: number; source: FlightProvider; confidence: Confidence } {
+  const trend = verticalTrend({ ...position, seenSec: positionAgeSec(position) }, context.history);
+  return { ...trend, hex: position.hex ?? "", callsign: position.callsign, registration: position.registration, type: position.type, typeName: position.type, year: null, operator: null,
+    lat: position.lat, lon: position.lon, altFt: position.altFt, gsKt: position.gsKt, track: position.track, vertFpm: Number.isFinite(position.vertFpm) ? position.vertFpm! : null, onGround: Boolean(position.onGround),
+    phase: phaseOf({ ...position, ...trend }, { ...context, groundTaxiKt: 5 }), extrapolated: false, seenSec: positionAgeSec(position), seenAt: position.seenAt, source: position.provider, confidence: position.confidence };
 }
 export function finalApproachEtaMin(remainingNm: number, gsKt: number): number { const kin = remainingNm / Math.max(90, gsKt) * 60; return remainingNm < 0.15 ? 0 : Math.min(60, kin); }
 export function passengerEtaMin(input: { remainingNm: number; directToDestNm: number | null; gsKt: number; providerEtaMin: number | null; }): number {

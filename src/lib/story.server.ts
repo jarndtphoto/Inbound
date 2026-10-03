@@ -1,8 +1,11 @@
 // @ts-nocheck
+import { phaseOf, verticalTrend, createPhaseHistory, destinationContext, type PhaseContext } from "./aircraft-phase.ts";
 import { loadAeroFlight } from "./aeroapi.server.ts";
 import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
 import { readFlightResume } from "./flight-resume";
+import { flightNotFound, verifiedFlightNotFoundPage } from "./flight-search.ts";
+import { withStoryRequest, noteStoryCache, noteStorySchedule, noteStoryFallback } from "./story-request-log.server.ts";
 import { loadPhaseState, savePhaseState, phaseStateEqual } from "./flight-phase-state.server";
 import { confirmTakeoff, reconcileTakeoff, takeoffFloorStage, takeoffDiagnostic, hasOriginSurfaceFix } from "./confirmed-takeoff.ts";
 import { activeConfirmedTakeoff, mergeConfirmedTakeoff } from "./flight-phase-state-logic.ts";
@@ -50,8 +53,10 @@ import {
 import { faAltFt, hasAirborneEvidence, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
 import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
 import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
-import { arrivalFuturePoints } from "./arrival-path.ts";
+import { displayArrivalProjection } from "./arrival-display.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
+import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress, routeMemoryEqual } from "./route-memory.ts";
+import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
 import { loadOfficialFlightData } from "./official-flight-data.server.ts";
@@ -72,9 +77,17 @@ var inflight = /* @__PURE__ */ new Map();
 function cached(key, ttlMs, fn) {
 	const hit = cache.get(key);
 	const ttl = hit?.ttl ?? ttlMs;
-	if (hit && Date.now() >= hit.at && Date.now() - hit.at < ttl) return Promise.resolve(hit.value);
+	const storyCache = /^story\d*:|^resume:[a-f0-9]+:story$/.test(key);
+	if (hit && Date.now() >= hit.at && Date.now() - hit.at < ttl) {
+		if (storyCache) noteStoryCache("hit");
+		return Promise.resolve(hit.value);
+	}
 	const pending = inflight.get(key);
-	if (pending) return pending;
+	if (pending) {
+		if (storyCache) noteStoryCache("inflight");
+		return pending;
+	}
+	if (storyCache) noteStoryCache("miss");
 	let timer;
 	const deadline = new Promise((_, reject) => {
 		timer = setTimeout(() => reject(new Error("Flight data request timed out. Please try again.")), 30000);
@@ -479,14 +492,16 @@ async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, fa
 	const faRaw = Array.isArray(faTrack) && faTrack.length >= 2 ? faTrack : [];
 	let raw = faRaw.length ? faRaw.slice() : [];
 	if (hexRaw.length) raw = raw.length ? mergeTraces(raw, hexRaw) : hexRaw;
-	const flown = uniqueTrack(legsForThisSector(splitTraceLegs(raw), origin, dest, live, takeoffUnix ?? null), faRaw.length ? 1.6 : 6);
+	const sector = legsForThisSector(splitTraceLegs(raw), origin, dest, live, takeoffUnix ?? null);
+	const phaseHistory = sector.map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon }));
+	const flown = uniqueTrack(sector, faRaw.length ? 1.6 : 6);
 	if (live && haversineNm({ lat: live.lat, lon: live.lon }, dest) < 68) {
 		const arrival = stitchArrival(flown, live, dest);
-		if (arrival && arrival.length >= 4) return { points: arrival, spine, flown, source: flown.length >= 6 ? "track" : "direct" };
+		if (arrival && arrival.length >= 4) return { phaseHistory, points: arrival, spine, flown, source: flown.length >= 6 ? "track" : "direct" };
 	}
 	if (flown.length >= 6) {
 		return {
-			points: densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48),
+			phaseHistory, points: densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48),
 			spine,
 			flown,
 			source: "track"
@@ -494,28 +509,19 @@ async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, fa
 	}
 	if (flown.length >= 2) {
 		return {
-			points: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36),
+			phaseHistory, points: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36),
 			spine,
 			flown,
 			source: "track"
 		};
 	}
-	if (Array.isArray(waypoints) && waypoints.length >= 4) return { points: spine, spine, flown, source: "filed" };
-	if (live) return { points: directSpine(origin, dest, live), spine, flown, source: "direct" };
-	return { points: spine, spine, flown, source: "direct" };
+	if (Array.isArray(waypoints) && waypoints.length >= 4) return { phaseHistory, points: spine, spine, flown, source: "filed" };
+	if (live) return { phaseHistory, points: directSpine(origin, dest, live), spine, flown, source: "direct" };
+	return { phaseHistory, points: spine, spine, flown, source: "direct" };
 }
 
 function acList(d) {
 	return d?.ac ?? d?.aircraft ?? [];
-}
-function phaseOf(ac) {
-	if (ac.onGround) return (ac.gsKt ?? 0) > 8 ? "taxi" : "parked";
-	const v = ac.vertFpm ?? 0;
-	const alt = ac.altFt ?? 0;
-	if (v < -400 && alt < 8e3) return "approach";
-	if (v < -250) return "descent";
-	if (v > 400 && alt < 12e3) return "climb";
-	return "cruise";
 }
 function destParkedLeftover(cand, dest, aware) {
 	if (!cand || !dest || !aware?.takeoff?.actual || aware?.landing?.actual) return false;
@@ -557,9 +563,12 @@ function coastTracePt(pt) {
 	}
 	return { lat, lon, age, alt: pt.alt ?? null, gs: pt.gs ?? null, track: pt.track ?? null };
 }
-function liveFromTracePt(pt, hex, seed) {
+export function liveFromTracePt(pt, hex, seed, context: PhaseContext = {}) {
 	const c = coastTracePt(pt);
+	const sample = { lat: c.lat, lon: c.lon, altFt: c.alt, gsKt: c.gs, seenAt: pt.t, seenSec: c.age, onGround: false, vertFpm: pt.vertFpm };
+	const trend = verticalTrend(sample, context.history);
 	return {
+		...trend,
 		hex: hex || seed?.hex || "",
 		callsign: seed?.callsign ?? null,
 		registration: seed?.registration ?? null,
@@ -572,11 +581,11 @@ function liveFromTracePt(pt, hex, seed) {
 		altFt: c.alt,
 		gsKt: c.gs,
 		track: c.track ?? seed?.track ?? null,
-		vertFpm: seed?.vertFpm ?? null,
+		vertFpm: Number.isFinite(pt.vertFpm) ? pt.vertFpm : trend.phaseVertFpm,
 		onGround: false,
-		phase: "cruise",
+		phase: phaseOf({ ...sample, ...trend }, context),
 		extrapolated: c.age > 45,
-		seenSec: c.age
+		seenSec: c.age, seenAt: pt.t
 	};
 }
 function rememberKin(identKey, live) {
@@ -625,7 +634,7 @@ function toLive(raw) {
 				? altGeom
 				: null;
 	const gsKt = typeof raw.gs === "number" ? raw.gs : typeof raw.spd === "number" ? raw.spd : null;
-	const vertFpm = typeof raw.baro_rate === "number" ? raw.baro_rate : null;
+	const vertFpm = Number.isFinite(raw.baro_rate) ? raw.baro_rate : Number.isFinite(raw.geom_rate) ? raw.geom_rate : null;
 	const type = raw.t?.trim() || null;
 	const fusedSeen = raw._fusion?.ageSec ?? fusionSeen(raw);
 	const seenSec = fusedSeen === 999 ? null : fusedSeen;
@@ -643,7 +652,7 @@ function toLive(raw) {
 		gsKt,
 		track: typeof raw.track === "number" ? raw.track : null,
 		vertFpm,
-		// Arrival-only raw rate fallback. Existing phaseOf inputs stay unchanged.
+		// Keep the same raw rate input for arrival projection.
 		arrivalVertFpm: Number.isFinite(raw.baro_rate) ? raw.baro_rate : Number.isFinite(raw.geom_rate) ? raw.geom_rate : null,
 		onGround,
 		extrapolated: Boolean(raw.extrapolated ?? raw._fusion?.extrapolated),
@@ -1330,6 +1339,8 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 		}
 	}
 	if (!res.ok) {
+		if (res.status === 404 && withInbound && verifiedFlightNotFoundPage(404, await res.text()))
+			throw new Error(`[flight_not_found] No flight found for ${fallbackIdent}.`);
 		let reason = "";
 		if (res.status === 402) {
 			const body = (await res.text()).slice(0, 16000);
@@ -1353,7 +1364,10 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 		}
 		throw new Error(`Current flight route unavailable: schedule provider returned HTTP ${res.status}${reason ? " (" + reason + ")" : ""}. Please try again shortly.`);
 	}
-	const raw = (await res.text()).split("trackpollBootstrap = ")[1];
+	const html = await res.text();
+	const raw = html.split("trackpollBootstrap = ")[1];
+	if (!raw && withInbound && verifiedFlightNotFoundPage(res.status, html))
+		throw new Error(`[flight_not_found] No flight found for ${fallbackIdent}.`);
 	if (!raw) throw new Error("Current flight route unavailable: schedule provider returned no flight data. Please try again shortly.");
 	const flights = parseJsonObject(raw)?.flights;
 	if (!flights) return null;
@@ -1625,6 +1639,8 @@ async function loadFlightStatsPublic(callsign) {
 			candidates = candidates.concat(details.filter(Boolean));
 		}
 		const selected = chooseFlightStatsScheduleCandidate(candidates);
+		if (!selected && pages.length === dates.length && pages.every(page => verifiedFlightNotFoundPage(200, page.html)))
+			throw new Error(`[flight_not_found] No flight found for ${parsed.iata} on the checked service dates.`);
 		if (selected) {
 			console.info("[flightstats-schedule]", {
 				callsign: parsed.callsign,
@@ -1643,10 +1659,11 @@ async function loadFlightStatsPublic(callsign) {
 const awareRejections = new Map();
 async function loadAware(callsign) {
 	const apiRecord = await loadAeroFlight(callsign);
-	if (apiRecord) return apiRecord;
+	if (apiRecord) return { ...apiRecord, _scheduleSource: "flightaware_api" };
 	const rejected = awareRejections.get(callsign);
 	if (rejected && Date.now() < rejected.until) {
 		const fallback = await loadFlightStatsPublic(callsign);
+		noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
 		if (fallback) return fallback;
 		throw rejected.error;
 	}
@@ -1662,6 +1679,7 @@ async function loadAware(callsign) {
 			if (awareRejections.size >= 100) awareRejections.delete(awareRejections.keys().next().value);
 			awareRejections.set(callsign, { until: Date.now() + 60000, error });
 			const fallback = await loadFlightStatsPublic(callsign);
+			noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
 			if (fallback) return fallback;
 		}
 		throw error;
@@ -2239,35 +2257,7 @@ const parkByFlight = /* @__PURE__ */ new Map();
 const hexByIdent = /* @__PURE__ */ new Map();
 const hexRouteByIdent = /* @__PURE__ */ new Map();
 const lastKinByIdent = /* @__PURE__ */ new Map();
-const routeTrackByFlight = /* @__PURE__ */ new Map();
-const ROUTE_TRACK_HOLD_MS = 20 * 60_000;
-
-function holdLastGoodRouteTrack(key, filed) {
-	const now = Date.now();
-	const hasTrack = filed?.source === "track" && Array.isArray(filed.flown) && filed.flown.length >= 2;
-	if (hasTrack) {
-		routeTrackByFlight.set(key, {
-			at: now,
-			flown: filed.flown,
-			spine: Array.isArray(filed.spine) ? filed.spine : [],
-		});
-		return filed;
-	}
-	const prev = routeTrackByFlight.get(key);
-	if (!prev || now - prev.at > ROUTE_TRACK_HOLD_MS || !Array.isArray(prev.flown) || prev.flown.length < 2) {
-		if (prev && now - prev.at > ROUTE_TRACK_HOLD_MS) routeTrackByFlight.delete(key);
-		return filed;
-	}
-	const spine = Array.isArray(filed?.spine) && filed.spine.length >= 2 ? filed.spine : prev.spine;
-	if (!Array.isArray(spine) || spine.length < 2) return filed;
-	const origin = spine[0];
-	const dest = spine[spine.length - 1];
-	const flown = prev.flown;
-	const points = flown.length >= 6
-		? densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48)
-		: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36);
-	return { ...filed, points, spine, flown, source: "track" };
-}
+const observePhase = createPhaseHistory();
 function inboundSnapKey(aware, origin, dest, query) {
 	if (aware) return origKey(aware);
 	const day = new Date().toISOString().slice(0, 10);
@@ -2455,7 +2445,7 @@ function bearingToDestination(from, dest) {
 	return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-export function finalApproachEvidence(live, dest) {
+export function finalApproachEvidence(live, dest, origin = null) {
 	if (!live || !dest || live.onGround) return { directNm: null, headingDelta: null, result: false };
 	const directNm = haversineNm({ lat: live.lat, lon: live.lon }, dest);
 	const bearing = bearingToDestination(live, dest);
@@ -2467,16 +2457,17 @@ export function finalApproachEvidence(live, dest) {
 	const closeIn = directNm <= 7.5;
 	const outerFinal = directNm <= 12;
 	const plausibleAltitude = !Number.isFinite(live.altFt) || live.altFt <= 9000;
-	const descending = Number.isFinite(live.vertFpm) && live.vertFpm <= -150;
+	const stageRate = live.phaseVertFpm === undefined ? live.vertFpm : live.phaseVertFpm;
+	const descending = Number.isFinite(stageRate) && stageRate <= -300;
 	const approachPhase = live.phase === "approach";
 	const trackingToward = headingDelta != null && headingDelta <= 60;
-	const result = !obviouslyHigh && !implausibleSpeed &&
+	const result = destinationContext(live, { origin, dest }) && !obviouslyHigh && !implausibleSpeed &&
 		(closeIn || (outerFinal && plausibleAltitude && (descending || approachPhase || trackingToward)));
 	return { directNm, headingDelta, result };
 }
 
-export function isFinalApproach(live, dest) {
-	return finalApproachEvidence(live, dest).result;
+export function isFinalApproach(live, dest, origin = null) {
+	return finalApproachEvidence(live, dest, origin).result;
 }
 
 export function currentStageOf(args) {
@@ -2517,8 +2508,11 @@ function baseCurrentStageOf(args) {
 	}
 	if (begun || faAirborne || Boolean(ourTakeoffActual)) {
 		if (live && !live.onGround) {
-			if (isFinalApproach(live, dest)) return "final_approach";
-			if (live.phase === "approach" || remainingNm < 40 || live.altFt != null && live.altFt < 8e3 && (live.vertFpm ?? 0) < 0) return "arrival";
+			if (isFinalApproach(live, dest, origin)) return "final_approach";
+			const stageRate = live.phaseVertFpm === undefined ? live.vertFpm : live.phaseVertFpm;
+			if (destinationContext(live, { origin, dest }) &&
+				(live.phase === "approach" || live.phase === "descent" || remainingNm < 40
+					|| live.altFt != null && live.altFt < 8e3 && (stageRate ?? 0) <= -300)) return "arrival";
 			return "ride";
 		}
 		if (faAirborne || ourTakeoffActual) return "ride";
@@ -2701,8 +2695,11 @@ function buildStages(args) {
 		}
 	};
 }
-function liveFromAware(aware) {
-	const live = liveFromAwareTrack(aware);
+export function liveFromAware(aware, context: PhaseContext = {}) {
+	const origin = airportByIcao(aware?.originIcao ?? "") ?? airportByIata(aware?.originIata ?? "");
+	const dest = airportByIcao(aware?.destIcao ?? "") ?? airportByIata(aware?.destIata ?? "");
+	context = { origin: origin ?? undefined, dest: dest ?? undefined, ...context };
+	const live = liveFromAwareTrack(aware, context);
 	if (!live) return null;
 	const type = live.type ?? aware?.type ?? null;
 	return {
@@ -2713,7 +2710,6 @@ function liveFromAware(aware) {
 		typeName: airframeOf(type)?.name ?? type,
 		year: null,
 		operator: null,
-		vertFpm: null,
 	};
 }
 
@@ -2887,6 +2883,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const stateIdent = `${resumed?.scope ?? ""}${identKey}`;
 	let knownHex = hexByIdent.get(stateIdent) || null;
 	const hazardsP = loadHazards();
+	let scheduleError = null;
 	const [rawAc0, publicAware, route] = await Promise.all([
 		knownHex
 			? safe(adsbByHex(knownHex), null)
@@ -2894,6 +2891,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				? safe(adsbByReg(parsed.registration), null)
 				: safe(adsbByCallsign(parsed.callsign), null),
 		(resumed ? Promise.resolve(awareFromResume(resumed.resume, resumed.scope)) : loadAware(parsed.callsign)).catch((err) => {
+			scheduleError = err;
 			console.warn("[schedule-fallback-unavailable]", {
 				callsign: parsed.callsign,
 				reason: err instanceof Error ? err.message.slice(0, 180) : String(err).slice(0, 180),
@@ -2921,6 +2919,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		}));
 	}
 	const currentLegAware = publicAware ?? fr24Aware;
+	const scheduleSource = resumed ? "saved_resume" : publicAware
+		? publicAware._scheduleSource ?? (publicAware._publicScheduleDate ? "flightstats_public" : "flightaware_public")
+		: fr24Aware ? "fr24_live" : "unavailable";
+	noteStorySchedule(scheduleSource);
 	const flightawareOfficial = officialAwareCompatible(currentLegAware, official.flightaware) ? official.flightaware : null;
 	if (official.flightaware && !flightawareOfficial) {
 		console.log("[flightaware-instance-mismatch]", {
@@ -2936,6 +2938,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// to a different city pair. Require either a current schedule record or a
 	// fresh FR24 live record that identifies both ends of this exact active leg.
 	if (!parsed.registration && (!(aware?.originIata || aware?.originIcao) || !(aware?.destIata || aware?.destIcao))) {
+		if (flightNotFound(scheduleError)) throw scheduleError;
 		throw new Error("Current flight route unavailable. Try again when the flight feed responds.");
 	}
 	let rawAc = rawAc0;
@@ -2968,7 +2971,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		{ callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean), registration: aware?.tail ?? null, hex: knownHex ?? aware?.hex ?? null },
 		Date.now() / 1000, fieldElev(surfaceField)
 	);
-	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen) : adsbLive ?? liveFromAware(aware);
+	const phaseContext = { origin: { ...origin, elevationFt: fieldElev(origin) }, dest: { ...dest, elevationFt: fieldElev(dest) } };
+	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen, phaseContext) : adsbLive ?? liveFromAware(aware, phaseContext);
 	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
 	live = asOnGround(live, origin);
@@ -3083,6 +3087,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// written back once near the end of this function.
 	const loadedPhase = await loadPhaseState(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys);
 	const loadedArrival = await arrivalStateStore.load(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys);
+	const memoryLeg = routeLeg(stateKey ?? "", origin.iata, dest.iata);
+	const loadedRoute = memoryLeg ? await routeMemoryStore.load(stateKey, memoryLeg, canPersistState ? legacyKeys : []) : null;
+	let routeMemory = loadedRoute?.state ?? null;
+	let routeMemoryPersistence = loadedRoute?.status ?? "unavailable";
 	let pushLatchValue = loadedPhase.state.push;
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;
@@ -3176,10 +3184,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				safe(fetchTrace(hexForTrace, "trace_full"), []),
 				safe(fetchTrace(hexForTrace, "trace_recent"), [])
 			]);
-			const pt = lastAirborneTracePt(mergeTraces(full, recent), aware?.takeoff?.actual ?? null);
+			const trace = mergeTraces(full, recent);
+			const pt = lastAirborneTracePt(trace, aware?.takeoff?.actual ?? null);
 			if (pt) {
 				if (!live) {
-					const cand = liveFromTracePt(pt, hexForTrace, { hex: hexForTrace, callsign: parsed.callsign, registration: aware?.tail ?? null, type: aware?.type ?? null, typeName: airframeOf(aware?.type)?.name ?? aware?.type ?? null });
+					const cand = liveFromTracePt(pt, hexForTrace, { hex: hexForTrace, callsign: parsed.callsign, registration: aware?.tail ?? null, type: aware?.type ?? null, typeName: airframeOf(aware?.type)?.name ?? aware?.type ?? null }, { ...phaseContext, history: trace.map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon })) });
 					if (cand && !destParkedLeftover(cand, dest, aware)) live = cand;
 				} else {
 					live = {
@@ -3308,20 +3317,25 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	};
 	const hex = live ? (live.hex || "").toLowerCase() : null;
 	const filedRaw = await loadFiledPath(!ourLanded && ourAirborne ? hex : null, start, end, !ourLanded && ourAirborne ? live : null, aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? null, aware?.waypoints ?? [], aware?.faTrack ?? []);
-	const routeInstanceTime = aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? aware?.gateOut?.scheduled ?? null;
-	const routeInstanceDay = routeInstanceTime ? new Date(routeInstanceTime * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-	const routeTrackKey = `${aware?.flightId ?? stateIdent}|${routeKey}|${routeInstanceDay}`;
-	const filed = !ourLanded && ourAirborne ? holdLastGoodRouteTrack(routeTrackKey, filedRaw) : filedRaw;
+	if (memoryLeg) {
+		const poll = emptyRouteMemory(memoryLeg);
+		poll.filed = validatedFiledRoute(aware?.waypoints ?? [], start, end,
+			aware?.originIata === origin.iata && aware?.destIata === dest.iata, Date.now());
+		if (!ourLanded && ourAirborne && !live?.onGround)
+			poll.track = (filedRaw.phaseHistory ?? []).map(p => ({ lat: p.lat, lon: p.lon, seenAt: p.seenAt * 1000 }));
+		routeMemory = mergeRouteMemory(routeMemory, poll);
+	}
+	const heldWaypoints = routeMemory?.filed?.waypoints ?? [];
+	const heldSpine = heldWaypoints.length >= 4 ? makeSpine(start, end, heldWaypoints) : filedRaw.spine;
+	const heldTrack = routeMemory?.track?.length >= 2 ? routeMemory.track : filedRaw.flown;
+	const filed = { ...filedRaw, spine: heldSpine, flown: heldTrack };
 	let path;
 	let pathSource;
-	if (filed.source === "track" && filed.points.length >= 6) {
-		path = filed.points;
+	if (heldTrack.length >= 2) {
+		path = densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(heldTrack, heldSpine), start, end), 22), 48);
 		pathSource = "track";
-	} else if (aware && aware.waypoints.length >= 4) {
-		const wps = aware.waypoints.slice();
-		if (haversineNm(start, wps[0]) > 18) wps.unshift(start);
-		if (haversineNm(wps[wps.length - 1], end) > 8) wps.push(end);
-		path = densifyPath(downsampleNm(wps, 22), 48);
+	} else if (heldWaypoints.length >= 4) {
+		path = heldSpine;
 		pathSource = "filed";
 	} else {
 		path = filed.points.length >= 2 ? filed.points : greatCirclePoints(start, end, 18);
@@ -3344,42 +3358,38 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			}
 		}
 	}
-	if (!ourLanded && ourAirborne && live) {
+	const routeObservation = freshRouteObservation(live);
+	if (routeMemory) filed.flown = mergeObservedTrack(routeMemory.track, routeObservation ? [routeObservation] : []);
+	// A last known anchor shapes the historical/projected route only. It never
+	// becomes `live`, an aircraft marker, or a newly timed observation.
+	const displayAnchor = routeObservation ?? (!ourLanded && ourAirborne ? routeMemory?.lastObserved : null);
+	if (!ourLanded && ourAirborne && displayAnchor) {
 		path = canonicalLiveDisplayPath({
 			filedPath: filed.spine ?? path,
 			flownTrack: filed.flown ?? [],
-			live,
+			live: displayAnchor,
 			dest: end
 		});
+		if ((filed.flown?.length ?? 0) < 2 && filed.spine?.length >= 2) {
+			// With a filed-only plan, retain its past reference geometry too.
+			// It stays projected: observedFlownNm still requires real track.
+			const along = progressAlongPath(filed.spine, displayAnchor);
+			const fractions = pathFracs(filed.spine);
+			path = [...filed.spine.filter((p, i) => fractions[i] < along.frac - 0.004), ...path];
+		}
 		if ((filed.flown?.length ?? 0) >= 2) pathSource = "track";
 	}
-	let totalNm = Math.max(1, polylineLengthNm(path));
+	const routeProgressValue = routeProgress(path, routeMemory, routeObservation, ourAirborne, ourLanded);
+	let totalNm = routeProgressValue.totalNm;
 	let remainingNm;
-	let routeRemainingNm;
-	let progress;
-	const directToDestNm = live && Number.isFinite(live.lat) && Number.isFinite(live.lon)
+	let routeRemainingNm = routeProgressValue.remainingNm;
+	let progress = routeProgressValue.progress;
+	const directToDestNm = routeObservation && live && Number.isFinite(live.lat) && Number.isFinite(live.lon)
 		? haversineNm({ lat: live.lat, lon: live.lon }, end)
 		: null;
 	const filedRouteDeviationNm = live && filed.spine?.length >= 2
 		? distanceToPathNm({ lat: live.lat, lon: live.lon }, filed.spine)
 		: null;
-	if (ourLanded) {
-		progress = 1;
-		routeRemainingNm = 0;
-	} else if (live && Number.isFinite(live.lat) && Number.isFinite(live.lon) && !(live.extrapolated && haversineNm({ lat: live.lat, lon: live.lon }, start) < 4)) {
-		const along = progressAlongPath(path, {
-			lat: live.lat,
-			lon: live.lon
-		});
-		progress = along.frac;
-		routeRemainingNm = along.remainingNm;
-	} else if (ourAirborne || aware?.takeoff?.actual) {
-		progress = timeFracOf(aware) || 0.03;
-		routeRemainingNm = (1 - progress) * totalNm;
-	} else {
-		progress = 0;
-		routeRemainingNm = totalNm;
-	}
 	remainingNm = ourLanded
 		? 0
 		: directToDestNm != null && directToDestNm <= 25
@@ -3388,9 +3398,13 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// Preserve the original distance input to stage classification. Runway
 	// projection changes display/weather distance and ETA, never flight phases.
 	const stageRemainingNm = remainingNm;
+	if (live) {
+		const history = [...filedRaw.phaseHistory ?? [], ...(aware?.faTrack ?? []).map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon }))];
+		live = { ...live, ...observePhase(`${stateKey}|${live.hex || live.registration || live.callsign}`, live, { ...phaseContext, history }) };
+	}
 	let expectedArrival = null;
 	let arrivalPatternKind = null;
-	// Preserve normalized stage inputs; provider/derived rates are arrival-only.
+	// Arrival projection keeps its independent provider/altitude evidence.
 	const arrivalLive = live ? { ...live, vertFpm: positionChoice.chosen?.vertFpm ?? live.arrivalVertFpm ?? live.vertFpm ?? null } : null;
 	const arrivalInput = {
 		live: arrivalLive, dest: { ...end, elevationFt: fieldElev(dest) }, landed: ourLanded,
@@ -3414,13 +3428,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		arrivalPersistence = saved.status;
 	}
 	expectedArrival = arrivalState.runway;
-	const futureArrivalPoints = live ? arrivalFuturePoints(arrivalState.points, live) : arrivalState.points;
-	// Only this response's display path gets the observed aircraft anchor.
-	const displayArrivalPoints = live ? [{ lat: live.lat, lon: live.lon }, ...futureArrivalPoints] : [];
-	// A consumed suffix is still an active zero-distance projection until landing;
-	// do not fall back to the airport reference point after passing the threshold.
-	const pattern = !ourLanded && !live?.onGround && arrivalState.active && arrivalState.kind && displayArrivalPoints.length >= 1
-		? { points: displayArrivalPoints, lengthNm: polylineLengthNm(displayArrivalPoints), kind: arrivalState.kind } : null;
+	const pattern = displayArrivalProjection(arrivalState, {
+		observation: routeObservation && Date.now() - routeObservation.seenAt <= 60_000 ? routeObservation : null,
+		live, lastObserved: routeObservation ?? routeMemory?.lastObserved ?? null, landed: ourLanded
+	});
 	if (pattern) {
 		arrivalPatternKind = pattern.kind;
 		// Preserve observed history; only the future display path changes.
@@ -3435,10 +3446,18 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		remainingNm = pattern.lengthNm;
 		routeRemainingNm = pattern.lengthNm;
 		progress = Math.max(0, 1 - remainingNm / totalNm);
+		if (pattern.stale && routeMemory?.lastObserved) {
+			// A held plan does not create a new progress observation.
+			progress = routeMemory.lastObserved.progress;
+			totalNm = routeMemory.lastObserved.totalNm;
+			remainingNm = routeRemainingNm = routeMemory.lastObserved.remainingNm;
+		}
 	}
 	if (arrivalEntry || loadedArrival.state.startedAt || ourLanded) console.info("[arrival-projection]", {
-		flight: parsed.callsign, landKey, routeTrackKey, instance: ARRIVAL_INSTANCE,
+		flight: parsed.callsign, landKey, stateKey, instance: ARRIVAL_INSTANCE,
 		entryGate: arrivalEntry, reason: arrivalUpdate.reason, persistence: arrivalPersistence,
+		applied: Boolean(pattern), geometrySource: pattern?.geometrySource ?? null,
+		displayPointCount: pattern?.points.length ?? 0, stale: pattern?.stale ?? false,
 		loadedVersion: loadedArrival.version, hadPrevious: Boolean(loadedArrival.state.startedAt),
 		runway: expectedArrival?.runway ?? null, source: expectedArrival?.source ?? null,
 		side: arrivalState.side, active: arrivalState.active, startedAt: arrivalState.startedAt,
@@ -3449,6 +3468,12 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		phase: live?.phase ?? null, extrapolated: live?.extrapolated ?? false, seenSec: live?.seenSec ?? null,
 		kind: arrivalPatternKind, remainingNm, stageRemainingNm
 	});
+	if (routeMemory && routeObservation && !ourLanded && ourAirborne) {
+		routeMemory = mergeRouteMemory(routeMemory, {
+			...emptyRouteMemory(memoryLeg), track: [routeObservation],
+			lastObserved: { ...routeObservation, progress, totalNm, remainingNm }
+		});
+	}
 	const etaMin = remainingEtaMin(remainingNm, directToDestNm, live, aware);
 	const heading = ourLanded
 		? initialBearing(path[Math.max(0, path.length - 2)] ?? start, end)
@@ -4221,6 +4246,13 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			: baseResume.detectedPushUnix ?? null,
 		detectedTaxiUnix: taxiOutLatchValue?.at ?? baseResume.detectedTaxiUnix ?? null
 	} : undefined;
+	// Persist the combined filed/track/observation facts once, after the poll.
+	// storedState is the row before alias folding, so that carry is saved too.
+	if (canPersistState && routeMemory && loadedRoute && !routeMemoryEqual(routeMemory, loadedRoute.storedState)) {
+		const savedRoute = await routeMemoryStore.save(stateKey, routeMemory, loadedRoute.version);
+		routeMemory = savedRoute.state;
+		routeMemoryPersistence = savedRoute.status;
+	}
 	return {
 		fetchedAt: Date.now(),
 		stateKey,
@@ -4242,6 +4274,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		currentStage: current,
 		arrivalStatus,
 		providers: {
+			scheduleSource,
 			flightStateKey: stateKey,
 			canonicalKey: stateIdentity.canonicalKey,
 			canonicalKeyFailure: stateIdentity.reason,
@@ -4266,7 +4299,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			// or stale base rather than the real persisted state. Surfaced here
 			// (not just server logs) so a strangely-behaving flight can be
 			// checked from the response itself, not just a log search.
-			phaseStatePersistence
+			phaseStatePersistence,
+			routeMemoryPersistence
 		},
 		aircraft,
 		origin,
@@ -4274,17 +4308,24 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		route: {
 			expectedArrival,
 			arrivalPatternKind,
+			arrivalProjectionStale: pattern?.stale ?? false,
+			arrivalGeometrySource: pattern?.geometrySource ?? null,
+			filedRouteFingerprint: routeMemory?.filed?.fingerprint ?? null,
+			filedRouteObservedAt: routeMemory?.filed?.observedAt ?? null,
 			totalNm,
 			remainingNm,
 			routeRemainingNm,
 			directToDestNm,
 			flownNm: Math.max(0, totalNm - remainingNm),
+			observedFlownNm: (routeMemory?.track?.length ?? 0) >= 2 ? polylineLengthNm(routeMemory.track) : filed.flown?.length >= 2 ? polylineLengthNm(filed.flown) : null,
+			progressSource: routeProgressValue.source,
+			progressObservedAt: routeProgressValue.observedAt,
 			etaMin,
 			progress,
 			heading,
 			source: pathSource,
 			samples,
-			filedFixes: (aware?.waypoints ?? [])
+			filedFixes: (heldWaypoints.length ? heldWaypoints : aware?.waypoints ?? [])
 				.filter((p) => typeof p.label === "string" && p.label.trim().length > 0)
 				.map((p) => ({ lat: p.lat, lon: p.lon, label: p.label }))
 		},
@@ -4311,6 +4352,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	};
 }
 export async function loadFlightStory(query, opts) {
+	return withStoryRequest(query, Boolean(opts?.fresh), () => loadFlightStoryCore(query, opts));
+}
+async function loadFlightStoryCore(query, opts) {
 	const fresh = Boolean(opts?.fresh);
 	try {
 		const key = `story43:${String(query || "").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
@@ -4342,7 +4386,9 @@ export async function loadFlightStory(query, opts) {
 		}
 	} catch (err) {
 		const msg = err instanceof Error && err.message && err.name !== "AbortError" ? err.message : "Could not load that flight. Try again.";
-		throw new Error(msg);
+		const error = new Error(msg, { cause: err });
+		if (err?.name === "AbortError") error.name = "AbortError";
+		throw error;
 	}
 }
 export async function loadLiveBoard() {

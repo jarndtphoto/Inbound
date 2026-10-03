@@ -72,9 +72,9 @@ export function createFlightPhaseStateStore(sqlProvider: () => Promise<Sql>) {
     if (!landKey) return { state: { ...EMPTY_PHASE_STATE }, version: 0, status: "ok" };
     try {
       let current = await read(landKey);
-      // An unvalidated poll may update its separate row after the canonical
-      // row exists. Reconcile that row on later validated polls as well.
-      const carryKeys = current.version === 0 ? legacyKeys : legacyKeys.filter(key => key.startsWith("leg:unvalidated:"));
+      // An older instance may update a validated provider-alias or unvalidated
+      // row after our canonical row exists. Fold those same-leg rows forward.
+      const carryKeys = current.version === 0 ? legacyKeys : legacyKeys.filter(key => key.startsWith("leg:"));
       if (carryKeys.length || recentLegacyKeys.length) {
         const sql = await sqlProvider();
         const candidates = await sql<Row>`select land_key, push_unix, push_source, push_live, push_at, taxi_out_at, confirmed_takeoff, version

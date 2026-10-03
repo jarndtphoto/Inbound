@@ -18,12 +18,12 @@ describe("official provider normalization", () => {
     const p = normalizeFr24Position({ fr24_id: "f1", callsign: "AAL2668", lat: 32.9, lon: -97.0, alt: 800, gspeed: 145, track: 180, on_ground: false, timestamp: 10_000 });
     assert.equal(p?.provider, "fr24"); assert.equal(p?.altFt, 800); assert.equal(p?.gsKt, 145);
   });
-  it("retains FR24 vertical rate for arrival use without altering normalized stage inputs", () => {
+  it("retains FR24 vertical rate for display while one unconfirmed sample stays cruise", () => {
     for (const vspeed of [-640, 0]) {
       const p = normalizeFr24Position({ lat: 41.95, lon: -88.1, alt: 4000, vspeed, on_ground: false, timestamp: Date.now() / 1000 })!;
       assert.equal(p.vertFpm, vspeed);
       const stageLive = normalizedToLive(p);
-      assert.equal(stageLive.vertFpm, null); assert.equal(stageLive.phase, "cruise");
+      assert.equal(stageLive.vertFpm, vspeed); assert.equal(stageLive.phase, "cruise");
     }
     assert.equal(normalizeFr24Position({ lat: 41.95, lon: -88.1, alt: 4000, vspeed: NaN })!.vertFpm, null);
   });
