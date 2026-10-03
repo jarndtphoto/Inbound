@@ -49,11 +49,19 @@ export function mergeObservedTrack(a: RouteObservation[], b: RouteObservation[])
 export function mergeRouteMemory(previous: RouteMemory, next: RouteMemory): RouteMemory {
   // The caller/store must start a new row for a new date/route/diversion.
   if (!sameRouteLeg(previous.leg, next.leg)) return next;
-  const filed = next.filed && (!previous.filed || next.filed.observedAt > previous.filed.observedAt)
+  const filed = next.filed && (!previous.filed || (next.filed.fingerprint !== previous.filed.fingerprint && next.filed.observedAt > previous.filed.observedAt))
     ? next.filed : previous.filed;
   const lastObserved = next.lastObserved && (!previous.lastObserved || next.lastObserved.seenAt > previous.lastObserved.seenAt)
     ? next.lastObserved : previous.lastObserved;
   return { leg: next.leg, filed, track: mergeObservedTrack(previous.track, next.track), lastObserved };
+}
+
+export function freshRouteObservation(live: (RoutePoint & { seenAt?: number | null; seenSec?: number | null; extrapolated?: boolean; onGround?: boolean }) | null, now = Date.now()): RouteObservation | null {
+  if (!live || !validPoint(live) || live.extrapolated || live.onGround) return null;
+  const seenAt = Number.isFinite(live.seenAt) && live.seenAt! > 0 ? live.seenAt! * 1000
+    : Number.isFinite(live.seenSec) && live.seenSec! >= 0 ? now - live.seenSec! * 1000 : null;
+  return seenAt != null && now >= seenAt - 2000 && now - seenAt <= 90_000
+    ? { lat: live.lat, lon: live.lon, seenAt } : null;
 }
 
 /** Preserve last observed progress through coverage gaps; never turn elapsed

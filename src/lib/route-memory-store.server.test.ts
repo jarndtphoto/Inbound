@@ -24,6 +24,7 @@ test("filed → direct → filed, cold stores, reroute and concurrent weak polls
   try {
     const first = poll(); first.filed = validatedFiledRoute(waypoints, origin, dest, true, now);
     first.track = [{ ...origin, seenAt: now - 100_000 }, { lat: 35, lon: -120, seenAt: now }];
+    first.lastObserved = { lat: 35, lon: -120, seenAt: now, progress: 0.45, totalNm: 3900, remainingNm: 2145 };
     const saved = await cold().save(key, first, 0);
     const direct = await cold().save(key, poll(), saved.version);
     assert.deepEqual(direct.state.filed, first.filed); assert.deepEqual(direct.state.track, first.track);
@@ -35,6 +36,7 @@ test("filed → direct → filed, cold stores, reroute and concurrent weak polls
     const final = await cold().load(key, leg);
     assert.equal(final.state.filed!.fingerprint, reroute.filed!.fingerprint);
     assert.equal(final.state.track.length, 3);
+    assert.deepEqual(final.state.lastObserved, first.lastObserved, "weak/concurrent cold polls retain observed progress and time");
     assert.equal((await pg.query("select * from flight_route_state")).rows.length, 1);
     for (const other of ["leg:v1:UAL219|2026-10-04|ORD|HNL", "leg:v1:UAL219|2026-10-03|ORD|SFO"]) {
       const otherLeg = routeLeg(other, "ORD", other.endsWith("SFO") ? "SFO" : "HNL")!;

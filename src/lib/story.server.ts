@@ -55,7 +55,7 @@ import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFligh
 import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
 import { arrivalFuturePoints } from "./arrival-path.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
-import { emptyRouteMemory, mergeRouteMemory, routeLeg, validatedFiledRoute } from "./route-memory.ts";
+import { emptyRouteMemory, mergeRouteMemory, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress } from "./route-memory.ts";
 import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
@@ -3091,6 +3091,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const loadedRoute = memoryLeg ? await routeMemoryStore.load(stateKey, memoryLeg, canPersistState ? legacyKeys : []) : null;
 	let routeMemory = loadedRoute?.state ?? null;
 	let routeMemoryPersistence = loadedRoute?.status ?? "unavailable";
+	let routeMemoryVersion = loadedRoute?.version ?? 0;
 	let pushLatchValue = loadedPhase.state.push;
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;
@@ -3327,6 +3328,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			const savedRoute = await routeMemoryStore.save(stateKey, routeMemory, loadedRoute.version);
 			routeMemory = savedRoute.state;
 			routeMemoryPersistence = savedRoute.status;
+			routeMemoryVersion = savedRoute.version;
 		}
 	}
 	const heldWaypoints = routeMemory?.filed?.waypoints ?? [];
@@ -3362,42 +3364,30 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			}
 		}
 	}
-	if (!ourLanded && ourAirborne && live) {
+	const routeObservation = freshRouteObservation(live);
+	// A last known anchor shapes the historical/projected route only. It never
+	// becomes `live`, an aircraft marker, or a newly timed observation.
+	const displayAnchor = routeObservation ?? (!ourLanded && ourAirborne ? routeMemory?.lastObserved : null);
+	if (!ourLanded && ourAirborne && displayAnchor) {
 		path = canonicalLiveDisplayPath({
 			filedPath: filed.spine ?? path,
 			flownTrack: filed.flown ?? [],
-			live,
+			live: displayAnchor,
 			dest: end
 		});
 		if ((filed.flown?.length ?? 0) >= 2) pathSource = "track";
 	}
-	let totalNm = Math.max(1, polylineLengthNm(path));
+	const routeProgressValue = routeProgress(path, routeMemory, routeObservation, ourAirborne, ourLanded);
+	let totalNm = routeProgressValue.totalNm;
 	let remainingNm;
-	let routeRemainingNm;
-	let progress;
-	const directToDestNm = live && Number.isFinite(live.lat) && Number.isFinite(live.lon)
+	let routeRemainingNm = routeProgressValue.remainingNm;
+	let progress = routeProgressValue.progress;
+	const directToDestNm = routeObservation && live && Number.isFinite(live.lat) && Number.isFinite(live.lon)
 		? haversineNm({ lat: live.lat, lon: live.lon }, end)
 		: null;
 	const filedRouteDeviationNm = live && filed.spine?.length >= 2
 		? distanceToPathNm({ lat: live.lat, lon: live.lon }, filed.spine)
 		: null;
-	if (ourLanded) {
-		progress = 1;
-		routeRemainingNm = 0;
-	} else if (live && Number.isFinite(live.lat) && Number.isFinite(live.lon) && !(live.extrapolated && haversineNm({ lat: live.lat, lon: live.lon }, start) < 4)) {
-		const along = progressAlongPath(path, {
-			lat: live.lat,
-			lon: live.lon
-		});
-		progress = along.frac;
-		routeRemainingNm = along.remainingNm;
-	} else if (ourAirborne || aware?.takeoff?.actual) {
-		progress = timeFracOf(aware) || 0.03;
-		routeRemainingNm = (1 - progress) * totalNm;
-	} else {
-		progress = 0;
-		routeRemainingNm = totalNm;
-	}
 	remainingNm = ourLanded
 		? 0
 		: directToDestNm != null && directToDestNm <= 25
@@ -3471,6 +3461,17 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		phase: live?.phase ?? null, extrapolated: live?.extrapolated ?? false, seenSec: live?.seenSec ?? null,
 		kind: arrivalPatternKind, remainingNm, stageRemainingNm
 	});
+	if (routeMemory && routeObservation && !ourLanded && ourAirborne) {
+		routeMemory = mergeRouteMemory(routeMemory, {
+			...emptyRouteMemory(memoryLeg), track: [routeObservation],
+			lastObserved: { ...routeObservation, progress, totalNm, remainingNm }
+		});
+		if (canPersistState) {
+			const savedRoute = await routeMemoryStore.save(stateKey, routeMemory, routeMemoryVersion);
+			routeMemory = savedRoute.state;
+			routeMemoryPersistence = savedRoute.status;
+		}
+	}
 	const etaMin = remainingEtaMin(remainingNm, directToDestNm, live, aware);
 	const heading = ourLanded
 		? initialBearing(path[Math.max(0, path.length - 2)] ?? start, end)
@@ -4289,7 +4290,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			// or stale base rather than the real persisted state. Surfaced here
 			// (not just server logs) so a strangely-behaving flight can be
 			// checked from the response itself, not just a log search.
-			phaseStatePersistence
+			phaseStatePersistence,
+			routeMemoryPersistence
 		},
 		aircraft,
 		origin,
@@ -4302,13 +4304,15 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			routeRemainingNm,
 			directToDestNm,
 			flownNm: Math.max(0, totalNm - remainingNm),
-			observedFlownNm: filed.flown?.length >= 2 ? polylineLengthNm(filed.flown) : null,
+			observedFlownNm: (routeMemory?.track?.length ?? 0) >= 2 ? polylineLengthNm(routeMemory.track) : filed.flown?.length >= 2 ? polylineLengthNm(filed.flown) : null,
+			progressSource: routeProgressValue.source,
+			progressObservedAt: routeProgressValue.observedAt,
 			etaMin,
 			progress,
 			heading,
 			source: pathSource,
 			samples,
-			filedFixes: (aware?.waypoints ?? [])
+			filedFixes: (heldWaypoints.length ? heldWaypoints : aware?.waypoints ?? [])
 				.filter((p) => typeof p.label === "string" && p.label.trim().length > 0)
 				.map((p) => ({ lat: p.lat, lon: p.lon, label: p.label }))
 		},
