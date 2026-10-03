@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { EMPTY_PHASE_STATE, mergeForward, phaseStateEqual, type PhaseState } from "./flight-phase-state-logic.ts";
+import { EMPTY_PHASE_STATE, activeConfirmedTakeoff, mergeForward, phaseStateEqual, type PhaseState } from "./flight-phase-state-logic.ts";
 
 const push = (unix: number, source: string | null = "track_detected", live = true, at = unix): PhaseState["push"] => ({ unix, source, live, at });
 const taxi = (at: number): PhaseState["taxiOut"] => ({ at });
@@ -103,7 +103,7 @@ describe("confirmed takeoff merge", () => {
     assert.deepEqual(mergeForward(empty, observed), observed);
   });
   it("keeps provider actual time over observed and the first confirmation, in either order", () => {
-    const expected = { ...actual, confirmedTakeoff: { ...actual.confirmedTakeoff, confirmedAt: 120 } };
+    const expected = { ...actual, confirmedTakeoff: { ...actual.confirmedTakeoff, confirmedAt: 120, observedAt: 120 } };
     assert.deepEqual(mergeForward(actual, observed), expected);
     assert.deepEqual(mergeForward(observed, actual), expected);
   });
@@ -112,4 +112,16 @@ describe("confirmed takeoff merge", () => {
     assert.equal(mergeForward(observed, later).confirmedTakeoff!.time, null);
     assert.deepEqual(mergeForward(mergeForward(actual, later), observed), mergeForward(actual, mergeForward(later, observed)));
   });
+  it("revoked stamps cannot return through a merge, corrected stamps can, and observed proof is retained", () => {
+    const revoked = { ...actual, confirmedTakeoff: { ...actual.confirmedTakeoff, revocations: [{ time: 100, at: 150 }] } };
+    assert.equal(activeConfirmedTakeoff(mergeForward(actual, revoked).confirmedTakeoff), undefined);
+    const corrected = { ...actual, confirmedTakeoff: { ...actual.confirmedTakeoff, time: 160, confirmedAt: 170 } };
+    const combined = mergeForward(revoked, corrected);
+    assert.equal(activeConfirmedTakeoff(combined.confirmedTakeoff)?.time, 160);
+    assert.equal(activeConfirmedTakeoff(mergeForward(combined, actual).confirmedTakeoff)?.time, 160);
+    const permanent = mergeForward(revoked, observed);
+    assert.equal(activeConfirmedTakeoff(permanent.confirmedTakeoff)?.source, "observed_airborne");
+    assert.deepEqual(mergeForward(mergeForward(revoked, corrected), observed), mergeForward(revoked, mergeForward(corrected, observed)));
+  });
+
 });

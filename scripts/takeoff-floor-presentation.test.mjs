@@ -75,3 +75,19 @@ test('previous server evidence carries only the same dated key through a DB outa
     assert.equal(applyTakeoffFloor({ ...missing, stateKey }, story).currentStage, 'taxi');
   assert.equal(applyTakeoffFloor(missing).currentStage, 'taxi', 'cold start with no readable proof remains explicitly unconfirmed');
 });
+
+test('server revocation prevents a prior provider story or resume from reapplying the floor; observed proof survives', () => {
+  const takeoffRevocations = [{ time: confirmation.at, at: now }];
+  const rejected = { ...story, confirmedTakeoff: null, takeoffRevocations };
+  const result = applyTakeoffFloor(rejected, story);
+  assert.equal(result.currentStage, 'taxi'); assert.equal(result.times.airborne, false);
+  assert.equal(displayStage(result), 'taxi'); assert.equal(flightAirborne(result), false);
+  const parsed = resumeFromStory({ ...rejected, resume: { ...resume, stateKey: key,
+    confirmedTakeoff: confirmation, takeoff: { ...resume.takeoff, actual: confirmation.at } } }, 'UA219', now * 1000);
+  assert.equal(parsed.confirmedTakeoff, null); assert.equal(parsed.takeoff.actual, null);
+  assert.deepEqual(parsed.takeoffRevocations, takeoffRevocations);
+  const stale = { ...story, confirmedTakeoff: null };
+  assert.equal(applyTakeoffFloor(stale, parsed).currentStage, 'taxi');
+  for (const proof of [{ ...confirmation, source: 'observed_airborne', at: null }, { ...confirmation, observedAt: now - 5 }])
+    assert.equal(applyTakeoffFloor(rejected, { ...story, confirmedTakeoff: proof }).currentStage, 'ride');
+});

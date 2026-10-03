@@ -229,6 +229,7 @@ export type WxBrief = {
 export type FlightStory = {
   stateKey?: string | null;
   confirmedTakeoff?: import("./confirmed-takeoff.ts").TakeoffDiagnostic | null;
+  takeoffRevocations?: import("./flight-phase-state-logic.ts").TakeoffRevocation[];
   selectedStageReason?: string;
   takeoffFloorApplied?: boolean;
   candidateStage?: string;

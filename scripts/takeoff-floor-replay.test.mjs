@@ -19,7 +19,7 @@ test('UA219 actual takeoff survives provider-ID to FlightStats fallback to provi
   const keys = ['FR24_API_TOKEN', 'FLIGHTAWARE_AEROAPI_KEY'];
   const env = keys.map(k => process.env[k]);
   const fixture = JSON.parse(readFileSync(new URL('./fixtures/ua219-provider-handoff.json', import.meta.url)));
-  let now = fixture.firstAtUnix * 1000, mode = 'aware', instance = 0, record = fixture.flightawareRecord;
+  let now = fixture.firstAtUnix * 1000, mode = 'aware', instance = 0, record = fixture.flightawareRecord, surface = null;
   const requests = [];
   try {
     keys.forEach(k => delete process.env[k]);
@@ -39,7 +39,7 @@ test('UA219 actual takeoff survives provider-ID to FlightStats fallback to provi
         : new Response(null, { status: 402 });
       if (/flightstats/.test(url.hostname)) return mode !== 'outage' && url.searchParams.get('date') === '2' && url.searchParams.get('month') === '10'
         ? new Response(fixture.flightstatsHtml) : new Response(null, { status: 404 });
-      if (/adsb\.fi|adsb\.lol|airplanes\.live/.test(url.hostname) && !url.pathname.includes('trace_')) return Response.json({ ac: mode === 'outage'
+      if (/adsb\.fi|adsb\.lol|airplanes\.live/.test(url.hostname) && !url.pathname.includes('trace_')) return Response.json({ ac: surface ? [surface] : mode === 'outage'
         ? [{ flight: 'UAL219', r: 'N219UA', hex: 'a21900', lat: 41.9786, lon: -87.9048, alt_baro: 'ground', gs: 0, seen: 1, seen_pos: 1 }] : [] });
       if (url.pathname.includes('trace_')) return Response.json({ timestamp: now / 1000, trace: [] });
       if (url.hostname === 'aviationweather.gov') return Response.json(url.pathname.endsWith('/metar') || url.pathname.endsWith('/taf') ? [] : { features: [] });
@@ -133,6 +133,66 @@ test('UA219 actual takeoff survives provider-ID to FlightStats fallback to provi
     assert.equal(observedGap.currentStage, 'ride'); assert.equal(observedGap.times.airborne, true);
     assert.equal(observedGap.times.takeoffUnix, null); assert.equal(observedGap.times.takeoffKind, null);
     assert.equal(observedGap.aircraft, null); assert.equal(observedGap.providers.chosenPositionAgeSec, null);
+
+    // A provider-only latch is provisional for ten minutes. A later fresh
+    // matched surface fix revokes it durably and in the previous client/resume.
+    await pg.exec('delete from flight_phase_state; delete from arrival_projection_state');
+    now = fixture.firstAtUnix * 1000; mode = 'aware'; record = structuredClone(fixture.flightawareRecord);
+    record.coord = null; record.track = []; record.altitude = null; record.groundspeed = null;
+    record.gateDepartureTimes.actual = now / 1000 - 300;
+    record.takeoffTimes.actual = now / 1000 - 30;
+    server = await cold();
+    const providerOnly = await server.loadFlightStory('UA219', { fresh: true });
+    assert.equal(providerOnly.confirmedTakeoff.source, 'provider_actual');
+    assert.equal(providerOnly.currentStage, 'ride'); assert.equal(providerOnly.aircraft, null);
+    surface = { flight: 'UAL219', r: 'N219UA', hex: 'a21900', lat: 41.9786, lon: -87.9048,
+      alt_baro: 'ground', gs: 14, seen: 1, seen_pos: 1 };
+    now += 10_000;
+    const revoked = await (await cold()).loadFlightStory('UA219', { fresh: true, resume: providerOnly.resume });
+    assert.equal(revoked.currentStage, 'taxi'); assert.equal(revoked.times.airborne, false);
+    assert.equal(revoked.confirmedTakeoff, null); assert.notEqual(revoked.times.takeoffKind, 'actual');
+    assert.equal(revoked.selectedStageReason, 'provider_takeoff_contradicted_by_surface');
+    assert.equal(revoked.resume.takeoff.actual, null);
+    assert.equal(applyTakeoffFloor(revoked, providerOnly).currentStage, 'taxi');
+    for (const wrap of [ui.applyFr24GroundExperiment, ui.preserveDepartureProgress, ui.preferFreshAirborneState])
+      assert.equal(wrap(revoked, providerOnly.resume).currentStage, 'taxi');
+    assert.equal(displayStage(revoked), 'taxi'); assert.equal(flightAirborne(revoked), false);
+    surface = null; now += 10_000;
+    const rejectedGap = await (await cold()).loadFlightStory('UA219', { fresh: true });
+    assert.equal(rejectedGap.confirmedTakeoff, null); assert.equal(rejectedGap.currentStage, 'taxi');
+    assert.equal(rejectedGap.times.airborne, false); assert.notEqual(rejectedGap.times.takeoffKind, 'actual');
+    assert.equal((await pg.query('select confirmed_takeoff from flight_phase_state')).rows[0].confirmed_takeoff.revocations[0].time,
+      providerOnly.confirmedTakeoff.at);
+
+    // Actual airborne observation remains permanent, even after a provider
+    // clock upgrade followed by a fresh origin surface fix in that early window.
+    await pg.exec('delete from flight_phase_state; delete from arrival_projection_state');
+    record = structuredClone(fixture.flightawareRecord); record.takeoffTimes.actual = null;
+    record.track[0].timestamp = now / 1000 - 1;
+    const physical = await (await cold()).loadFlightStory('UA219', { fresh: true });
+    assert.equal(physical.confirmedTakeoff.source, 'observed_airborne');
+    record.coord = null; record.track = []; record.altitude = null; record.groundspeed = null;
+    record.takeoffTimes.actual = now / 1000 - 30;
+    const upgraded = await (await cold()).loadFlightStory('UA219', { fresh: true });
+    assert.equal(upgraded.confirmedTakeoff.source, 'provider_actual');
+    assert.equal(upgraded.confirmedTakeoff.observedAt, physical.confirmedTakeoff.confirmedAt);
+    surface = { flight: 'UAL219', r: 'N219UA', hex: 'a21900', lat: 41.9786, lon: -87.9048,
+      alt_baro: 'ground', gs: 14, seen: 1, seen_pos: 1 };
+    const permanentObserved = await (await cold()).loadFlightStory('UA219', { fresh: true });
+    assert.equal(permanentObserved.currentStage, 'ride'); assert.equal(permanentObserved.times.airborne, true);
+    assert.equal(permanentObserved.confirmedTakeoff.observedAt, physical.confirmedTakeoff.confirmedAt);
+
+    // An uncontradicted provider-only latch is permanent after ten minutes.
+    await pg.exec('delete from flight_phase_state; delete from arrival_projection_state');
+    surface = null; record.takeoffTimes.actual = now / 1000 - 601;
+    const permanentProvider = await (await cold()).loadFlightStory('UA219', { fresh: true });
+    assert.equal(permanentProvider.confirmedTakeoff.source, 'provider_actual');
+    surface = { flight: 'UAL219', r: 'N219UA', hex: 'a21900', lat: 41.9786, lon: -87.9048,
+      alt_baro: 'ground', gs: 14, seen: 1, seen_pos: 1 };
+    const lateSurface = await (await cold()).loadFlightStory('UA219', { fresh: true });
+    assert.equal(lateSurface.currentStage, 'ride'); assert.equal(lateSurface.times.airborne, true);
+    assert.equal(lateSurface.confirmedTakeoff.at, permanentProvider.confirmedTakeoff.at);
+    surface = null; mode = 'stats';
 
     // An arbitrary device claim never becomes a shared durable confirmation.
     await pg.exec('delete from flight_phase_state; delete from arrival_projection_state');

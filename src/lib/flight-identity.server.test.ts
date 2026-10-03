@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import type { Sql } from "./db.ts";
+import { activeConfirmedTakeoff } from "./flight-phase-state-logic.ts";
 import { canonicalLegKey, legacyLegKeys, flightStateIdentity, unvalidatedLegKey } from "./flight-identity.ts";
 import { createFlightPhaseStateStore } from "./flight-phase-state-store.server.ts";
 import { createArrivalStateStore } from "./arrival-state-store.server.ts";
@@ -204,7 +205,7 @@ test("confirmed takeoff survives concurrent stale CAS writes and same-version om
     assert.equal(await db.phase().save(key, { ...departure, confirmedTakeoff: observed }, 0), "ok");
     assert.equal(await db.phase().save(key, { ...departure, confirmedTakeoff: actual }, stale.version), "conflict_resolved");
     const current = await db.phase().load(key);
-    assert.deepEqual(current.state.confirmedTakeoff, { ...actual, confirmedAt: observed.confirmedAt });
+    assert.deepEqual(current.state.confirmedTakeoff, { ...actual, confirmedAt: observed.confirmedAt, observedAt: observed.confirmedAt });
     await db.phase().save(key, { push: null, taxiOut: null }, current.version);
     await db.phase().save(key, departure, 0);
     assert.deepEqual((await db.phase().load(key)).state.confirmedTakeoff, current.state.confirmedTakeoff);
@@ -225,5 +226,31 @@ test("confirmed takeoff never crosses a scheduled service day or route", async (
       const id = flightStateIdentity(record, ctx);
       assert.equal((await db.phase().load(id.key!, id.legacyKeys, id.recentLegacyKeys)).state.confirmedTakeoff, undefined);
     }
+  } finally { await db.pg.close(); }
+});
+
+test("early provider revocation survives stale CAS, omissions and legacy folds; observed races remain permanent", async () => {
+  const db = await database();
+  try {
+    const provider = { time: 1790957520, source: "provider_actual" as const, confirmedAt: 1790957530 };
+    const rejected = { ...provider, revocations: [{ time: provider.time, at: 1790957600 }] };
+    await db.phase().save(key, { ...departure, confirmedTakeoff: provider }, 0);
+    const stale = await db.phase().load(key);
+    await db.phase().save(key, { ...departure, confirmedTakeoff: rejected }, stale.version);
+    assert.equal(await db.phase().save(key, { ...departure, confirmedTakeoff: provider }, stale.version), "conflict_resolved");
+    let loaded = await db.phase().load(key);
+    assert.equal(activeConfirmedTakeoff(loaded.state.confirmedTakeoff), undefined);
+    await db.phase().save(key, departure, loaded.version);
+    const fallback = unvalidatedLegKey(schedule, context)!;
+    await db.phase().save(fallback, { ...departure, confirmedTakeoff: provider }, 0);
+    loaded = await db.phase().load(key, [fallback]);
+    assert.equal(activeConfirmedTakeoff(loaded.state.confirmedTakeoff), undefined);
+    assert.equal(loaded.state.confirmedTakeoff?.revocations?.[0].time, provider.time);
+    const observed = { time: null, source: "observed_airborne" as const, confirmedAt: 1790957610 };
+    await db.phase().save(key, { ...departure, confirmedTakeoff: observed }, stale.version);
+    loaded = await db.phase().load(key);
+    assert.equal(activeConfirmedTakeoff(loaded.state.confirmedTakeoff)?.source, "observed_airborne");
+    await db.phase().save(key, { ...departure, confirmedTakeoff: rejected }, 0);
+    assert.equal(activeConfirmedTakeoff((await db.phase().load(key)).state.confirmedTakeoff)?.source, "observed_airborne");
   } finally { await db.pg.close(); }
 });

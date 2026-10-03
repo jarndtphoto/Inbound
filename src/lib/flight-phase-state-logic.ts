@@ -8,7 +8,11 @@
 
 export type PushLatch = { unix: number; source: string | null; live: boolean; at: number } | null;
 export type TaxiOutLatch = { at: number } | null;
-export type ConfirmedTakeoff = { time: number | null; source: "provider_actual" | "observed_airborne"; confirmedAt: number };
+export type TakeoffRevocation = { time: number; at: number };
+// Revocations stay in the existing JSONB even when no active latch remains.
+// That lets CAS/legacy merges reject a stale copy of the same provider stamp.
+export type ConfirmedTakeoff = { time: number | null; source: "provider_actual" | "observed_airborne"; confirmedAt: number;
+  observedAt?: number; revocations?: TakeoffRevocation[] };
 export type PhaseState = { push: PushLatch; taxiOut: TaxiOutLatch; confirmedTakeoff?: ConfirmedTakeoff };
 
 export const EMPTY_PHASE_STATE: PhaseState = { push: null, taxiOut: null };
@@ -69,12 +73,31 @@ export function phaseStateEqual(a: PhaseState, b: PhaseState): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** Confirmation is monotone; only a provider actual supplies an event time. */
+/** Observed proof is permanent; rejected provider stamps merge as tombstones. */
 export function mergeConfirmedTakeoff(a?: ConfirmedTakeoff, b?: ConfirmedTakeoff): ConfirmedTakeoff | undefined {
   if (!a) return b;
   if (!b) return a;
+  const revocations = [...a.revocations ?? [], ...b.revocations ?? []].reduce<TakeoffRevocation[]>((all, item) => {
+    const prior = all.find(r => r.time === item.time);
+    if (prior) prior.at = Math.min(prior.at, item.at); else all.push({ ...item });
+    return all;
+  }, []).sort((x, y) => x.time - y.time);
+  const observations = [a, b].flatMap(x => x.observedAt != null ? [x.observedAt]
+    : x.source === "observed_airborne" ? [x.confirmedAt] : []);
+  const observedAt = observations.length ? Math.min(...observations) : undefined;
   const actuals = [a, b].filter(x => x.source === "provider_actual" && x.time != null);
+  const accepted = actuals.filter(x => !revocations.some(r => r.time === x.time));
+  const clocks = accepted.length ? accepted : actuals;
   return { source: actuals.length ? "provider_actual" : "observed_airborne",
-    time: actuals.length ? Math.min(...actuals.map(x => x.time!)) : null,
-    confirmedAt: Math.min(a.confirmedAt, b.confirmedAt) };
+    time: clocks.length ? Math.min(...clocks.map(x => x.time!)) : null,
+    confirmedAt: Math.min(a.confirmedAt, b.confirmedAt),
+    ...(observedAt != null && actuals.length ? { observedAt } : {}),
+    ...(revocations.length ? { revocations } : {}) };
+}
+
+export function activeConfirmedTakeoff(c?: ConfirmedTakeoff): ConfirmedTakeoff | undefined {
+  if (!c) return;
+  if (c.source === "provider_actual" && c.revocations?.some(r => r.time === c.time))
+    return c.observedAt != null ? { ...c, source: "observed_airborne", time: null } : undefined;
+  return c;
 }

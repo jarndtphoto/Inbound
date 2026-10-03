@@ -4,8 +4,8 @@ import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
 import { readFlightResume } from "./flight-resume";
 import { loadPhaseState, savePhaseState, phaseStateEqual } from "./flight-phase-state.server";
-import { confirmTakeoff, takeoffFloorStage, takeoffDiagnostic } from "./confirmed-takeoff.ts";
-import { mergeConfirmedTakeoff } from "./flight-phase-state-logic.ts";
+import { confirmTakeoff, reconcileTakeoff, takeoffFloorStage, takeoffDiagnostic, hasOriginSurfaceFix } from "./confirmed-takeoff.ts";
+import { activeConfirmedTakeoff, mergeConfirmedTakeoff } from "./flight-phase-state-logic.ts";
 // Only server-validated evidence enters this bounded outage continuity memo.
 // Durable state remains authoritative across cold instances.
 const takeoffContinuity = new Map();
@@ -3084,14 +3084,15 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;
 	const evidenceArgs = { schedule: aware, key: stateKey, reason: stateIdentity.reason,
-		now: Date.now() / 1000, deviceOnly: Boolean(resumed), groundElevationFt: fieldElev(origin),
+		now: Date.now() / 1000, deviceOnly: Boolean(resumed), origin, groundElevationFt: fieldElev(origin),
 		expected: { callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean),
 			registration: aware?.tail ?? null, hex: aware?.hex ?? knownHex ?? null } };
-	let confirmedTakeoff = mergeConfirmedTakeoff(loadedPhase.state.confirmedTakeoff,
-		confirmTakeoff({ ...evidenceArgs, position: live }));
+	let takeoffEvidence = loadedPhase.state.confirmedTakeoff;
 	const memo = takeoffContinuity.get(stateKey);
 	if (memo && Date.now() / 1000 - memo.at <= 30 * 3600)
-		confirmedTakeoff = mergeConfirmedTakeoff(confirmedTakeoff, memo.confirmation);
+		takeoffEvidence = mergeConfirmedTakeoff(takeoffEvidence, memo.confirmation);
+	takeoffEvidence = reconcileTakeoff(takeoffEvidence, { ...evidenceArgs, position: live });
+	let confirmedTakeoff = activeConfirmedTakeoff(takeoffEvidence);
 	if (progressResume && progressResume.originIcao === origin.icao && progressResume.destIcao === dest.icao) {
 		if (!pushLatchValue) {
 			const resumedPush = pushLatchFromResume(progressResume);
@@ -3240,7 +3241,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const landed = inboundLanded(inboundAware) || Boolean(inboundSnapByFlight.get(snapKey)?.landUnix);
 	const atGateFa = inboundAtGate(inboundAware);
 	const onField = Boolean(live && stillOnField(live, origin));
-	confirmedTakeoff = mergeConfirmedTakeoff(confirmedTakeoff, confirmTakeoff({ ...evidenceArgs, now: Date.now() / 1000, position: live }));
+	takeoffEvidence = reconcileTakeoff(takeoffEvidence, { ...evidenceArgs, now: Date.now() / 1000, origin, position: live });
+	confirmedTakeoff = activeConfirmedTakeoff(takeoffEvidence);
 	const faSaysAir = Boolean(confirmedTakeoff);
 	const surfaceFixAtOrigin = Boolean(live && live.onGround && stillOnField(live, origin));
 	const ourAirborne = Boolean(confirmedTakeoff && !ourLanded) || Boolean(flightBegun(live, origin))
@@ -3656,8 +3658,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		? aware
 		: { ...aware, gateOut: effectiveGateOut };
 	let times = timesOf(awareWithEffectiveGateOut, origin, dest);
-	if (resumed && !confirmedTakeoff) {
-		// Device-supplied clocks are schedule context, not validated takeoff proof.
+	if (!confirmedTakeoff && (resumed || takeoffEvidence?.revocations?.some(r => r.time === aware?.takeoff?.actual))) {
+		// Device clocks and explicitly rejected provider stamps are schedule
+		// context, not validated takeoff proof (also across a later position gap).
 		const departureEstimate = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? null;
 		times = { ...times, airborne: false, takeoffUnix: departureEstimate,
 			takeoff: clockAt(departureEstimate, tzOf(origin)), takeoffKind: departureEstimate ? "estimated" : null };
@@ -3898,7 +3901,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	}
 	const inbound = buildInbound({
 		live,
-		ourTakeoffActual: confirmTakeoff({ ...evidenceArgs, position: null })?.time ?? null,
+		ourTakeoffActual: confirmedTakeoff ? confirmTakeoff({ ...evidenceArgs, position: live })?.time ?? null : null,
 		ourGateOutActual: confirmedGateOutActual(effectiveGateOut),
 		origin,
 		inboundIdent: inboundAware?.ident ?? inboundIdent,
@@ -3940,38 +3943,47 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// Persist before choosing the response stage so a CAS winner also protects
 	// this stale poll. No provider lookup is needed to apply the floor.
 	const nextPhase = { push: pushLatchValue, taxiOut: taxiOutLatchValue,
-		...(confirmedTakeoff ? { confirmedTakeoff } : {}) };
+		...(takeoffEvidence ? { confirmedTakeoff: takeoffEvidence } : {}) };
 	if (canPersistState && !phaseStateEqual(loadedPhase.state, nextPhase)) {
 		const saveStatus = await savePhaseState(stateKey, nextPhase, loadedPhase.version);
 		if (saveStatus !== "ok") phaseStatePersistence = saveStatus;
 		if (saveStatus === "conflict_resolved" || saveStatus === "conflict_dropped") {
 			const winner = await loadPhaseState(stateKey);
-			confirmedTakeoff = mergeConfirmedTakeoff(confirmedTakeoff, winner.state.confirmedTakeoff);
+			takeoffEvidence = mergeConfirmedTakeoff(takeoffEvidence, winner.state.confirmedTakeoff);
+			confirmedTakeoff = activeConfirmedTakeoff(takeoffEvidence);
 			if (winner.status !== "ok") phaseStatePersistence = winner.status;
 		}
+	}
+	if (!confirmedTakeoff && takeoffEvidence?.revocations?.some(r => r.time === aware?.takeoff?.actual)) {
+		// A CAS winner may have revoked the stamp after this poll built times.
+		const departureEstimate = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? null;
+		times = { ...times, airborne: false, takeoffUnix: departureEstimate,
+			takeoff: clockAt(departureEstimate, tzOf(origin)), takeoffKind: departureEstimate ? "estimated" : null };
 	}
 	if (confirmedTakeoff) {
 		times = { ...times, airborne: true, ...(confirmedTakeoff.time != null ? {
 			takeoffUnix: confirmedTakeoff.time, takeoffKind: "actual", takeoff: clockAt(confirmedTakeoff.time, tzOf(origin))
 		} : {}) };
-		if (canPersistState) {
-			if (takeoffContinuity.size >= 1000) takeoffContinuity.delete(takeoffContinuity.keys().next().value);
-			takeoffContinuity.set(stateKey, { confirmation: confirmedTakeoff, at: Date.now() / 1000 });
-		}
+	}
+	// Retain revocations in warm outage continuity too; an old memo must not
+	// resurrect a rejected provider stamp when the database is unavailable.
+	if (canPersistState && takeoffEvidence) {
+		if (takeoffContinuity.size >= 1000) takeoffContinuity.delete(takeoffContinuity.keys().next().value);
+		takeoffContinuity.set(stateKey, { confirmation: takeoffEvidence, at: Date.now() / 1000 });
 	}
 	const stageArgs = {
 		live,
 		remainingNm: stageRemainingNm,
 		dest,
 		origin,
-		ourTakeoffActual: confirmTakeoff({ ...evidenceArgs, position: null })?.time ?? null,
+		ourTakeoffActual: confirmedTakeoff ? confirmTakeoff({ ...evidenceArgs, position: live })?.time ?? null : null,
 		ourLandingActual: aware?.landing.actual ?? null,
 		ourLanded,
 		// A resume contains no verified inbound leg. Do not relabel the tracked
 		// aircraft's fresh departure-airport position as an inbound flight.
 		inboundStatus: resumed && !inboundAware ? "unknown" : inbound.status,
 		pushed: Boolean(times.pushed || leftGate),
-		faAirborne: Boolean(confirmTakeoff({ ...evidenceArgs, position: live }) || flightBegun(live, origin) || motion.flying) && !surfaceFixAtOrigin && !stageTaxiHint,
+		faAirborne: Boolean((confirmedTakeoff && confirmTakeoff({ ...evidenceArgs, position: live })) || flightBegun(live, origin) || motion.flying) && !surfaceFixAtOrigin && !stageTaxiHint,
 		taxiHint: stageTaxiHint,
 		taxiOutLatched,
 		distPark,
@@ -3982,7 +3994,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const candidateStage = currentStageOf(stageArgs);
 	const current = currentStageOf({ ...stageArgs, confirmedTakeoff });
 	const takeoffFloorApplied = candidateStage !== current;
-	const selectedStageReason = takeoffFloorApplied ? "confirmed_takeoff_floor"
+	const selectedStageReason = !confirmedTakeoff && hasOriginSurfaceFix({ ...evidenceArgs, origin, position: live })
+		&& takeoffEvidence?.revocations?.length ? "provider_takeoff_contradicted_by_surface" : takeoffFloorApplied ? "confirmed_takeoff_floor"
 		: confirmedTakeoff ? `confirmed_takeoff_${confirmedTakeoff.source}:${current}` : `current_evidence:${current}`;
 	const arrivalStatus = current === "taxi_in"
 		? "taxi_in"
@@ -4197,7 +4210,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		type: baseResume.type ?? aircraft?.type ?? null,
 		stateKey,
 		confirmedTakeoff: takeoffDiagnostic(confirmedTakeoff),
-		takeoff: { ...baseResume.takeoff, actual: confirmedTakeoff?.time ?? baseResume.takeoff?.actual ?? null },
+		takeoffRevocations: takeoffEvidence?.revocations,
+		takeoff: { ...baseResume.takeoff, actual: confirmedTakeoff?.time ?? (takeoffEvidence?.revocations?.some(r => r.time === baseResume.takeoff?.actual) ? null : baseResume.takeoff?.actual) ?? null },
 		departureStage: confirmedTakeoff ? null : taxiOutLatched ? "taxi" : pushLatchValue ? "push" : null,
 		detectedPushUnix: detectedPush && typeof detectedPush === "object" && detectedPush.source === "live_detected"
 			? detectedPush.unix
@@ -4208,6 +4222,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		fetchedAt: Date.now(),
 		stateKey,
 		confirmedTakeoff: takeoffDiagnostic(confirmedTakeoff),
+		takeoffRevocations: takeoffEvidence?.revocations,
 		selectedStageReason,
 		takeoffFloorApplied,
 		candidateStage,

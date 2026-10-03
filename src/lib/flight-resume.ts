@@ -1,4 +1,5 @@
-import { readTakeoffDiagnostic, takeoffDiagnostic, type TakeoffDiagnostic } from "./confirmed-takeoff.ts";
+import { readTakeoffDiagnostic, readTakeoffRevocations, takeoffDiagnostic, type TakeoffDiagnostic } from "./confirmed-takeoff.ts";
+import { activeConfirmedTakeoff, mergeConfirmedTakeoff, type TakeoffRevocation } from "./flight-phase-state-logic.ts";
 import { canonicalLegKey, unvalidatedLegKey } from "./flight-identity.ts";
 import { airportByIcao } from "./airports.ts";
 import { parseFlightQuery, storyMatchesQuery } from "./flight-parse.ts";
@@ -39,6 +40,7 @@ export type FlightResume = {
   waypoints: { lat: number; lon: number }[];
   stateKey?: string | null;
   confirmedTakeoff?: TakeoffDiagnostic | null;
+  takeoffRevocations?: TakeoffRevocation[];
   departureStage?: DepartureStageCheckpoint | null;
   detectedPushUnix?: number | null;
   detectedTaxiUnix?: number | null;
@@ -129,14 +131,19 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
   const expectedKey = typeof r.stateKey === "string" && r.stateKey.startsWith("leg:v1:") ? canonicalLegKey(keySchedule, keyContext)
     : unvalidatedLegKey(keySchedule, keyContext, now / 1000);
   const stateKey = r.stateKey === expectedKey ? expectedKey : null;
-  const confirmedTakeoff = stateKey ? takeoffDiagnostic(readTakeoffDiagnostic(r.confirmedTakeoff, now / 1000)) : null;
+  const takeoffRevocations = stateKey ? readTakeoffRevocations(r.takeoffRevocations, now / 1000) : [];
+  let evidence = stateKey ? readTakeoffDiagnostic(r.confirmedTakeoff, now / 1000) : undefined;
+  for (const revocation of takeoffRevocations) evidence = mergeConfirmedTakeoff(evidence,
+    { source: "provider_actual", time: revocation.time, confirmedAt: revocation.at, revocations: [revocation] });
+  const confirmedTakeoff = takeoffDiagnostic(activeConfirmedTakeoff(evidence));
+  if (!confirmedTakeoff && takeoffRevocations.some(r => r.time === stamps.takeoff.actual)) stamps.takeoff.actual = null;
   return {
     version: 1, callsign: want.callsign, ident: r.ident, confirmedAt: r.confirmedAt,
     ...fields, originIcao: r.originIcao, destIcao: r.destIcao,
     originGate: token(r.originGate, /^[A-Z0-9 -]{1,12}$/i), destGate: token(r.destGate, /^[A-Z0-9 -]{1,12}$/i),
     gateOut: stamps.gateOut, takeoff: stamps.takeoff, landing: stamps.landing, gateIn: stamps.gateIn,
     tail: token(r.tail, /^[A-Z0-9-]{3,12}$/i), hex: token(r.hex, /^[a-f0-9]{6}$/i),
-    type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, stateKey, confirmedTakeoff, departureStage: confirmedTakeoff ? null : departureStage, detectedPushUnix, detectedTaxiUnix, parkedLat, parkedLon,
+    type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, stateKey, confirmedTakeoff, takeoffRevocations, departureStage: confirmedTakeoff ? null : departureStage, detectedPushUnix, detectedTaxiUnix, parkedLat, parkedLon,
     takeoffRollStreak, takeoffRollStreakSeenAt, flightSpeedStreak, flightSpeedStreakSeenAt,
   } as FlightResume;
 }
@@ -164,6 +171,7 @@ export function resumeFromStory(story: FlightStory | undefined, q: string, now =
     const parsed = readFlightResume({ ...story.resume,
       stateKey: story.stateKey ?? story.resume.stateKey,
       confirmedTakeoff: story.confirmedTakeoff ?? story.resume.confirmedTakeoff,
+      takeoffRevocations: story.takeoffRevocations ?? story.resume.takeoffRevocations,
       takeoff: { ...story.resume.takeoff, ...(confirmation?.time != null ? { actual: confirmation.time } : {}) },
     }, q, now);
     if (!parsed) return;
@@ -182,7 +190,7 @@ export function resumeFromStory(story: FlightStory | undefined, q: string, now =
   });
   return readFlightResume({
     version: 1, callsign, ident: callsign, confirmedAt: story.schedule?.confirmedAt ?? story.fetchedAt,
-    stateKey: story.stateKey, confirmedTakeoff: story.confirmedTakeoff,
+    stateKey: story.stateKey, confirmedTakeoff: story.confirmedTakeoff, takeoffRevocations: story.takeoffRevocations,
     originIcao: story.origin?.icao, destIcao: story.dest?.icao,
     originIata: story.origin?.iata, destIata: story.dest?.iata,
     originLat: story.origin?.lat, originLon: story.origin?.lon, destLat: story.dest?.lat, destLon: story.dest?.lon,
