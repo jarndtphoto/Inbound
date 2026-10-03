@@ -30,6 +30,7 @@ const { rideOutlook, RideOutlookText, nextStep } = await import('../src/lib/trav
 const { WeatherEventMarker } = await import('../src/components/weather-event-marker.ts');
 const { passengerWeatherCopy } = await import('../src/lib/weather-card-copy.ts');
 const { WeatherEventHeadline, WeatherEventBody, WeatherPreviewLabel } = await import('../src/components/weather-event-copy.ts');
+const { FLIGHT_STAGES } = await import('../src/lib/flight-stage.ts');
 
 describe('passenger weather presentation', () => {
   const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
@@ -205,7 +206,8 @@ describe('final approach passenger stage', () => {
 
   it('renders Final approach as a first-class passenger stage', () => {
     const source = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
-    assert.match(source, /\{ id: "final_approach", label: "Final approach" \}/);
+    assert.equal(FLIGHT_STAGES.find(stage => stage.id === 'final_approach')?.label, 'Final approach');
+    assert.match(source, /FLIGHT_STAGES as STAGES/);
     assert.match(source, /story\.currentStage === "final_approach"/);
   });
 });
@@ -255,7 +257,8 @@ describe('post-landing passenger stage', () => {
 
   it('renders Taxiing in as the actual passenger stage', () => {
     const source = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
-    assert.match(source, /\{ id: "taxi_in", label: "Taxiing in" \}/);
+    assert.equal(FLIGHT_STAGES.find(stage => stage.id === 'taxi_in')?.label, 'Taxiing in');
+    assert.match(source, /FLIGHT_STAGES as STAGES/);
     assert.match(source, /story\.currentStage === "taxi_in"/);
   });
 });
@@ -581,8 +584,9 @@ describe('first-class pushback and taxi-out stages', () => {
 
   it('renders Pushback and Taxiing out as separate passenger stages', () => {
     const source = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
-    assert.match(source, /\{ id: "push", label: "Pushback" \}/);
-    assert.match(source, /\{ id: "taxi", label: "Taxiing out" \}/);
+    assert.equal(FLIGHT_STAGES.find(stage => stage.id === 'push')?.label, 'Pushback');
+    assert.equal(FLIGHT_STAGES.find(stage => stage.id === 'taxi')?.label, 'Taxiing out');
+    assert.match(source, /FLIGHT_STAGES as STAGES/);
     assert.match(source, /story\.currentStage === "push"/);
     assert.match(source, /story\.currentStage === "taxi"/);
   });
@@ -672,7 +676,7 @@ describe('on the move evidence', () => {
 
   it('labels the passenger operational event Pushback, not Departure', () => {
     const source = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
-    assert.match(source, /label: "Pushback"/);
+    assert.match(source, /<TimeChip\s+label="Pushback"/);
     assert.doesNotMatch(source, /rows\.push\(\{ label: "Departure"/);
   });
 
