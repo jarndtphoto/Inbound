@@ -55,6 +55,8 @@ import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFligh
 import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
 import { arrivalFuturePoints } from "./arrival-path.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
+import { emptyRouteMemory, mergeRouteMemory, routeLeg, validatedFiledRoute } from "./route-memory.ts";
+import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
 import { loadOfficialFlightData } from "./official-flight-data.server.ts";
@@ -2256,35 +2258,6 @@ const hexByIdent = /* @__PURE__ */ new Map();
 const hexRouteByIdent = /* @__PURE__ */ new Map();
 const lastKinByIdent = /* @__PURE__ */ new Map();
 const observePhase = createPhaseHistory();
-const routeTrackByFlight = /* @__PURE__ */ new Map();
-const ROUTE_TRACK_HOLD_MS = 20 * 60_000;
-
-function holdLastGoodRouteTrack(key, filed) {
-	const now = Date.now();
-	const hasTrack = filed?.source === "track" && Array.isArray(filed.flown) && filed.flown.length >= 2;
-	if (hasTrack) {
-		routeTrackByFlight.set(key, {
-			at: now,
-			flown: filed.flown,
-			spine: Array.isArray(filed.spine) ? filed.spine : [],
-		});
-		return filed;
-	}
-	const prev = routeTrackByFlight.get(key);
-	if (!prev || now - prev.at > ROUTE_TRACK_HOLD_MS || !Array.isArray(prev.flown) || prev.flown.length < 2) {
-		if (prev && now - prev.at > ROUTE_TRACK_HOLD_MS) routeTrackByFlight.delete(key);
-		return filed;
-	}
-	const spine = Array.isArray(filed?.spine) && filed.spine.length >= 2 ? filed.spine : prev.spine;
-	if (!Array.isArray(spine) || spine.length < 2) return filed;
-	const origin = spine[0];
-	const dest = spine[spine.length - 1];
-	const flown = prev.flown;
-	const points = flown.length >= 6
-		? densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48)
-		: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36);
-	return { ...filed, points, spine, flown, source: "track" };
-}
 function inboundSnapKey(aware, origin, dest, query) {
 	if (aware) return origKey(aware);
 	const day = new Date().toISOString().slice(0, 10);
@@ -3114,6 +3087,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// written back once near the end of this function.
 	const loadedPhase = await loadPhaseState(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys);
 	const loadedArrival = await arrivalStateStore.load(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys);
+	const memoryLeg = routeLeg(stateKey ?? "", origin.iata, dest.iata);
+	const loadedRoute = memoryLeg ? await routeMemoryStore.load(stateKey, memoryLeg, canPersistState ? legacyKeys : []) : null;
+	let routeMemory = loadedRoute?.state ?? null;
+	let routeMemoryPersistence = loadedRoute?.status ?? "unavailable";
 	let pushLatchValue = loadedPhase.state.push;
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;
@@ -3340,20 +3317,29 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	};
 	const hex = live ? (live.hex || "").toLowerCase() : null;
 	const filedRaw = await loadFiledPath(!ourLanded && ourAirborne ? hex : null, start, end, !ourLanded && ourAirborne ? live : null, aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? null, aware?.waypoints ?? [], aware?.faTrack ?? []);
-	const routeInstanceTime = aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? aware?.gateOut?.scheduled ?? null;
-	const routeInstanceDay = routeInstanceTime ? new Date(routeInstanceTime * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-	const routeTrackKey = `${aware?.flightId ?? stateIdent}|${routeKey}|${routeInstanceDay}`;
-	const filed = !ourLanded && ourAirborne ? holdLastGoodRouteTrack(routeTrackKey, filedRaw) : filedRaw;
+	if (memoryLeg) {
+		const poll = emptyRouteMemory(memoryLeg);
+		poll.filed = validatedFiledRoute(aware?.waypoints ?? [], start, end,
+			aware?.originIata === origin.iata && aware?.destIata === dest.iata, Date.now());
+		poll.track = (filedRaw.phaseHistory ?? []).map(p => ({ lat: p.lat, lon: p.lon, seenAt: p.seenAt * 1000 }));
+		routeMemory = mergeRouteMemory(routeMemory, poll);
+		if (canPersistState) {
+			const savedRoute = await routeMemoryStore.save(stateKey, routeMemory, loadedRoute.version);
+			routeMemory = savedRoute.state;
+			routeMemoryPersistence = savedRoute.status;
+		}
+	}
+	const heldWaypoints = routeMemory?.filed?.waypoints ?? [];
+	const heldSpine = heldWaypoints.length >= 4 ? makeSpine(start, end, heldWaypoints) : filedRaw.spine;
+	const heldTrack = routeMemory?.track?.length >= 2 ? routeMemory.track : filedRaw.flown;
+	const filed = { ...filedRaw, spine: heldSpine, flown: heldTrack };
 	let path;
 	let pathSource;
-	if (filed.source === "track" && filed.points.length >= 6) {
-		path = filed.points;
+	if (heldTrack.length >= 2) {
+		path = densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(heldTrack, heldSpine), start, end), 22), 48);
 		pathSource = "track";
-	} else if (aware && aware.waypoints.length >= 4) {
-		const wps = aware.waypoints.slice();
-		if (haversineNm(start, wps[0]) > 18) wps.unshift(start);
-		if (haversineNm(wps[wps.length - 1], end) > 8) wps.push(end);
-		path = densifyPath(downsampleNm(wps, 22), 48);
+	} else if (heldWaypoints.length >= 4) {
+		path = heldSpine;
 		pathSource = "filed";
 	} else {
 		path = filed.points.length >= 2 ? filed.points : greatCirclePoints(start, end, 18);
@@ -3473,7 +3459,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		progress = Math.max(0, 1 - remainingNm / totalNm);
 	}
 	if (arrivalEntry || loadedArrival.state.startedAt || ourLanded) console.info("[arrival-projection]", {
-		flight: parsed.callsign, landKey, routeTrackKey, instance: ARRIVAL_INSTANCE,
+		flight: parsed.callsign, landKey, stateKey, instance: ARRIVAL_INSTANCE,
 		entryGate: arrivalEntry, reason: arrivalUpdate.reason, persistence: arrivalPersistence,
 		loadedVersion: loadedArrival.version, hadPrevious: Boolean(loadedArrival.state.startedAt),
 		runway: expectedArrival?.runway ?? null, source: expectedArrival?.source ?? null,

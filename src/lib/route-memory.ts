@@ -1,0 +1,73 @@
+import { haversineNm, polylineLengthNm, progressAlongPath } from "./geo.ts";
+
+export type RoutePoint = { lat: number; lon: number; label?: string | null };
+export type RouteObservation = RoutePoint & { seenAt: number }; // milliseconds
+export type RouteLeg = { origin: string; destination: string; date: string };
+export type ObservedProgress = RouteObservation & { progress: number; totalNm: number; remainingNm: number };
+export type RouteMemory = {
+  leg: RouteLeg;
+  filed: { waypoints: RoutePoint[]; observedAt: number; fingerprint: string } | null;
+  track: RouteObservation[];
+  lastObserved: ObservedProgress | null;
+};
+
+export function routeLeg(key: string, origin: string, destination: string): RouteLeg | null {
+  const parts = key.replace(/^leg:(?:v1|unvalidated):/, "").split("|");
+  const date = key.startsWith("leg:v1:") ? parts[1] : parts[3];
+  const from = key.startsWith("leg:v1:") ? parts[2] : parts[1];
+  const to = key.startsWith("leg:v1:") ? parts[3] : parts[2];
+  return /^\d{4}-\d{2}-\d{2}$/.test(date ?? "") && from === origin && to === destination
+    ? { origin, destination, date } : null;
+}
+export const emptyRouteMemory = (leg: RouteLeg): RouteMemory => ({ leg, filed: null, track: [], lastObserved: null });
+export const sameRouteLeg = (a: RouteLeg, b: RouteLeg) => a.origin === b.origin && a.destination === b.destination && a.date === b.date;
+const validPoint = (p: RoutePoint) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
+
+/** Accept provider waypoints only for the resolved route. Direct spines never
+ * enter this field. A later validated reroute replaces the entire filed plan. */
+export function validatedFiledRoute(waypoints: RoutePoint[], origin: RoutePoint, destination: RoutePoint, validated: boolean, now: number): RouteMemory["filed"] {
+  if (!validated || !Array.isArray(waypoints) || waypoints.length < 4 || waypoints.length > 512 || !waypoints.every(validPoint)) return null;
+  const points = [origin, ...waypoints, destination];
+  const direct = haversineNm(origin, destination);
+  if (direct < 1 || polylineLengthNm(points) > direct * 3 + 100) return null;
+  const clean = waypoints.map(p => ({ lat: p.lat, lon: p.lon, ...(p.label ? { label: String(p.label).slice(0, 40) } : {}) }));
+  return { waypoints: clean, observedAt: now, fingerprint: clean.map(p => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`).join(";") };
+}
+
+/** Keep real observations in time order; bound storage while preserving both
+ * endpoints. A failed/partial trace cannot erase an earlier observed sector. */
+export function mergeObservedTrack(a: RouteObservation[], b: RouteObservation[]): RouteObservation[] {
+  const byTime = new Map<number, RouteObservation>();
+  for (const p of [...a, ...b]) if (validPoint(p) && Number.isFinite(p.seenAt) && p.seenAt > 0)
+    byTime.set(p.seenAt, { lat: p.lat, lon: p.lon, seenAt: p.seenAt });
+  const sorted = [...byTime.values()].sort((x, y) => x.seenAt - y.seenAt);
+  const spaced = sorted.filter((p, i) => i === 0 || i === sorted.length - 1 || haversineNm(sorted[i - 1]!, p) >= 0.5);
+  if (spaced.length <= 512) return spaced;
+  return Array.from({ length: 512 }, (_, i) => spaced[Math.round(i * (spaced.length - 1) / 511)]!);
+}
+
+export function mergeRouteMemory(previous: RouteMemory, next: RouteMemory): RouteMemory {
+  // The caller/store must start a new row for a new date/route/diversion.
+  if (!sameRouteLeg(previous.leg, next.leg)) return next;
+  const filed = next.filed && (!previous.filed || next.filed.observedAt > previous.filed.observedAt)
+    ? next.filed : previous.filed;
+  const lastObserved = next.lastObserved && (!previous.lastObserved || next.lastObserved.seenAt > previous.lastObserved.seenAt)
+    ? next.lastObserved : previous.lastObserved;
+  return { leg: next.leg, filed, track: mergeObservedTrack(previous.track, next.track), lastObserved };
+}
+
+/** Preserve last observed progress through coverage gaps; never turn elapsed
+ * time into a position. A new real fix resumes projection on the held path. */
+export function routeProgress(path: RoutePoint[], memory: RouteMemory | null, observation: RouteObservation | null, airborne: boolean, landed: boolean) {
+  const totalNm = Math.max(1, polylineLengthNm(path));
+  if (landed) return { progress: 1, totalNm, remainingNm: 0, source: "landed" as const, observedAt: null };
+  if (observation) {
+    const along = progressAlongPath(path, observation);
+    return { progress: along.frac, totalNm, remainingNm: along.remainingNm, source: "observed" as const, observedAt: observation.seenAt };
+  }
+  if (airborne && memory?.lastObserved) {
+    const last = memory.lastObserved;
+    return { progress: last.progress, totalNm: last.totalNm, remainingNm: last.remainingNm, source: "last_known" as const, observedAt: last.seenAt };
+  }
+  return { progress: 0, totalNm, remainingNm: totalNm, source: "unknown" as const, observedAt: null };
+}
