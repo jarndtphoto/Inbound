@@ -63,6 +63,7 @@ export type TabId = "sky" | "field" | "seat" | "log";
 
 export type StageId = "inbound" | "origin_gate" | "push" | "taxi" | "takeoff_roll" | "ride" | "arrival" | "final_approach" | "taxi_in" | "gate";
 export type StageStepId = Exclude<StageId, "takeoff_roll">;
+export type FlightScheduleSource = "flightaware_api" | "flightaware_public" | "flightstats_public" | "fr24_live" | "saved_resume" | "unavailable" | "unknown";
 
 export type Chop = "smooth" | "light" | "moderate" | "severe";
 
@@ -253,6 +254,7 @@ export type FlightStory = {
   currentStage: StageId;
   arrivalStatus?: "airborne" | "landed" | "taxi_in" | "gate";
   providers?: {
+    scheduleSource?: FlightScheduleSource;
     flightStateKey?: string | null;
     canonicalKey?: string | null;
     canonicalKeyFailure?: "missing_scheduled" | "route_mismatch" | "service_date_mismatch" | "no_ident" | null;
