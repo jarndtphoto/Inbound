@@ -1087,17 +1087,17 @@ describe('AAL3197 weather entry rendering', () => {
     assert.match(html, />2<\/text>/);
   });
 
-  it('renders moderate turbulence exactly once and keeps the entry timing', () => {
+  it('leads with the next weather event once and keeps its entry timing and shared map wording', () => {
     const story = {
       route: { progress: 0.50, samples },
       weatherCoverage: { failedSources: [] }
     };
     const text = rideOutlook(story);
     const html = renderToStaticMarkup(createElement(RideOutlookText, { story }));
-    assert.equal((text.match(/moderate turbulence/gi) || []).length, 1);
-    assert.match(text, /Moderate turbulence is possible in about 47 minutes\./);
-    assert.match(text, /^Projected ride is currently choppy\./);
-    assert.match(html, /Moderate turbulence is possible in about 47 minutes\./);
+    assert.equal((text.match(/moderate bumps/gi) || []).length, 1);
+    assert.match(text, /^Light bumps possible around now\.\nModerate bumps later, about 47 min ahead\./);
+    assert.match(text, /Projected ride is currently choppy\./);
+    assert.match(html, /Moderate bumps later, about 47 min ahead\./);
   });
 
   it('does not split one continuous moderate range when storm detail changes', () => {

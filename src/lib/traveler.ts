@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import type { FlightStory } from "./types";
-import { routeWeatherEvents } from "./weather-events";
+import { upcomingWeatherEvents, weatherOutlook } from "./weather-presentation";
 import { passengerNextEvent } from "./next-event";
 
 export const isLanded = (s: FlightStory) => s.currentStage === "gate" || s.times.landKind === "actual" || (s.currentStage === "arrival" && s.aircraft?.onGround === true);
@@ -22,33 +22,16 @@ export function rideOutlook(s: FlightStory): string {
         ? "Weather coverage is incomplete, so the current ride is uncertain."
         : "Projected ride is currently smooth, based on available forecasts.";
 
-  const rank = { smooth: 0, light: 1, moderate: 2, severe: 3 } as const;
-  const events = routeWeatherEvents(samples, s.route.progress);
-  const strongest = events.reduce<(typeof events)[number] | null>((best, event) => {
-    if (!best) return event;
-    const eventRank = rank[event.strongestChop ?? event.start.chop] + (event.start.convective ? 0.5 : 0);
-    const bestRank = rank[best.strongestChop ?? best.start.chop] + (best.start.convective ? 0.5 : 0);
-    return eventRank > bestRank || (eventRank === bestRank && event.startEtaMin < best.startEtaMin) ? event : best;
-  }, null);
-  if (strongest) {
-    const strongestChop = strongest.strongestChop ?? strongest.start.chop;
-    const severity = strongestChop === "severe" ? "Quite bumpy air"
-      : strongestChop === "moderate" ? "Moderate turbulence"
-        : strongestChop === "light" ? "Light turbulence"
-          : "Storms near the route";
-    const minutes = Math.max(0, Math.round(strongest.startEtaMin));
-    text += minutes <= 1
-      ? ` ${severity} is possible now.`
-      : ` ${severity} is possible in about ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
-  } else if (!incomplete) {
-    text += " No significant conditions are currently flagged ahead.";
-  }
+  const highlights = weatherOutlook(upcomingWeatherEvents(samples, s.route.progress), s.dest?.city || s.dest?.iata || "");
+  if (highlights.length) return [...highlights, text + (incomplete && (current.chop !== "smooth" || current.convective) ? " Weather coverage is incomplete." : "")].join("\n");
+  if (!incomplete) text += " No significant conditions are currently flagged ahead.";
   if (incomplete && (current.chop !== "smooth" || current.convective)) text += " Weather coverage is incomplete.";
   return text;
 }
 
 export function RideOutlookText({ story }: { story: FlightStory }) {
-  return createElement("span", null, rideOutlook(story));
+  return createElement("span", null, ...rideOutlook(story).split("\n").map((line, index) =>
+    createElement("span", { key: index, className: index ? "mt-1 block text-muted" : "block" }, line)));
 }
 
 export function nextStep(s: FlightStory, now = Date.now(), failed = false) {

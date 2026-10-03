@@ -1,10 +1,10 @@
 import { destPoint, formatDuration, formatMiles, haversineNm } from "@/lib/geo";
 import { ArrivalRunwayChip } from "./arrival-runway-chip";
 import { upcomingStorms } from "@/lib/route-hazards";
-import { routeWeatherEvents, weatherEventNumber } from "@/lib/weather-events";
+import { weatherEventNumber } from "@/lib/weather-events";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
 import { WeatherPreviewLabel, WeatherIntensityLabel } from "@/components/weather-event-copy";
-import { passengerWeatherCopy } from "@/lib/weather-card-copy";
+import { upcomingWeatherEvents, eventWeatherCopy } from "@/lib/weather-presentation";
 import { useFiled } from "@/lib/store";
 import type { FlightStory, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
@@ -15,7 +15,7 @@ import { WORLD_COUNTRY_RINGS } from "@/lib/world-country-lines";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { CloudRain } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useId } from "react";
 
 import { routeWeatherSegments, sampleWeather } from "@/lib/route-weather-segments";
 
@@ -439,6 +439,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const setWeatherOn = useFiled((s) => s.setWeatherOn);
   const freePan = fixedViewport && !weatherPreview;
   const zoom = useMapBoxZoom(`${story.callsign}:${story.origin.iata}:${story.dest.iata}`, H, freePan);
+  const panelGroup = useId();
   const samples = story.route?.samples ?? [];
   if (samples.length < 2) return null;
 
@@ -496,22 +497,13 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       ? sy(ac!.lat)
       : sy(origin.lat);
   const rot = landed ? 0 : story.route.heading;
-  const weatherLabel = (sample: RouteSample, eventKey?: string, note?: string | null) => {
-    const label = passengerWeatherCopy(
-      sample,
-      sample.frac >= 0.85,
-      story.dest.city || story.dest.iata,
-      eventKey,
-    ).mapLabel;
-    return /\b(?:PIREP|REPORTED)\b/i.test(note ?? "") ? `${label} reported` : label;
-  };
   const takeoffAt = story.times.takeoffUnix;
   const airborneNow = story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach";
   const elapsedMin = airborneNow && story.times.takeoffKind === "actual" && takeoffAt != null
     ? Math.max(0, (story.fetchedAt / 1000 - takeoffAt) / 60) : null;
   const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
     ? (story.times.landUnix - takeoffAt) / 60 : null;
-  const mapEvents = routeWeatherEvents(samples, progress);
+  const mapEvents = upcomingWeatherEvents(samples, progress);
   // Both the full map and preview pin the event's entry point. The affected
   // route line still spans every range through the event's exit.
   const ticks = weatherPreview
@@ -529,7 +521,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     : mapEvents.map((event, index) => ({
         eventNumber: weatherEventNumber(mapEvents, event),
         ...event.start,
-        alertLabel: weatherLabel(event.start, event.key, event.note),
+        alertLabel: eventWeatherCopy(event, story.dest.city || story.dest.iata).mapLabel + (/\b(?:PIREP|REPORTED)\b/i.test(event.note ?? "") ? " reported" : ""),
         intensityBand: event.intensities.length === 1 && event.intensities[0] === "light-moderate" ? "light" : undefined,
         intensity: event.key.startsWith("turbulence:") ? event.key.slice(11) : undefined,
         durationMin: airborneNow ? event.endEtaMin - event.startEtaMin
@@ -764,7 +756,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       </div>
 
       <div className="pointer-events-auto relative z-20 flex shrink-0 items-center gap-3 border-t border-border bg-surface px-3 py-1 text-xs text-fg">
-        <details className="group">
+        <details name={panelGroup} className="group">
           <summary className="cursor-pointer py-3 font-semibold">Weather alerts</summary>
           <div className="absolute inset-x-0 bottom-full max-h-48 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
             {ticks.map((s) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{s.eventNumber || (s.convective ? "⚡" : "☁")}</span><div>{s.intensity && <p><WeatherIntensityLabel intensity={s.intensity} band={s.intensityBand} /> turbulence</p>}<p className={sampleWeather(s).band === "light" ? "font-semibold text-turbulence-light" : sampleWeather(s).band === "moderate" ? "font-semibold text-turbulence-moderate" : "font-semibold"}>{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
@@ -772,7 +764,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
             {!ticks.length && <p>No map alerts shown. Coverage may be incomplete.</p>}
           </div>
         </details>
-        <details>
+        <details name={panelGroup}>
           <summary className="cursor-pointer py-3 font-semibold">Map details</summary>
           <div className="absolute inset-x-0 bottom-full max-h-48 space-y-3 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
             <div className="flex flex-wrap gap-3">

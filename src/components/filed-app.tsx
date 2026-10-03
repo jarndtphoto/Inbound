@@ -14,8 +14,11 @@ import { formatDuration, formatMiles, feetPretty, haversineNm } from "@/lib/geo"
 import { parseFlightQuery, storyMatchesQuery } from "@/lib/flight-parse";
 import { RESUME_MAX_AGE_MS, resumeFromStory, savedScheduleNote } from "@/lib/flight-resume";
 import { useFiled } from "@/lib/store";
-import { routeWeatherEvents, weatherEventNumber, type RouteWeatherEvent } from "@/lib/weather-events";
+import { weatherEventNumber, type RouteWeatherEvent } from "@/lib/weather-events";
 import { passengerWeatherCopy } from "@/lib/weather-card-copy";
+import { upcomingWeatherEvents, eventWeatherCopy } from "@/lib/weather-presentation";
+import { scheduledTimes, type ScheduledTimes } from "@/lib/scheduled-times";
+import { formatClockTime, timeKindLabel } from "@/lib/presentation-time";
 import { passengerAirportWeather } from "@/lib/passenger-airport-weather";
 import { getFlightStory } from "@/lib/story";
 import type { Comfort, FlightStory, StageId } from "@/lib/types";
@@ -46,7 +49,7 @@ const STAGES: { id: StageId; label: string }[] = [
 
 const STORY_CACHE_KEY = "filed-story-cache-v9";
 const LEGACY_STORY_CACHE_KEY = "filed-story-cache-v8";
-const ORIG_MEM_KEY = "filed-orig-sched-v2";
+const ORIG_MEM_KEY = "filed-orig-sched-v3";
 
 function normFlight(q: string) {
   return q.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -61,6 +64,12 @@ function readCachedStory(q: string): FlightStory | undefined {
     const entry = records[key] ?? (legacy && storyMatchesQuery(legacy.story ?? {}, q) ? legacy : undefined);
     if (!entry || !Number.isFinite(entry.at) || Date.now() - entry.at > RESUME_MAX_AGE_MS) return undefined;
     if (!entry.story?.iata || !storyMatchesQuery(entry.story, q)) return undefined;
+    // Older client caches may have promoted an estimate/actual into orig*.
+    // Keep all flight evidence, but rebuild schedule presentation from stamps.
+    if (entry.scheduledOnly !== true) return { ...entry.story, times: {
+      ...entry.story.times, origPushUnix: null, origTakeoffUnix: null, origLandUnix: null,
+      pushWas: null, takeoffWas: null, landWas: null,
+    } };
     return entry.story;
   } catch {
     return undefined;
@@ -99,7 +108,7 @@ function writeCachedStory(q: string, story: FlightStory) {
     };
     const key = parseFlightQuery(q)?.callsign ?? normFlight(q);
     const records = JSON.parse(localStorage.getItem(STORY_CACHE_KEY) || "{}");
-    records[key] = { story: slim, at: Date.now() };
+    records[key] = { story: slim, at: Date.now(), scheduledOnly: true };
     const recent = Object.entries(records).filter(([, value]) =>
       Date.now() - (value as { at: number }).at <= RESUME_MAX_AGE_MS
     ).sort((a, b) => (b[1] as { at: number }).at - (a[1] as { at: number }).at).slice(0, 8);
@@ -109,16 +118,8 @@ function writeCachedStory(q: string, story: FlightStory) {
   }
 }
 
-type OrigMem = {
-  pushUnix: number;
-  pushClock: string;
-  takeoffUnix: number | null;
-  takeoffClock: string | null;
-  landUnix: number | null;
-  landClock: string | null;
-};
-
 function origMemKey(story: FlightStory) {
+  if (story.stateKey) return story.stateKey;
   const u = story.times?.origPushUnix ?? story.times?.pushUnix;
   const day =
     u != null
@@ -157,79 +158,34 @@ function saveBrief(story: FlightStory, brief: CompiledBrief) {
   } catch { /* Storage can be unavailable; live tracking still works. */ }
 }
 
+function clientSchedules(story: FlightStory) {
+  let previous: ScheduledTimes | undefined;
+  try { previous = JSON.parse(localStorage.getItem(ORIG_MEM_KEY) || "{}")[origMemKey(story)]; } catch { /* Unavailable storage or SSR. */ }
+  return scheduledTimes(story, previous);
+}
+
 function rememberOrigOnClient(story: FlightStory): FlightStory {
-  if (typeof window === "undefined") return story;
-  const t = story.times;
-  const pushUnix = t?.pushUnix ?? null;
-  if (pushUnix == null || !t?.push) return story;
-  let all: Record<string, OrigMem> = {};
-  try {
-    all = JSON.parse(localStorage.getItem(ORIG_MEM_KEY) || "{}") as Record<string, OrigMem>;
-  } catch {
-    all = {};
-  }
+  let all: Record<string, ScheduledTimes> = {};
+  try { all = JSON.parse(localStorage.getItem(ORIG_MEM_KEY) || "{}"); } catch { /* Unavailable storage. */ }
   const k = origMemKey(story);
-  const prev = all[k];
-  const seedPush = t.origPushUnix ?? pushUnix;
-  let origPushUnix = prev?.pushUnix != null ? Math.min(prev.pushUnix, seedPush) : seedPush;
-  if (Math.abs(pushUnix - origPushUnix) > 8 * 3600) origPushUnix = seedPush;
-  const origPushClock =
-    prev && prev.pushUnix <= origPushUnix ? prev.pushClock : t.pushWas || t.push;
-  const seedTakeoff = t.origTakeoffUnix ?? t.takeoffUnix ?? null;
-  let origTakeoffUnix =
-    prev?.takeoffUnix != null && seedTakeoff != null
-      ? Math.min(prev.takeoffUnix, seedTakeoff)
-      : (prev?.takeoffUnix ?? seedTakeoff);
-  if (origTakeoffUnix != null && t.takeoffUnix != null && Math.abs(t.takeoffUnix - origTakeoffUnix) > 8 * 3600) {
-    origTakeoffUnix = seedTakeoff;
-  }
-  const origTakeoffClock =
-    prev && origTakeoffUnix != null && prev.takeoffUnix === origTakeoffUnix
-      ? prev.takeoffClock
-      : t.takeoffWas || t.takeoff || null;
-  const seedLand = t.origLandUnix ?? t.landUnix ?? null;
-  let origLandUnix =
-    prev?.landUnix != null && seedLand != null ? Math.min(prev.landUnix, seedLand) : (prev?.landUnix ?? seedLand);
-  if (origLandUnix != null && t.landUnix != null && Math.abs(t.landUnix - origLandUnix) > 8 * 3600) {
-    origLandUnix = seedLand;
-  }
-  const origLandClock =
-    prev && origLandUnix != null && prev.landUnix === origLandUnix ? prev.landClock : t.landWas || t.land || null;
-  all[k] = {
-    pushUnix: origPushUnix,
-    pushClock: origPushClock,
-    takeoffUnix: origTakeoffUnix,
-    takeoffClock: origTakeoffClock,
-    landUnix: origLandUnix,
-    landClock: origLandClock,
+  const original = clientSchedules(story);
+  all[k] = original;
+  try { localStorage.setItem(ORIG_MEM_KEY, JSON.stringify(all)); } catch { /* quota */ }
+  const t = story.times;
+  const slip = (posted: number | null | undefined, scheduled: number | null) => {
+    if (posted == null || scheduled == null) return null;
+    const minutes = Math.round((posted - scheduled) / 60);
+    return minutes > 480 || minutes < -90 || Math.abs(minutes) < 5 ? 0 : minutes;
   };
-  try {
-    localStorage.setItem(ORIG_MEM_KEY, JSON.stringify(all));
-  } catch {
-    /* quota */
-  }
-  let delayMin = Math.round((pushUnix - origPushUnix) / 60);
-  if (delayMin > 8 * 60 || delayMin < -90) delayMin = 0;
-  let arriveDelayMin =
-    t.landUnix != null && origLandUnix != null ? Math.round((t.landUnix - origLandUnix) / 60) : (t.arriveDelayMin ?? null);
-  if (arriveDelayMin != null && (arriveDelayMin > 8 * 60 || arriveDelayMin < -90)) arriveDelayMin = 0;
-  const late = delayMin >= 5;
-  const arriveLate = arriveDelayMin != null && arriveDelayMin >= 5;
-  return {
-    ...story,
-    times: {
-      ...t,
-      origPushUnix,
-      origTakeoffUnix,
-      origLandUnix,
-      delayMin: Math.abs(delayMin) < 5 ? 0 : delayMin,
-      arriveDelayMin:
-        arriveDelayMin == null ? t.arriveDelayMin ?? null : Math.abs(arriveDelayMin) < 5 ? 0 : arriveDelayMin,
-      pushWas: late && origPushClock !== t.push ? origPushClock : late ? origPushClock : null,
-      takeoffWas: late ? origTakeoffClock : null,
-      landWas: arriveLate ? origLandClock : null,
-    },
-  };
+  const delayMin = slip(t.pushUnix, original.pushUnix);
+  const arriveDelayMin = slip(t.landUnix, original.landUnix);
+  return { ...story, times: {
+    ...t, origPushUnix: original.pushUnix, origTakeoffUnix: original.takeoffUnix, origLandUnix: original.landUnix,
+    delayMin: delayMin ?? t.delayMin, arriveDelayMin: arriveDelayMin ?? t.arriveDelayMin,
+    pushWas: (delayMin ?? 0) >= 5 ? formatLocalUnix(original.pushUnix, story.origin.tz) : null,
+    takeoffWas: (delayMin ?? 0) >= 5 ? formatLocalUnix(original.takeoffUnix, story.origin.tz) : null,
+    landWas: (arriveDelayMin ?? 0) >= 5 ? formatLocalUnix(original.landUnix, story.dest.tz) : null,
+  } };
 }
 
 function isUsableStory(s: FlightStory | undefined): s is FlightStory {
@@ -1032,16 +988,13 @@ const CLOSED_OVERVIEW_DETAILS: Record<OverviewDetailKey, boolean> = { flight: fa
 
 function formatLocalUnix(unix: number | null | undefined, timeZone?: string) {
   if (unix == null || !Number.isFinite(unix)) return null;
-  try {
-    return new Intl.DateTimeFormat(undefined, { timeZone, hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(unix * 1000);
-  } catch {
-    return new Date(unix * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
+  return formatClockTime(unix * 1000, timeZone);
 }
 
 function plannedDuration(story: FlightStory) {
-  const start = story.times.origTakeoffUnix ?? story.times.takeoffUnix;
-  const end = story.times.origLandUnix ?? story.times.landUnix;
+  const schedule = clientSchedules(story);
+  const start = schedule.takeoffUnix;
+  const end = schedule.landUnix;
   return start != null && end != null && end > start ? formatDuration((end - start) / 60) : null;
 }
 
@@ -1106,13 +1059,13 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
   const destStop = [story.dest.iata, story.times.destGate ? `Gate ${story.times.destGate}` : null].filter(Boolean).join(" ");
   const baggage = useBaggageStatus({flight:story.iata.replace(/\s/g, ""),origin:story.origin.iata,destination:story.dest.iata,date:flightDepartureDate(story)});
   const baggageProminent = wheelsDown(story);
-  const scheduledPush = formatLocalUnix(story.times.origPushUnix, story.origin.tz) ?? story.times.pushWas;
-  const scheduledTakeoff = formatLocalUnix(story.times.origTakeoffUnix, story.origin.tz) ?? story.times.takeoffWas;
+  const schedule = clientSchedules(story);
+  const scheduledPush = formatLocalUnix(schedule.pushUnix, story.origin.tz);
+  const scheduledTakeoff = formatLocalUnix(schedule.takeoffUnix, story.origin.tz);
   const pushActualLabel = story.times.pushSource === "provider_actual" ? "Actual"
     : story.times.pushSource === "live_detected" || story.times.pushSource === "track_detected" ? "Detected"
-      : story.times.pushKind === "estimated" ? "Estimated" : null;
-  const takeoffActualLabel = story.times.takeoffKind === "actual" ? "Actual"
-    : story.times.takeoffKind === "estimated" ? "Estimated" : null;
+      : story.times.pushKind !== "scheduled" ? timeKindLabel(story.times.pushKind) : null;
+  const takeoffActualLabel = story.times.takeoffKind !== "scheduled" ? timeKindLabel(story.times.takeoffKind) : null;
   return <section className="overview-details mt-4 rounded-xl border border-border bg-surface px-4" aria-label="More flight information">
     {timing}
     <dl className="arrival-details"><div><dt>Terminal</dt><dd>{baggage.result?.terminal ?? "—"}</dd><p>{story.dest.city} ({story.dest.iata})</p></div><div><dt>Gate</dt><dd>{story.times.destGate ?? "—"}</dd><p>{story.times.destGate ? "Arrival gate" : "Not assigned"}</p></div><div><dt>Baggage</dt><dd>{baggage.result?.status === "posted" && baggage.result.carousel ? baggage.result.carousel : "—"}</dd><p>{baggageSummary(baggage.result)}</p></div></dl>
@@ -1129,7 +1082,9 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
           <DetailRow label="Scheduled" value={scheduledTakeoff} />
           {takeoffActualLabel ? <DetailRow label={takeoffActualLabel} value={story.times.takeoff} /> : null}
         </div>
-        <DetailRow label="Scheduled landing" value={formatLocalUnix(story.times.origLandUnix, story.dest.tz) ?? story.times.landWas} />
+        <DetailRow label="Scheduled landing" value={formatLocalUnix(schedule.landUnix, story.dest.tz)} />
+        {story.times.landKind !== "scheduled" && <DetailRow label={timeKindLabel(story.times.landKind, "landing")} value={story.times.land} />}
+        <DetailRow label={timeKindLabel(story.times.gateKind, "gate arrival")} value={story.times.gate} />
         <DetailRow label="Planned flight time" value={plannedDuration(story)} />
       </dl>
     </OverviewDisclosure>
@@ -1144,7 +1099,7 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
     <OverviewDisclosure id="airports" title="Airport details" summary={`${originStop} → ${destStop}`} open={open.airports} onToggle={toggle}>
       <div className="grid gap-4 sm:grid-cols-2">
         <section aria-label="Departure airport details"><h3 className="font-semibold">Departure · {story.origin.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.originGate ?? "Not assigned"} /><DetailRow label="Pushback" value={story.times.push} /><DetailRow label="Weather" value={passengerAirportWeather(story.origin.decoded, story.origin.rawMetar)} /></dl></section>
-        <section aria-label="Arrival airport details"><h3 className="font-semibold">Arrival · {story.dest.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.destGate ?? "Not assigned"} /><DetailRow label="Gate arrival" value={story.times.gate} /><DetailRow label="Weather" value={passengerAirportWeather(story.dest.decoded, story.dest.rawMetar)} /></dl></section>
+        <section aria-label="Arrival airport details"><h3 className="font-semibold">Arrival · {story.dest.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.destGate ?? "Not assigned"} /><DetailRow label={timeKindLabel(story.times.gateKind, "gate arrival")} value={story.times.gate} /><DetailRow label="Weather" value={passengerAirportWeather(story.dest.decoded, story.dest.rawMetar)} /></dl></section>
       </div>
     </OverviewDisclosure>
     <OverviewDisclosure id="baggage" title="Baggage" summary={baggageSummary(baggage.result)} open={open.baggage} onToggle={toggle} prominent={baggageProminent}>
@@ -1154,10 +1109,7 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
 }
 
 function kindLabel(kind: FlightStory["times"]["pushKind"]) {
-  if (kind === "actual") return "Actual";
-  if (kind === "estimated") return "Estimated";
-  if (kind === "scheduled") return "Scheduled";
-  return "";
+  return timeKindLabel(kind);
 }
 
 function ClockCell({
@@ -1390,7 +1342,7 @@ function BreakdownCard({
   onCompile: () => void;
 }) {
   const asOf = briefing?.liveAt
-    ? new Date(briefing.liveAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    ? formatClockTime(briefing.liveAt)
     : null;
   const log = briefing?.log ?? [];
   return (
@@ -1412,7 +1364,7 @@ function BreakdownCard({
                 {log.map((entry, i) => (
                   <li key={`${entry.at}-${i}`} className="text-sm leading-snug">
                     <p className="text-xs text-muted">
-                      {new Date(entry.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                      {formatClockTime(entry.at)}
                       {" · "}
                       {briefLogLabel(entry)}
                     </p>
@@ -1855,8 +1807,8 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
   const takeoff = story.times.takeoffUnix;
   const landing = story.times.landUnix;
   const duration = takeoff && landing && landing > takeoff ? (landing - takeoff) / 60 : null;
-  const samples = story.route.samples.filter(s => !airborne || s.frac >= story.route.progress);
-  const visibleGroups = routeWeatherEvents(samples, story.route.progress);
+  const samples = story.route.samples;
+  const visibleGroups = upcomingWeatherEvents(samples, story.route.progress);
 
   const timeLabel = (group: RouteWeatherEvent) => {
     const from = airborne ? group.startEtaMin : duration == null ? null : group.startFrac * duration;
@@ -1888,7 +1840,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     <h3 className="weather-route-heading text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
     {landed ? <p className="text-sm text-muted">Flight has landed. A historical weather timeline was not recorded.</p> : visibleGroups.length ? <ol className="weather-events">
       {visibleGroups.map((g, i) => {
-        const copy = passengerWeatherCopy(g.start, g.endFrac >= 0.85, story.dest.city || story.dest.iata, g.key);
+        const copy = eventWeatherCopy(g, story.dest.city || story.dest.iata);
         const title = copy.headline;
         const source = passengerWeatherSource(g.note);
         const technical = technicalWeatherProducts(g.note);
@@ -1918,7 +1870,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     <details className="weather-disclosure weather-sources"><summary><span>Weather sources and timing</span><ChevronDown className="size-5 shrink-0 text-muted" aria-hidden="true" /></summary>
       <div className="mt-3 space-y-2 text-sm text-muted">
         <p>Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters. Unflagged areas may have incomplete coverage.</p>
-        <p className="text-xs">Flight data fetched {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Weather observation and advisory times are shown in their source details.</p>
+        <p className="text-xs">Flight data fetched {formatClockTime(story.fetchedAt)}. Weather observation and advisory times are shown in their source details.</p>
       </div>
       {story.hazards.filter(h => h.remaining).map(h => {
         const technical = technicalWeatherProducts(`${h.label} ${h.detail}`);
@@ -1953,6 +1905,6 @@ function FlightWelcome({ open, onClose, story, brief }: { open: boolean; onClose
       {!isLanded(story) && story.origin.nas?.delayed && <p><strong>Departure airport:</strong> {story.origin.nas.reason}</p>}
       {story.dest.nas?.delayed && <p><strong>Arrival airport:</strong> {story.dest.nas.reason}</p>}
     </div>
-    <p className="mt-4 text-xs text-muted">Data as of {new Date(story.fetchedAt).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}. Estimates may change. Full details remain in Briefing and Weather.</p>
+    <p className="mt-4 text-xs text-muted">Data as of {formatClockTime(story.fetchedAt)}. Estimates may change. Full details remain in Briefing and Weather.</p>
   </dialog>;
 }

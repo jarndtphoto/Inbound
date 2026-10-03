@@ -1,3 +1,4 @@
+import { formatClockTime } from "@/lib/presentation-time";
 import { useEffect, useState } from "react";
 import { getBaggage } from "@/lib/baggage";
 import type { BaggageResult } from "@/lib/baggage.server";
@@ -43,6 +44,6 @@ export function BaggageStatus({state}:{state:BaggageStatusState}) {
     : value?.sourceName ? <>{value.sourceName} · </> : null;
   return <>
     <p className="font-semibold">{value?.status==="posted"?`Carousel ${value.carousel}${value.terminal?` · Terminal ${value.terminal}`:""}`:loading?"Checking baggage claim…":"Baggage claim hasn't been assigned yet."}</p>
-    {value && value.status!=="unavailable" ? <p className="mt-1 text-xs text-muted">{source}Checked {new Date(value.checkedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}. Confirm on arrival; assignments can change.</p> : <p className="mt-1 text-xs text-muted">{supported?"Check airport displays after arrival if an assignment is not available here yet.":"Automatic baggage assignments aren’t available for this airport yet. Check airport displays after arrival."}</p>}
+    {value && value.status!=="unavailable" ? <p className="mt-1 text-xs text-muted">{source}Checked {formatClockTime(value.checkedAt)}. Confirm on arrival; assignments can change.</p> : <p className="mt-1 text-xs text-muted">{supported?"Check airport displays after arrival if an assignment is not available here yet.":"Automatic baggage assignments aren’t available for this airport yet. Check airport displays after arrival."}</p>}
   </>;
 }

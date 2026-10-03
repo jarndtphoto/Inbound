@@ -155,7 +155,7 @@ describe("briefing update log", () => {
     );
     assert.match(b.lead, /landed at 4:51 pm/i);
     assert.match(b.lead, /taxiing in/i);
-    assert.match(b.lead, /at the gate around 5:00 pm/i);
+    assert.match(b.lead, /Estimated gate arrival 5:00 pm/i);
     assert.equal(/you're at the gate/i.test(b.lead), false);
   });
 
