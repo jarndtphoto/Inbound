@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'vite';
@@ -44,6 +44,17 @@ function markup(Component, story) {
   const realNow=Date.now;Date.now=()=>story.fetchedAt;
   try{return renderToStaticMarkup(h(QueryClientProvider,{client:new QueryClient()},h(Component,{story})));}finally{Date.now=realNow;}
 }
+
+test('taxiing movement and a taxi hold use the same direct Taxiing out label',async()=>{
+  const base=polishStory();
+  for(const gsKt of [0,15]) {
+    const story={...base,currentStage:'taxi',confirmedTakeoff:null,
+      aircraft:{...base.aircraft,...base.origin,onGround:true,gsKt},times:{...base.times,airborne:false,takeoffKind:null,takeoffUnix:null}};
+    const html=markup(ui.FlightHead,story);
+    assert.match(html,/>Taxiing out</);assert.doesNotMatch(html,/Heading to runway|Holding short/);
+  }
+  assert.doesNotMatch(await readFile(resolve('src/routes/index.tsx'),'utf8'),/MutationObserver|createTreeWalker/);
+});
 
 test('UA219 oceanic gap retains a provider ETA and labels it estimated, never a reset route ETA',()=>{
   const base=polishStory(), now=base.fetchedAt;
