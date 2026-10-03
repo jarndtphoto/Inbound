@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import type { Sql } from "./db.ts";
-import { canonicalLegKey, legacyLegKeys } from "./flight-identity.ts";
+import { canonicalLegKey, legacyLegKeys, flightStateIdentity, unvalidatedLegKey } from "./flight-identity.ts";
 import { createFlightPhaseStateStore } from "./flight-phase-state-store.server.ts";
 import { createArrivalStateStore } from "./arrival-state-store.server.ts";
 import { emptyArrivalState } from "./arrival-projection-state.ts";
@@ -125,4 +125,46 @@ test("UA219 provider handoff fixture selects the same durable leg without changi
     gateOut: { scheduled: fixture.flightawareRecord.gateDepartureTimes.scheduled } };
   assert.match(fixture.flightstatsHtml, /ORD[\s\S]*HNL/);
   assert.equal(canonicalLegKey(first, context), canonicalLegKey({ ...first, flightId: null }, context));
+});
+test("unvalidated FR24 state survives cold stores, folds forward, and reconciles later schedule gaps", async () => {
+  const db = await database();
+  try {
+    const noSchedule = { ...schedule, gateOut: {}, takeoff: {} };
+    const fallback = flightStateIdentity(noSchedule, context, { nowSec: 1790952900 });
+    assert.equal(fallback.canPersist, true);
+    await db.phase().save(fallback.key!, departure, 0); await db.arrival().save(fallback.key!, arrival, 0);
+    assert.deepEqual((await db.phase().load(fallback.key!)).state, departure);
+    const validated = flightStateIdentity(schedule, context);
+    assert.deepEqual((await db.phase().load(validated.key!, validated.legacyKeys)).state, departure);
+    assert.deepEqual((await db.arrival().load(validated.key!, validated.legacyKeys)).state, arrival);
+    await db.phase().save(fallback.key!, { ...departure, taxiOut: { at: 1790959999 } }, 1);
+    const laterArrival = { ...arrival, lastFixAt: arrival.lastFixAt + 1000 };
+    await db.arrival().save(fallback.key!, laterArrival, 1);
+    const carried = await db.phase().load(validated.key!, validated.legacyKeys);
+    assert.equal(carried.state.taxiOut!.at, 1790959999);
+    assert.deepEqual((await db.arrival().load(validated.key!, validated.legacyKeys)).state, laterArrival);
+    assert.equal((await db.phase().load(validated.key!, validated.legacyKeys)).version, carried.version, "unchanged carry-forward does not write again");
+    assert.equal((await db.phase().load(fallback.key!)).version, 2, "fallback row retained");
+  } finally { await db.pg.close(); }
+});
+test("fallback rows isolate different days/routes and UTC date is validated against scheduled clock", async () => {
+  const db = await database();
+  try {
+    const noSchedule = { ...schedule, gateOut: {} }, today = unvalidatedLegKey(noSchedule, context, 1790952900)!;
+    await db.phase().save(today, departure, 0); await db.arrival().save(today, arrival, 0);
+    const tomorrow = unvalidatedLegKey(noSchedule, context, 1790952900 + 86400)!;
+    const otherRoute = unvalidatedLegKey(noSchedule, { ...context, destination: { iata: "LAX" } }, 1790952900)!;
+    for (const other of [tomorrow, otherRoute]) {
+      assert.deepEqual((await db.phase().load(other)).state, { push: null, taxiOut: null });
+      assert.equal((await db.arrival().load(other)).state.active, false);
+    }
+    const next = { ...schedule, flightId: null, gateOut: { scheduled: 1790952900 + 86400 } };
+    const identity = flightStateIdentity(next, context);
+    assert(!identity.legacyKeys.includes(today));
+    assert.deepEqual((await db.phase().load(identity.key!, identity.legacyKeys)).state, { push: null, taxiOut: null });
+    const midnight = { ...schedule, gateOut: { scheduled: Date.parse("2026-10-03T04:45:00Z") / 1000 } };
+    const keys = legacyLegKeys(midnight, context);
+    assert(keys.includes("leg:unvalidated:UAL219|ORD|HNL|2026-10-03"));
+    assert(!keys.includes("leg:unvalidated:UAL219|ORD|HNL|2026-10-04"));
+  } finally { await db.pg.close(); }
 });

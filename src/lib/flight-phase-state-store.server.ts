@@ -1,6 +1,6 @@
 import type { Sql } from "./db.ts";
 import { legacyProviderPattern, legacyProviderBelongsToLeg } from "./flight-identity.ts";
-import { EMPTY_PHASE_STATE, mergeForward } from "./flight-phase-state-logic";
+import { EMPTY_PHASE_STATE, mergeForward, phaseStateEqual } from "./flight-phase-state-logic";
 import type { PhaseState, PushLatch, TaxiOutLatch } from "./flight-phase-state-logic";
 
 export type { PushLatch, TaxiOutLatch, PhaseState };
@@ -66,14 +66,18 @@ export function createFlightPhaseStateStore(sqlProvider: () => Promise<Sql>) {
     if (!landKey) return { state: { ...EMPTY_PHASE_STATE }, version: 0, status: "ok" };
     try {
       let current = await read(landKey);
-      if (current.version === 0 && legacyKeys.length) {
+      // An unvalidated poll may update its separate row after the canonical
+      // row exists. Reconcile that row on later validated polls as well.
+      const carryKeys = current.version === 0 ? legacyKeys : legacyKeys.filter(key => key.startsWith("leg:unvalidated:"));
+      if (carryKeys.length) {
         const sql = await sqlProvider();
         const candidates = await sql<Row>`select land_key, push_unix, push_source, push_live, push_at, taxi_out_at, version
-          from flight_phase_state where land_key = any(${legacyKeys.filter(key => key !== landKey)}::text[])
-            or land_key like ${legacyProviderPattern(landKey)}`;
-        const legacy = candidates.filter(row => legacyKeys.includes(row.land_key!) || legacyProviderBelongsToLeg(row.land_key!, landKey));
+          from flight_phase_state where land_key = any(${carryKeys.filter(key => key !== landKey)}::text[])
+            or land_key like ${current.version === 0 ? legacyProviderPattern(landKey) : ""}`;
+        const legacy = candidates.filter(row => carryKeys.includes(row.land_key!) || (current.version === 0 && legacyProviderBelongsToLeg(row.land_key!, landKey)));
         if (legacy.length) {
           const merged = legacy.reduce((state, row) => mergeForward(state, stateFromRow(row).state), current.state);
+          if (current.version > 0 && phaseStateEqual(current.state, merged)) return { ...current, status: "ok" };
           const status = await save(landKey, merged, current.version);
           if (status === "ok" || status === "conflict_resolved") {
             // Legacy rows stay intact; only future polls write the canonical key.
