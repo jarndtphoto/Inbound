@@ -26,11 +26,13 @@ import type { Comfort, FlightStory, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
 import { flightPollingComplete } from "@/lib/flight-polling";
+import { INITIAL_FLIGHT_SEARCH_MS, flightStoryQueryKey, flightNotFound, flightSearchCanPoll, stopFlightSearch, flightStoryRequest } from "@/lib/flight-search";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
 import { sampleWeather } from "@/lib/route-weather-segments";
 import { WeatherEventBody, WeatherEventHeadline, WeatherIntensityLabel } from "@/components/weather-event-copy";
 import { Button } from "@/components/ui/button";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
 import { Clock, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, House, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, Info } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type ReactNode } from "react";
 
@@ -347,6 +349,7 @@ class ScreenErrorBoundary extends Component<{ children: ReactNode }, { err: Erro
 }
 
 export function FiledApp() {
+  const history = useRouter().history;
   const [ready, setReady] = useState(false);
   const [entered, setEntered] = useState(false);
   const [page, setPage] = useState<"home" | "flight">("home");
@@ -358,11 +361,27 @@ export function FiledApp() {
     hydrate();
     setReady(true);
   }, [hydrate]);
+  useEffect(() => history.subscribe(({ location, action }) => {
+    if (action.type === "PUSH" || action.type === "REPLACE") return;
+    const value = (location.state as { inboundFlightQuery?: string }).inboundFlightQuery;
+    if (value) {
+      setFlight(value);
+      setQuery(value.trim());
+      setPage("flight");
+    } else setPage("home");
+  }), [history, setQuery]);
   const start = (value: string) => {
     const q = value.trim();
     if (!q) return;
+    setFlight(value);
     setQuery(q);
+    // Use the router's history so its index/key bookkeeping stays intact.
+    history.push(history.location.href, { ...history.location.state, inboundFlightQuery: value });
     setPage("flight");
+  };
+  const onHome = () => {
+    setPage("home");
+    if ((history.location.state as { inboundFlightQuery?: string }).inboundFlightQuery) history.back();
   };
   if (!entered) return <main className="inbound-welcome inbound-redesign">
     <header className="journey-header header-without-brand"><AppearanceControl /></header>
@@ -376,7 +395,7 @@ export function FiledApp() {
       </button>
     </div>
   </main>;
-  if (page === "flight") return <FlightPages onHome={() => setPage("home")} />;
+  if (page === "flight") return <FlightPages onHome={onHome} />;
   return <main className="inbound-home inbound-redesign">
     <header className="journey-header header-without-brand"><AppearanceControl /></header>
     <div className="home-content">
@@ -399,6 +418,7 @@ export function FiledApp() {
 }
 
 function FlightPages({ onHome }: { onHome: () => void }) {
+  const queryClient = useQueryClient();
   const query = useFiled((s) => s.query);
   const stagePref = useFiled((s) => s.stage);
   const setQuery = useFiled((s) => s.setQuery);
@@ -410,6 +430,9 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
   const [briefingFor, setBriefingFor] = useState("");
   const [cacheOk, setCacheOk] = useState(false);
+  const [searchExpired, setSearchExpired] = useState(false);
+  const [searchAttempt, setSearchAttempt] = useState(0);
+  const leavingRef = useRef(false);
   const [refreshErr, setRefreshErr] = useState<string | null>(null);
   const [pullPx, setPullPx] = useState(0);
   const [manualBusy, setManualBusy] = useState(false);
@@ -456,22 +479,20 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   }, []);
 
   const storyQ = useQuery({
-    queryKey: ["story", query],
-    queryFn: async ({ client }) => {
+    queryKey: flightStoryQueryKey(query),
+    queryFn: async ({ client, signal }) => {
+      if (leavingRef.current) throw new DOMException("Left flight search", "AbortError");
       const fresh = freshRef.current;
       freshRef.current = false;
       const saved = storyForQuery(client.getQueryData<FlightStory>(["story", query]), query) ?? readCachedStory(query);
       const resume = resumeFromStory(saved, query);
-      let requestTimer: ReturnType<typeof setTimeout> | undefined;
-      const s = await Promise.race([
-        getFlightStory({ data: { q: query, fresh, resume } }),
-        new Promise<never>((_, reject) => {
-          requestTimer = setTimeout(() => reject(new Error("Flight data request timed out. Please try again.")), 35_000);
-        }),
-      ]).catch((error) => {
-        console.error("[Inbound flight request]", error instanceof Error ? error.message : String(error));
+      const s = await flightStoryRequest(signal, (requestSignal) =>
+        getFlightStory({ data: { q: query, fresh, resume }, signal: requestSignal }),
+      ).catch((error) => {
+        if (!signal.aborted) console.error("[Inbound flight request]", error instanceof Error ? error.message : String(error));
         throw error;
-      }).finally(() => clearTimeout(requestTimer));
+      });
+      signal.throwIfAborted();
       if (!storyMatchesQuery(s, query)) {
         throw new Error("Could not load that flight. Try another number.");
       }
@@ -489,9 +510,11 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       return cached ? rememberOrigOnClient(cached) : undefined;
     },
     initialDataUpdatedAt: 0,
-    enabled: cacheOk && query.length > 0,
+    enabled: (q) => cacheOk && query.length > 0
+      && flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current),
     refetchInterval: (q) => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return false;
+      if (!flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current)) return false;
       if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
       if (s && flightPollingComplete(s)) return 60_000;
@@ -505,34 +528,62 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     staleTime: 2_500,
     gcTime: 10 * 60_000,
     retry: (count, err) => {
+      // Empty searches fail once and wait for an explicit Try again. Saved
+      // flights retain their existing live-update retries for transient errors.
+      if (!storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query)
+        || leavingRef.current || searchExpired || flightNotFound(err)) return false;
       if (count >= 2 || /HTTP 402\b/.test(err instanceof Error ? err.message : "")) return false;
       const msg = err instanceof Error ? err.message : "";
       if (/Try another number|Enter a flight number|Flight number is too long/i.test(msg)) return false;
       return true;
     },
     retryDelay: (attempt) => Math.min(2_000 * 2 ** attempt, 8_000),
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
+    refetchOnWindowFocus: (q) => flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current),
+    refetchOnReconnect: (q) => flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current),
     placeholderData: (previousData) => {
       if (storyForQuery(previousData, query)) return previousData;
       return storyForQuery(readCachedStory(query), query);
     },
   });
 
+  const story = storyForQuery(storyQ.data, query);
+  useEffect(() => () => stopFlightSearch(queryClient, query), [queryClient, query]);
+  useEffect(() => {
+    if (!cacheOk || story || storyQ.isError || searchExpired) return;
+    const timer = window.setTimeout(() => {
+      if (storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query)) return;
+      setSearchExpired(true);
+      void queryClient.cancelQueries({ queryKey: flightStoryQueryKey(query), exact: true });
+    }, INITIAL_FLIGHT_SEARCH_MS);
+    return () => window.clearTimeout(timer);
+  }, [cacheOk, query, queryClient, searchAttempt, Boolean(story), storyQ.isError, searchExpired]);
+
+  function leaveFlight() {
+    leavingRef.current = true;
+    briefGen.current += 1;
+    stopFlightSearch(queryClient, query);
+    onHome();
+  }
+  function trySearchAgain() {
+    setSearchExpired(false);
+    setSearchAttempt((attempt) => attempt + 1);
+    void storyQ.refetch();
+  }
+
   useEffect(() => {
     const refreshWhenVisible = () => {
       if (document.visibilityState !== "visible" || !query) return;
+      if (!flightSearchCanPoll(storyQ.data, storyQ.error, searchExpired || leavingRef.current)) return;
       if (Date.now() - storyQ.dataUpdatedAt > 2_500) void storyQ.refetch();
     };
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => document.removeEventListener("visibilitychange", refreshWhenVisible);
-  }, [query, storyQ.dataUpdatedAt, storyQ.refetch]);
+  }, [query, storyQ.dataUpdatedAt, storyQ.data, storyQ.error, storyQ.refetch, searchExpired]);
 
   useEffect(() => {
     if (storyQ.dataUpdatedAt > 0) setRefreshErr(null);
   }, [query, storyQ.dataUpdatedAt]);
 
-  const story = storyForQuery(storyQ.data, query);
   useEffect(() => {
     if (!story) return;
     const key = normFlight(query);
@@ -751,7 +802,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
   return (
     <div className={cn("pwa-flight-shell", "inbound-redesign", "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg")} style={shellStyle}>
-      <header className="journey-header"><div>{story ? <p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p> : <p>{query || "Preparing your flight…"}</p>}</div><AppearanceControl /></header>
+      <header className="journey-header"><div className="flex min-w-0 items-center gap-2"><button type="button" aria-label="Back to search" onClick={leaveFlight} className="flex size-11 shrink-0 items-center justify-center rounded-md text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><ChevronLeft className="size-6" aria-hidden="true" /></button>{story ? <p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p> : <p>{query || "Preparing your flight…"}</p>}</div><AppearanceControl /></header>
       {story && <FlightWelcome open={briefPopupOpen} onClose={() => setBriefPopupOpen(false)} story={story} brief={shownBrief} />}
       <ScreenErrorBoundary>
       <main
@@ -775,7 +826,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
           <div role="status" className="mb-3 rounded-md border border-ifr/40 bg-surface px-4 py-2">
             <p className="text-sm text-ifr">
               {storyQ.isError
-                ? "Live update failed — showing saved flight data. Position, stage, and times may be out of date. Retrying automatically."
+                ? `Live update failed — showing saved flight data. Position, stage, and times may be out of date. ${flightNotFound(storyQ.error) ? "Use Refresh to try again." : "Retrying automatically."}`
                 : refreshErr}
             </p>
           </div>
@@ -785,18 +836,21 @@ function FlightPages({ onHome }: { onHome: () => void }) {
             {savedScheduleNote(story.schedule.confirmedAt)}
           </div>
         ) : null}
-        {storyQ.isError && !story && (
-          <div className="mb-4 rounded-md border border-ifr/40 bg-surface px-4 py-3">
+        {(storyQ.isError || searchExpired) && !story && (
+          <div role="alert" className="mb-4 rounded-md border border-ifr/40 bg-surface px-4 py-3">
             <p className="text-sm text-ifr">
-              {"We couldn’t get this flight’s latest information. We’ll retry automatically, or you can try again below."}
+              {searchExpired || flightNotFound(storyQ.error)
+                ? `We couldn't find ${query}. Check the flight number.`
+                : `We couldn't load ${query}'s flight information. Check the flight number or try again.`}
             </p>
-            <Button type="button" variant="secondary" className="mt-3" onClick={() => void storyQ.refetch()}>
-              Try again
-            </Button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" onClick={leaveFlight}>Back to search</Button>
+              <Button type="button" variant="secondary" onClick={trySearchAgain}>Try again</Button>
+            </div>
           </div>
         )}
 
-        {!story && !storyQ.isError && <Skeleton query={query || "the flight"} />}
+        {!story && !storyQ.isError && !searchExpired && <Skeleton query={query || "the flight"} onHome={leaveFlight} />}
 
         {story && (
           <div key={normFlight(query)} className={cn("journey-body min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
@@ -821,7 +875,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       </main>
       {story ? <nav aria-label="Flight pages" className="pwa-bottom-nav shrink-0 border-t border-border bg-bg/95 px-2 pt-0.5 backdrop-blur lg:px-6">
         <div className="mx-auto grid max-w-2xl grid-cols-5 gap-0.5">
-          <button type="button" aria-label="Home — flight search" onClick={onHome}
+          <button type="button" aria-label="Home — flight search" onClick={leaveFlight}
             className="flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md px-1 py-0.5 text-[11px] font-semibold text-muted transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
             <House className="size-4.5" aria-hidden="true" /><span>Home</span>
           </button>
@@ -1767,13 +1821,14 @@ function WxBlock({
   );
 }
 
-function Skeleton({ query }: { query: string }) {
+function Skeleton({ query, onHome }: { query: string; onHome: () => void }) {
   const label = query.trim() || "the flight";
   return (
     <div className="flight-loading" role="status">
       <RefreshCw className="size-6 animate-spin text-accent" aria-hidden="true" />
       <h2>Getting {label}</h2>
       <p>Getting times, weather, and the map…</p>
+      <button type="button" onClick={onHome} className="min-h-11 px-3 text-sm font-semibold text-accent underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">Cancel</button>
       <dl><div><dt>Times</dt><dd>Scheduled and estimated clocks load with the flight.</dd></div><div><dt>Briefing</dt><dd>Ride notes appear as soon as weather is in.</dd></div></dl>
     </div>
   );
