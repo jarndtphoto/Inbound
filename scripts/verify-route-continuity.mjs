@@ -56,6 +56,9 @@ try{
     await page.getByText('Map details',{exact:true}).click();
     await page.getByText('Approach plan is stale and held from the last known point until a fresh observation arrives.',{exact:true}).waitFor();
     await page.screenshot({path:join(shots,`${name}-approach-gap.png`)});
+    await page.getByText('Map details',{exact:true}).click();
+    for(let i=0;i<10;i++) await page.getByRole('button',{name:'Zoom in',exact:true}).click();
+    await page.screenshot({path:join(shots,`${name}-approach-plan.png`)});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
     assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);
     results.push({viewport:name,lastKnownAge:true,observedTrack:true,noGapAircraft:true,freshRecovery:true,heldApproach:true,horizontalOverflow:false,pageErrors:errors,externalRequests:0});await page.close();

@@ -803,7 +803,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
               <span>⚡ Thunderstorms · ☁ Clouds</span>
             </div>
             {(weatherOn || weatherPreview) && <RadarStatus />}
-            {!weatherPreview && lastKnownLabel ? <p>{lastKnownLabel}. The solid line retains the observed track. No current aircraft position is shown.</p> : null}
+            {!weatherPreview && lastKnownLabel ? <p>{lastKnownLabel}. {story.route.source === "track" ? "The solid line retains the observed track." : "The projected route geometry is retained."} No current aircraft position is shown.</p> : null}
             {!weatherPreview && story.route.arrivalProjectionStale ? <p>Approach plan is stale and held from the last known point until a fresh observation arrives.</p> : null}
             {story.hazards.filter(h => h.remaining && h.validity).map(h => <p key={h.id}>{h.label} · {h.validity}</p>)}
           </div>
