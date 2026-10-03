@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Inbound Live — static fixture proof</title>
+  <style nonce="__PROOF_NONCE__">
+    :root { color-scheme: light dark; --bg:#fff; --fg:#1c252b; --muted:#53616a; --line:#dbe1e5; --soft:#f4f6f7; --accent:#215c77; --chosen:#edf5f9; --radius:12px; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:680px; margin:0 auto; padding:20px; }
+    header { display:flex; gap:12px; justify-content:space-between; align-items:flex-start; margin-bottom:16px; }
+    h1 { font-size:19px; line-height:1.2; margin:0 0 4px; letter-spacing:-.025em; font-weight:650; }
+    p { margin:0; } .muted { color:var(--muted); } .kicker { font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin-bottom:5px; }
+    .fixture { font-size:11px; font-weight:650; border:1px solid var(--line); border-radius:6px; padding:5px 8px; white-space:nowrap; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; align-items:center; }
+    button,select { min-height:44px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); padding:8px 12px; font:inherit; cursor:pointer; }
+    button:hover { background:var(--soft); } button:disabled { color:var(--muted); opacity:.6; cursor:default; }
+    button:focus-visible,select:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+    #cards { display:grid; gap:8px; }
+    .card { text-align:left; width:100%; border:1px solid var(--line); border-radius:var(--radius); padding:14px; background:var(--bg); }
+    .card[aria-pressed="true"] { background:var(--chosen); border-color:var(--accent); box-shadow:inset 3px 0 var(--accent); }
+    .card-top,.card-bottom { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .ident { font-size:16px; font-weight:650; letter-spacing:.005em; } .altitude { font-size:15px; font-weight:550; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .route { display:block; margin:4px 0 8px; color:var(--muted); font-size:13px; } .hint { font-size:11px; }
+    .card-bottom { color:var(--muted); font-size:12px; flex-wrap:wrap; gap:4px; }
+    .notice { color:var(--muted); font-size:12px; padding:12px 0; }
+    .selection { margin-top:12px; padding:12px 14px; border-radius:8px; background:var(--soft); font-size:13px; min-height:44px; }
+    details { margin-top:12px; border-top:1px solid var(--line); padding-top:12px; color:var(--muted); font-size:12px; }
+    summary { min-height:32px; cursor:pointer; } details p + p { margin-top:6px; }
+    [hidden] { display:none !important; }
+    @media(max-width:420px) { main { padding:16px; } .card-top { gap:8px; } .ident { font-size:15px; } .altitude { font-size:14px; } }
+    @media(prefers-color-scheme:dark) { :root { --bg:#171c20; --fg:#edf1f3; --muted:#abb7c0; --line:#35414a; --soft:#222b32; --accent:#82b6cb; --chosen:#213a47; } }
+  </style>
+</head>
+<body>
+<main>
+  <header><div><p class="kicker">Inbound Live</p><h1 id="area-title">Near Chicago</h1><p id="reference" class="muted">Distances from Chicago area center</p></div><span class="fixture">STATIC FIXTURES</span></header>
+  <div class="controls"><label for="area" class="muted">Area</label><select id="area"><option value="preset:chicago">Chicago</option><option value="airport:KORD">ORD</option><option value="airport:KMDW">MDW</option></select><button id="refresh">Refresh fixture</button><button id="pause">Pause</button></div>
+  <div id="cards" aria-label="Fixture aircraft"></div>
+  <p id="board-notice" class="notice" role="status"></p>
+  <p id="selected" class="selection">Select an aircraft to focus it locally.</p>
+  <div class="controls"><button id="pip" disabled>Request PiP</button><button id="fullscreen" disabled>Expand</button><button id="dismiss">Dismiss proof</button></div>
+  <details><summary>About this proof</summary><p>Invented test aircraft and routes. No live providers or detailed flight resolution.</p><p>Available coverage; not all aircraft. Distances refer to the named area or airport, never your location.</p><p id="host-status">Local inline fallback. ChatGPT host behavior is unverified.</p><p id="proof-status">Fixture refresh calls: 0. This UI sends no chat messages or model requests.</p><p>Refreshing the static fixture does not reset observation ages. Aircraft disappear after the fixture's 120-second safety window.</p></details>
+</main>
+<script nonce="__PROOF_NONCE__">
+(() => {
+  const initial = __INITIAL_FIXTURE__;
+  const $ = id => document.getElementById(id);
+  const openai = () => window.openai;
+  const persisted = openai()?.widgetState;
+  let saved = persisted && typeof persisted === 'object' ? persisted : {};
+  if (!persisted) { try { saved = JSON.parse(sessionStorage.getItem('inbound-fixture-proof') || '{}'); } catch {} }
+  const state = { version:1, areaId:['preset:chicago','airport:KORD','airport:KMDW'].includes(saved.areaId) ? saved.areaId : 'preset:chicago', selectedCardId:typeof saved.selectedCardId === 'string' ? saved.selectedCardId : null, paused:saved.paused === true, fixtureStartedAtEpochMs:Number.isFinite(saved.fixtureStartedAtEpochMs) ? saved.fixtureStartedAtEpochMs : Date.now() };
+  let board = initial, timer = null, ageTimer = null, dismissed = false, busy = false, requestGeneration = 0, refreshCalls = 0, abort = null;
+  let hostReady = false, hostContext = { displayMode:'inline', availableDisplayModes:[] }, hostOrigin = null, sequence = 0;
+  const pending = new Map();
+  const targetOrigin = () => hostOrigin && hostOrigin !== 'null' ? hostOrigin : '*';
+  function save() { try { if (openai()?.setWidgetState) openai().setWidgetState({...state}); else sessionStorage.setItem('inbound-fixture-proof',JSON.stringify(state)); } catch {} }
+  function notify(method,params={}) { if (window.parent !== window) window.parent.postMessage({jsonrpc:'2.0',method,params},targetOrigin()); }
+  function rpc(method,params) { return new Promise((resolve,reject) => { const id=++sequence; const timeout=setTimeout(()=>{pending.delete(id);reject(new Error('Host request timed out'));},5000);pending.set(id,{resolve,reject,timeout});window.parent.postMessage({jsonrpc:'2.0',id,method,params},targetOrigin()); }); }
+  function hostControls() {
+    $('pip').disabled = dismissed || !hostReady || !hostContext.availableDisplayModes.includes('pip');
+    $('fullscreen').disabled = dismissed || !hostReady || !hostContext.availableDisplayModes.includes('fullscreen');
+    $('host-status').textContent = hostReady ? `Host bridge connected; display mode: ${hostContext.displayMode}. Actual ChatGPT persistence still requires a host test.` : 'Local inline fallback. ChatGPT PiP/fullscreen is unverified; display controls are unavailable.';
+  }
+  function elapsedSeconds() { return Math.max(0,Math.floor((Date.now()-state.fixtureStartedAtEpochMs)/1000)); }
+  function liveAge(card) { return card.freshness.ageSeconds + elapsedSeconds(); }
+  function render() {
+    const area=board.resolvedArea;
+    $('area-title').textContent=area?.id==='airport:KORD' ? 'Near ORD' : area?.id==='airport:KMDW' ? 'Near MDW' : 'Near Chicago';
+    $('reference').textContent=area ? `Distances from ${area.reference.label}` : 'Choose an area'; $('area').value=state.areaId;
+    $('pause').textContent=state.paused ? 'Resume' : 'Pause';
+    $('pause').disabled=dismissed;$('refresh').disabled=dismissed || busy;$('area').disabled=dismissed;
+    const visible=board.flights.filter(c=>liveAge(c)<=120);
+    const cards=$('cards');
+    cards.hidden=dismissed;
+    for(const button of [...cards.children]) if(!visible.some(c=>c.cardId===button.dataset.cardId))button.remove();
+    for(const [index,card] of visible.entries()) {
+      let button=[...cards.children].find(b=>b.dataset.cardId===card.cardId);
+      if(!button) {
+        button=document.createElement('button'); button.className='card'; button.dataset.cardId=card.cardId;
+        const top=document.createElement('span');top.className='card-top';
+        for(const name of ['ident','altitude']) { const span=document.createElement('span');span.className=name;top.append(span); }
+        const route=document.createElement('span');route.className='route';
+        const bottom=document.createElement('span');bottom.className='card-bottom';
+        for(let i=0;i<3;i++)bottom.append(document.createElement('span'));
+        button.append(top,route,bottom);button.onclick=()=>{state.selectedCardId=card.cardId;save();render();};
+      }
+      button.setAttribute('aria-pressed',String(state.selectedCardId===card.cardId));
+      button.querySelector('.ident').textContent=card.identity.displayIdent;
+      const arrow={rising:'↑',falling:'↓',level:'→',unknown:''}[card.motion.verticalTrend];button.querySelector('.altitude').textContent=`${Math.round(card.altitudeFt).toLocaleString('en-US')} ft ${arrow}`;
+      button.querySelector('.route').textContent=card.route.verification==='unknown' ? 'Route unavailable' : `${card.route.originIata || 'Unknown'} → ${card.route.destinationIata || 'Unknown'}${card.route.verification==='hint' ? ' · Route hint' : ''}`;
+      const texts=[card.motion.label,`${(card.proximity.distanceNm*1.150779448).toFixed(1)} mi from ${area.reference.label}`,`Updated ${liveAge(card)} sec ago`];
+      [...button.querySelector('.card-bottom').children].forEach((span,i)=>{span.textContent=texts[i];});
+      if(cards.children[index]!==button)cards.insertBefore(button,cards.children[index] || null);
+    }
+    const picked=board.flights.find(c=>c.cardId===state.selectedCardId);
+    $('selected').textContent=picked ? `Focused: ${picked.identity.displayIdent}${liveAge(picked)>120 ? ' — observation expired' : ''}. Detailed resolution is outside this proof.` : state.selectedCardId ? 'The focused fixture is no longer in this area.' : 'Select an aircraft to focus it locally.';
+    $('board-notice').textContent=dismissed ? 'Proof dismissed. Refresh stopped.' : state.paused || document.hidden ? 'Paused. Fixture refresh stopped.' : !visible.length && board.status==='ok' ? 'Fixture observations expired. No live data is connected.' : board.status==='empty' ? 'No eligible nearby aircraft right now — fixture.' : board.status==='unavailable' ? 'Fixture aircraft are temporarily unavailable.' : board.status==='invalid_request' ? board.error.message : board.stale || visible.some(c=>liveAge(c)>45) ? 'Last known fixture — observations are aging.' : 'Four invented aircraft. Updated ages advance locally.';
+    $('proof-status').textContent=`Fixture refresh calls: ${refreshCalls}. This UI sends no chat messages or model requests.`;
+    hostControls();
+  }
+  function wanted() { return !dismissed && !state.paused && !document.hidden; }
+  function stop() { clearTimeout(timer);clearInterval(ageTimer);timer=null;ageTimer=null;requestGeneration++;abort?.abort();abort=null; }
+  function schedule() { stop();if(!wanted())return;ageTimer=setInterval(render,1000);timer=setTimeout(async()=>{await refresh();schedule();},(board.refreshAfterSeconds || 20)*1000); }
+  function accept(result) {
+    const value=result?.structuredContent || result;
+    if(value?.schemaVersion==='1.0' && ['ok','empty','unavailable','invalid_request'].includes(value.status) && Array.isArray(value.flights) && value.flights.length<=5) { board=value;if(value.resolvedArea){state.areaId=value.resolvedArea.id;save();}render(); }
+  }
+  async function refresh() {
+    if(!wanted() || busy)return;
+    busy=true;$('refresh').disabled=true;const generation=requestGeneration;
+    const area=state.areaId==='preset:chicago' ? {kind:'preset',nameOrId:'chicago'} : {kind:'airport',code:state.areaId==='airport:KORD' ? 'ORD' : 'MDW'};
+    try {
+      let result;
+      if(hostReady) result=await rpc('tools/call',{name:'fixture_get_nearby_flights',arguments:{area,limit:4}});
+      else if(openai()?.callTool) result=await openai().callTool('fixture_get_nearby_flights',{area,limit:4});
+      else if(window.parent===window && ['127.0.0.1','localhost'].includes(location.hostname)) { abort=new AbortController(); const response=await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json, text/event-stream'},signal:abort.signal,body:JSON.stringify({jsonrpc:'2.0',id:++sequence,method:'tools/call',params:{name:'fixture_get_nearby_flights',arguments:{area,limit:4}}})}); if(!response.ok)throw new Error('Fixture refresh failed'); result=(await response.json()).result; }
+      else { $('host-status').textContent='No callable host bridge. Inline fixture only; periodic refresh is unverified.';return; }
+      refreshCalls++;if(generation===requestGeneration && wanted())accept(result);
+    } catch { if(wanted())$('board-notice').textContent='Fixture refresh unavailable. Preserved observation ages remain visible.'; }
+    finally { busy=false;abort=null;$('refresh').disabled=dismissed; }
+  }
+  async function display(mode) { if(!hostReady || !hostContext.availableDisplayModes.includes(mode))return;try { const result=await rpc('ui/request-display-mode',{mode});hostContext.displayMode=result.mode;render();schedule(); }catch { $('host-status').textContent='Host declined the display request. Inline fallback remains.'; } }
+  $('pip').onclick=()=>display('pip');$('fullscreen').onclick=()=>display('fullscreen');
+  $('refresh').onclick=async()=>{await refresh();schedule();};
+  $('pause').onclick=async()=>{state.paused=!state.paused;save();render();if(!state.paused)await refresh();schedule();};
+  $('area').onchange=async()=>{state.areaId=$('area').value;save();stop();await refresh();schedule();};
+  $('dismiss').onclick=()=>{dismissed=true;stop();render();if(openai()?.requestClose)openai().requestClose();};
+  document.addEventListener('visibilitychange',async()=>{render();stop();if(wanted())await refresh();schedule();});
+  window.addEventListener('pagehide',()=>{dismissed=true;stop();save();});
+  window.addEventListener('openai:set_globals',event=>{ const g=event.detail?.globals || {};if(g.toolOutput)accept(g.toolOutput);if(g.widgetState && typeof g.widgetState==='object' && typeof g.widgetState.selectedCardId==='string'){state.selectedCardId=g.widgetState.selectedCardId;render();} });
+  window.addEventListener('message',event=>{
+    if(event.source!==window.parent || event.data?.jsonrpc!=='2.0' || hostOrigin && event.origin!==hostOrigin)return;
+    const message=event.data;
+    if(pending.has(message.id) && (message.result || message.error)) { const p=pending.get(message.id);pending.delete(message.id);clearTimeout(p.timeout);if(!hostOrigin)hostOrigin=event.origin;message.error ? p.reject(new Error('Host request failed')) : p.resolve(message.result);return; }
+    if(!hostReady)return;
+    if(message.method==='ui/notifications/tool-result') { if(wanted())accept(message.params); }
+    if(message.method==='ui/notifications/host-context-changed') { hostContext={...hostContext,...message.params};render();schedule(); }
+    if(message.method==='ui/resource-teardown') { dismissed=true;stop();save();render();window.parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},targetOrigin()); }
+  });
+  save();accept(openai()?.toolOutput || initial);render();schedule();
+  if(window.parent!==window) rpc('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'Inbound static fixture proof',version:'0.1.0'},appCapabilities:{availableDisplayModes:['inline','pip','fullscreen']}}).then(result=>{hostReady=true;hostContext={...hostContext,...result.hostContext};notify('ui/notifications/initialized');render();schedule();}).catch(()=>{hostControls();});
+  if(state.areaId!=='preset:chicago')refresh();
+  // Exposes lifecycle diagnostics only in this explicitly isolated test artifact.
+  window.inboundFixtureProof={read:()=>({selectedCardId:state.selectedCardId,paused:state.paused,dismissed,refreshCalls,pollScheduled:timer!==null,displayMode:hostContext.displayMode,hostReady}),refresh};
+})();
+</script>
+</body>
+</html>

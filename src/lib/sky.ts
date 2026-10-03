@@ -4,6 +4,7 @@ import { airframeOf, airlineOf, isVehicleType, isWidebody } from "./aircraft";
 import { haversineNm, initialBearing } from "./geo";
 import { decodeMetar, passengerDelayHint, type Metar, type Taf } from "./metar";
 import type { FieldSnapshot, Traffic } from "./types";
+import { phaseOf } from "./traffic-motion";
 import { fetchAround, fuseProviderLists, lastGoodAround, rememberAround, type AdsbRaw } from "./adsb-fusion";
 
 const RANGE_NM = 38;
@@ -27,21 +28,6 @@ async function fetchJson<T>(url: string, ms = 8000): Promise<T> {
   });
   if (!res.ok) throw new Error(`upstream ${res.status}`);
   return (await res.json()) as T;
-}
-
-function phaseOf(ac: {
-  onGround: boolean;
-  gsKt: number | null;
-  altFt: number | null;
-  vertFpm: number | null;
-}): Traffic["phase"] {
-  if (ac.onGround) return (ac.gsKt ?? 0) > 8 ? "taxi" : "parked";
-  const v = ac.vertFpm ?? 0;
-  const alt = ac.altFt ?? 0;
-  if (v < -400 && alt < 8000) return "approach";
-  if (v < -250) return "descent";
-  if (v > 400 && alt < 12000) return "climb";
-  return "cruise";
 }
 
 function toTraffic(raw: AdsbRaw, airport: { lat: number; lon: number }): Traffic | null {
