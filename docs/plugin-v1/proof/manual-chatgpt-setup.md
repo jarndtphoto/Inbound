@@ -4,9 +4,14 @@ Foundation: `f852f79ba12485c5d6cae9b31a3b59e9858fc82f`, branch `plugin-v1-founda
 
 ## Deployment status
 
-Prepared, but **not deployed**. The connected Vercel integration reports that its
-advertised deployment tool is unavailable. No reachable HTTPS MCP URL exists yet.
-Do not connect a guessed URL or the production Inbound domain.
+The isolated private repository `jarndtphoto/inbound-live-fixture-dev` has a
+protected Preview on `preview-host-test`. The initial deployment built on Node
+22 but failed function invocation with no exception/stack exposed by Vercel.
+Process-wide patches independently broke local Undici loopback transport and
+runtime instrumentation; the exact original deployed exception is unconfirmed.
+The replacement removes those patches and audits the static fixture payload.
+Deployment Protection remains enabled. Do not connect ChatGPT until a separate
+public-access step is approved and verified.
 
 Secure MCP Tunnel was considered first. This environment has no tunnel ID,
 runtime API key, or tunnel client. No credentials were requested.
@@ -30,18 +35,27 @@ modules are included. The deployment payload consists of only `api/mcp.js`,
 - Only explicitly allowlisted pure modules and Zod enter the compiled bundle.
 - Preview runtime rejects production execution, provider/database configuration,
   unexpected authorities/origins, and requests after the temporary test window.
-- Outbound fetch, HTTP(S), TCP/TLS, DNS, UDP and subprocess operations are denied.
-  This is an application-process safeguard, not a claim of a Vercel network-level
-  firewall. No remote-runtime verification has occurred yet.
-- Request logs contain only fixed method names, counters and blocked-operation
-  counts. Request arguments, account data and credentials are not logged.
+- The final server bundle permits only `node:crypto`'s `randomBytes` import.
+  Build-time AST checks reject application fetch/WebSocket, HTTP clients,
+  socket/DNS/subprocess imports, dynamic loading/code generation, unapproved
+  endpoints, credential patterns and database URLs. Zod uses interpreted
+  validation and bundle-local configuration. Node/Vercel globals are untouched.
+- The embedded unchanged UI is checked separately: its sole fetch is the
+  existing localhost-only relative `/mcp` read. Host UI CSP has empty external
+  connect/resource domains. No provider or production API endpoints are shipped.
+- The three-file directory is audited for exact file names and dependency-free
+  package/deployment configuration. Negative safety fixtures must fail the same
+  audit used by the build. This is deterministic static isolation, not a runtime
+  or platform network firewall. Headers report `X-Inbound-Egress: static-isolation`.
+- Request logs contain only fixed method names, counters and the static policy
+  name. Request arguments, account data and credentials are not logged.
 - MCP uses HTTP POST for read-only JSON-RPC; it exposes no mutation tools.
 - Equivalent direct MCP inspection is available in
   `scripts/plugin-v1-mcp-inspect.mjs`. Public HTTPS verification is pending.
 
-Completed local validation: 77 fixture tests pass, typecheck passes, and the main
-app build passes with `DATABASE_URL` unset (migration skipped). The compiled
-fixture bundle passes 40 independent direct MCP checks, including four tool
+The runtime-fix regression suite includes the existing 77 tests and three
+additional compiled-payload isolation/HTTP tests. The compiled
+fixture bundle is inspected with 43 independent direct MCP checks, including four tool
 reads and Chicago/ORD/MDW inputs. Source and compiled widget rendering pass at
 1280×800 and 390×844 with four cards, no horizontal overflow, and no console/page
 errors. The existing component/mock-host suite passes 12 assertions. None of
@@ -105,7 +119,10 @@ must remain untouched. Expiry also disables this fixture server automatically.
 ## Maintainer build and inspection
 
 Build only the fixture payload with `node scripts/plugin-v1-preview-build.mjs`.
-The output is `artifacts/plugin-v1-fixture-preview`; do not deploy the repository
+The output is `artifacts/plugin-v1-fixture-preview`; the exact three files are
+copied byte-for-byte to `deploy/plugin-v1-fixture-preview`. Audit that dedicated
+directory with `assertFixturePayload` from `scripts/plugin-v1-preview-isolation.mjs`.
+Do not deploy the repository
 root or the root `.vercel/output` directory. `audit.json` is local evidence and is
 not part of the three-file deployment payload.
 

@@ -3,12 +3,6 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import http from "node:http";
-import https from "node:https";
-import net from "node:net";
-import tls from "node:tls";
-import dns from "node:dns";
-import dgram from "node:dgram";
-import childProcess from "node:child_process";
 import fixturePreview from "./proof-preview";
 import { NearbyFlightsResponseV1Schema } from "./contracts";
 
@@ -40,7 +34,7 @@ test("Preview is read-only, fixture-only, bounded, and fails closed for producti
     assert.deepEqual(a.json.result.structuredContent, b.json.result.structuredContent, "new reads preserve static observations");
     assert.notEqual(a.json.result._meta.fixtureReadId, b.json.result._meta.fixtureReadId);
     assert.equal(b.json.result._meta.fixtureReadSequence, a.json.result._meta.fixtureReadSequence + 1);
-    assert.equal(a.headers["X-Inbound-Egress"], "denied");
+    assert.equal(a.headers["X-Inbound-Egress"], "static-isolation");
     assert.equal((await read("tools/call", { name: "get_flight" })).json.error.code, -32602);
     assert.equal((await read("resources/read", { uri: "file:///etc/passwd" })).json.error.code, -32602);
     assert.equal((await read("delete", {})).json.error.code, -32601);
@@ -59,7 +53,11 @@ test("Preview is read-only, fixture-only, bounded, and fails closed for producti
     try { assert.equal((await read("tools/list")).status, 503); } finally { Date.now = originalNow; }
   } finally { process.env = previous; }
 });
-test("Egress guard rejects provider HTTP, production API, database sockets, DNS and subprocesses before any I/O", async () => {
-  for (const url of ["https://fr24.example", "https://ads-b.example", "https://flightstats.example", "https://adsbdb.example", "https://weather.example", "https://faa.example", "https://production-inbound.example"]) await assert.rejects(fetch(url), /Outbound operations are disabled/);
-  for (const operation of [() => http.get("http://127.0.0.1:5432"), () => https.request("https://fr24.example"), () => net.connect(5432, "database.example"), () => tls.connect(5432, "database.example"), () => dns.lookup("database.example", () => {}), () => dgram.createSocket("udp4"), () => childProcess.spawn("curl", ["https://fr24.example"])]) assert.throws(operation, /Outbound operations are disabled/);
+test("Fixture import leaves host transport and instrumentation writable", async () => {
+  const fetchDescriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+  const requestDescriptor = Object.getOwnPropertyDescriptor(http, "request");
+  await import("./proof-preview");
+  assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, "fetch"), fetchDescriptor);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(http, "request"), requestDescriptor);
+  assert.doesNotThrow(() => { globalThis.fetch = globalThis.fetch; http.request = http.request; });
 });

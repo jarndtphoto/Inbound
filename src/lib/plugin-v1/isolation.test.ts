@@ -17,6 +17,6 @@ test("Foundation and fixture proof import no provider, live story, DB runtime, o
     }
     assert.doesNotMatch(source, /\b(?:fetchAround|getFlightStory|loadFlightStory|createServerFn)\s*\(/, path);
   };
-  for (const file of ["contracts.ts", "areas.ts", "geography.ts", "ranking.ts", "stability.ts", "fixtures.ts", "proof-server.ts", "proof-preview.ts", "proof-egress.ts"]) visit(resolve(directory, file));
+  for (const file of ["contracts.ts", "areas.ts", "geography.ts", "ranking.ts", "stability.ts", "fixtures.ts", "proof-server.ts", "proof-preview.ts"]) visit(resolve(directory, file));
   assert.ok(visited.size > 7);
 });

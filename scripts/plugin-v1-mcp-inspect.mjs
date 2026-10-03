@@ -14,7 +14,7 @@ const check = (name, condition) => { assert.ok(condition, name); evidence.checks
 async function rpc(method, params = {}, notification = false) {
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-11-25' }, body: JSON.stringify({ jsonrpc: '2.0', ...(!notification ? { id: ++id } : {}), method, params }), signal: AbortSignal.timeout(15000) });
   check(`${method}: fixture header`, response.headers.get('x-inbound-fixture-only') === 'true');
-  check(`${method}: egress denied header`, response.headers.get('x-inbound-egress') === 'denied');
+  check(`${method}: static isolation header`, response.headers.get('x-inbound-egress') === 'static-isolation');
   assert.equal(response.status, notification ? 202 : 200);
   return notification ? null : response.json();
 }
@@ -41,6 +41,10 @@ check('unsupported/mixed request rejected', invalid.structuredContent.status ===
 check('real-flight tool unavailable', (await rpc('tools/call', { name: 'get_flight', arguments: {} })).error.code === -32602);
 check('raw files unavailable', (await rpc('resources/read', { uri: 'file:///etc/passwd' })).error.code === -32602);
 check('write method unavailable', (await rpc('fixture/write')).error.code === -32601);
+const widgetResponse = await fetch(new URL('/widget', url), { signal: AbortSignal.timeout(15000) });
+check('widget retrieval', widgetResponse.status === 200 && (await widgetResponse.text()).includes('STATIC FIXTURES'));
+check('widget fixture header', widgetResponse.headers.get('x-inbound-fixture-only') === 'true');
+check('widget no-store', widgetResponse.headers.get('cache-control') === 'no-store');
 evidence.tools = tools.map(t => ({ name: t.name, annotations: t.annotations, resourceUri: t._meta.ui.resourceUri }));
 evidence.resources = resources;
 evidence.status = 'passed';
