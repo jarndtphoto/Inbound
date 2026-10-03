@@ -1,3 +1,5 @@
+import { readTakeoffDiagnostic, takeoffDiagnostic, type TakeoffDiagnostic } from "./confirmed-takeoff.ts";
+import { canonicalLegKey, unvalidatedLegKey } from "./flight-identity.ts";
 import { airportByIcao } from "./airports.ts";
 import { parseFlightQuery, storyMatchesQuery } from "./flight-parse.ts";
 import type { FlightStory } from "./types.ts";
@@ -35,6 +37,8 @@ export type FlightResume = {
   hex: string | null;
   type: string | null;
   waypoints: { lat: number; lon: number }[];
+  stateKey?: string | null;
+  confirmedTakeoff?: TakeoffDiagnostic | null;
   departureStage?: DepartureStageCheckpoint | null;
   detectedPushUnix?: number | null;
   detectedTaxiUnix?: number | null;
@@ -118,13 +122,21 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
   // fabricated "now" -- lets a resumed taxi stage carry its true start time
   // instead of story.server.ts having to invent one on restore.
   const detectedTaxiUnix = recentSeenAt(r.detectedTaxiUnix);
+  const keyContext = { requested: want.callsign, origin: { iata: fields.originIata, icao: r.originIcao, tz: fields.originTz },
+    destination: { iata: fields.destIata, icao: r.destIcao } };
+  const keySchedule = { ident: r.ident, originIata: fields.originIata, destIata: fields.destIata,
+    gateOut: stamps.gateOut, takeoff: stamps.takeoff };
+  const expectedKey = typeof r.stateKey === "string" && r.stateKey.startsWith("leg:v1:") ? canonicalLegKey(keySchedule, keyContext)
+    : unvalidatedLegKey(keySchedule, keyContext, now / 1000);
+  const stateKey = r.stateKey === expectedKey ? expectedKey : null;
+  const confirmedTakeoff = stateKey ? takeoffDiagnostic(readTakeoffDiagnostic(r.confirmedTakeoff, now / 1000)) : null;
   return {
     version: 1, callsign: want.callsign, ident: r.ident, confirmedAt: r.confirmedAt,
     ...fields, originIcao: r.originIcao, destIcao: r.destIcao,
     originGate: token(r.originGate, /^[A-Z0-9 -]{1,12}$/i), destGate: token(r.destGate, /^[A-Z0-9 -]{1,12}$/i),
     gateOut: stamps.gateOut, takeoff: stamps.takeoff, landing: stamps.landing, gateIn: stamps.gateIn,
     tail: token(r.tail, /^[A-Z0-9-]{3,12}$/i), hex: token(r.hex, /^[a-f0-9]{6}$/i),
-    type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, departureStage, detectedPushUnix, detectedTaxiUnix, parkedLat, parkedLon,
+    type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, stateKey, confirmedTakeoff, departureStage: confirmedTakeoff ? null : departureStage, detectedPushUnix, detectedTaxiUnix, parkedLat, parkedLon,
     takeoffRollStreak, takeoffRollStreakSeenAt, flightSpeedStreak, flightSpeedStreakSeenAt,
   } as FlightResume;
 }
@@ -148,9 +160,14 @@ export function resumeFromStory(story: FlightStory | undefined, q: string, now =
   // omitted it. Once takeoff roll or taxi has been shown, carry it forward.
   const observed = observedDepartureStage(story);
   if (story.resume) {
-    const parsed = readFlightResume(story.resume, q, now);
+    const confirmation = readTakeoffDiagnostic(story.confirmedTakeoff, story.fetchedAt / 1000);
+    const parsed = readFlightResume({ ...story.resume,
+      stateKey: story.stateKey ?? story.resume.stateKey,
+      confirmedTakeoff: story.confirmedTakeoff ?? story.resume.confirmedTakeoff,
+      takeoff: { ...story.resume.takeoff, ...(confirmation?.time != null ? { actual: confirmation.time } : {}) },
+    }, q, now);
     if (!parsed) return;
-    const departureStage = maxDepartureStage(parsed.departureStage, observed);
+    const departureStage = parsed.confirmedTakeoff ? null : maxDepartureStage(parsed.departureStage, observed);
     return departureStage === parsed.departureStage ? parsed : { ...parsed, departureStage };
   }
 
@@ -165,13 +182,14 @@ export function resumeFromStory(story: FlightStory | undefined, q: string, now =
   });
   return readFlightResume({
     version: 1, callsign, ident: callsign, confirmedAt: story.schedule?.confirmedAt ?? story.fetchedAt,
+    stateKey: story.stateKey, confirmedTakeoff: story.confirmedTakeoff,
     originIcao: story.origin?.icao, destIcao: story.dest?.icao,
     originIata: story.origin?.iata, destIata: story.dest?.iata,
     originLat: story.origin?.lat, originLon: story.origin?.lon, destLat: story.dest?.lat, destLon: story.dest?.lon,
     originTz: story.origin?.tz, destTz: story.dest?.tz,
     originName: story.origin?.name, originCity: story.origin?.city, destName: story.dest?.name, destCity: story.dest?.city,
     originGate: t.originGate, destGate: t.destGate,
-    gateOut: stamp(t.pushUnix, t.origPushUnix), takeoff: stamp(t.takeoffUnix, t.origTakeoffUnix),
+    gateOut: stamp(t.pushUnix, t.origPushUnix), takeoff: { ...stamp(t.takeoffUnix, t.origTakeoffUnix), actual: readTakeoffDiagnostic(story.confirmedTakeoff, story.fetchedAt / 1000)?.time ?? null },
     landing: stamp(t.landUnix, t.origLandUnix), gateIn: stamp(t.gateUnix),
     tail: story.aircraft?.registration, hex: story.aircraft?.hex, type: story.aircraft?.type,
     waypoints: [], departureStage: observed,

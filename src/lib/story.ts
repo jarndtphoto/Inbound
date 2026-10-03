@@ -1,3 +1,4 @@
+import { applyTakeoffFloor } from "./confirmed-takeoff.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { loadFlightStory, loadLiveBoard } from "./story.server";
 import { readFlightResume, type DepartureStageCheckpoint, type FlightResume } from "./flight-resume";
@@ -16,6 +17,8 @@ function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
 }
 
 export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResume): FlightStory {
+  const floored = applyTakeoffFloor(story, prior);
+  if (floored.confirmedTakeoff) return floored;
   const candidate = story.providers?.fr24Position;
   const sameLeg = sameResumeLeg(story, prior);
   const priorStage = sameLeg ? prior?.departureStage ?? null : null;
@@ -86,6 +89,8 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
 }
 
 export function preserveDepartureProgress(story: FlightStory, prior?: FlightResume): FlightStory {
+  const floored = applyTakeoffFloor(story, prior);
+  if (floored.confirmedTakeoff) return floored;
   const current = story.currentStage;
   const sameLeg = sameResumeLeg(story, prior);
   const priorStage = sameLeg ? prior?.departureStage ?? null : null;
@@ -177,6 +182,8 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
 }
 
 export function preferFreshAirborneState(story: FlightStory): FlightStory {
+  const floored = applyTakeoffFloor(story);
+  if (floored.confirmedTakeoff) return floored;
   const ac = story.aircraft;
   if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon) || ac.onGround !== false) return story;
   const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : ac.seenSec ?? null;
@@ -253,8 +260,11 @@ export const getFlightStory = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     const story = await loadFlightStory(data.q, { fresh: data.fresh, resume: data.resume });
-    const experimental = applyFr24GroundExperiment(story, data.resume);
-    const progressed = preserveDepartureProgress(experimental, data.resume);
+    // A device checkpoint is presentation context, not authenticated takeoff
+    // evidence. Only loadFlightStory's provider/durable proof may floor here.
+    const groundResume = data.resume ? { ...data.resume, confirmedTakeoff: null, stateKey: null } : undefined;
+    const experimental = applyFr24GroundExperiment(story, groundResume);
+    const progressed = preserveDepartureProgress(experimental, groundResume);
     const airborne = preferFreshAirborneState(progressed);
     const sanitized = sanitizeDetectedPushTime(airborne);
     return suppressLateJoinDetectedPush(sanitized, data.resume);
