@@ -44,8 +44,11 @@ test("Compiled fixture works through real HTTP/Undici without changing host glob
   watched.forEach(([object, name], i) => assert.deepEqual(Object.getOwnPropertyDescriptor(object, name), descriptors[i], name));
   assert.doesNotThrow(() => { globalThis.fetch = globalThis.fetch; http.request = http.request; });
   const previous = process.env;
+  // Preserve host-owned localhost routing while stripping application config.
+  // Node's environment proxy reads NO_PROXY per request in this workspace.
+  const transportEnvironment = { NO_PROXY: previous.NO_PROXY, no_proxy: previous.no_proxy };
   const host = "inbound-live-fixture-local-test.vercel.app";
-  process.env = { VERCEL_ENV: "preview", VERCEL_URL: host };
+  process.env = { ...transportEnvironment, VERCEL_ENV: "preview", VERCEL_URL: host };
   const server = createServer((req, res) => { req.headers.host = host; void handler(req, res); });
   try {
     await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
@@ -57,10 +60,10 @@ test("Compiled fixture works through real HTTP/Undici without changing host glob
     assert.equal(inspected.status, "passed"); assert.equal(inspected.checks.length, 43);
     assert.deepEqual(inspected.toolReads.map((r: { areaId: string }) => r.areaId), ["preset:chicago", "airport:KORD", "airport:KMDW", "preset:chicago"]);
     for (const config of [{ VERCEL_ENV: "production", VERCEL_URL: host }, { VERCEL_ENV: "preview", VERCEL_URL: "bad.example" }, { VERCEL_ENV: "preview", VERCEL_URL: host, DATABASE_URL: "unshipped-test-secret" }]) {
-      process.env = config;
+      process.env = { ...transportEnvironment, ...config };
       const response = await fetch(endpoint, { headers: { Connection: "close" } }).catch(error => { throw new Error(`Refusal HTTP check failed: ${JSON.stringify(Object.keys(config))}`, { cause: error }); }); assert.equal(response.status, 503); assert.ok(!(await response.text()).includes("unshipped-test-secret"));
     }
-    process.env = { VERCEL_ENV: "preview", VERCEL_URL: host };
+    process.env = { ...transportEnvironment, VERCEL_ENV: "preview", VERCEL_URL: host };
     const originalNow = Date.now;
     let expiryStatus = 0;
     try {

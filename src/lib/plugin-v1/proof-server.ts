@@ -2,10 +2,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { destPoint } from "../geo";
-import { resolveNearbyRequest } from "./areas";
+import { haversineNm } from "../geo";
+import { areaDefinition, resolveNearbyRequest } from "./areas";
 import { NearbyFlightsResponseV1Schema, NearbyRequestV1Schema } from "./contracts";
-import { FIXTURE_NOTICE, FIXTURE_NOW, fixtureNearbyBoard } from "./fixtures";
+import { FIXTURE_NOTICE, FIXTURE_NOW, fixtureNearbyBoard, fixtureRankingCandidate } from "./fixtures";
 
 export const PROOF_TOOL = "fixture_get_nearby_flights";
 export const PROOF_RESOURCE = "ui://inbound/fixture-live-v1.html";
@@ -22,17 +22,31 @@ export function proofFixtureResult(input: unknown) {
   let board;
   if (!resolution.ok) board = resolution.response;
   else {
-    board = fixtureNearbyBoard(resolution.area.id, Math.min(4, resolution.limit));
+    board = fixtureNearbyBoard(resolution.area.id);
     board.resolvedArea = resolution.area;
-    if (resolution.includePosition) for (const card of board.flights) {
-      const p = destPoint({ lat: resolution.area.reference.latitude, lon: resolution.area.reference.longitude }, 90, card.proximity.distanceNm);
-      card.position = { latitude: p.lat, longitude: p.lon, kind: "observed" };
+    for (const [index, card] of board.flights.entries()) {
+      // Reuse the existing invented ranking observations, anchored to Chicago.
+      // Changing a named reference never relocates an aircraft observation.
+      const observation = fixtureRankingCandidate(index);
+      card.proximity.distanceNm = haversineNm(
+        { lat: resolution.area.reference.latitude, lon: resolution.area.reference.longitude },
+        { lat: observation.latitude, lon: observation.longitude },
+      );
+      if (resolution.includePosition) card.position = { latitude: observation.latitude, longitude: observation.longitude, kind: "observed" };
     }
+    board.flights = board.flights.filter(card => card.proximity.distanceNm <= resolution.area.radiusNm).slice(0, resolution.limit);
+    board.status = board.flights.length ? "ok" : "empty";
   }
   return { content: [{ type: "text" as const, text: "STATIC FIXTURE PROOF: invented aircraft data, no live provider requests." }], structuredContent: NearbyFlightsResponseV1Schema.parse(board), _meta: { fixtureOnly: true, fixtureNotice: FIXTURE_NOTICE } };
 }
 export function proofWidgetHtml(nonce = randomBytes(18).toString("base64url")) {
-  return template().replaceAll("__PROOF_NONCE__", nonce).replace("__INITIAL_FIXTURE__", JSON.stringify(proofFixtureResult({ area: { kind: "preset", nameOrId: "chicago" } }).structuredContent).replaceAll("<", "\\u003c"));
+  const airports = ["airport:KORD", "airport:KMDW"].map(id => {
+    const area = areaDefinition(id as "airport:KORD" | "airport:KMDW");
+    return { code: id === "airport:KORD" ? "ORD" : "MDW", areaId: id, ...area.reference };
+  });
+  return template().replaceAll("__PROOF_NONCE__", nonce)
+    .replace("__RADAR_AIRPORTS__", JSON.stringify(airports))
+    .replace("__INITIAL_FIXTURE__", JSON.stringify(proofFixtureResult({ area: { kind: "preset", nameOrId: "chicago" }, includePosition: true }).structuredContent).replaceAll("<", "\\u003c"));
 }
 function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
@@ -99,7 +113,7 @@ export function createFixtureProofHandler(options: FixtureProofOptions = {}) {
           const fixture = proofFixtureResult(params.arguments);
           result = { ...fixture, _meta: { ...fixture._meta, fixtureReadId: randomBytes(9).toString("hex"), fixtureReadSequence: stats.toolCalls } }; break;
         }
-        case "resources/list": result = { resources: [{ uri: PROOF_RESOURCE, name: "Inbound Live fixture board", mimeType: UI_MIME, description: "Static four-card aviation host proof." }] }; break;
+        case "resources/list": result = { resources: [{ uri: PROOF_RESOURCE, name: "Inbound Live fixture board", mimeType: UI_MIME, description: "Static Radar and Flights aviation host proof." }] }; break;
         case "resources/read":
           if (params.uri !== PROOF_RESOURCE) { send(res, 200, rpcError(id, -32602, "Unknown fixture resource.")); return; }
           result = { contents: [{ uri: PROOF_RESOURCE, mimeType: UI_MIME, text: proofWidgetHtml(), _meta: { ui: { prefersBorder: true, csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["inline", "pip", "fullscreen"] }, "openai/widgetDescription": "Invented static Inbound Live proof; not live flight information." } }] }; break;

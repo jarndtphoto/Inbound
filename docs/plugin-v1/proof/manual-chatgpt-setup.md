@@ -1,143 +1,147 @@
-# Part 3A.5: user-run ChatGPT fixture test
+# Part 3A.6: static Radar and Flights host proof
 
-Foundation: `f852f79ba12485c5d6cae9b31a3b59e9858fc82f`, branch `plugin-v1-foundation`.
+Source repository: `jarndtphoto/Inbound`, branch `plugin-v1-foundation`.
+Isolated repository: `jarndtphoto/inbound-live-fixture-dev`, branch
+`preview-host-test`. This stage builds on the approved source commit
+`cb7b4df099d8e535c18aaf24f07fc440861b1a2f` and isolated fixture commit
+`fd53fb59ad22bfd8ae3758a3359fa48ca83599d1`.
 
-## Deployment status
+## Host evidence and next test
 
-The isolated private repository `jarndtphoto/inbound-live-fixture-dev` has a
-protected Preview on `preview-host-test`. The initial deployment built on Node
-22 but failed function invocation with no exception/stack exposed by Vercel.
-Process-wide patches independently broke local Undici loopback transport and
-runtime instrumentation; the exact original deployed exception is unconfirmed.
-The replacement removes those patches and audits the static fixture payload.
-Deployment Protection remains enabled. Do not connect ChatGPT until a separate
-public-access step is approved and verified.
+The user verified Part 3A.5 in their authenticated ChatGPT web account as
+**Inbound Live Dev**: MCP connection, inline four-card UI, Chicago/ORD/MDW,
+interactive controls, expanded/fullscreen display and advancing local ages.
+That host did not advertise `pip`; Request PiP correctly stayed disabled.
 
-Secure MCP Tunnel was considered first. This environment has no tunnel ID,
-runtime API key, or tunnel client. No credentials were requested.
+Part 3A.6 adds the Radar UI. Its local component and simulated-host tests are
+separate from the next user-run ChatGPT test. Do not sign into the user's
+ChatGPT account, automate that host test, or change their existing connection.
 
-The prepared fallback targets a new, isolated project named
-`inbound-live-fixture-dev`, with a **Preview** deployment only. No existing Inbound
-project configuration, environment variables, domains, database, or provider
-modules are included. The deployment payload consists of only `api/mcp.js`,
-`package.json`, and `vercel.json` from the explicit fixture build.
+Standard Vercel Authentication remains enabled on the isolated fixture project.
+The separately approved public exception applies only to the previous immutable
+Preview hostname `inbound-live-fixture-8lq158y26-jarndtphoto.vercel.app`.
+A new Preview hostname requires separate approval before adding any exception.
+Report the new protected URL and its access status; stop if it is not public.
+After public MCP verification is separately approved and passes, the user will
+need to update their Inbound Live Dev connection to the new `/mcp` URL.
 
-## Safety and verification
+## Radar and Flights
 
-- One read-only tool: `fixture_get_nearby_flights`.
-- One resource: `ui://inbound/fixture-live-v1.html`.
+- Inline defaults to **Flights**. Fullscreen defaults to **Radar**.
+- Each display mode remembers its chosen view in widget state where the host
+  supports `window.openai.setWidgetState`; standalone local proof uses session
+  storage. Both views share one selected aircraft ID.
+- The dark radar surface uses local SVG/HTML/CSS, an approximate bundled Lake
+  Michigan shoreline, Chicago context, and ORD/MDW airport markers.
+- A north-up local equirectangular projection converts longitude difference to
+  eastward nautical miles using the reference latitude's cosine; latitude
+  difference supplies northward nautical miles. One scale serves both axes.
+- The map fits the returned fixture positions and airport references within the
+  selected area radius. No aircraft is hand-positioned in screen coordinates.
+- Positions reuse the existing invented ranking-fixture observations, anchored
+  to Chicago. Chicago, ORD and MDW recenter the map and recalculate named-reference
+  distances without relocating aircraft or changing observation timestamps.
+- Default areas each return all four fixtures. A smaller requested radius can
+  return fewer; radius filtering happens before the presentation limit.
+- The nearby contract contains no heading field. Neutral diamond symbols and
+  explicit **Heading unavailable** labels preserve that uncertainty. The pure
+  heading helper can orient a marker when an actual heading is available; this
+  stage does not add one to the MCP contract or invent orientation.
+- Marker and card selection stays synchronized through view switches and host
+  state restoration. Selection makes no MCP request.
+- The Radar summary shows identifier, route/hint or unavailable route, altitude,
+  text vertical direction, motion, named-reference distance and observation age.
+  **Track flight** is visibly disabled and has no tool or tracking handler.
+- The Flights view retains four readable cards. On narrow screens, marker labels
+  yield to the selected summary so the four 44px aircraft targets stay clear.
+- Observation ages advance locally. Pause stops fixture refresh requests while
+  ages continue advancing. Refresh calls only `fixture_get_nearby_flights` with
+  `includePosition: true`. Aircraft disappear from both views after 120 seconds;
+  an existing selection is explicitly marked expired.
+- Static warnings remain visible. Aircraft positions never animate. No model
+  turns, chat messages, geolocation, live tracking or detailed flight resolution
+  are added. PiP remains capability-gated; no floating window is simulated.
+
+## Fixture safety
+
+- Exactly one read-only tool: `fixture_get_nearby_flights`.
+- Exactly one UI resource: `ui://inbound/fixture-live-v1.html`.
 - Resource MIME: `text/html;profile=mcp-app`.
-- No real single-flight lookup, selection resolution, provider acquisition,
-  production API, database, or persistent server state.
-- Fixture aircraft, routes, and observation timestamps remain static.
-- Each tool read includes a new diagnostic read ID and a per-process sequence.
-  These are test metadata; they do not refresh observation timestamps.
+- No provider, aviation API, weather/baggage, database, production Inbound API,
+  production application UI, external HTTP client, map API or tile service ships.
 - Only explicitly allowlisted pure modules and Zod enter the compiled bundle.
-- Preview runtime rejects production execution, provider/database configuration,
-  unexpected authorities/origins, and requests after the temporary test window.
-- The final server bundle permits only `node:crypto`'s `randomBytes` import.
-  Build-time AST checks reject application fetch/WebSocket, HTTP clients,
-  socket/DNS/subprocess imports, dynamic loading/code generation, unapproved
-  endpoints, credential patterns and database URLs. Zod uses interpreted
-  validation and bundle-local configuration. Node/Vercel globals are untouched.
-- The embedded unchanged UI is checked separately: its sole fetch is the
-  existing localhost-only relative `/mcp` read. Host UI CSP has empty external
-  connect/resource domains. No provider or production API endpoints are shipped.
-- The three-file directory is audited for exact file names and dependency-free
-  package/deployment configuration. Negative safety fixtures must fail the same
-  audit used by the build. This is deterministic static isolation, not a runtime
-  or platform network firewall. Headers report `X-Inbound-Egress: static-isolation`.
-- Request logs contain only fixed method names, counters and the static policy
-  name. Request arguments, account data and credentials are not logged.
-- MCP uses HTTP POST for read-only JSON-RPC; it exposes no mutation tools.
-- Equivalent direct MCP inspection is available in
-  `scripts/plugin-v1-mcp-inspect.mjs`. Public HTTPS verification is pending.
+  The only external server import is `node:crypto`'s `randomBytes`.
+- Build-time AST checks reject application outbound clients, socket/DNS/process
+  imports, dynamic loading/code generation, unapproved endpoints, credential
+  patterns and database URLs. The embedded UI is inspected separately; its only
+  fetch is the existing localhost-only relative `/mcp` fallback. Host UI CSP
+  advertises empty external connect/resource domains.
+- Node/Vercel globals and builtins remain untouched. Zod uses interpreted
+  validation and bundle-local configuration. Static isolation is deterministic
+  application auditing, not a runtime or platform network firewall.
+- Runtime requires `VERCEL_ENV === "preview"`, a valid `VERCEL_URL`, approved
+  authorities/origins, and no sensitive provider/database environment settings.
+  It fails closed after `2026-10-10T23:59:59.000Z`
+  (October 10, 2026, 6:59:59 p.m. Chicago time).
+- Responses retain `X-Inbound-Fixture-Only: true`,
+  `X-Inbound-Egress: static-isolation` and `Cache-Control: no-store`.
+- Each read has a new diagnostic read ID and per-process sequence; observations
+  remain static. Logs contain only fixed methods, counters and policy labels.
+- Deployment payload is exactly `api/mcp.js`, `package.json`, `vercel.json`.
+  It contains no environment files, credentials, audit file, database setup,
+  provider modules or repository-root package configuration.
+- The source branch's existing root `vercel.json` disables automatic deployments
+  for `plugin-v1-foundation`; it remains unchanged. Only the isolated repository's
+  `preview-host-test` push should create this fixture Preview.
 
-The runtime-fix regression suite includes the existing 77 tests and three
-additional compiled-payload isolation/HTTP tests. The compiled
-fixture bundle is inspected with 43 independent direct MCP checks, including four tool
-reads and Chicago/ORD/MDW inputs. Source and compiled widget rendering pass at
-1280×800 and 390×844 with four cards, no horizontal overflow, and no console/page
-errors. The existing component/mock-host suite passes 12 assertions. None of
-these results constitutes real ChatGPT or actual mobile host verification.
+## Maintainer validation
 
-## User connection steps, after a verified URL is supplied
+Build with `node scripts/plugin-v1-preview-build.mjs`. Copy only the three payload
+files from `artifacts/plugin-v1-fixture-preview` to
+`deploy/plugin-v1-fixture-preview`, preserving bytes. Audit the dedicated directory
+using `assertFixturePayload` in `scripts/plugin-v1-preview-isolation.mjs`.
+`audit.json` remains local build evidence outside the deployable directory.
 
-1. Open your normal, already logged-in **ChatGPT web** account.
-2. Open **Settings** → **Security and login**.
-3. Enable **Developer mode**.
-4. Go to **ChatGPT Plugins** and press **+**.
-5. Name: **Inbound Live Dev**.
-6. Description: **Static fixture-only Inbound Live UI test. No real aircraft.**
-7. Under **Connection**, choose the public URL option and paste the verified
-   HTTPS URL ending in `/mcp`. Select no authentication if asked.
-8. Create/connect it. It should discover exactly `fixture_get_nearby_flights`.
-9. Start a new conversation. Select **Inbound Live Dev** from the tools menu
-   (**+** → **More** where offered).
-10. Send: **Open Inbound Live.**
+Run `npm run plugin:test` and `npm run typecheck`. The fixture suite includes
+negative isolation cases, Node/Undici transport and instrumentation regressions,
+production/configuration/expiry refusals, geometry, contracts and projection.
+Tests retain the host-owned localhost proxy exemption while stripping application
+configuration; no deployed environment variables are introduced.
 
-If asked for an area, choose **Chicago**. The proof also supports **ORD** and **MDW**.
-Developer mode availability depends on your account and workspace policy.
-These instructions follow official documentation; no signed-in account UI was
-inspected during this setup task. No real-host verification is claimed.
+Run `npm run plugin:browser-proof`, then
+`npm run plugin:browser-proof -- --compiled`. If the test environment supplies a
+Chromium binary outside Playwright's default cache, select that existing test
+binary with `PLAYWRIGHT_CHROMIUM_EXECUTABLE`. It is a test-runner setting only.
+The same browser assertions exercise source and the exact compiled payload:
+selection, view/state persistence, local ages, refresh, lifecycle controls,
+capability-gated PiP, accepted/declined fullscreen, desktop inline/expanded,
+375px layout, accessible keyboard controls, zero external requests and expiry.
 
-## What to try
-
-- Confirm four cards, the area label, route hint, altitude/trend, named-reference
-  distance, age labels, and local aircraft selection.
-- Open **About this proof**. Watch the refresh count and server read ID. A changed
-  read ID proves a new fixture response; age ticks alone do not.
-- Try **Request PiP**, then send an unrelated message. Record what actually stays
-  visible. A disabled button means the bridge did not advertise that capability.
-- Try **Pause**, **Resume**, **Expand**, area changes, selection, and dismissal.
-- Mobile ChatGPT is a separate host test; responsive browser QA is not evidence.
-
-## Known limits
-
-- All aviation facts are invented; no real Nearby backend exists in this proof.
-- Cards age out after 120 seconds. Refresh intentionally does not reset their
-  ages. A fresh host widget/session may be required for another test; host state
-  retention is itself unverified.
-- Selection focuses a fixture locally. Detailed flight navigation and Back to
-  Live are not implemented in this proof.
-- PiP, fullscreen, direct refresh, mounting and state retention are host-gated
-  and remain unverified until the user tests them.
-- The read sequence can restart on a Vercel cold start. Use the unique read ID
-  alongside it.
-- The prepared server fails closed after `2026-10-10T23:59:59.000Z`
-  (October 10, 2026, 6:59:59 p.m. Chicago time). Expiry disables serving; it does
-  not delete the deployment or project.
-- Preview Deployment Protection must permit ChatGPT's requests before a URL is
-  supplied. No protection setting has been changed.
-
-## Removal
-
-Remove/disconnect **Inbound Live Dev** in ChatGPT Plugins. Then delete only the
-isolated fixture Preview deployment in Vercel. The production `inbound` project
-must remain untouched. Expiry also disables this fixture server automatically.
-
-## Maintainer build and inspection
-
-Build only the fixture payload with `node scripts/plugin-v1-preview-build.mjs`.
-The output is `artifacts/plugin-v1-fixture-preview`; the exact three files are
-copied byte-for-byte to `deploy/plugin-v1-fixture-preview`. Audit that dedicated
-directory with `assertFixturePayload` from `scripts/plugin-v1-preview-isolation.mjs`.
-Do not deploy the repository
-root or the root `.vercel/output` directory. `audit.json` is local evidence and is
-not part of the three-file deployment payload.
-
-After the Preview is reachable, inspect its exact URL with:
+The existing direct MCP inspection suite runs through a real local HTTP server
+in the compiled fixture regression test. It exercises initialize, discovery,
+resource retrieval, Chicago/ORD/MDW/repeated reads and rejected mutations.
+After separately approved public access, inspect the exact HTTPS endpoint with:
 
 ```
 node scripts/plugin-v1-mcp-inspect.mjs VERIFIED_HTTPS_MCP_URL EVIDENCE_JSON_PATH
 ```
 
-Do not provide the URL to the user until the public, unauthenticated HTTPS
-inspection passes. This task does not authorize Part 3B, main-branch merge,
-production deployment, or automated ChatGPT authentication/host testing.
+## User-run host test after public verification
 
-Official setup documentation:
-https://developers.openai.com/plugins/deploy/connect-chatgpt
+In the user's existing Inbound Live Dev connection, use the newly verified public
+`/mcp` URL. Open Inbound Live for Chicago, expand it, and confirm Radar defaults
+open with four invented observations. Try ORD/MDW, marker/card selection, switching
+views, Pause/Resume and refresh. Confirm the disabled Track flight action, static
+positions, local ages and capability-gated PiP. Actual mobile ChatGPT remains a
+separate host test; a 375px simulation is responsive QA only.
 
-Official tunnel documentation:
-https://developers.openai.com/api/docs/guides/secure-mcp-tunnels
+## Restore protection and remove the proof
+
+After host testing, remove only the approved hostname from the isolated project's
+**Deployment Protection Exceptions → Unprotected Domains → Menu → Remove**.
+Standard Protection remains enabled. The exception does not expire automatically;
+the fixture's application expiration does not remove that protection exception.
+
+The user can disconnect Inbound Live Dev in ChatGPT. Removing the isolated fixture
+Preview/project is a separate action. Real Inbound, both repositories' main
+branches, merges, production deployments and Part 3B remain outside this stage.

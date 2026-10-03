@@ -7,9 +7,9 @@ import { createFixtureProofServer, proofFixtureResult, proofWidgetHtml, PROOF_RE
 import { NearbyFlightsResponseV1Schema } from "./contracts";
 
 test("Fixture tool never resolves flights, preserves nulls, and honors area/presentation input", () => {
-  const result = proofFixtureResult({ area: { kind: "airport", code: "ORD" }, limit: 2, includePosition: true, radiusNm: 12 });
+  const result = proofFixtureResult({ area: { kind: "airport", code: "ORD" }, limit: 2, includePosition: true, radiusNm: 25 });
   const r = NearbyFlightsResponseV1Schema.parse(result.structuredContent);
-  assert.equal(r.resolvedArea!.id, "airport:KORD"); assert.equal(r.resolvedArea!.radiusNm, 12); assert.equal(r.flights.length, 2);
+  assert.equal(r.resolvedArea!.id, "airport:KORD"); assert.equal(r.resolvedArea!.radiusNm, 25); assert.equal(r.flights.length, 2);
   assert.ok(r.flights.every(f => f.position?.kind === "observed")); assert.equal(result._meta.fixtureOnly, true);
   assert.equal(proofFixtureResult({ area: { kind: "airport", code: "JFK" } }).structuredContent.status, "invalid_request");
   assert.deepEqual(proofFixtureResult({ area: { kind: "preset", nameOrId: "chicago" } }), proofFixtureResult({ area: { kind: "preset", nameOrId: "chicago" } }), "static reads do not change observation times");

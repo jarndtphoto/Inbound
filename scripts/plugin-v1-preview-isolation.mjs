@@ -22,7 +22,7 @@ export function assertFixtureApplication(code, { widget = false } = {}) {
     if (ts.isExportDeclaration(node) && node.moduleSpecifier) fail('external re-export');
     if (node.kind === ts.SyntaxKind.ImportKeyword) fail('dynamic import');
     if (ts.isIdentifier(node) && forbiddenNames.has(node.text)) {
-      // The unchanged widget has one local-only fallback to its own /mcp.
+      // The self-contained widget has one local-only fallback to its own /mcp.
       const localWidgetRead = widget && node.text === 'fetch' && ts.isCallExpression(node.parent) && node.parent.expression === node && node.parent.arguments[0] && ts.isStringLiteral(node.parent.arguments[0]) && node.parent.arguments[0].text === '/mcp';
       if (!localWidgetRead) fail(`forbidden capability ${node.text}`);
     }
@@ -38,7 +38,7 @@ export function assertFixtureApplication(code, { widget = false } = {}) {
       for (const match of value.matchAll(/https?:\/\/[^\s"'<>`\\)]+/g)) {
         if (!metadataUrls.has(match[0])) fail('unapproved endpoint URL');
       }
-      // UI stays byte-identical; inspect the embedded script as browser code.
+      // Inspect embedded browser code separately from the inbound server.
       if (!widget && value.includes('<script')) {
         for (const match of value.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) assertFixtureApplication(match[1], { widget: true });
         if (/<script\b[^>]*\bsrc\s*=|\b(?:src|href)\s*=\s*["']https?:/i.test(value)) fail('external UI asset');
