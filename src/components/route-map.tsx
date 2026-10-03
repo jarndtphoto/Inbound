@@ -17,14 +17,13 @@ import { useQuery } from "@tanstack/react-query";
 import { CloudRain } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useId } from "react";
 
+import { clampRouteMapView as clampView, isMapControl, MAX_ROUTE_ZOOM, MIN_FREE_ROUTE_ZOOM } from "@/lib/route-map-interaction";
+
 import { routeWeatherSegments, sampleWeather } from "@/lib/route-weather-segments";
 
 const W = 800;
 const H = 800;
 const PAD = 40;
-const MAX_ROUTE_ZOOM = 12;
-const MIN_FREE_ROUTE_ZOOM = 0.01;
-const PAN_WORLD_SCREENS = 4;
 
 function weatherStroke(band: string, past: boolean) {
   if (past) return "stroke-muted/40";
@@ -204,28 +203,6 @@ function RadarLayer({
   );
 }
 
-function clampView(next: { s: number; x: number; y: number }, mapH = 800, freePan = false) {
-  const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
-  const s = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, next.s));
-  if (freePan) {
-    const xLimit = W * PAN_WORLD_SCREENS * s;
-    const yLimit = mapH * PAN_WORLD_SCREENS * s;
-    return {
-      s,
-      x: Math.min(xLimit, Math.max(-xLimit, next.x)),
-      y: Math.min(yLimit, Math.max(-yLimit, next.y)),
-    };
-  }
-  if (s <= 1.001) return { s: 1, x: 0, y: 0 };
-  const minX = W - W * s;
-  const minY = mapH - mapH * s;
-  return {
-    s,
-    x: Math.min(0, Math.max(minX, next.x)),
-    y: Math.min(0, Math.max(minY, next.y)),
-  };
-}
-
 function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ s: 1, x: 0, y: 0 });
@@ -293,7 +270,14 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
 
     const dist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 
+    let blockedTouchGesture = false;
     const onTouchStart = (e: TouchEvent) => {
+      if (blockedTouchGesture || isMapControl(e.target) || Array.from(e.touches).some(t => isMapControl(t.target))) {
+        blockedTouchGesture = true;
+        pinchRef.current = null;
+        dragRef.current = null;
+        return;
+      }
       if (e.touches.length >= 2) {
         e.preventDefault();
         const a = e.touches[0]!;
@@ -316,11 +300,11 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
 
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length >= 2) {
+        const p = pinchRef.current;
+        if (!p) return;
         e.preventDefault();
         const a = e.touches[0]!;
         const b = e.touches[1]!;
-        const p = pinchRef.current;
-        if (!p) return;
         const factor = dist(a, b) / p.d;
         const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
         const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, p.s * factor));
@@ -344,7 +328,32 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
 
     const onTouchEnd = (e: TouchEvent) => {
       if (e.touches.length < 2) pinchRef.current = null;
-      if (e.touches.length === 0) dragRef.current = null;
+      if (e.touches.length === 0) {
+        dragRef.current = null;
+        blockedTouchGesture = false;
+      }
+    };
+
+    let pointerDrag: { id: number; px: number; py: number; x: number; y: number } | null = null;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!freePan || e.pointerType === "touch" || e.button !== 0 || !e.isPrimary || pointerDrag || isMapControl(e.target)) return;
+      e.preventDefault();
+      pointerDrag = { id: e.pointerId, px: e.clientX, py: e.clientY, x: viewRef.current.x, y: viewRef.current.y };
+      el.setPointerCapture(e.pointerId);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!pointerDrag || pointerDrag.id !== e.pointerId) return;
+      const r = el.getBoundingClientRect();
+      apply({
+        s: viewRef.current.s,
+        x: pointerDrag.x + ((e.clientX - pointerDrag.px) / Math.max(1, r.width)) * W,
+        y: pointerDrag.y + ((e.clientY - pointerDrag.py) / Math.max(1, r.height)) * H,
+      });
+    };
+    const onPointerEnd = (e: PointerEvent) => {
+      if (!pointerDrag || pointerDrag.id !== e.pointerId) return;
+      pointerDrag = null;
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
     };
 
     const blockPageZoom = (e: Event) => e.preventDefault();
@@ -354,6 +363,11 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
       e.preventDefault();
     };
 
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", onPointerEnd);
+    el.addEventListener("pointercancel", onPointerEnd);
+    el.addEventListener("lostpointercapture", onPointerEnd);
     el.addEventListener("wheel", onWheel, { passive: false });
     el.addEventListener("touchstart", onTouchStart, { passive: false });
     el.addEventListener("touchmove", onTouchMove, { passive: false });
@@ -366,6 +380,14 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
     document.addEventListener("gesturechange", blockPageGesture, { passive: false });
     document.addEventListener("gestureend", blockPageGesture, { passive: false });
     return () => {
+      if (pointerDrag && el.hasPointerCapture(pointerDrag.id)) el.releasePointerCapture(pointerDrag.id);
+      pinchRef.current = null;
+      dragRef.current = null;
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerEnd);
+      el.removeEventListener("pointercancel", onPointerEnd);
+      el.removeEventListener("lostpointercapture", onPointerEnd);
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
@@ -439,6 +461,10 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const setWeatherOn = useFiled((s) => s.setWeatherOn);
   const freePan = fixedViewport && !weatherPreview;
   const zoom = useMapBoxZoom(`${story.callsign}:${story.origin.iata}:${story.dest.iata}`, H, freePan);
+  const setMapFrame = useCallback((node: HTMLDivElement | null) => {
+    zoom.boxRef.current = node;
+    frameRef.current = node;
+  }, [zoom.boxRef]);
   const panelGroup = useId();
   const samples = story.route?.samples ?? [];
   if (samples.length < 2) return null;
@@ -562,10 +588,10 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-surface", fixedViewport && "flex h-full flex-col items-center")}>
       <div
-        ref={(node) => { zoom.boxRef.current = node; frameRef.current = node; }}
+        ref={setMapFrame}
         data-map-box
         className={cn("relative overflow-hidden select-none", fixedViewport && "w-full min-h-0 flex-1")}
-        style={{ touchAction: fixedViewport ? "none" : "pan-y",  }}
+        style={{ touchAction: fixedViewport ? "none" : "pan-y", cursor: freePan ? "grab" : undefined }}
       >
       <svg
         data-route-map
