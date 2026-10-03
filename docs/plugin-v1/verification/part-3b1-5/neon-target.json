@@ -1,0 +1,19 @@
+{
+  "projectId": "withered-water-48367194",
+  "branchId": "br-calm-star-aualangq",
+  "branchName": "plugin-v1-3b1-5-verification-20261003",
+  "databaseName": "neondb",
+  "productionBranchId": "br-late-forest-au7csk9x",
+  "proofSource": "Authenticated Neon console; schema-only setup and successful branch overview screenshots captured on 2026-10-03.",
+  "parentBranchId": "br-late-forest-au7csk9x",
+  "parentBranchName": "main",
+  "creationMode": "schema-only",
+  "endpointHost": "ep-young-violet-au5o7j7r.c-10.us-east-1.aws.neon.tech",
+  "isolated": true,
+  "noProductionDataCopied": true,
+  "createdForVerification": true,
+  "createdAt": "2026-10-03T23:33:54Z",
+  "expiresAt": "2026-10-04T23:33:54Z",
+  "controlPlaneEvidence": "Neon console creation dialog selected Branch schema only; successful branch creation and branch overview observed via authenticated UI. Connection pooling disabled in this branch connection dialog.",
+  "overviewUrl": "https://console.neon.tech/app/projects/withered-water-48367194/branches/br-calm-star-aualangq"
+}
