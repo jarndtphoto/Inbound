@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { polishStory } from './fixtures/presentation-polish.mjs';
 import { statusProgressIndex, stageStepId } from '../src/lib/flight-stage.ts';
-import { flightAirborne, elapsedFlight, flownDistance } from '../src/lib/flight-presentation.ts';
+import { flightAirborne, elapsedFlight, flownDistance, remainingFlight } from '../src/lib/flight-presentation.ts';
 
 let directory, ui;
 before(async () => {
@@ -40,7 +40,26 @@ test('observed airborne without a clock shows approximate elapsed and nonzero di
   assert.equal(elapsedFlight({...input,times:{...input.times,takeoffUnix:base.fetchedAt/1000-300,takeoffKind:'actual'}}).estimated,false);
 });
 after(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});
-function markup(Component, story) {return renderToStaticMarkup(h(QueryClientProvider,{client:new QueryClient()},h(Component,{story})));}
+function markup(Component, story) {
+  const realNow=Date.now;Date.now=()=>story.fetchedAt;
+  try{return renderToStaticMarkup(h(QueryClientProvider,{client:new QueryClient()},h(Component,{story})));}finally{Date.now=realNow;}
+}
+
+test('UA219 oceanic gap retains a provider ETA and labels it estimated, never a reset route ETA',()=>{
+  const base=polishStory(), now=base.fetchedAt;
+  const gap={...base,live:false,aircraft:null,
+    providers:{chosenPositionAgeSec:600,providerEta:{flightaware:now/1000+44*60,fr24:null}},
+    route:{...base.route,etaMin:500}};
+  assert.equal(remainingFlight(gap,now).minutes,44);assert.equal(remainingFlight(gap,now).estimated,true);
+  const html=markup(ui.TimesStrip,gap);
+  assert.match(html,/>44m</);assert.match(html,/Estimated · No live position · last seen 10 min ago/);
+  assert.doesNotMatch(html,/Updating…|Live position is stale/);
+  const server={...gap,providers:{chosenPositionAgeSec:null,etaMin:38},times:{...gap.times,landUnix:null}};
+  assert.equal(remainingFlight(server,now+60_000).minutes,37);
+  assert.match(markup(ui.TimesStrip,server),/Estimated · No live position/);
+  const unavailable={...server,providers:{},route:{...server.route,etaMin:NaN}};
+  assert.equal(remainingFlight(unavailable,now).minutes,null);assert.match(markup(ui.TimesStrip,unavailable),/Updating…/);
+});
 
 test('DL4820 surface takeoff roll activates Taxi, then confirmed airborne activates Flight without a takeoff clock',()=>{
   const base=polishStory(), origin={...base.origin,iata:'MDW',icao:'KMDW',lat:41.7868,lon:-87.7522};

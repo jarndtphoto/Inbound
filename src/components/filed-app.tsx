@@ -1,5 +1,5 @@
 import { applyTakeoffFloor } from "@/lib/confirmed-takeoff";
-import { displayStage, flightAirborne, liveFix, elapsedFlight, flownDistance } from "@/lib/flight-presentation";
+import { displayStage, flightAirborne, liveFix, elapsedFlight, flownDistance, remainingFlight } from "@/lib/flight-presentation";
 import { FLIGHT_STAGES as STAGES, stageStepId, statusProgressIndex } from "@/lib/flight-stage";
 import { AppearanceControl } from "@/components/appearance-control";
 import { inboundDiversionText } from "@/lib/inbound-diversion";
@@ -1172,7 +1172,7 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
   const showLiveFlight = Boolean(liveFix(story) && flightAirborne(story) && ac && !ac.onGround && (ac.altFt || ac.gsKt));
   const elapsed = airborne ? elapsedFlight(story) : null;
   const flown = airborne ? flownDistance(story) : null;
-  const liveFresh = cachedStorySafeDuringRefreshFailure(story);
+  const remaining = remainingFlight(story);
   const parked = story.currentStage === "gate";
   const delay = t?.delayMin ?? null;
   const late = (delay ?? 0) >= 5;
@@ -1213,8 +1213,8 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
             <StatusCard
               prominent
               title="Remaining"
-              value={liveFresh ? formatDuration(story.route.etaMin) : "Updating…"}
-              detail={liveFresh ? formatMiles(story.route.remainingNm) : "Live position is stale"}
+              value={remaining.minutes != null ? formatDuration(remaining.minutes) : "Updating…"}
+              detail={remaining.estimated ? [remaining.minutes != null ? "Estimated" : null, remaining.gapNote].filter(Boolean).join(" · ") : formatMiles(story.route.remainingNm)}
             />
             <StatusCard
               title="Flown"

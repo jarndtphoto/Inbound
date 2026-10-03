@@ -90,3 +90,25 @@ export function flownDistance(story: FlightStory): { nm: number; source: "track"
   const distance = haversineNm(story.origin, ac);
   return Number.isFinite(distance) && distance > 0 ? { nm: distance, source: "position" } : null;
 }
+
+export function remainingFlight(story: FlightStory, nowMs = Date.now()) {
+  const now = nowMs / 1000, sinceFetch = Math.max(0, now - story.fetchedAt / 1000);
+  const ages = [story.providers?.chosenPositionAgeSec, story.aircraft?.seenSec]
+    .filter((age): age is number => typeof age === "number" && Number.isFinite(age) && age >= 0)
+    .map(age => age + sinceFetch);
+  const seenAt = story.providers?.chosenPositionSeenAt;
+  if (typeof seenAt === "number" && Number.isFinite(seenAt) && seenAt > 0 && seenAt <= now) ages.push(now - seenAt);
+  const age = ages.length ? Math.min(...ages) : null;
+  const fresh = Boolean(liveFix(story) && !story.aircraft?.extrapolated && age != null && age <= 90);
+  const gapNote = fresh ? null : age == null ? "No live position" : `No live position · last seen ${Math.max(1, Math.round(age / 60))} min ago`;
+  const validEta = (unix: unknown): unix is number => typeof unix === "number" && Number.isFinite(unix) && unix > now && unix < now + 48 * 3600;
+  const etas = [story.providers?.providerEta?.fr24, story.providers?.providerEta?.flightaware, story.resume?.landing.estimated,
+    story.times.landKind === "estimated" ? story.times.landUnix : null];
+  const providerEta = etas.find(validEta);
+  const serverEta = story.providers?.etaMin ?? story.route.etaMin;
+  const serverRemaining = typeof serverEta === "number" && Number.isFinite(serverEta) && serverEta >= 0
+    ? serverEta - sinceFetch / 60 : null;
+  const minutes = !fresh && providerEta != null ? (providerEta - now) / 60
+    : serverRemaining != null && serverRemaining >= 0 ? serverRemaining : providerEta != null ? (providerEta - now) / 60 : null;
+  return { minutes, estimated: !fresh, gapNote };
+}
