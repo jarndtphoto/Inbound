@@ -213,3 +213,17 @@ test("confirmed takeoff survives concurrent stale CAS writes and same-version om
     assert.deepEqual((await db.phase().load(key)).state.confirmedTakeoff, current.state.confirmedTakeoff);
   } finally { await db.pg.close(); }
 });
+
+
+test("confirmed takeoff never crosses a scheduled service day or route", async () => {
+  const db = await database();
+  try {
+    const confirmedTakeoff = { source: "provider_actual" as const, time: 1790957520, confirmedAt: 1790957521 };
+    await db.phase().save(key, { ...departure, confirmedTakeoff }, 0);
+    for (const [record, ctx] of [[{ ...schedule, gateOut: { scheduled: 1790952900 + 86400 } }, context],
+      [{ ...schedule, destIata: "LAX" }, { ...context, destination: { iata: "LAX" } }]] as const) {
+      const id = flightStateIdentity(record, ctx);
+      assert.equal((await db.phase().load(id.key!, id.legacyKeys, id.recentLegacyKeys)).state.confirmedTakeoff, undefined);
+    }
+  } finally { await db.pg.close(); }
+});

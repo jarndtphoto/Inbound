@@ -18,7 +18,7 @@ function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
 
 export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResume): FlightStory {
   const floored = applyTakeoffFloor(story, prior);
-  if (floored.confirmedTakeoff) return floored;
+  if (floored !== story) return floored;
   const candidate = story.providers?.fr24Position;
   const sameLeg = sameResumeLeg(story, prior);
   const priorStage = sameLeg ? prior?.departureStage ?? null : null;
@@ -90,7 +90,7 @@ export function applyFr24GroundExperiment(story: FlightStory, prior?: FlightResu
 
 export function preserveDepartureProgress(story: FlightStory, prior?: FlightResume): FlightStory {
   const floored = applyTakeoffFloor(story, prior);
-  if (floored.confirmedTakeoff) return floored;
+  if (floored !== story) return floored;
   const current = story.currentStage;
   const sameLeg = sameResumeLeg(story, prior);
   const priorStage = sameLeg ? prior?.departureStage ?? null : null;
@@ -183,7 +183,7 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
 
 export function preferFreshAirborneState(story: FlightStory): FlightStory {
   const floored = applyTakeoffFloor(story);
-  if (floored.confirmedTakeoff) return floored;
+  if (floored !== story) return floored;
   const ac = story.aircraft;
   if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon) || ac.onGround !== false) return story;
   const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : ac.seenSec ?? null;

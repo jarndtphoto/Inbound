@@ -27,6 +27,7 @@ export function confirmTakeoff(args: {
   if (key.startsWith("leg:v1:") && finite(actual) && actual > 0 && actual <= now
     && finite(scheduled) && actual >= scheduled - 6 * 3600 && actual <= scheduled + 30 * 3600)
     return { time: actual, source: "provider_actual", confirmedAt: now };
+  if (finite(scheduled) && (now < scheduled - 5 * 60 || now > scheduled + 30 * 3600)) return;
   if (!p || p.extrapolated || p.onGround !== false || !finite(p.lat) || !finite(p.lon)
     || Math.abs(p.lat) > 90 || Math.abs(p.lon) > 180 || !identityCompatible(p, expected)) return;
   const age = finite(p.seenAt) ? now - p.seenAt : p.seenSec;

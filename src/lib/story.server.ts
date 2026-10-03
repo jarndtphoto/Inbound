@@ -3656,6 +3656,12 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		? aware
 		: { ...aware, gateOut: effectiveGateOut };
 	let times = timesOf(awareWithEffectiveGateOut, origin, dest);
+	if (resumed && !confirmedTakeoff) {
+		// Device-supplied clocks are schedule context, not validated takeoff proof.
+		const departureEstimate = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? null;
+		times = { ...times, airborne: false, takeoffUnix: departureEstimate,
+			takeoff: clockAt(departureEstimate, tzOf(origin)), takeoffKind: departureEstimate ? "estimated" : null };
+	}
 	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
 	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
 	const { awayFromPassengerGateArea } = departureSurfaceLocationHint(live, origin, effectiveGateOut);

@@ -43,6 +43,10 @@ test('wrappers and display retain the floor with missing, expired, or conflictin
       }
       assert.equal(displayStage(input), 'ride'); assert.equal(flightAirborne(input), true);
     }
+    const aborted = wrappers.preserveDepartureProgress({ ...story, confirmedTakeoff: null, currentStage: 'taxi',
+      aircraft: { ...story.origin, onGround: true, gsKt: 20, altFt: 680 },
+      providers: { chosenPosition: 'fr24', chosenPositionAgeSec: 1 } }, { ...resume, departureStage: 'takeoff_roll' });
+    assert.equal(aborted.currentStage, 'taxi'); assert.equal(aborted.confirmedTakeoff, null);
     const gap = applyTakeoffFloor(story);
     assert.equal(liveFix(gap), false); assert.equal(elapsedFlight(gap).estimated, false);
     assert.equal(gap.stages.ride.state, 'now'); assert.equal(gap.stages.taxi.state, 'done');
