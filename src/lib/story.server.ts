@@ -4289,6 +4289,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			routeRemainingNm,
 			directToDestNm,
 			flownNm: Math.max(0, totalNm - remainingNm),
+			observedFlownNm: filed.flown?.length >= 2 ? polylineLengthNm(filed.flown) : null,
 			etaMin,
 			progress,
 			heading,

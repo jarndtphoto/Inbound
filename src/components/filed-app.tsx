@@ -1,5 +1,5 @@
 import { applyTakeoffFloor } from "@/lib/confirmed-takeoff";
-import { displayStage, flightAirborne, liveFix, elapsedFlight } from "@/lib/flight-presentation";
+import { displayStage, flightAirborne, liveFix, elapsedFlight, flownDistance } from "@/lib/flight-presentation";
 import { FLIGHT_STAGES as STAGES, stageStepId, statusProgressIndex } from "@/lib/flight-stage";
 import { AppearanceControl } from "@/components/appearance-control";
 import { inboundDiversionText } from "@/lib/inbound-diversion";
@@ -1171,6 +1171,7 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
   const ac = story.aircraft;
   const showLiveFlight = Boolean(liveFix(story) && flightAirborne(story) && ac && !ac.onGround && (ac.altFt || ac.gsKt));
   const elapsed = airborne ? elapsedFlight(story) : null;
+  const flown = airborne ? flownDistance(story) : null;
   const liveFresh = cachedStorySafeDuringRefreshFailure(story);
   const parked = story.currentStage === "gate";
   const delay = t?.delayMin ?? null;
@@ -1217,8 +1218,8 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
             />
             <StatusCard
               title="Flown"
-              value={elapsed ? formatDuration(elapsed.minutes) : "—"}
-              detail={`${elapsed?.estimated || !liveFix(story) ? "Est. " : "Approx. "}${formatMiles(story.route.flownNm)}`}
+              value={elapsed ? `${elapsed.approximate ? "Approx. " : elapsed.estimated ? "Est. " : ""}${formatDuration(elapsed.minutes)}` : "—"}
+              detail={flown ? `Approx. ${flown.nm * 1.15078 < 1 ? "less than 1 mile" : formatMiles(flown.nm)}` : "Distance unavailable"}
             />
           </div>
         ) : down ? (

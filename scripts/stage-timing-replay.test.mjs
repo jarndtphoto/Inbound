@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { polishStory } from './fixtures/presentation-polish.mjs';
 import { statusProgressIndex, stageStepId } from '../src/lib/flight-stage.ts';
-import { flightAirborne } from '../src/lib/flight-presentation.ts';
+import { flightAirborne, elapsedFlight, flownDistance } from '../src/lib/flight-presentation.ts';
 
 let directory, ui;
 before(async () => {
@@ -20,6 +20,24 @@ before(async () => {
       if(id===resolve('src/components/filed-app.tsx')) return code+'\nexport {FlightHead, TimesStrip, FlightStatusProgress};\nexport {preserveDepartureProgress, preferFreshAirborneState} from "@/lib/story";';
     }},react()],build:{ssr:resolve('src/components/filed-app.tsx'),outDir:directory,rollupOptions:{output:{entryFileNames:'ui.mjs'}}} });
   ui=await import(pathToFileURL(join(directory,'ui.mjs')).href);
+});
+
+test('observed airborne without a clock shows approximate elapsed and nonzero distance, keeping actual Takeoff empty',()=>{
+  const base=polishStory(), input={...base,
+    confirmedTakeoff:{source:'observed_airborne',at:null,confirmedAt:base.fetchedAt/1000-120},
+    times:{...base.times,takeoff:null,takeoffUnix:null,takeoffKind:null},
+    route:{...base.route,flownNm:0},aircraft:{...base.aircraft,lat:42.06,lon:-87.95}};
+  assert.equal(elapsedFlight(input).minutes,2);assert.equal(elapsedFlight(input).approximate,true);
+  assert(flownDistance(input).nm>1);assert.equal(flownDistance(input).source,'position');
+  const html=markup(ui.TimesStrip,input);assert.match(html,/Approx\. 2m/);assert.doesNotMatch(html,/Approx\. 0 miles/);
+  assert.equal(input.times.takeoffUnix,null);assert.equal(input.times.takeoffKind,null);
+  const tracked={...input,route:{...input.route,observedFlownNm:7}};
+  assert.deepEqual(flownDistance(tracked),{nm:7,source:'track'});
+  const gap={...tracked,live:false,aircraft:null};assert.equal(elapsedFlight(gap).minutes,2);
+  assert.equal(flownDistance(gap).nm,7);
+  assert.equal(flownDistance({...gap,route:{...gap.route,observedFlownNm:null}}),null);
+  assert.equal(elapsedFlight({...input,stateKey:null}),null,'unvalidated device evidence supplies no approximate clock');
+  assert.equal(elapsedFlight({...input,times:{...input.times,takeoffUnix:base.fetchedAt/1000-300,takeoffKind:'actual'}}).estimated,false);
 });
 after(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});
 function markup(Component, story) {return renderToStaticMarkup(h(QueryClientProvider,{client:new QueryClient()},h(Component,{story})));}

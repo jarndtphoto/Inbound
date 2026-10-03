@@ -64,9 +64,29 @@ export function flightAirborne(story: FlightStory) {
 export function elapsedFlight(story: FlightStory) {
   const takeoff = story.times?.takeoffUnix;
   const now = story.fetchedAt / 1000;
-  if (!flightAirborne(story) || takeoff == null || !Number.isFinite(takeoff) || takeoff > now) return null;
+  if (!flightAirborne(story)) return null;
+  const confirmation = story.stateKey ? readTakeoffDiagnostic(story.confirmedTakeoff, now) : undefined;
+  const observed = confirmation?.observedAt ?? (confirmation?.source === "observed_airborne" ? confirmation.confirmedAt : null);
+  if (story.times.takeoffKind !== "actual" && observed != null) return {
+    minutes: (now - observed) / 60, estimated: true, approximate: true,
+  };
+  if (takeoff == null || !Number.isFinite(takeoff) || takeoff > now) return null;
   return {
     minutes: (now - takeoff) / 60,
     estimated: story.times?.takeoffKind !== "actual",
+    approximate: false,
   };
+}
+
+/** Observed track distance never includes the forward projection. Without a
+ * track, use a real origin-to-fix distance; a missing fix is not zero flown. */
+export function flownDistance(story: FlightStory): { nm: number; source: "track" | "position" } | null {
+  if (!flightAirborne(story)) return null;
+  const track = story.route.observedFlownNm;
+  if (typeof track === "number" && Number.isFinite(track) && track > 0) return { nm: track, source: "track" };
+  const ac = story.aircraft;
+  if (!liveFix(story) || !ac || ac.onGround || ac.extrapolated
+    || !Number.isFinite(story.origin.lat) || !Number.isFinite(story.origin.lon)) return null;
+  const distance = haversineNm(story.origin, ac);
+  return Number.isFinite(distance) && distance > 0 ? { nm: distance, source: "position" } : null;
 }

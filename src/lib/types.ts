@@ -283,6 +283,8 @@ export type FlightStory = {
     totalNm: number;
     remainingNm: number;
     flownNm: number;
+    /** Distance along observed sector track, excluding projected geometry. */
+    observedFlownNm?: number | null;
     etaMin: number;
     progress: number;
     heading: number;
