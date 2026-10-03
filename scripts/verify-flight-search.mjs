@@ -33,7 +33,12 @@ try {
     window.searchFixture = {client,mode:'pending',requests:0,aborts:0,load({signal}) {
       this.requests++;
       if(this.mode==='notfound') return Promise.reject(new Error('Flight not found'));
+      if(this.mode==='temporary') return Promise.reject(new Error('Current flight route unavailable: schedule provider returned HTTP 402; FlightStats unavailable'));
       if(this.mode==='loaded') return Promise.resolve({...polishStory(),fetchedAt:Date.now()});
+      if(this.mode==='slow') return new Promise((resolve,reject)=>{
+        const timer=setTimeout(()=>resolve({...polishStory(),fetchedAt:Date.now()}),28_000);
+        signal.addEventListener('abort',()=>{clearTimeout(timer);this.aborts++;reject(signal.reason);},{once:true});
+      });
       return new Promise((resolve,reject) => signal.addEventListener('abort',()=>{this.aborts++;reject(signal.reason);},{once:true}));
     }};
     const root = createRootRoute({component:()=> <QueryClientProvider client={client}><Outlet/></QueryClientProvider>});
@@ -122,10 +127,31 @@ try {
     await kept('US5558'); await flat();
 
     await start('US5558', 'pending'); await page.getByRole('button', { name: 'Cancel', exact: true }).waitFor();
+    const beforeSoft={requests:await requests(),aborts:await page.evaluate(()=>window.searchFixture.aborts)};
     await page.clock.fastForward(19_000); assert.equal(await page.getByRole('button', { name: 'Cancel', exact: true }).count(), 1);
-    await page.clock.fastForward(1_100); await alert.waitFor();
-    assert.match(await alert.innerText(), /We couldn't find US5558/); await screenshot('timeout'); await flat();
-    await back.click(); await kept('US5558');
+    await page.clock.fastForward(1_100); await page.getByRole('heading',{name:'Still looking…',exact:true}).waitFor();
+    assert.equal(await requests(),beforeSoft.requests);assert.equal(await page.evaluate(()=>window.searchFixture.aborts),beforeSoft.aborts);
+    assert.equal(await alert.count(),0);await screenshot('still-looking');
+    await page.getByRole('button',{name:'Cancel',exact:true}).click();await kept('US5558');await flat();
+
+    await start('UA219','slow');await page.getByRole('button',{name:'Cancel',exact:true}).waitFor();
+    const slowCount=await requests(),slowAborts=await page.evaluate(()=>window.searchFixture.aborts);
+    await page.clock.fastForward(20_100);await page.getByRole('heading',{name:'Still looking…',exact:true}).waitFor();
+    assert.equal(await page.evaluate(()=>window.searchFixture.aborts),slowAborts);
+    await page.clock.fastForward(8_000);await page.getByRole('button',{name:'Close flight briefing'}).click();
+    await page.getByRole('navigation',{name:'Flight pages'}).waitFor();
+    assert.equal(await requests(),slowCount,'a valid 28-second load uses one request');
+    await back.click();await kept('UA219');await flat();
+    await page.evaluate(()=>localStorage.removeItem('filed-story-cache-v9'));
+
+    await start('WN421','temporary');await alert.waitFor();const temporaryCount=await requests();
+    assert.match(await alert.innerText(),/Flight data is temporarily unavailable/);
+    assert.doesNotMatch(await alert.innerText(),/couldn't find/);await screenshot('temporary');
+    for(let i=1;i<=4;i++){
+      await page.clock.fastForward(30_100);await page.waitForFunction(count=>window.searchFixture.requests===count,temporaryCount+i);
+    }
+    await flat();assert.equal(await requests(),temporaryCount+4,'initial request plus four slow retries');
+    await alert.getByRole('button',{name:'Back to search',exact:true}).click();await kept('WN421');await flat();
 
     await start('US5558', 'pending'); await page.getByRole('button', { name: 'Cancel', exact: true }).waitFor();
     await page.goBack(); await kept('US5558'); await flat();
@@ -149,7 +175,7 @@ try {
     assert.deepEqual(errors, []);
     assert.ok(!blocked.some(host => /flightaware|flightstats|fr24|flightradar|adsb/.test(host)));
     results.push({ viewport: name, loadingCancel: true, loadingBack: true, errorBack: true, textKept: true,
-      postExitRequestsFlat: true, notFoundNoRetry: true, timeoutMs: 20_000, explicitRetry: true,
+      postExitRequestsFlat: true, notFoundNoRetry: true, stillLookingMs: 20_000, slowValidLoadMs:28_000, temporaryAttempts:5, temporaryRetryMs:30_000, explicitRetry: true,
       browserBackForward: true, loadedPollingAndTabs: true, pageErrors: errors, providerRequests: 0 });
     await context.close();
   }

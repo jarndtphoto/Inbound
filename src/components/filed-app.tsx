@@ -27,7 +27,7 @@ import type { Comfort, FlightStory, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
 import { flightPollingComplete } from "@/lib/flight-polling";
-import { INITIAL_FLIGHT_SEARCH_MS, flightStoryQueryKey, flightNotFound, flightSearchCanPoll, stopFlightSearch, flightStoryRequest } from "@/lib/flight-search";
+import { INITIAL_FLIGHT_SEARCH_MS, TEMPORARY_FLIGHT_RETRY_MS, flightStoryQueryKey, flightNotFound, flightSearchCanPoll, flightSearchShouldRetry, stopFlightSearch, flightStoryRequest } from "@/lib/flight-search";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
 import { sampleWeather } from "@/lib/route-weather-segments";
 import { WeatherEventBody, WeatherEventHeadline, WeatherIntensityLabel } from "@/components/weather-event-copy";
@@ -419,7 +419,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
   const [briefingFor, setBriefingFor] = useState("");
   const [cacheOk, setCacheOk] = useState(false);
-  const [searchExpired, setSearchExpired] = useState(false);
+  const [stillLooking, setStillLooking] = useState(false);
   const [searchAttempt, setSearchAttempt] = useState(0);
   const leavingRef = useRef(false);
   const [refreshErr, setRefreshErr] = useState<string | null>(null);
@@ -483,7 +483,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       });
       signal.throwIfAborted();
       if (!storyMatchesQuery(s, query)) {
-        throw new Error("Could not load that flight. Try another number.");
+        throw new Error("Flight data is temporarily unavailable: the provider returned a different flight.");
       }
       const merged = keepRecentTrackGeometry(
         rememberOrigOnClient(applyTakeoffFloor(s, saved)),
@@ -500,15 +500,15 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     },
     initialDataUpdatedAt: 0,
     enabled: (q) => cacheOk && query.length > 0
-      && flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current),
+      && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     refetchInterval: (q) => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return false;
-      if (!flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current)) return false;
+      if (!flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount)) return false;
       if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
       if (s && flightPollingComplete(s)) return 60_000;
       if (q.state.status === "error") return /HTTP 402\b/.test(String(q.state.error?.message ?? "")) ? 60_000 : 15_000;
-      if (!s) return 5_000;
+      if (!s) return false; // The bounded retryer owns initial search attempts.
       if (s.live || s.currentStage === "push" || s.currentStage === "taxi") return 3_000;
       if (s.currentStage === "ride" || s.currentStage === "arrival" || s.currentStage === "final_approach" || s.currentStage === "taxi_in") return 4_000;
       if (s.currentStage === "inbound") return 5_000;
@@ -517,18 +517,16 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     staleTime: 2_500,
     gcTime: 10 * 60_000,
     retry: (count, err) => {
-      // Empty searches fail once and wait for an explicit Try again. Saved
-      // flights retain their existing live-update retries for transient errors.
-      if (!storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query)
-        || leavingRef.current || searchExpired || flightNotFound(err)) return false;
+      if (leavingRef.current || flightNotFound(err)) return false;
+      if (!storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query))
+        return flightSearchShouldRetry(count, err, leavingRef.current);
       if (count >= 2 || /HTTP 402\b/.test(err instanceof Error ? err.message : "")) return false;
-      const msg = err instanceof Error ? err.message : "";
-      if (/Try another number|Enter a flight number|Flight number is too long/i.test(msg)) return false;
       return true;
     },
-    retryDelay: (attempt) => Math.min(2_000 * 2 ** attempt, 8_000),
-    refetchOnWindowFocus: (q) => flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current),
-    refetchOnReconnect: (q) => flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current),
+    retryDelay: (attempt) => storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query)
+      ? Math.min(2_000 * 2 ** attempt, 8_000) : TEMPORARY_FLIGHT_RETRY_MS,
+    refetchOnWindowFocus: (q) => Boolean(q.state.data) && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
+    refetchOnReconnect: (q) => Boolean(q.state.data) && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     placeholderData: (previousData) => {
       if (storyForQuery(previousData, query)) return previousData;
       return storyForQuery(readCachedStory(query), query);
@@ -538,14 +536,13 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   const story = storyForQuery(storyQ.data, query);
   useEffect(() => () => stopFlightSearch(queryClient, query), [queryClient, query]);
   useEffect(() => {
-    if (!cacheOk || story || storyQ.isError || searchExpired) return;
+    if (!cacheOk || story || storyQ.isError || stillLooking) return;
     const timer = window.setTimeout(() => {
       if (storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query)) return;
-      setSearchExpired(true);
-      void queryClient.cancelQueries({ queryKey: flightStoryQueryKey(query), exact: true });
+      setStillLooking(true);
     }, INITIAL_FLIGHT_SEARCH_MS);
     return () => window.clearTimeout(timer);
-  }, [cacheOk, query, queryClient, searchAttempt, Boolean(story), storyQ.isError, searchExpired]);
+  }, [cacheOk, query, queryClient, searchAttempt, Boolean(story), storyQ.isError, stillLooking]);
 
   function leaveFlight() {
     leavingRef.current = true;
@@ -554,20 +551,21 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     onHome();
   }
   function trySearchAgain() {
-    setSearchExpired(false);
+    setStillLooking(false);
     setSearchAttempt((attempt) => attempt + 1);
-    void storyQ.refetch();
+    void queryClient.cancelQueries({ queryKey: flightStoryQueryKey(query), exact: true }).then(() => storyQ.refetch());
   }
 
   useEffect(() => {
     const refreshWhenVisible = () => {
       if (document.visibilityState !== "visible" || !query) return;
-      if (!flightSearchCanPoll(storyQ.data, storyQ.error, searchExpired || leavingRef.current)) return;
+      if (!storyQ.data && storyQ.failureCount > 0) return;
+      if (!flightSearchCanPoll(storyQ.data, storyQ.error, leavingRef.current, storyQ.failureCount)) return;
       if (Date.now() - storyQ.dataUpdatedAt > 2_500) void storyQ.refetch();
     };
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => document.removeEventListener("visibilitychange", refreshWhenVisible);
-  }, [query, storyQ.dataUpdatedAt, storyQ.data, storyQ.error, storyQ.refetch, searchExpired]);
+  }, [query, storyQ.dataUpdatedAt, storyQ.data, storyQ.error, storyQ.refetch, storyQ.failureCount]);
 
   useEffect(() => {
     if (storyQ.dataUpdatedAt > 0) setRefreshErr(null);
@@ -820,13 +818,14 @@ function FlightPages({ onHome }: { onHome: () => void }) {
             {savedScheduleNote(story.schedule.confirmedAt)}
           </div>
         ) : null}
-        {(storyQ.isError || searchExpired) && !story && (
+        {(storyQ.isError || storyQ.failureCount > 0) && !story && (
           <div role="alert" className="mb-4 rounded-md border border-ifr/40 bg-surface px-4 py-3">
             <p className="text-sm text-ifr">
-              {searchExpired || flightNotFound(storyQ.error)
+              {flightNotFound(storyQ.error ?? storyQ.failureReason)
                 ? `We couldn't find ${query}. Check the flight number.`
-                : `We couldn't load ${query}'s flight information. Check the flight number or try again.`}
+                : "Flight data is temporarily unavailable."}
             </p>
+            {!flightNotFound(storyQ.error ?? storyQ.failureReason) && storyQ.isFetching && <p className="mt-1 text-sm text-muted">We’ll try again shortly.</p>}
             <div className="mt-3 flex flex-wrap gap-2">
               <Button type="button" variant="secondary" onClick={leaveFlight}>Back to search</Button>
               <Button type="button" variant="secondary" onClick={trySearchAgain}>Try again</Button>
@@ -834,7 +833,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
           </div>
         )}
 
-        {!story && !storyQ.isError && !searchExpired && <Skeleton query={query || "the flight"} onHome={leaveFlight} />}
+        {!story && !storyQ.isError && storyQ.failureCount === 0 && <Skeleton query={query || "the flight"} onHome={leaveFlight} slow={stillLooking} />}
 
         {story && (
           <div key={normFlight(query)} className={cn("journey-body min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
@@ -1799,13 +1798,13 @@ function WxBlock({
   );
 }
 
-function Skeleton({ query, onHome }: { query: string; onHome: () => void }) {
+function Skeleton({ query, onHome, slow = false }: { query: string; onHome: () => void; slow?: boolean }) {
   const label = query.trim() || "the flight";
   return (
     <div className="flight-loading" role="status">
       <RefreshCw className="size-6 animate-spin text-accent" aria-hidden="true" />
-      <h2>Getting {label}</h2>
-      <p>Getting times, weather, and the map…</p>
+      <h2>{slow ? "Still looking…" : `Getting ${label}`}</h2>
+      <p>{slow ? `We're still checking ${label}'s flight information.` : "Getting times, weather, and the map…"}</p>
       <button type="button" onClick={onHome} className="min-h-11 px-3 text-sm font-semibold text-accent underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">Cancel</button>
       <dl><div><dt>Times</dt><dd>Scheduled and estimated clocks load with the flight.</dd></div><div><dt>Briefing</dt><dd>Ride notes appear as soon as weather is in.</dd></div></dl>
     </div>

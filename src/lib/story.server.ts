@@ -4,6 +4,7 @@ import { loadAeroFlight } from "./aeroapi.server.ts";
 import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
 import { readFlightResume } from "./flight-resume";
+import { flightNotFound, verifiedFlightNotFoundPage } from "./flight-search.ts";
 import { loadPhaseState, savePhaseState, phaseStateEqual } from "./flight-phase-state.server";
 import { confirmTakeoff, reconcileTakeoff, takeoffFloorStage, takeoffDiagnostic, hasOriginSurfaceFix } from "./confirmed-takeoff.ts";
 import { activeConfirmedTakeoff, mergeConfirmedTakeoff } from "./flight-phase-state-logic.ts";
@@ -1327,6 +1328,8 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 		}
 	}
 	if (!res.ok) {
+		if (res.status === 404 && withInbound && verifiedFlightNotFoundPage(404, await res.text()))
+			throw new Error(`[flight_not_found] No flight found for ${fallbackIdent}.`);
 		let reason = "";
 		if (res.status === 402) {
 			const body = (await res.text()).slice(0, 16000);
@@ -1350,7 +1353,10 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 		}
 		throw new Error(`Current flight route unavailable: schedule provider returned HTTP ${res.status}${reason ? " (" + reason + ")" : ""}. Please try again shortly.`);
 	}
-	const raw = (await res.text()).split("trackpollBootstrap = ")[1];
+	const html = await res.text();
+	const raw = html.split("trackpollBootstrap = ")[1];
+	if (!raw && withInbound && verifiedFlightNotFoundPage(res.status, html))
+		throw new Error(`[flight_not_found] No flight found for ${fallbackIdent}.`);
 	if (!raw) throw new Error("Current flight route unavailable: schedule provider returned no flight data. Please try again shortly.");
 	const flights = parseJsonObject(raw)?.flights;
 	if (!flights) return null;
@@ -1622,6 +1628,8 @@ async function loadFlightStatsPublic(callsign) {
 			candidates = candidates.concat(details.filter(Boolean));
 		}
 		const selected = chooseFlightStatsScheduleCandidate(candidates);
+		if (!selected && pages.length === dates.length && pages.every(page => verifiedFlightNotFoundPage(200, page.html)))
+			throw new Error(`[flight_not_found] No flight found for ${parsed.iata} on the checked service dates.`);
 		if (selected) {
 			console.info("[flightstats-schedule]", {
 				callsign: parsed.callsign,
@@ -2891,6 +2899,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const stateIdent = `${resumed?.scope ?? ""}${identKey}`;
 	let knownHex = hexByIdent.get(stateIdent) || null;
 	const hazardsP = loadHazards();
+	let scheduleError = null;
 	const [rawAc0, publicAware, route] = await Promise.all([
 		knownHex
 			? safe(adsbByHex(knownHex), null)
@@ -2898,6 +2907,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				? safe(adsbByReg(parsed.registration), null)
 				: safe(adsbByCallsign(parsed.callsign), null),
 		(resumed ? Promise.resolve(awareFromResume(resumed.resume, resumed.scope)) : loadAware(parsed.callsign)).catch((err) => {
+			scheduleError = err;
 			console.warn("[schedule-fallback-unavailable]", {
 				callsign: parsed.callsign,
 				reason: err instanceof Error ? err.message.slice(0, 180) : String(err).slice(0, 180),
@@ -2940,6 +2950,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// to a different city pair. Require either a current schedule record or a
 	// fresh FR24 live record that identifies both ends of this exact active leg.
 	if (!parsed.registration && (!(aware?.originIata || aware?.originIcao) || !(aware?.destIata || aware?.destIcao))) {
+		if (flightNotFound(scheduleError)) throw scheduleError;
 		throw new Error("Current flight route unavailable. Try again when the flight feed responds.");
 	}
 	let rawAc = rawAc0;
