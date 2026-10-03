@@ -6,6 +6,7 @@ import { TravelerCompanion } from "@/components/traveler-companion";
 import { BaggageStatus, useBaggageStatus } from "@/components/baggage-status";
 import { baggageSummary } from "@/lib/baggage-copy";
 import { flightDepartureDate } from "@/lib/airline-status";
+import { storyLegDate } from "@/lib/flight-story-date";
 import { isLanded, nextStep } from "@/lib/traveler";
 import { briefRide } from "@/lib/brief";
 import { briefLogLabel, briefLogText, briefingRefreshOutcome, composeBrief, logManualRefresh, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
@@ -120,29 +121,24 @@ function writeCachedStory(q: string, story: FlightStory) {
 
 function origMemKey(story: FlightStory) {
   if (story.stateKey) return story.stateKey;
-  const u = story.times?.origPushUnix ?? story.times?.pushUnix;
-  const day =
-    u != null
-      ? new Date(u * 1000).toISOString().slice(0, 10)
-      : new Date(story.fetchedAt).toISOString().slice(0, 10);
+  const day = storyLegDate(story) ?? new Date(story.fetchedAt).toISOString().slice(0, 10);
   return `${normFlight(story.callsign)}:${story.origin.iata}:${story.dest.iata}:${day}`;
 }
 
 const BRIEF_HISTORY_KEY = "inbound-brief-history-v2";
 
-function briefHistoryKey(story: FlightStory) {
+function briefHistoryKey(story: FlightStory, legacy = false) {
+  if (!legacy && story.stateKey) return story.stateKey;
   const instance = story.flightId?.trim();
   if (instance) return `${instance}:${story.origin.iata}:${story.dest.iata}`;
-  const u = story.times?.origPushUnix ?? story.times?.pushUnix ?? story.times?.takeoffUnix;
-  const day = u != null
-    ? new Date(u * 1000).toISOString().slice(0, 10)
-    : new Date(story.fetchedAt).toISOString().slice(0, 10);
+  const day = storyLegDate(legacy ? { ...story, stateKey: null } : story) ?? new Date(story.fetchedAt).toISOString().slice(0, 10);
   return `${normFlight(story.callsign)}:${story.origin.iata}:${story.dest.iata}:${day}`;
 }
 
 function savedBrief(story: FlightStory): CompiledBrief | null {
   try {
-    const entry = JSON.parse(localStorage.getItem(BRIEF_HISTORY_KEY) || "{}")[briefHistoryKey(story)];
+    const records = JSON.parse(localStorage.getItem(BRIEF_HISTORY_KEY) || "{}");
+    const entry = records[briefHistoryKey(story)] ?? records[briefHistoryKey(story, true)];
     const b = entry?.brief;
     return b && typeof b.lead === "string" && b.snap && Array.isArray(b.log)
       && Array.isArray(b.segments) ? b : null;
