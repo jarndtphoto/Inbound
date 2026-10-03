@@ -227,6 +227,11 @@ export type WxBrief = {
 };
 
 export type FlightStory = {
+  stateKey?: string | null;
+  confirmedTakeoff?: import("./confirmed-takeoff.ts").TakeoffDiagnostic | null;
+  selectedStageReason?: string;
+  takeoffFloorApplied?: boolean;
+  candidateStage?: string;
   flightId?: string;
   inboundDiversion?: { source: "flightaware"; reportedAt: number; flightId: string; flight: string; aircraft: string; destination: string | null; originalDestination: string | null; chain: string[] };
   diversion?: { source: "flightaware"; reportedAt: number; originalDestination: string | null; destination: string | null };

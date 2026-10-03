@@ -1,6 +1,6 @@
 import type { Sql } from "./db.ts";
 import { legacyProviderPattern, legacyProviderBelongsToLeg } from "./flight-identity.ts";
-import { EMPTY_PHASE_STATE, mergeForward, phaseStateEqual } from "./flight-phase-state-logic";
+import { EMPTY_PHASE_STATE, mergeForward, mergeConfirmedTakeoff, phaseStateEqual } from "./flight-phase-state-logic";
 import type { PhaseState, PushLatch, TaxiOutLatch, ConfirmedTakeoff } from "./flight-phase-state-logic";
 
 export type { PushLatch, TaxiOutLatch, PhaseState, ConfirmedTakeoff };
@@ -60,7 +60,8 @@ export function createFlightPhaseStateStore(sqlProvider: () => Promise<Sql>) {
       // Even a write with the current version may omit previously confirmed
       // evidence. Merge it before the CAS; a racing writer still uses the retry.
       const prior = await read(landKey);
-      if (await writeOnce(landKey, mergeForward(prior.state, next), expectedVersion)) return "ok";
+      const confirmedTakeoff = mergeConfirmedTakeoff(prior.state.confirmedTakeoff, next.confirmedTakeoff);
+      if (await writeOnce(landKey, { ...next, ...(confirmedTakeoff ? { confirmedTakeoff } : {}) }, expectedVersion)) return "ok";
       const current = await read(landKey);
       if (await writeOnce(landKey, mergeForward(current.state, next), current.version)) return "conflict_resolved";
       console.error("[flight-phase-state] save conflict retry also lost the race", { landKey });

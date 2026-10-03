@@ -430,10 +430,10 @@ describe('MDW departure surface-stage replays', () => {
   const now = 1789231976;
   for (const [flight, speed, status, gateActual, takeoffActual, expectedStage, expectedPush] of [
     ['WN363', 0, 'scheduled', now - 90, null, 'push', true],
-    ['WN1035', 14, 'airborne', now - 180, now - 30, 'taxi', true],
-    ['WN102', 65, 'airborne', now - 580, now - 480, 'taxi', true],
+    ['WN1035', 14, 'airborne', now - 180, now - 30, 'ride', true],
+    ['WN102', 65, 'airborne', now - 580, now - 480, 'ride', true],
   ]) {
-    it(`${flight}: a fresh ground fix controls the stage`, async (t) => {
+    it(`${flight}: ground telemetry cannot undo a confirmed actual takeoff`, async (t) => {
       const record = structuredClone(JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8')));
       record.ident = flight;
       record.iataIdent = flight;
@@ -464,7 +464,12 @@ describe('MDW departure surface-stage replays', () => {
       });
       const story = await loadFlightStory(flight, { fresh: true });
       assert.equal(story.currentStage, expectedStage);
-      assert.equal(story.times.airborne, false);
+      assert.equal(story.times.airborne, takeoffActual != null);
+      if (takeoffActual != null) {
+        assert.equal(story.confirmedTakeoff.source, 'provider_actual');
+        assert.equal(story.times.takeoffUnix, takeoffActual);
+        assert.match(story.selectedStageReason, /confirmed_takeoff/);
+      }
       assert.equal(story.times.pushed, expectedPush);
       assert.equal(story.aircraft.onGround, true);
       if (flight === 'WN363') {
