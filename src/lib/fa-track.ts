@@ -1,3 +1,4 @@
+import { phaseOf, verticalTrend, type PhaseContext } from "./aircraft-phase.ts";
 export function parseJsonObject(raw: string): Record<string, unknown> | null {
   if (typeof raw !== "string") return null;
   const start = raw.indexOf("{");
@@ -98,7 +99,7 @@ export function liveFromAware(aware: {
   heading?: number | null;
   altFt?: number | null;
   faTrack?: FaTrackPt[] | null;
-} | null): {
+} | null, context: PhaseContext = {}): {
   hex: string;
   callsign: string | null;
   registration: string | null;
@@ -109,7 +110,11 @@ export function liveFromAware(aware: {
   gsKt: number | null;
   track: number | null;
   onGround: boolean;
-  phase: string;
+  phase: ReturnType<typeof phaseOf>;
+  vertFpm: number | null;
+  phaseVertFpm: number | null;
+  phaseRateWindowSec: number;
+  phaseRateSource: "altitude-delta" | "sustained-provider" | null;
   extrapolated: boolean;
   seenSec: number;
 } | null {
@@ -133,7 +138,10 @@ export function liveFromAware(aware: {
   const hdg = last.track ?? aware.heading ?? null;
   const altFt = last.alt ?? aware.altFt ?? null;
   const onGround = Boolean(last.ground) || ((altFt == null || altFt < 50) && (gs == null || gs < 40));
+  const sample = { lat, lon, altFt, onGround, gsKt: gs, seenAt: last.t!, seenSec: age };
+  const trend = verticalTrend(sample, pts.map(p => ({ seenAt: p.t!, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon })));
   return {
+    ...trend, vertFpm: trend.phaseVertFpm,
     hex: String(aware.hex || "").toLowerCase(),
     callsign: String(aware.ident || "").replace(/\s/g, "").toUpperCase() || null,
     registration: aware.tail ?? null,
@@ -144,7 +152,7 @@ export function liveFromAware(aware: {
     gsKt: gs,
     track: hdg,
     onGround,
-    phase: onGround ? ((gs ?? 0) >= 2 ? "taxi" : "parked") : ((altFt ?? 0) < 10000 ? "climb" : "cruise"),
+    phase: phaseOf({ ...sample, ...trend }, { ...context, groundTaxiKt: 1.999 }),
     extrapolated: false,
     seenSec: age,
   };

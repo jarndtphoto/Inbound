@@ -18,6 +18,7 @@ export type AdsbRaw = {
   spd?: number;
   track?: number;
   baro_rate?: number;
+  geom_rate?: number;
   seen?: number;
   seen_pos?: number;
   dst?: number;

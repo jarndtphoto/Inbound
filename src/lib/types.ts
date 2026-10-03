@@ -133,6 +133,10 @@ export type LiveAircraft = {
   vertFpm: number | null;
   onGround: boolean;
   phase: Traffic["phase"];
+  /** Sustained/derived rate used for stages; raw vertFpm remains a measurement. */
+  phaseVertFpm?: number | null;
+  phaseRateWindowSec?: number;
+  phaseRateSource?: "altitude-delta" | "sustained-provider" | null;
   callsign?: string | null;
   extrapolated?: boolean;
   seenSec?: number | null;
