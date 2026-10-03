@@ -283,6 +283,10 @@ export type FlightStory = {
   route: {
     expectedArrival?: import("./arrival-runway").ExpectedArrivalRunway | null;
     arrivalPatternKind?: "straight-in" | "downwind-base" | null;
+    arrivalProjectionStale?: boolean;
+    arrivalGeometrySource?: "observed_fix" | "last_known_fix" | "held_cursor" | null;
+    filedRouteFingerprint?: string | null;
+    filedRouteObservedAt?: number | null;
     totalNm: number;
     remainingNm: number;
     flownNm: number;

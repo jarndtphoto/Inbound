@@ -53,7 +53,7 @@ import {
 import { faAltFt, hasAirborneEvidence, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
 import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
 import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
-import { arrivalFuturePoints } from "./arrival-path.ts";
+import { displayArrivalProjection } from "./arrival-display.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
 import { emptyRouteMemory, mergeRouteMemory, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress } from "./route-memory.ts";
 import { routeMemoryStore } from "./route-memory-store.server.ts";
@@ -3426,13 +3426,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		arrivalPersistence = saved.status;
 	}
 	expectedArrival = arrivalState.runway;
-	const futureArrivalPoints = live ? arrivalFuturePoints(arrivalState.points, live) : arrivalState.points;
-	// Only this response's display path gets the observed aircraft anchor.
-	const displayArrivalPoints = live ? [{ lat: live.lat, lon: live.lon }, ...futureArrivalPoints] : [];
-	// A consumed suffix is still an active zero-distance projection until landing;
-	// do not fall back to the airport reference point after passing the threshold.
-	const pattern = !ourLanded && !live?.onGround && arrivalState.active && arrivalState.kind && displayArrivalPoints.length >= 1
-		? { points: displayArrivalPoints, lengthNm: polylineLengthNm(displayArrivalPoints), kind: arrivalState.kind } : null;
+	const pattern = displayArrivalProjection(arrivalState, {
+		observation: routeObservation && Date.now() - routeObservation.seenAt <= 60_000 ? routeObservation : null,
+		live, lastObserved: routeObservation ?? routeMemory?.lastObserved ?? null, landed: ourLanded
+	});
 	if (pattern) {
 		arrivalPatternKind = pattern.kind;
 		// Preserve observed history; only the future display path changes.
@@ -3447,10 +3444,18 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		remainingNm = pattern.lengthNm;
 		routeRemainingNm = pattern.lengthNm;
 		progress = Math.max(0, 1 - remainingNm / totalNm);
+		if (pattern.stale && routeMemory?.lastObserved) {
+			// A held plan does not create a new progress observation.
+			progress = routeMemory.lastObserved.progress;
+			totalNm = routeMemory.lastObserved.totalNm;
+			remainingNm = routeRemainingNm = routeMemory.lastObserved.remainingNm;
+		}
 	}
 	if (arrivalEntry || loadedArrival.state.startedAt || ourLanded) console.info("[arrival-projection]", {
 		flight: parsed.callsign, landKey, stateKey, instance: ARRIVAL_INSTANCE,
 		entryGate: arrivalEntry, reason: arrivalUpdate.reason, persistence: arrivalPersistence,
+		applied: Boolean(pattern), geometrySource: pattern?.geometrySource ?? null,
+		displayPointCount: pattern?.points.length ?? 0, stale: pattern?.stale ?? false,
 		loadedVersion: loadedArrival.version, hadPrevious: Boolean(loadedArrival.state.startedAt),
 		runway: expectedArrival?.runway ?? null, source: expectedArrival?.source ?? null,
 		side: arrivalState.side, active: arrivalState.active, startedAt: arrivalState.startedAt,
@@ -4299,6 +4304,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		route: {
 			expectedArrival,
 			arrivalPatternKind,
+			arrivalProjectionStale: pattern?.stale ?? false,
+			arrivalGeometrySource: pattern?.geometrySource ?? null,
+			filedRouteFingerprint: routeMemory?.filed?.fingerprint ?? null,
+			filedRouteObservedAt: routeMemory?.filed?.observedAt ?? null,
 			totalNm,
 			remainingNm,
 			routeRemainingNm,
