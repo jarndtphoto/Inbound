@@ -1,3 +1,4 @@
+import { lastKnownProgressLabel } from "@/lib/route-continuity";
 import { destPoint, formatDuration, formatMiles, haversineNm } from "@/lib/geo";
 import { ArrivalRunwayChip } from "./arrival-runway-chip";
 import { upcomingStorms } from "@/lib/route-hazards";
@@ -507,7 +508,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const origin = { lat: story.origin.lat, lon: story.origin.lon };
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
   const ac = story.aircraft;
-  const hasFix = Boolean(story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
+  const hasFix = Boolean(story.route.progressSource !== "last_known" && story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
+  const lastKnownLabel = lastKnownProgressLabel(story);
   const onField = Boolean(hasFix && ac?.onGround && haversineNm(ac, dest) < 8);
   const atGate = story.currentStage === "gate";
   const landed = atGate || onField;
@@ -739,11 +741,12 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
       />}
 
       <div data-map-obstacle className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
-        <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
+        <p className="max-w-1/2 rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
           {weatherPreview ? <WeatherPreviewLabel label={weatherPreview.label} /> : story.route.source === "track" ? "TRACK + PROJECTED ROUTE" : "PROJECTED ROUTE"}
+          {!weatherPreview && story.route.arrivalProjectionStale ? <span className="block">Approach plan · stale</span> : null}
         </p>
-        <p className="rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : Date.now() - story.fetchedAt > 15_000 || (story.providers?.chosenPositionAgeSec ?? Infinity) > 60 ? "Updating live position…" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`}
+        <p data-route-progress-source={story.route.progressSource} className="max-w-1/2 rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
+          {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : lastKnownLabel ?? (Date.now() - story.fetchedAt > 15_000 || (story.providers?.chosenPositionAgeSec ?? Infinity) > 60 ? "Updating live position…" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`)}
         </p>
       </div>
       {weatherPreview && ticks[0] ? <WeatherPreviewLocation lat={ticks[0].lat} lon={ticks[0].lon} /> : null}
@@ -800,6 +803,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
               <span>⚡ Thunderstorms · ☁ Clouds</span>
             </div>
             {(weatherOn || weatherPreview) && <RadarStatus />}
+            {!weatherPreview && lastKnownLabel ? <p>{lastKnownLabel}. {story.route.source === "track" ? "The solid line retains the observed track." : "The projected route geometry is retained."} No current aircraft position is shown.</p> : null}
+            {!weatherPreview && story.route.arrivalProjectionStale ? <p>Approach plan is stale and held from the last known point until a fresh observation arrives.</p> : null}
             {story.hazards.filter(h => h.remaining && h.validity).map(h => <p key={h.id}>{h.label} · {h.validity}</p>)}
           </div>
         </details>

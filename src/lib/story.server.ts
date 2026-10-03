@@ -53,8 +53,10 @@ import {
 import { faAltFt, hasAirborneEvidence, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
 import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
 import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
-import { arrivalFuturePoints } from "./arrival-path.ts";
+import { displayArrivalProjection } from "./arrival-display.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
+import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress, routeMemoryEqual } from "./route-memory.ts";
+import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
 import { loadOfficialFlightData } from "./official-flight-data.server.ts";
@@ -2256,35 +2258,6 @@ const hexByIdent = /* @__PURE__ */ new Map();
 const hexRouteByIdent = /* @__PURE__ */ new Map();
 const lastKinByIdent = /* @__PURE__ */ new Map();
 const observePhase = createPhaseHistory();
-const routeTrackByFlight = /* @__PURE__ */ new Map();
-const ROUTE_TRACK_HOLD_MS = 20 * 60_000;
-
-function holdLastGoodRouteTrack(key, filed) {
-	const now = Date.now();
-	const hasTrack = filed?.source === "track" && Array.isArray(filed.flown) && filed.flown.length >= 2;
-	if (hasTrack) {
-		routeTrackByFlight.set(key, {
-			at: now,
-			flown: filed.flown,
-			spine: Array.isArray(filed.spine) ? filed.spine : [],
-		});
-		return filed;
-	}
-	const prev = routeTrackByFlight.get(key);
-	if (!prev || now - prev.at > ROUTE_TRACK_HOLD_MS || !Array.isArray(prev.flown) || prev.flown.length < 2) {
-		if (prev && now - prev.at > ROUTE_TRACK_HOLD_MS) routeTrackByFlight.delete(key);
-		return filed;
-	}
-	const spine = Array.isArray(filed?.spine) && filed.spine.length >= 2 ? filed.spine : prev.spine;
-	if (!Array.isArray(spine) || spine.length < 2) return filed;
-	const origin = spine[0];
-	const dest = spine[spine.length - 1];
-	const flown = prev.flown;
-	const points = flown.length >= 6
-		? densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48)
-		: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36);
-	return { ...filed, points, spine, flown, source: "track" };
-}
 function inboundSnapKey(aware, origin, dest, query) {
 	if (aware) return origKey(aware);
 	const day = new Date().toISOString().slice(0, 10);
@@ -3114,6 +3087,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// written back once near the end of this function.
 	const loadedPhase = await loadPhaseState(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys);
 	const loadedArrival = await arrivalStateStore.load(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys);
+	const memoryLeg = routeLeg(stateKey ?? "", origin.iata, dest.iata);
+	const loadedRoute = memoryLeg ? await routeMemoryStore.load(stateKey, memoryLeg, canPersistState ? legacyKeys : []) : null;
+	let routeMemory = loadedRoute?.state ?? null;
+	let routeMemoryPersistence = loadedRoute?.status ?? "unavailable";
 	let pushLatchValue = loadedPhase.state.push;
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;
@@ -3340,20 +3317,25 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	};
 	const hex = live ? (live.hex || "").toLowerCase() : null;
 	const filedRaw = await loadFiledPath(!ourLanded && ourAirborne ? hex : null, start, end, !ourLanded && ourAirborne ? live : null, aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? null, aware?.waypoints ?? [], aware?.faTrack ?? []);
-	const routeInstanceTime = aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? aware?.gateOut?.scheduled ?? null;
-	const routeInstanceDay = routeInstanceTime ? new Date(routeInstanceTime * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-	const routeTrackKey = `${aware?.flightId ?? stateIdent}|${routeKey}|${routeInstanceDay}`;
-	const filed = !ourLanded && ourAirborne ? holdLastGoodRouteTrack(routeTrackKey, filedRaw) : filedRaw;
+	if (memoryLeg) {
+		const poll = emptyRouteMemory(memoryLeg);
+		poll.filed = validatedFiledRoute(aware?.waypoints ?? [], start, end,
+			aware?.originIata === origin.iata && aware?.destIata === dest.iata, Date.now());
+		if (!ourLanded && ourAirborne && !live?.onGround)
+			poll.track = (filedRaw.phaseHistory ?? []).map(p => ({ lat: p.lat, lon: p.lon, seenAt: p.seenAt * 1000 }));
+		routeMemory = mergeRouteMemory(routeMemory, poll);
+	}
+	const heldWaypoints = routeMemory?.filed?.waypoints ?? [];
+	const heldSpine = heldWaypoints.length >= 4 ? makeSpine(start, end, heldWaypoints) : filedRaw.spine;
+	const heldTrack = routeMemory?.track?.length >= 2 ? routeMemory.track : filedRaw.flown;
+	const filed = { ...filedRaw, spine: heldSpine, flown: heldTrack };
 	let path;
 	let pathSource;
-	if (filed.source === "track" && filed.points.length >= 6) {
-		path = filed.points;
+	if (heldTrack.length >= 2) {
+		path = densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(heldTrack, heldSpine), start, end), 22), 48);
 		pathSource = "track";
-	} else if (aware && aware.waypoints.length >= 4) {
-		const wps = aware.waypoints.slice();
-		if (haversineNm(start, wps[0]) > 18) wps.unshift(start);
-		if (haversineNm(wps[wps.length - 1], end) > 8) wps.push(end);
-		path = densifyPath(downsampleNm(wps, 22), 48);
+	} else if (heldWaypoints.length >= 4) {
+		path = heldSpine;
 		pathSource = "filed";
 	} else {
 		path = filed.points.length >= 2 ? filed.points : greatCirclePoints(start, end, 18);
@@ -3376,42 +3358,38 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			}
 		}
 	}
-	if (!ourLanded && ourAirborne && live) {
+	const routeObservation = freshRouteObservation(live);
+	if (routeMemory) filed.flown = mergeObservedTrack(routeMemory.track, routeObservation ? [routeObservation] : []);
+	// A last known anchor shapes the historical/projected route only. It never
+	// becomes `live`, an aircraft marker, or a newly timed observation.
+	const displayAnchor = routeObservation ?? (!ourLanded && ourAirborne ? routeMemory?.lastObserved : null);
+	if (!ourLanded && ourAirborne && displayAnchor) {
 		path = canonicalLiveDisplayPath({
 			filedPath: filed.spine ?? path,
 			flownTrack: filed.flown ?? [],
-			live,
+			live: displayAnchor,
 			dest: end
 		});
+		if ((filed.flown?.length ?? 0) < 2 && filed.spine?.length >= 2) {
+			// With a filed-only plan, retain its past reference geometry too.
+			// It stays projected: observedFlownNm still requires real track.
+			const along = progressAlongPath(filed.spine, displayAnchor);
+			const fractions = pathFracs(filed.spine);
+			path = [...filed.spine.filter((p, i) => fractions[i] < along.frac - 0.004), ...path];
+		}
 		if ((filed.flown?.length ?? 0) >= 2) pathSource = "track";
 	}
-	let totalNm = Math.max(1, polylineLengthNm(path));
+	const routeProgressValue = routeProgress(path, routeMemory, routeObservation, ourAirborne, ourLanded);
+	let totalNm = routeProgressValue.totalNm;
 	let remainingNm;
-	let routeRemainingNm;
-	let progress;
-	const directToDestNm = live && Number.isFinite(live.lat) && Number.isFinite(live.lon)
+	let routeRemainingNm = routeProgressValue.remainingNm;
+	let progress = routeProgressValue.progress;
+	const directToDestNm = routeObservation && live && Number.isFinite(live.lat) && Number.isFinite(live.lon)
 		? haversineNm({ lat: live.lat, lon: live.lon }, end)
 		: null;
 	const filedRouteDeviationNm = live && filed.spine?.length >= 2
 		? distanceToPathNm({ lat: live.lat, lon: live.lon }, filed.spine)
 		: null;
-	if (ourLanded) {
-		progress = 1;
-		routeRemainingNm = 0;
-	} else if (live && Number.isFinite(live.lat) && Number.isFinite(live.lon) && !(live.extrapolated && haversineNm({ lat: live.lat, lon: live.lon }, start) < 4)) {
-		const along = progressAlongPath(path, {
-			lat: live.lat,
-			lon: live.lon
-		});
-		progress = along.frac;
-		routeRemainingNm = along.remainingNm;
-	} else if (ourAirborne || aware?.takeoff?.actual) {
-		progress = timeFracOf(aware) || 0.03;
-		routeRemainingNm = (1 - progress) * totalNm;
-	} else {
-		progress = 0;
-		routeRemainingNm = totalNm;
-	}
 	remainingNm = ourLanded
 		? 0
 		: directToDestNm != null && directToDestNm <= 25
@@ -3450,13 +3428,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		arrivalPersistence = saved.status;
 	}
 	expectedArrival = arrivalState.runway;
-	const futureArrivalPoints = live ? arrivalFuturePoints(arrivalState.points, live) : arrivalState.points;
-	// Only this response's display path gets the observed aircraft anchor.
-	const displayArrivalPoints = live ? [{ lat: live.lat, lon: live.lon }, ...futureArrivalPoints] : [];
-	// A consumed suffix is still an active zero-distance projection until landing;
-	// do not fall back to the airport reference point after passing the threshold.
-	const pattern = !ourLanded && !live?.onGround && arrivalState.active && arrivalState.kind && displayArrivalPoints.length >= 1
-		? { points: displayArrivalPoints, lengthNm: polylineLengthNm(displayArrivalPoints), kind: arrivalState.kind } : null;
+	const pattern = displayArrivalProjection(arrivalState, {
+		observation: routeObservation && Date.now() - routeObservation.seenAt <= 60_000 ? routeObservation : null,
+		live, lastObserved: routeObservation ?? routeMemory?.lastObserved ?? null, landed: ourLanded
+	});
 	if (pattern) {
 		arrivalPatternKind = pattern.kind;
 		// Preserve observed history; only the future display path changes.
@@ -3471,10 +3446,18 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		remainingNm = pattern.lengthNm;
 		routeRemainingNm = pattern.lengthNm;
 		progress = Math.max(0, 1 - remainingNm / totalNm);
+		if (pattern.stale && routeMemory?.lastObserved) {
+			// A held plan does not create a new progress observation.
+			progress = routeMemory.lastObserved.progress;
+			totalNm = routeMemory.lastObserved.totalNm;
+			remainingNm = routeRemainingNm = routeMemory.lastObserved.remainingNm;
+		}
 	}
 	if (arrivalEntry || loadedArrival.state.startedAt || ourLanded) console.info("[arrival-projection]", {
-		flight: parsed.callsign, landKey, routeTrackKey, instance: ARRIVAL_INSTANCE,
+		flight: parsed.callsign, landKey, stateKey, instance: ARRIVAL_INSTANCE,
 		entryGate: arrivalEntry, reason: arrivalUpdate.reason, persistence: arrivalPersistence,
+		applied: Boolean(pattern), geometrySource: pattern?.geometrySource ?? null,
+		displayPointCount: pattern?.points.length ?? 0, stale: pattern?.stale ?? false,
 		loadedVersion: loadedArrival.version, hadPrevious: Boolean(loadedArrival.state.startedAt),
 		runway: expectedArrival?.runway ?? null, source: expectedArrival?.source ?? null,
 		side: arrivalState.side, active: arrivalState.active, startedAt: arrivalState.startedAt,
@@ -3485,6 +3468,12 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		phase: live?.phase ?? null, extrapolated: live?.extrapolated ?? false, seenSec: live?.seenSec ?? null,
 		kind: arrivalPatternKind, remainingNm, stageRemainingNm
 	});
+	if (routeMemory && routeObservation && !ourLanded && ourAirborne) {
+		routeMemory = mergeRouteMemory(routeMemory, {
+			...emptyRouteMemory(memoryLeg), track: [routeObservation],
+			lastObserved: { ...routeObservation, progress, totalNm, remainingNm }
+		});
+	}
 	const etaMin = remainingEtaMin(remainingNm, directToDestNm, live, aware);
 	const heading = ourLanded
 		? initialBearing(path[Math.max(0, path.length - 2)] ?? start, end)
@@ -4257,6 +4246,13 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			: baseResume.detectedPushUnix ?? null,
 		detectedTaxiUnix: taxiOutLatchValue?.at ?? baseResume.detectedTaxiUnix ?? null
 	} : undefined;
+	// Persist the combined filed/track/observation facts once, after the poll.
+	// storedState is the row before alias folding, so that carry is saved too.
+	if (canPersistState && routeMemory && loadedRoute && !routeMemoryEqual(routeMemory, loadedRoute.storedState)) {
+		const savedRoute = await routeMemoryStore.save(stateKey, routeMemory, loadedRoute.version);
+		routeMemory = savedRoute.state;
+		routeMemoryPersistence = savedRoute.status;
+	}
 	return {
 		fetchedAt: Date.now(),
 		stateKey,
@@ -4303,7 +4299,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			// or stale base rather than the real persisted state. Surfaced here
 			// (not just server logs) so a strangely-behaving flight can be
 			// checked from the response itself, not just a log search.
-			phaseStatePersistence
+			phaseStatePersistence,
+			routeMemoryPersistence
 		},
 		aircraft,
 		origin,
@@ -4311,18 +4308,24 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		route: {
 			expectedArrival,
 			arrivalPatternKind,
+			arrivalProjectionStale: pattern?.stale ?? false,
+			arrivalGeometrySource: pattern?.geometrySource ?? null,
+			filedRouteFingerprint: routeMemory?.filed?.fingerprint ?? null,
+			filedRouteObservedAt: routeMemory?.filed?.observedAt ?? null,
 			totalNm,
 			remainingNm,
 			routeRemainingNm,
 			directToDestNm,
 			flownNm: Math.max(0, totalNm - remainingNm),
-			observedFlownNm: filed.flown?.length >= 2 ? polylineLengthNm(filed.flown) : null,
+			observedFlownNm: (routeMemory?.track?.length ?? 0) >= 2 ? polylineLengthNm(routeMemory.track) : filed.flown?.length >= 2 ? polylineLengthNm(filed.flown) : null,
+			progressSource: routeProgressValue.source,
+			progressObservedAt: routeProgressValue.observedAt,
 			etaMin,
 			progress,
 			heading,
 			source: pathSource,
 			samples,
-			filedFixes: (aware?.waypoints ?? [])
+			filedFixes: (heldWaypoints.length ? heldWaypoints : aware?.waypoints ?? [])
 				.filter((p) => typeof p.label === "string" && p.label.trim().length > 0)
 				.map((p) => ({ lat: p.lat, lon: p.lon, label: p.label }))
 		},

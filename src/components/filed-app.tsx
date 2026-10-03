@@ -1,3 +1,4 @@
+import { keepRouteGeometry as keepRecentTrackGeometry } from "@/lib/route-continuity";
 import { applyTakeoffFloor } from "@/lib/confirmed-takeoff";
 import { displayStage, flightAirborne, liveFix, elapsedFlight, flownDistance, remainingFlight } from "@/lib/flight-presentation";
 import { FLIGHT_STAGES as STAGES, stageStepId, statusProgressIndex } from "@/lib/flight-stage";
@@ -181,43 +182,6 @@ function isUsableStory(s: FlightStory | undefined): s is FlightStory {
 
 function storyForQuery(s: FlightStory | undefined, q: string): FlightStory | undefined {
   return isUsableStory(s) && storyMatchesQuery(s, q) ? s : undefined;
-}
-
-const TRACK_ROUTE_HOLD_MS = 20 * 60_000;
-
-function keepRecentTrackGeometry(incoming: FlightStory, saved: FlightStory | undefined): FlightStory {
-  if (!saved || incoming.route.source === "track" || saved.route.source !== "track") return incoming;
-  if (incoming.origin.iata !== saved.origin.iata || incoming.dest.iata !== saved.dest.iata) return incoming;
-  if (incoming.flightId && saved.flightId && incoming.flightId !== saved.flightId) return incoming;
-  if (Date.now() - saved.fetchedAt > TRACK_ROUTE_HOLD_MS) return incoming;
-  if (!["ride", "arrival", "final_approach"].includes(incoming.currentStage)) return incoming;
-  const oldSamples = saved.route.samples ?? [];
-  const freshSamples = incoming.route.samples ?? [];
-  if (oldSamples.length < 8 || freshSamples.length < 2) return incoming;
-
-  const samples = oldSamples.map((old) => {
-    let best = freshSamples[0]!;
-    let delta = Math.abs(best.frac - old.frac);
-    for (let i = 1; i < freshSamples.length; i++) {
-      const candidate = freshSamples[i]!;
-      const d = Math.abs(candidate.frac - old.frac);
-      if (d < delta) {
-        best = candidate;
-        delta = d;
-      }
-    }
-    return { ...best, lat: old.lat, lon: old.lon, frac: old.frac };
-  });
-
-  return {
-    ...incoming,
-    route: {
-      ...incoming.route,
-      source: "track",
-      samples,
-      filedFixes: incoming.route.filedFixes ?? saved.route.filedFixes,
-    },
-  };
 }
 
 function rideLabelOf(story: FlightStory) {

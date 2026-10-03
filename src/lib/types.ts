@@ -274,6 +274,7 @@ export type FlightStory = {
     etaMin?: number;
     landed?: boolean;
     phaseStatePersistence?: string;
+    routeMemoryPersistence?: string;
     surfaceTelemetryStale?: boolean;
   };
   aircraft: LiveAircraft | null;
@@ -282,11 +283,18 @@ export type FlightStory = {
   route: {
     expectedArrival?: import("./arrival-runway").ExpectedArrivalRunway | null;
     arrivalPatternKind?: "straight-in" | "downwind-base" | null;
+    arrivalProjectionStale?: boolean;
+    arrivalGeometrySource?: "observed_fix" | "last_known_fix" | "held_cursor" | null;
+    filedRouteFingerprint?: string | null;
+    filedRouteObservedAt?: number | null;
     totalNm: number;
     remainingNm: number;
     flownNm: number;
     /** Distance along observed sector track, excluding projected geometry. */
     observedFlownNm?: number | null;
+    progressSource?: "observed" | "last_known" | "unknown" | "landed";
+    /** Time of the real fix behind progress, never the time of a gap poll. */
+    progressObservedAt?: number | null;
     etaMin: number;
     progress: number;
     heading: number;
