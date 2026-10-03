@@ -24,7 +24,7 @@ function airport(field: Airport) {
   // The server already resolves provider airports beyond the small local list.
   return byIata ?? byIcao ?? (/^[A-Z]{3}$/.test(iata) ? { iata, icao, tz: field.tz } : null);
 }
-function operatingIdent(value: unknown): string | null {
+function normalizedIdent(value: unknown): string | null {
   const parsed = parseFlightQuery(clean(value));
   return parsed && !parsed.registration ? parsed.callsign.replace(/^(\D+)0+(\d)/, "$1$2") : null;
 }
@@ -38,7 +38,7 @@ export function departureDate(unix: number, timeZone: string): string | null {
   } catch { return null; }
 }
 
-/** Provider IDs and actual/estimated clocks never choose a durable leg key.
+/** The requested flight ident stays stable across provider carrier aliases.
  * Require a scheduled departure and a matching service date/route. */
 export function canonicalLegIdentity(schedule: LegSchedule | null, context: LegContext): { key: string | null; reason: CanonicalFailure | null } {
   const reject = (reason: CanonicalFailure) => {
@@ -62,8 +62,7 @@ export function canonicalLegIdentity(schedule: LegSchedule | null, context: LegC
   const date = departureDate(scheduled, origin.tz ?? context.origin.tz ?? schedule.originTz ?? "");
   const serviceDate = schedule.serviceDate ?? schedule._publicScheduleDate;
   if (!date || (serviceDate != null && serviceDate !== date)) return reject("service_date_mismatch");
-  const ident = operatingIdent(schedule.operatingIdent) ?? operatingIdent(schedule.ident)
-    ?? operatingIdent(schedule.iataIdent) ?? operatingIdent(context.requested);
+  const ident = normalizedIdent(context.requested);
   return ident ? { key: `leg:v1:${ident}|${date}|${origin.iata}|${destination.iata}`, reason: null } : reject("no_ident");
 }
 export function canonicalLegKey(schedule: LegSchedule | null, context: LegContext): string | null {
@@ -77,8 +76,8 @@ export function departureSeedUnix(stamp?: Stamp | null): number | null {
   return s != null && posted != null && Math.abs(posted - s) > 8 * 3600 ? e ?? a ?? s : s ?? e ?? a;
 }
 export function unvalidatedLegKey(schedule: LegSchedule | null, context: LegContext, nowSec = Date.now() / 1000): string | null {
-  const ident = operatingIdent(schedule?.operatingIdent) ?? operatingIdent(schedule?.ident)
-    ?? operatingIdent(schedule?.iataIdent) ?? operatingIdent(context.requested) ?? clean(context.requested);
+  const ident = normalizedIdent(context.requested) ?? normalizedIdent(schedule?.operatingIdent)
+    ?? normalizedIdent(schedule?.ident) ?? normalizedIdent(schedule?.iataIdent) ?? clean(context.requested);
   const origin = airport(context.origin)?.iata ?? clean(context.origin.iata || context.origin.icao);
   const dest = airport(context.destination)?.iata ?? clean(context.destination.iata || context.destination.icao);
   const unix = departureSeedUnix(schedule?.gateOut) ?? departureSeedUnix(schedule?.takeoff) ?? nowSec;
@@ -98,13 +97,17 @@ function legacyFallbackKeys(schedule: LegSchedule | null, context: LegContext, n
   const fallback = unvalidatedLegKey(schedule, context, nowSec);
   if (!fallback) return [];
   const [ident, origin, dest, date] = fallback.slice("leg:unvalidated:".length).split("|");
-  const keys = [...new Set([clean(schedule?.ident), ident].filter(Boolean).map(id => `${id}|${origin}|${dest}|${date}`))];
+  const idents = [...new Set([schedule?.operatingIdent, schedule?.ident, schedule?.iataIdent, context.requested, ident]
+    .map(clean).filter(id => /^[A-Z0-9]{2,12}$/.test(id)))];
+  const aliases = [...new Set(idents.map(normalizedIdent).filter((id): id is string => id != null))];
+  const keys = idents.map(id => `${id}|${origin}|${dest}|${date}`);
+  keys.push(...aliases.map(id => `leg:unvalidated:${id}|${origin}|${dest}|${date}`).filter(key => key !== fallback));
   const providerId = schedule?.flightId?.trim();
   const dated = providerId?.match(/^([A-Z0-9]+)-(\d{10})(?:-|$)/);
   if (providerId && providerId.length <= 200 && !/[|\x00-\x1f]/.test(providerId)
-    && (!dated || (operatingIdent(dated[1]) === ident && departureDate(Number(dated[2]), "UTC") === date)))
+    && (!dated || (aliases.includes(normalizedIdent(dated[1]) ?? "") && departureDate(Number(dated[2]), "UTC") === date)))
     keys.unshift(`${providerId}|${origin}|${dest}`);
-  return keys;
+  return [...new Set(keys)];
 }
 
 /** Exact old forms for this validated schedule. Do not probe neighboring days
@@ -115,16 +118,18 @@ export function legacyLegKeys(schedule: LegSchedule | null, context: LegContext)
   const [ident, date, origin, dest] = key.slice("leg:v1:".length).split("|");
   const scheduled = positive(schedule.gateOut?.scheduled) ? schedule.gateOut.scheduled : schedule.takeoff!.scheduled!;
   const utcDate = new Date(scheduled * 1000).toISOString().slice(0, 10);
-  const idents = [...new Set([schedule.ident, schedule.iataIdent, ident, context.requested].map(clean).filter(v => /^[A-Z0-9]{3,8}$/.test(v)))];
+  const idents = [...new Set([schedule.operatingIdent, schedule.ident, schedule.iataIdent, ident, context.requested].map(clean).filter(v => /^[A-Z0-9]{3,8}$/.test(v)))];
+  const aliases = [...new Set(idents.map(normalizedIdent).filter((id): id is string => id != null))];
   const keys = idents.flatMap(id => [`${id}|${origin}|${dest}|${utcDate}`,
-    `leg:unvalidated:${operatingIdent(id) ?? id}|${origin}|${dest}|${utcDate}`]);
+    `leg:unvalidated:${normalizedIdent(id) ?? id}|${origin}|${dest}|${utcDate}`]);
+  keys.push(...aliases.filter(id => id !== ident).map(id => `leg:v1:${id}|${date}|${origin}|${dest}`));
   const providerId = typeof schedule.flightId === "string" ? schedule.flightId.trim() : "";
   const datedId = providerId.match(/^([A-Z0-9]+)-(\d{10})(?:-|$)/);
-  const validDate = !datedId || (operatingIdent(datedId[1]) === ident
+  const validDate = !datedId || (aliases.includes(normalizedIdent(datedId[1]) ?? "")
     && departureDate(Number(datedId[2]), airport(context.origin)!.tz ?? context.origin.tz ?? schedule.originTz ?? "") === date);
   if (providerId && providerId.length <= 200 && !/[|\x00-\x1f]/.test(providerId) && validDate)
     keys.unshift(`${providerId}|${origin}|${dest}`);
-  return keys;
+  return [...new Set(keys)];
 }
 
 export function legacyProviderPattern(key: string): string {
@@ -141,5 +146,5 @@ export function legacyProviderBelongsToLeg(legacy: string, key: string): boolean
   const match = id.match(/^([A-Z0-9]+)-(\d{10})(?:-|$)/);
   const tz = airportByIata(origin)?.tz;
   return !!match && !!tz && extra == null && from === origin && to === dest
-    && operatingIdent(match[1]) === ident && departureDate(Number(match[2]), tz) === date;
+    && normalizedIdent(match[1]) === ident && departureDate(Number(match[2]), tz) === date;
 }

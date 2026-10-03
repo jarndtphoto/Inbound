@@ -16,7 +16,7 @@ export function createArrivalStateStore(sqlProvider: () => Promise<Sql>) {
       try {
         const sql = await sqlProvider();
         const rows = await sql<Row>`select state, version from arrival_projection_state where land_key = ${key}`;
-        const carryKeys = !rows.length ? legacyKeys : legacyKeys.filter(key => key.startsWith("leg:unvalidated:"));
+        const carryKeys = !rows.length ? legacyKeys : legacyKeys.filter(key => key.startsWith("leg:"));
         if (carryKeys.length || recentLegacyKeys.length) {
           const candidates = await sql<Row & { land_key: string }>`select land_key, state, version from arrival_projection_state
             where land_key = any(${carryKeys.filter(legacy => legacy !== key)}::text[])
