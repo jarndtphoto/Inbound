@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useId } from "react";
 import type { FlightStory } from "@/lib/types";
 import { isLanded, nextStep, RideOutlookText } from "@/lib/traveler";
+import { formatClockTime, timeKindLabel } from "@/lib/presentation-time";
 import { destinationGateTime } from "@/lib/passenger-time";
 
 const SURFACE_CACHE_MS = 12 * 60 * 60_000;
@@ -47,7 +48,7 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
       <h2 className="text-xl font-semibold">Inbound aircraft was diverted</h2>
       <p className="mt-2 text-sm leading-relaxed">{inboundDiversionText(story.inboundDiversion)}</p>
       <p className="mt-3 text-sm text-muted">Aircraft {story.inboundDiversion.aircraft} · {story.inboundDiversion.chain.join(" → ")}</p>
-      <p className="mt-2 text-xs text-muted">FlightAware history checked {new Date(story.inboundDiversion.reportedAt).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}.{failed || now-story.fetchedAt>60000 ? " Updates are delayed; this is the last confirmed history." : ""}</p>
+      <p className="mt-2 text-xs text-muted">FlightAware history checked {formatClockTime(story.inboundDiversion.reportedAt)}.{failed || now-story.fetchedAt>60000 ? " Updates are delayed; this is the last confirmed history." : ""}</p>
     </section>}
     <section className="rounded-xl border border-border bg-surface p-5" aria-label="What happens next">
       <h2 className="text-xl font-semibold">{step.title}</h2><p className="mt-2 text-sm leading-relaxed">{story.currentStage === "ride" ? <RideOutlookText story={story} /> : step.body}</p>
@@ -63,11 +64,11 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
         <p className="text-sm text-muted">Incoming flight: {inbound?.iata}{inbound?.from ? ` · From ${inbound.from}` : ""}</p>
         <button type="button" className="mt-2 min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-fg" onClick={()=>onTrackInbound?.(inboundFlight.callsign)}>Take me to inbound</button>
       </div>}
-      <p className="mt-3 text-xs text-muted">{step.confidence} · Updated {new Date(story.fetchedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</p>
+      <p className="mt-3 text-xs text-muted">{step.confidence} · Updated {formatClockTime(story.fetchedAt)}</p>
     </section>
     {(!story.diversion || story.diversion.destination) && <section className="rounded-xl border border-border bg-surface p-5" aria-label="Arrival help">
       <h2 className="text-lg font-semibold">{story.diversion ? "Diversion airport: " : "Arriving in "}{story.dest.city}</h2><p className="mt-1 text-sm text-muted">{gateArrivalTime}</p>
-      <dl className="mt-3 grid grid-cols-2 gap-4 text-sm"><div><dt className="text-muted">Arrival gate</dt><dd className="mt-1 font-semibold">{story.times.destGate||"Not assigned"}</dd></div><div><dt className="text-muted">{story.times.gateKind==="actual"?"Reported gate arrival":"Estimated gate arrival"}</dt><dd className="mt-1 font-semibold">{gateArrivalTime}</dd></div></dl>
+      <dl className="mt-3 grid grid-cols-2 gap-4 text-sm"><div><dt className="text-muted">Arrival gate</dt><dd className="mt-1 font-semibold">{story.times.destGate||"Not assigned"}</dd></div><div><dt className="text-muted">{timeKindLabel(story.times.gateKind,"gate arrival")}</dt><dd className="mt-1 font-semibold">{gateArrivalTime}</dd></div></dl>
       <div className="mt-4 border-t border-border pt-4">
         {airlineLink ? <>
           <a className="mt-3 inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm font-semibold underline" href={airlineLink.url} target="_blank" rel="noopener noreferrer">{airlineLink.direct ? "Check airline status for " + story.iata : "Search airline flight status"} ↗</a>

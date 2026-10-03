@@ -1,3 +1,4 @@
+import { timeKindLabel } from "./presentation-time.ts";
 import { formatHoursMinutes, formatMiles } from "./geo.ts";
 
 export type BriefLogKind = "weather" | "schedule" | "stage" | "delay" | "update";
@@ -447,16 +448,12 @@ function destClause(d: RideFacts) {
     d.landKind === "actual" && d.land
       ? `Landed at ${d.land}`
       : d.land
-        ? `Landing around ${d.land}`
+        ? `${timeKindLabel(d.landKind, "landing")} ${d.land}`
         : `Into ${d.toCity}`;
   const gate =
-    d.gate && d.now === "gate" && d.gateKind === "actual"
-      ? ` At the gate ${d.gate}.`
-      : d.gate && (d.now === "arrival" || d.now === "ride")
-        ? d.gateKind === "actual"
-          ? ` At the gate ${d.gate}.`
-          : ` At the gate around ${d.gate}.`
-        : "";
+    d.gate && (d.now === "ride" || d.now === "arrival" || (d.now === "gate" && d.gateKind === "actual"))
+      ? ` ${timeKindLabel(d.gateKind, "gate arrival")} ${d.gate}.`
+      : "";
   const taf = d.destTaf && !/n\/a/i.test(d.destTaf) ? ` Arrival forecast: ${d.destTaf}.` : "";
   if (delay) return `${land}. ${d.toIata} delay: ${delay}.${gate}${taf}`;
   return `${land}.${gate}${taf}`;
@@ -489,9 +486,7 @@ function composeLead(d: RideFacts) {
         open,
         `Landed${d.land ? ` at ${d.land}` : ""}. Taxiing in.`,
         d.gate
-          ? d.gateKind === "actual"
-            ? `At the gate ${d.gate}.`
-            : `At the gate around ${d.gate}.`
+          ? `${timeKindLabel(d.gateKind, "gate arrival")} ${d.gate}.`
           : taxiInClause(d),
       ]);
     }
