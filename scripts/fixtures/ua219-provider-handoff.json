@@ -1,0 +1,19 @@
+{
+  "description": "UA219 ORD-HNL Preview transition observed 2026-10-02 23:27:30-35 UTC; provider payload reconstructed from telemetry and published clocks. No live requests required.",
+  "firstAtUnix": 1790983651.844,
+  "nextAtUnix": 1790983661.415,
+  "flightawareRecord": {
+    "ident": "UAL219", "iataIdent": "UA219", "flightId": "UAL219-1790952900-schedule-0001",
+    "flightStatus": "airborne", "inboundFlight": null,
+    "origin": { "iata": "ORD", "icao": "KORD", "TZ": ":America/Chicago", "coord": [-87.9048, 41.9786], "gate": "B19" },
+    "destination": { "iata": "HNL", "icao": "PHNL", "TZ": ":Pacific/Honolulu", "coord": [-157.9225, 21.3187], "gate": null },
+    "gateDepartureTimes": { "scheduled": 1790952900, "estimated": null, "actual": 1790955180 },
+    "takeoffTimes": { "scheduled": 1790954700, "estimated": null, "actual": 1790957520 },
+    "landingTimes": { "scheduled": 1790986200, "estimated": 1790986500, "actual": null },
+    "gateArrivalTimes": { "scheduled": 1790987280, "estimated": null, "actual": null },
+    "coord": [-153.1667, 24.95], "altitude": 36000, "groundspeed": 462, "heading": 237,
+    "track": [{ "coord": [-153.1667, 24.95], "timestamp": 1790983588, "alt": 36000, "gs": 462, "heading": 237 }],
+    "aircraft": { "type": "B772", "tail": "N219UA" }, "hexid": "a21900", "waypoints": []
+  },
+  "flightstatsHtml": "<html><body><h1>Flight Status</h1><div>UA 219 United Airlines ORD Chicago HNL Honolulu Departed</div><div>Flight Departure Times 02-Oct-2026 Scheduled 10:15 CDT Actual 10:33 CDT</div><div>Flight Arrival Times 02-Oct-2026 Scheduled 14:28 HST Estimated 14:28 HST</div></body></html>"
+}

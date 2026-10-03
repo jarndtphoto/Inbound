@@ -4,6 +4,7 @@ import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
 import { readFlightResume } from "./flight-resume";
 import { loadPhaseState, savePhaseState, phaseStateEqual } from "./flight-phase-state.server";
+import { canonicalLegKey, legacyLegKeys } from "./flight-identity.ts";
 import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
 import { routeWeatherEvents } from "./weather-events";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
@@ -1054,11 +1055,6 @@ function origKey(aware) {
 	const u = seedUnix(aware.gateOut) ?? seedUnix(aware.takeoff) ?? Date.now() / 1e3;
 	const day = (/* @__PURE__ */ new Date(u * 1e3)).toISOString().slice(0, 10);
 	return `${aware._resumeScope ?? ""}${aware.ident}|${aware.originIata ?? ""}|${aware.destIata ?? ""}|${day}`;
-}
-function flightInstanceKey(aware, fallback) {
-	const id = typeof aware?.flightId === "string" ? aware.flightId.trim() : "";
-	if (id) return `${aware._resumeScope ?? ""}${id}|${aware.originIata ?? ""}|${aware.destIata ?? ""}`;
-	return aware ? origKey(aware) : fallback;
 }
 export function pushLatchFromResume(progressResume) {
 	if (!progressResume || !["push", "taxi", "takeoff_roll"].includes(progressResume.departureStage)) return null;
@@ -3068,13 +3064,18 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		)
 	);
 	const flyingAway = Boolean(live && !live.onGround && ((live.altFt ?? 0) > 2500 || (live.gsKt ?? 0) > 160) && dLiveDest > 25);
-	const landKey = flightInstanceKey(aware, `${parsed.callsign}|${origin.iata}|${dest.iata}`);
+	const legContext = { requested: parsed.callsign, origin, destination: dest };
+	const canonicalKey = canonicalLegKey(aware, legContext);
+	const legacyKeys = resumed ? [] : legacyLegKeys(aware, legContext);
+	// Device-only resumes may read same-leg state, but never write shared rows.
+	const canPersistState = Boolean(canonicalKey && !resumed);
+	const landKey = `${resumed?.scope ?? ""}${canonicalKey ?? `unvalidated:${stateIdent}|${origin.iata}|${dest.iata}`}`;
 	// Durable ground-phase state for this flight instance (see
 	// src/lib/flight-phase-state.server.ts for why this replaced module-scope
 	// Maps). Loaded once here, mutated locally exactly as the old Maps were,
 	// written back once near the end of this function.
-	const loadedPhase = await loadPhaseState(landKey);
-	const loadedArrival = await arrivalStateStore.load(landKey);
+	const loadedPhase = await loadPhaseState(canonicalKey ?? "", legacyKeys);
+	const loadedArrival = await arrivalStateStore.load(canonicalKey ?? "", legacyKeys);
 	let pushLatchValue = loadedPhase.state.push;
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;
@@ -3388,8 +3389,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const arrivalUpdate = updateArrivalProjection(loadedArrival.state, { ...arrivalInput, runway: selectedArrival });
 	let arrivalState = arrivalUpdate.state;
 	let arrivalPersistence: string = loadedArrival.status;
-	if (JSON.stringify(arrivalState) !== JSON.stringify(loadedArrival.state)) {
-		const saved = await arrivalStateStore.save(landKey, arrivalState, loadedArrival.version);
+	if (canPersistState && JSON.stringify(arrivalState) !== JSON.stringify(loadedArrival.state)) {
+		const saved = await arrivalStateStore.save(canonicalKey, arrivalState, loadedArrival.version);
 		arrivalState = saved.state;
 		arrivalPersistence = saved.status;
 	}
@@ -4161,8 +4162,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// this table exists to fix. Only fires on an actual transition, not every
 	// poll, so the added latency is bounded to the moments that matter.
 	const nextPhase = { push: pushLatchValue, taxiOut: taxiOutLatchValue };
-	if (landKey && !phaseStateEqual(loadedPhase.state, nextPhase)) {
-		const saveStatus = await savePhaseState(landKey, nextPhase, loadedPhase.version);
+	if (canPersistState && !phaseStateEqual(loadedPhase.state, nextPhase)) {
+		const saveStatus = await savePhaseState(canonicalKey, nextPhase, loadedPhase.version);
 		if (saveStatus !== "ok") phaseStatePersistence = saveStatus;
 	}
 	return {

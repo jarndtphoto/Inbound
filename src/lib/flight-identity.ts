@@ -53,3 +53,37 @@ export function canonicalLegKey(schedule: LegSchedule | null, context: LegContex
     ?? operatingIdent(schedule.iataIdent) ?? operatingIdent(context.requested);
   return ident ? `leg:v1:${ident}|${date}|${origin.iata}|${destination.iata}` : null;
 }
+
+/** Exact old forms for this validated schedule. Do not probe neighboring days
+ * from delayed actual/estimated clocks or accept resume-scoped device keys. */
+export function legacyLegKeys(schedule: LegSchedule | null, context: LegContext): string[] {
+  const key = canonicalLegKey(schedule, context);
+  if (!key || !schedule) return [];
+  const [ident, date, origin, dest] = key.slice("leg:v1:".length).split("|");
+  const scheduled = positive(schedule.gateOut?.scheduled) ? schedule.gateOut.scheduled : schedule.takeoff!.scheduled!;
+  const utcDate = new Date(scheduled * 1000).toISOString().slice(0, 10);
+  const idents = [...new Set([schedule.ident, schedule.iataIdent, ident, context.requested].map(clean).filter(v => /^[A-Z0-9]{3,8}$/.test(v)))];
+  const keys = idents.map(id => `${id}|${origin}|${dest}|${utcDate}`);
+  const providerId = typeof schedule.flightId === "string" ? schedule.flightId.trim() : "";
+  const datedId = providerId.match(/^([A-Z0-9]+)-(\d{10})(?:-|$)/);
+  const validDate = !datedId || (operatingIdent(datedId[1]) === ident
+    && departureDate(Number(datedId[2]), airport(context.origin)!.tz) === date);
+  if (providerId && providerId.length <= 200 && !/[|\x00-\x1f]/.test(providerId) && validDate)
+    keys.unshift(`${providerId}|${origin}|${dest}`);
+  return keys;
+}
+
+export function legacyProviderPattern(key: string): string {
+  const [ident, , origin, dest] = key.slice("leg:v1:".length).split("|");
+  return `${ident}-%|${origin}|${dest}`;
+}
+/** Only dated FlightAware IDs can be discovered without the current ID.
+ * Opaque IDs require the exact ID on the validated provider record. */
+export function legacyProviderBelongsToLeg(legacy: string, key: string): boolean {
+  const [ident, date, origin, dest] = key.slice("leg:v1:".length).split("|");
+  const [id, from, to, extra] = legacy.split("|");
+  const match = id.match(/^([A-Z0-9]+)-(\d{10})(?:-|$)/);
+  const tz = airportByIata(origin)?.tz;
+  return !!match && !!tz && extra == null && from === origin && to === dest
+    && operatingIdent(match[1]) === ident && departureDate(Number(match[2]), tz) === date;
+}
