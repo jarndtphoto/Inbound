@@ -15,12 +15,22 @@ nor save shared rows; legacy rows are retained.
 
 `0004_confirmed_takeoff.sql` adds nullable `confirmed_takeoff` JSONB with
 `time`, `source` (`provider_actual` or `observed_airborne`), and `confirmedAt`.
-CAS merges never erase confirmation; provider actual supplies the event time
-in preference to observation, and the first confirmation is retained. Ordinary
-uncontended push reconciliation keeps its existing behavior.
+Observed-airborne proof is permanent. Provider-only proof can be revoked by a
+fresh matched origin surface fix during the first ten minutes after its stamped
+time. The same JSONB stores `observedAt` when a provider clock upgrades observed
+proof, and `revocations` (stamped time + conflict observation time) as durable
+inactive tombstones. CAS merges, omitted fields, warm outage continuity and
+legacy folds cannot restore a rejected stamp. A genuinely corrected provider
+stamp or subsequent airborne observation can establish new proof. No new column
+or migration is needed. Ordinary uncontended push reconciliation is unchanged.
 
 A provider actual must pass canonical route/service-date validation, be in the
-selected departure window, and not be in the future. Observation requires
+selected departure window, and not be in the future. Initial provider confirmation
+is blocked by any identity-matched, non-extrapolated on-ground fix aged 0–60 s
+within 15 nm of the origin, regardless of how old the stamp is. A previously
+uncontradicted provider-only latch can be revoked through 600 s after takeoff;
+after 600 s it is permanent. Observed proof is never revoked, including after a
+provider clock upgrade. Observation requires
 compatible positively matched identity, a fresh non-extrapolated fix (45 s),
 `onGround=false`, and altitude >500 ft AGL or speed >80 kt. Scheduled/estimated
 clocks, Departed status, surface acceleration, and device claims do not confirm.
@@ -29,7 +39,9 @@ The floor is `ride` (In flight). Landing, taxi-in, gate and go-around classifica
 remain available. The server, wrappers, resumes, displayStage and flightAirborne
 retain the floor. Diagnostic fields include `confirmedTakeoff` source/at,
 `stateKey`, `candidateStage`, `selectedStageReason`, and `takeoffFloorApplied`;
-`providers.canonicalKey` exposes the canonical key. Observation's `at` stays null.
+`providers.canonicalKey` exposes the canonical key. Surface conflicts return
+`selectedStageReason=provider_takeoff_contradicted_by_surface`, an inactive
+`confirmedTakeoff=null`, and `takeoffRevocations`. Observation's `at` stays null.
 Known provider actual time survives partial responses; position, source, age and
 speed remain honest. The floor adds no provider endpoint or request.
 
@@ -86,16 +98,35 @@ and appends no new pre-departure stage.
 DB limitation: a cold server with neither readable durable state nor current
 validated evidence cannot infer a confirmed takeoff. It reports persistence
 failure. An existing client with a prior same-key server response retains its
-floor. No guessed confirmation or new provider request repairs that absence.
+floor, except when the current server response explicitly revokes that provider
+stamp. Revocations also survive client resumes; they are never device-supplied
+shared truth. No guessed confirmation or new provider request repairs absence.
 
-Two old MDW tests expected valid provider actual takeoff to be overridden by
-surface fixes. Those expectations now assert ride, retained actual time and
-confirmation, as required by the approved behavior. Unconfirmed fusion remains
-unchanged. Held #6 (ZRH/unknown-airport route support) remains TODO.
+## Review correction: premature MDW takeoff stamps
+
+The original e303b47 expectations are restored. FlightAware's premature actual
+clock is contradicted by the fresh matching surface fix, so WN1035 and WN102 stay
+Taxi with `airborne=false`, no active takeoff latch, estimated takeoff timing,
+and the explicit surface-conflict reason. Their original flight/speed/time
+fixtures are unchanged. Unconfirmed #33 fusion rules remain unchanged.
+
+| Required case | Evidence |
+|---|---|
+| Premature MDW stamp + surface | WN1035 at 14 kt / stamp 30 s old; WN102 at 65 kt / stamp 480 s old; both Taxi, airborne=false, confirmedTakeoff=null |
+| Provider stamp, no position | Real cold SSR replay: recent actual stamp, aircraft=null, ride, provider_actual latch |
+| Provider-only latch, then early origin surface | Real SSR replay across separate cold instances: Taxi, airborne=false, conflict reason, resume actual cleared, previous client/wrappers cannot reapply the floor; another missing-position cold poll stays unconfirmed |
+| Observed proof, then surface | Real SSR replay: observed proof, provider-time upgrade retaining observedAt, early origin surface; remains ride/airborne=true |
+| Ten-minute permanence | Unit boundary at 600 s revokes, 601 s keeps existing latch; real SSR provider-only latch >600 s followed by origin surface stays ride |
+| Freshness/identity/distance exclusions | 60 s included; 61 s, future, extrapolated, missing/conflicting identity, outside 15 nm cannot contradict |
+| Concurrent stale provider writes | Real PGlite CAS test: revocation survives stale version, same-version omission, legacy folding; a racing observed confirmation remains permanent |
+| Corrected provider stamp | Pure forward-merge test accepts a corrected clock while retaining the rejected stamp's tombstone; stale old clock cannot replace it |
+
+All 11 investigation cases above still pass. Held #6 (ZRH/unknown-airport route
+support) remains TODO.
 
 ## Validation and Preview database
 
-`npm run check`: typecheck green; 620 tests, 619 pass, 0 failures, 1 existing held
+`npm run check`: typecheck green; 628 tests, 627 pass, 0 failures, 1 existing held
 TODO. `npm run build`: green. Local db:migrate skips because DATABASE_URL is unset;
 that local skip is not Preview migration evidence.
 
@@ -111,3 +142,9 @@ flight_phase_state.confirmed_takeoff data_type = jsonb
 
 The final deployment's exact head/READY evidence is recorded in the PR description
 once that final push finishes. No merge is authorized for PR #36.
+
+Review correction checkpoint: `22def77309d78eac31f2aafc56719658690328c0`.
+Implementation Preview verified READY / readyState READY, target Preview,
+`aliasError=null`: `dpl_52PkgEGx9HJMYM47w5GFBe3tUJGR`,
+https://inbound-5l4n2w6y6-jarndtphoto.vercel.app. The final documentation-only
+push and its exact-head Preview are recorded in the PR description.
