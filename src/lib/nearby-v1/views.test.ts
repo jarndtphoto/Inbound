@@ -42,13 +42,14 @@ test("Radar can contain 100 accepted symbols while featured remains the same fou
   for (const limit of [0, 6, 1.1]) assert.throws(() => buildNearbyView(shared, chicago, NOW, { limit }), RangeError);
 });
 test("Renderer boundary preserves accepted anchors and telemetry while omitting private/provider/token data", () => {
-  const o = observation(1, { verticalRateFpm: null, groundTrackDeg: null, typeCode: "B738" });
+  const o = observation(1, { verticalRateFpm: null, groundTrackDeg: null, typeCode: "B738",
+    phaseEvidence: [[NOW / 1000 - 45, 6500, -500, false, 41.9, -87.8]] });
   const radar = buildNearbyView(collection([o]), chicago, NOW).radar[0]!;
   assert.equal(radar.latitude, o.latitude); assert.equal(radar.longitude, o.longitude); assert.equal(radar.observedAt, o.observedAt);
   assert.equal(radar.altitudeFt, o.altitudeFt); assert.equal(radar.verticalRateFpm, null); assert.equal(radar.groundTrackDeg, null);
   assert.equal(radar.motion.verticalTrend, "unknown"); assert.equal(radar.typeCode, "B738");
   const serialized = JSON.stringify(radar);
-  for (const privateField of [o.privateAircraftIdentity, o.sessionKey, o.provenance.source, "privateAircraftIdentity", "registration", "provenance", "selection", "token", "cardId"]) assert.equal(serialized.includes(privateField), false, privateField);
+  for (const privateField of [o.privateAircraftIdentity, o.sessionKey, o.provenance.source, "privateAircraftIdentity", "phaseEvidence", "registration", "provenance", "selection", "token", "cardId"]) assert.equal(serialized.includes(privateField), false, privateField);
   assert.equal(buildNearbyView(collection([observation(2, { typeCode: "<raw-provider-data>" })]), chicago, NOW).radar[0]!.typeCode, undefined);
 });
 test("Unidentified accepted aircraft populate Radar with a neutral ident and no invented track", () => {

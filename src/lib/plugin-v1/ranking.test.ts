@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { phaseOf } from "../traffic-motion";
+import { phaseOf } from "../aircraft-phase";
+import { AIRPORT_BY_IATA } from "../airports";
 import { destPoint } from "../geo";
 import { areaDefinition } from "./areas";
 import { compareRank, currentRoute, rankNearbyCandidates, scoreCandidate, verticalTrend, type NearbyCandidate } from "./ranking";
@@ -10,19 +9,40 @@ import { FIXTURE_NOW_MS, fixtureId, fixtureRankingCandidate, fixtureTime, rankin
 
 const area = areaDefinition("preset:chicago");
 function scored(c: NearbyCandidate) { const result = scoreCandidate(c, area, FIXTURE_NOW_MS); assert.ok(result); return result; }
-test("Existing six-value classifier body is verbatim and its boundaries agree", () => {
-  const baseline = execFileSync("git", ["show", "151cee0cd790d5a19e81c12e448ee3eb125dfdf6:src/lib/sky.ts"], { encoding: "utf8" });
-  const shared = readFileSync(new URL("../traffic-motion.ts", import.meta.url), "utf8");
-  const body = (source: string) => source.match(/function phaseOf\([\s\S]*?\): Traffic\["phase"\] \{([\s\S]*?)\n\}/)![1];
-  assert.equal(body(shared), body(baseline));
-  // Execute the original body itself rather than mirroring the implementation.
-  const original = new Function("ac", body(baseline)) as typeof phaseOf;
-  for (const onGround of [false, true]) for (const gsKt of [null, 0, 8, 8.001, 40]) for (const altFt of [null, 499, 7999, 8000, 11999, 12000, 35000]) for (const vertFpm of [null, -401, -400, -251, -250, 0, 250, 400, 401]) assert.equal(phaseOf({ onGround, gsKt, altFt, vertFpm }), original({ onGround, gsKt, altFt, vertFpm }));
+test("Plugin phase shares Inbound's sustained evidence rules while raw display trend remains instantaneous", () => {
+  const c = { ...fixtureRankingCandidate(), altitudeFt: 20000,
+    route: { originIata: null, destinationIata: null, verification: "unknown" as const, checkedAt: null }, datedBinding: null };
+  const seenAt = Date.parse(c.observedAt!) / 1000;
+  for (const verticalRateFpm of [-650, -400, -300, -250, 250, 300, 400, 650]) {
+    const candidate = { ...c, verticalRateFpm };
+    assert.equal(scored(candidate).motion.phase, "cruise");
+    assert.equal(scored(candidate).motion.phase, phaseOf({ seenAt, lat: c.latitude, lon: c.longitude, altFt: c.altitudeFt, vertFpm: verticalRateFpm, onGround: false }));
+  }
+  for (const span of [29, 30, 40]) {
+    const candidate: NearbyCandidate = { ...c, verticalRateFpm: 650, phaseEvidence: [[seenAt - span, 19500, 650, false, c.latitude, c.longitude]] };
+    const r = scored(candidate);
+    assert.equal(r.motion.phase, span < 30 ? "cruise" : "climb");
+    assert.equal(r.motion.phase, phaseOf({ seenAt, lat: c.latitude, lon: c.longitude, altFt: 20000, vertFpm: 650, onGround: false },
+      { history: [{ seenAt: seenAt - span, altFt: 19500, vertFpm: 650, onGround: false, lat: c.latitude, lon: c.longitude }] }));
+    assert.equal(scored({ ...candidate, positionKind: "extrapolated" }).motion.phase, "cruise");
+  }
+  const flat: NearbyCandidate = { ...c, verticalRateFpm: -650, phaseEvidence: [[seenAt - 40, 20000, -650, false, c.latitude, c.longitude]] };
+  assert.equal(scored(flat).motion.phase, "cruise"); assert.equal(scored(flat).motion.verticalTrend, "falling");
 });
-test("Separate vertical trend preserves thresholds without changing phase math", () => {
+test("Display-only vertical trend preserves its separate +/-250 fpm thresholds", () => {
   assert.equal(verticalTrend(250), "rising"); assert.equal(verticalTrend(249.999), "level"); assert.equal(verticalTrend(-250), "falling"); assert.equal(verticalTrend(-249.999), "level"); assert.equal(verticalTrend(null), "unknown");
   const c = fixtureRankingCandidate(); c.altitudeFt = 35000; c.verticalRateFpm = 800;
   const r = scored(c); assert.equal(r.motion.phase, "cruise"); assert.equal(r.motion.label, "In flight"); assert.equal(r.motion.verticalTrend, "rising");
+});
+test("Shared destination geometry requires confirmed dated routes before an approach label", () => {
+  const c = fixtureRankingCandidate(1); c.altitudeFt = 8300; c.verticalRateFpm = -650;
+  c.route = { ...c.route, originIata: "BOS", destinationIata: "ORD" };
+  const seenAt = Date.parse(c.observedAt!) / 1000;
+  c.phaseEvidence = [[seenAt - 40, 8800, -650, false, c.latitude, c.longitude]];
+  assert.equal(scored(c).motion.phase, "approach");
+  assert.equal(scored(c).motion.phase, phaseOf({ seenAt, lat: c.latitude, lon: c.longitude, altFt: c.altitudeFt, vertFpm: c.verticalRateFpm, onGround: false },
+    { origin: AIRPORT_BY_IATA.BOS, dest: AIRPORT_BY_IATA.ORD, history: [{ seenAt: seenAt - 40, altFt: 8800, vertFpm: -650, onGround: false, lat: c.latitude, lon: c.longitude }] }));
+  assert.equal(scored({ ...c, datedBinding: null }).motion.phase, "descent");
 });
 test("Every hard eligibility exclusion is enforced, while unknown route/private identity remains eligible", () => {
   const overrides: Partial<NearbyCandidate>[] = [
@@ -38,6 +58,7 @@ test("Every hard eligibility exclusion is enforced, while unknown route/private 
 });
 test("Exact score tops out at 128 and bonuses follow the frozen policy", () => {
   const c = fixtureRankingCandidate(1); c.latitude = 41.90; c.longitude = -87.80; c.altitudeFt = 6800; c.interesting = true; c.observedAt = fixtureTime(-20);
+  c.phaseEvidence = [[Date.parse(c.observedAt) / 1000 - 40, 6300, 650, false, c.latitude, c.longitude]];
   const max = scored(c); assert.equal(max.score, 128);
   assert.equal(scored({ ...c, positionKind: "extrapolated" }).score, 123);
   assert.equal(scored({ ...c, observedAt: fixtureTime(-20.001) }).score, 123);

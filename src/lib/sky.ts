@@ -5,7 +5,6 @@ import { airframeOf, airlineOf, isVehicleType, isWidebody, isInterestingAircraft
 import { haversineNm, initialBearing } from "./geo";
 import { decodeMetar, passengerDelayHint, type Metar, type Taf } from "./metar";
 import type { FieldSnapshot, Traffic } from "./types";
-import { phaseOf } from "./traffic-motion";
 import { fetchAround, fuseProviderLists, lastGoodAround, rememberAround, type AdsbRaw } from "./adsb-fusion";
 
 const RANGE_NM = 38;

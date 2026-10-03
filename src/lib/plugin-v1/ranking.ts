@@ -1,9 +1,13 @@
 import { airlineOf, isVehicleType } from "../aircraft";
-import { AIRPORT_BY_ICAO } from "../airports";
+import { AIRPORT_BY_ICAO, AIRPORT_BY_IATA } from "../airports";
+import { phaseOf, type PhaseSample } from "../aircraft-phase";
 import { parseFlightQuery } from "../flight-parse";
-import { phaseOf } from "../traffic-motion";
 import { DisplayIdentSchema, IataSchema, MOTION_LABELS, OpaqueIdSchema, ServiceDateSchema, TimestampSchema, type InboundNearbyFlight, type ResolvedAreaV1 } from "./contracts";
 import { validCoordinate, viewProximity } from "./geography";
+
+/** Compact private evidence in the current snapshot, never a public DTO/history log.
+ * Times use seconds, matching the shared Inbound phase classifier. */
+export type NearbyPhaseSample = [seenAt: number, altFt: number | null, vertFpm: number | null, onGround: boolean | null, lat: number, lon: number];
 
 /** Private, already-accepted Inbound inputs. Not a provider adapter or public DTO. */
 export type NearbyCandidate = {
@@ -20,6 +24,8 @@ export type NearbyCandidate = {
   /** Existing fusion must have accepted any extrapolation within its own limits. */
   acceptedPosition: boolean;
   identityConflict: boolean;
+  /** Prior observed fixes from this aircraft session, bounded by the private store. */
+  phaseEvidence?: NearbyPhaseSample[];
   typeCode: string | null; category: string | null; operator: string | null;
   interesting: boolean;
   route: InboundNearbyFlight["route"];
@@ -38,6 +44,8 @@ export type RankedCandidate = {
   route: InboundNearbyFlight["route"];
 };
 export function verticalTrend(rate: number | null): InboundNearbyFlight["motion"]["verticalTrend"] {
+  // Instantaneous display measurement only. Flight phase instead uses Inbound's
+  // >=30-second evidence and +/-300 fpm threshold in aircraft-phase.ts.
   if (rate === null || !Number.isFinite(rate)) return "unknown";
   return rate >= 250 ? "rising" : rate <= -250 ? "falling" : "level";
 }
@@ -76,8 +84,14 @@ export function scoreCandidate(c: NearbyCandidate, area: ResolvedAreaV1, nowMs: 
   if (!displayIdent) return null;
   const { distanceNm, bearingDeg } = viewProximity(area, c);
   if (distanceNm >= area.radiusNm) return null;
-  const phase = phaseOf({ onGround: false, gsKt: c.groundspeedKt, altFt: c.altitudeFt, vertFpm: Number.isFinite(c.verticalRateFpm) ? c.verticalRateFpm : null });
   const route = currentRoute(c, nowMs);
+  const history: PhaseSample[] = (c.phaseEvidence ?? []).map(([seenAt, altFt, vertFpm, onGround, lat, lon]) => ({ seenAt, altFt, vertFpm, onGround, lat, lon }));
+  // Area proximity does not establish an arrival/departure. Only an accepted
+  // dated route supplies airport context; unknown/hint routes remain neutral.
+  const origin = route.verification === "confirmed" && route.originIata ? AIRPORT_BY_IATA[route.originIata] : undefined;
+  const dest = route.verification === "confirmed" && route.destinationIata ? AIRPORT_BY_IATA[route.destinationIata] : undefined;
+  const phase = phaseOf({ onGround: false, gsKt: c.groundspeedKt, altFt: c.altitudeFt, vertFpm: c.verticalRateFpm,
+    lat: c.latitude, lon: c.longitude, seenAt: observedAtMs / 1000, seenSec: ageSeconds, extrapolated: c.positionKind === "extrapolated" }, { origin, dest, history });
   const parsed = c.observedCallsign ? parseFlightQuery(c.observedCallsign) : null;
   const recognizableAirline = !!parsed && parsed.registration === null && airlineOf(parsed.callsign) !== null;
   const associated = route.verification === "confirmed" && area.associatedAirports.some(code => {

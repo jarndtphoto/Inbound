@@ -3,7 +3,7 @@ import { CHICAGO_COLLECTION } from "../plugin-v1/areas";
 import { DisplayIdentSchema } from "../plugin-v1/contracts";
 import type { RankedCandidate } from "../plugin-v1/ranking";
 import { updateStableView, type NearbyStabilityState } from "../plugin-v1/stability";
-import { NEARBY_POLICY, type AcquisitionMetadata, type AcquisitionResult, type CollectionLease, type NearbyCollectionStore, type SharedCollection } from "./model";
+import { NEARBY_POLICY, nearbyStorageBytes, type AcquisitionMetadata, type AcquisitionResult, type CollectionLease, type NearbyCollectionStore, type SharedCollection } from "./model";
 
 type Instant = Date | string;
 type CollectionRow = {
@@ -44,8 +44,25 @@ function viewKey(areaId: string, radiusNm: number) { return `${areaId}:${radiusN
 function stable(row: ViewRow, areaId: string, radiusNm: number): NearbyStabilityState {
   return { viewKey: viewKey(areaId, radiusNm), collectionVersion: Number(row.applied_collection_version), slots: row.slots, inactiveExpiresAtMs: milliseconds(row.inactive_expires_at) };
 }
-const observationFields = new Set(["cardId", "privateAircraftIdentity", "sessionKey", "observedCallsign", "registration", "latitude", "longitude", "altitudeFt", "groundspeedKt", "verticalRateFpm", "onGround", "observedAt", "positionKind", "acceptedPosition", "identityConflict", "typeCode", "category", "operator", "interesting", "route", "datedBinding", "radarId", "groundTrackDeg", "sessionIdentity", "freshness", "provenance"]);
+const observationFields = new Set(["cardId", "privateAircraftIdentity", "sessionKey", "observedCallsign", "registration", "latitude", "longitude", "altitudeFt", "groundspeedKt", "verticalRateFpm", "onGround", "observedAt", "positionKind", "acceptedPosition", "identityConflict", "phaseEvidence", "typeCode", "category", "operator", "interesting", "route", "datedBinding", "radarId", "groundTrackDeg", "sessionIdentity", "freshness", "provenance"]);
 const metadataFields = new Set(["providerCalls", "rawCount", "fusedCount", "rejectedCount", "successfulProviders", "failedProviders"]);
+function validPhaseEvidence(observation: SharedCollection["observations"][number]): boolean {
+  if (observation.phaseEvidence === undefined) return true;
+  if (!Array.isArray(observation.phaseEvidence) || observation.phaseEvidence.length > NEARBY_POLICY.maxPhaseSamples) return false;
+  const currentAt = Date.parse(observation.observedAt) / 1000;
+  let lastAt = -Infinity;
+  for (const sample of observation.phaseEvidence) {
+    if (!Array.isArray(sample) || sample.length !== 6) return false;
+    const [seenAt, altFt, vertFpm, onGround, lat, lon] = sample;
+    if (!Number.isFinite(seenAt) || seenAt < 0 || seenAt <= lastAt || seenAt >= currentAt || currentAt - seenAt > 120
+      || altFt !== null && (!Number.isFinite(altFt) || altFt < -2000 || altFt > 200000)
+      || vertFpm !== null && (!Number.isFinite(vertFpm) || Math.abs(vertFpm) > 20000)
+      || ![null, false, true].includes(onGround)
+      || !Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lon) || Math.abs(lon) > 180) return false;
+    lastAt = seenAt;
+  }
+  return true;
+}
 function validatePublication(result: AcquisitionResult, nowMs: number) {
   if (!Array.isArray(result.observations) || result.observations.length > NEARBY_POLICY.maxAccepted
     || typeof result.partial !== "boolean" || !result.metadata
@@ -64,6 +81,7 @@ function validatePublication(result: AcquisitionResult, nowMs: number) {
       || !observation.radarId || !observation.sessionKey || !observation.cardId
       || observation.groundTrackDeg !== null && (!Number.isFinite(observation.groundTrackDeg) || observation.groundTrackDeg < 0 || observation.groundTrackDeg >= 360)
       || [observation.altitudeFt, observation.groundspeedKt, observation.verticalRateFpm].some(value => value !== null && !Number.isFinite(value))
+      || !validPhaseEvidence(observation)
       || observation.sessionIdentity !== undefined && (!observation.sessionIdentity || typeof observation.sessionIdentity !== "object"
         || Array.isArray(observation.sessionIdentity) || Object.keys(observation.sessionIdentity).length !== 2
         || Object.keys(observation.sessionIdentity).some(key => !["observedCallsign", "registration"].includes(key))
@@ -72,7 +90,7 @@ function validatePublication(result: AcquisitionResult, nowMs: number) {
       || Object.keys(observation.provenance).some(key => !["source", "receivedAt", "positionAgeSeconds", "acceptance"].includes(key))) throw new RangeError("Invalid accepted Nearby observation");
     identities.add(observation.privateAircraftIdentity);
   }
-  if (Buffer.byteLength(JSON.stringify(result.observations), "utf8") > 1048576) throw new RangeError("Nearby collection exceeds payload bound");
+  if (nearbyStorageBytes(result.observations) > NEARBY_POLICY.maxAcceptedBytes) throw new RangeError("Nearby collection exceeds payload bound");
 }
 
 /**

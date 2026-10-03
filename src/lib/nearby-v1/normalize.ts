@@ -4,7 +4,8 @@ import { isInterestingAircraft } from "../aircraft";
 import { haversineNm } from "../geo";
 import { CHICAGO_COLLECTION } from "../plugin-v1/areas";
 import { DisplayIdentSchema } from "../plugin-v1/contracts";
-import { NEARBY_POLICY, observationFreshness, type AcceptedNearbyObservation } from "./model";
+import type { NearbyPhaseSample } from "../plugin-v1/ranking";
+import { NEARBY_POLICY, nearbyStorageBytes, observationFreshness, type AcceptedNearbyObservation } from "./model";
 
 const stringValue = (value: unknown, max = 80): string | null => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 const ident = (value: unknown): string | null => {
@@ -88,7 +89,7 @@ export function normalizeAcceptedNearby(
       sessionIdentity: { observedCallsign: observedCallsign ?? priorIdentity?.observedCallsign ?? null,
         registration: registration ?? priorIdentity?.registration ?? null },
       altitudeFt, groundspeedKt, groundTrackDeg: trackValue(raw.track),
-      verticalRateFpm: numberValue(raw.baro_rate, -20_000, 20_000), onGround, observedAt,
+      verticalRateFpm: numberValue(raw.baro_rate, -20_000, 20_000) ?? numberValue(raw.geom_rate, -20_000, 20_000), onGround, observedAt,
       positionKind: "observed", acceptedPosition: true, identityConflict: false,
       typeCode, category: stringValue(raw.category, 16), operator: stringValue(raw.ownOp, 80),
       interesting: isInterestingAircraft(typeCode, year, new Date(nowMs).getUTCFullYear()),
@@ -97,9 +98,28 @@ export function normalizeAcceptedNearby(
       provenance: { source: `adsb:${anchor.provider}`, receivedAt: new Date(anchor.receivedAt).toISOString(),
         positionAgeSeconds: ageOf(anchor, nowMs), acceptance: "inbound-fusion" },
     };
+    if (stableSession && prior.positionKind === "observed" && prior.acceptedPosition) {
+      const priorSample: NearbyPhaseSample = [priorAt / 1000, prior.altitudeFt, prior.verticalRateFpm, prior.onGround, prior.latitude, prior.longitude];
+      const samples = [...prior.phaseEvidence ?? [], priorSample]
+        .filter(([seenAt]) => seenAt < observedAtMs / 1000 && observedAtMs / 1000 - seenAt <= 120);
+      // Replacing current JSON preserves cold-poll evidence without an append
+      // log. Repeated provider timestamps never create additional phase proof.
+      observation.phaseEvidence = [...new Map(samples.map(sample => [sample[0], sample])).values()]
+        .sort((a, b) => a[0] - b[0]).slice(-NEARBY_POLICY.maxPhaseSamples);
+    }
     const existing = accepted.get(privateAircraftIdentity);
     if (!existing || observedAt > existing.observedAt) accepted.set(privateAircraftIdentity, observation);
   }
-  // One bounded current snapshot; private IDs never determine public aircraft order.
-  return [...accepted.values()].sort((a, b) => b.observedAt.localeCompare(a.observedAt) || a.privateAircraftIdentity.localeCompare(b.privateAircraftIdentity)).slice(0, NEARBY_POLICY.maxAccepted);
+  // One current snapshot bounded by count AND existing durable JSON capacity.
+  // Compact phase evidence must not cause a dense real collection to fail publication.
+  const ordered = [...accepted.values()].sort((a, b) => b.observedAt.localeCompare(a.observedAt) || a.privateAircraftIdentity.localeCompare(b.privateAircraftIdentity));
+  const bounded: AcceptedNearbyObservation[] = [];
+  let bytes = 2;
+  for (const observation of ordered) {
+    if (bounded.length >= NEARBY_POLICY.maxAccepted) break;
+    const rowBytes = nearbyStorageBytes(observation) + (bounded.length ? 2 : 0);
+    if (bytes + rowBytes > NEARBY_POLICY.maxAcceptedBytes) break;
+    bounded.push(observation); bytes += rowBytes;
+  }
+  return bounded;
 }

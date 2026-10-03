@@ -3,14 +3,16 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
+import { fuseProviderLists, resetFusion, type AdsbRaw, type ProviderAcquisitionPack } from "../adsb-fusion";
 import type { Sql } from "../db";
 import { areaDefinition } from "../plugin-v1/areas";
 import { fixtureRankingCandidate, FIXTURE_NOW } from "../plugin-v1/fixtures";
 import { rankNearbyCandidates } from "../plugin-v1/ranking";
-import { NEARBY_POLICY, type AcceptedNearbyObservation, type AcquisitionResult } from "./model";
+import { NEARBY_POLICY, nearbyStorageBytes, type AcceptedNearbyObservation, type AcquisitionResult } from "./model";
+import { normalizeAcceptedNearby } from "./normalize";
 import { createNearbyCollectionStore } from "./store.server";
 
-const ddl = readFileSync(new URL("../../../docs/plugin-v1/migrations/0001_nearby_collection.sql", import.meta.url), "utf8");
+const ddl = readFileSync(new URL("../../../docs/plugin-v1/migrations/0006_nearby_collection.sql", import.meta.url), "utf8");
 const now = Date.parse(FIXTURE_NOW);
 function acquisition(at = now): AcquisitionResult {
   const observation: AcceptedNearbyObservation = {
@@ -29,6 +31,76 @@ async function database() {
   const store = (environment = "test") => createNearbyCollectionStore({ environment, sqlProvider: async () => sql, clock: "provided" });
   return { pg, sql, store };
 }
+
+test("Cold SQL stores preserve bounded phase evidence and use main's sustained classifier", async () => {
+  const { pg, store } = await database();
+  try {
+    const result = acquisition();
+    const observation = result.observations[0];
+    observation.route = { originIata: null, destinationIata: null, verification: "unknown", checkedAt: null };
+    observation.datedBinding = null;
+    observation.phaseEvidence = [[now / 1000 - 40, observation.altitudeFt! - 500, 650, false, observation.latitude, observation.longitude]];
+    const writer = store(); await writer.touch(now);
+    const lease = (await writer.claim(randomUUID(), now))!;
+    assert.equal(await writer.publish(lease, result, now), true);
+    const cold = (await store().read(now))!;
+    assert.deepEqual(cold.observations[0].phaseEvidence, observation.phaseEvidence);
+    assert.equal(rankNearbyCandidates(cold.observations, areaDefinition("preset:chicago"), now)[0].motion.phase, "climb");
+    assert.equal(rankNearbyCandidates([{ ...cold.observations[0], phaseEvidence: undefined }], areaDefinition("preset:chicago"), now)[0].motion.phase, "cruise");
+  } finally { await pg.close(); }
+});
+
+test("Publication rejects oversized, malformed, repeated, reordered or expired private phase evidence", async () => {
+  const { pg, store } = await database();
+  try {
+    const writer = store(); await writer.touch(now);
+    const lease = (await writer.claim(randomUUID(), now))!;
+    const sample = [now / 1000 - 40, 6500, 650, false, 41.91, -87.81];
+    const invalid = [null, {}, [sample.slice(0, 5)], [[now / 1000, ...sample.slice(1)]], [[now / 1000 - 121, ...sample.slice(1)]],
+      [sample, sample], [sample, [now / 1000 - 60, ...sample.slice(1)]],
+      [[sample[0], Infinity, ...sample.slice(2)]], [[sample[0], 200001, ...sample.slice(2)]],
+      [[sample[0], sample[1], 20001, ...sample.slice(3)]], [[...sample.slice(0, 3), "airborne", ...sample.slice(4)]],
+      [[...sample.slice(0, 4), 91, sample[5]]], [[...sample.slice(0, 5), 181]],
+      Array.from({ length: NEARBY_POLICY.maxPhaseSamples + 1 }, (_, i) => [now / 1000 - 100 + i, ...sample.slice(1)])];
+    for (const evidence of invalid) {
+      const result = acquisition();
+      result.observations[0].phaseEvidence = evidence as AcceptedNearbyObservation["phaseEvidence"];
+      await assert.rejects(writer.publish(lease, result, now), /Invalid accepted Nearby observation/);
+    }
+    assert.equal(await writer.publish(lease, acquisition(), now), true, "older snapshots without optional evidence remain valid");
+  } finally { await pg.close(); }
+});
+
+test("Dense normalized phase snapshots fit the actual SQL JSONB byte constraint", async () => {
+  const { pg, sql, store } = await database();
+  try {
+    const aircraft: AdsbRaw[] = Array.from({ length: NEARBY_POLICY.maxAccepted }, (_, i) => ({
+      hex: (i + 1).toString(16).padStart(6, "0"), flight: "UAL1234567890123", r: "N123456789012345",
+      lat: 41.91234567890123, lon: -87.81234567890123, alt_baro: 20000, gs: 210, track: 93, baro_rate: -650, seen: 0, seen_pos: 0,
+      t: "B738LONGMETADATA", category: "LONGMETADATA12345", ownOp: "é".repeat(80), year: "20001234",
+    }));
+    const packs = (at: number): ProviderAcquisitionPack[] => [{ provider: "fi", ac: aircraft, receivedAt: at, status: "ok", attempted: true }];
+    resetFusion();
+    const previous = normalizeAcceptedNearby(packs(now), fuseProviderLists(packs(now), { now, airside: true, preferObserved: true }), [], now);
+    for (const o of previous) o.phaseEvidence = Array.from({ length: NEARBY_POLICY.maxPhaseSamples }, (_, i) =>
+      [now / 1000 - (NEARBY_POLICY.maxPhaseSamples - i) * 20, 20000, -650, false, o.latitude, o.longitude]);
+    const at = now + 20000; resetFusion();
+    const observations = normalizeAcceptedNearby(packs(at), fuseProviderLists(packs(at), { now: at, airside: true, preferObserved: true }), previous, at);
+    assert.ok(observations.length > 0 && observations.length < previous.length);
+    assert.ok(observations.every(o => o.phaseEvidence?.length === NEARBY_POLICY.maxPhaseSamples));
+    const result = { ...acquisition(at), observations };
+    const writer = store(); await writer.touch(at);
+    const lease = (await writer.claim(randomUUID(), at))!;
+    assert.equal(await writer.publish(lease, result, at), true);
+    const [{ bytes }] = await sql.query<{ bytes: number }>("select octet_length(accepted_collection::text) as bytes from inbound_plugin_v1.current_collection");
+    assert.ok(bytes <= NEARBY_POLICY.maxAcceptedBytes);
+    assert.ok(nearbyStorageBytes(observations) >= bytes);
+    assert.equal((await store().read(at))!.observations.length, observations.length);
+    const tricky = { punctuation: 'é,:"\\', tiny: 1e-100, positive: 1e21, plain: [1, 2, 3] };
+    const [{ size }] = await sql.query<{ size: number }>("select octet_length($1::jsonb::text) as size", [JSON.stringify(tricky)]);
+    assert.ok(nearbyStorageBytes(tricky) >= size);
+  } finally { await pg.close(); }
+});
 
 test("Nearby migration applies only two bounded current-state tables to disposable PGlite", async () => {
   const { pg, sql, store } = await database();

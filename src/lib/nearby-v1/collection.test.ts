@@ -24,7 +24,7 @@ function barrier() {
 }
 async function database() {
   const pg = new PGlite();
-  await pg.exec(readFileSync(new URL("../../../docs/plugin-v1/migrations/0001_nearby_collection.sql", import.meta.url), "utf8"));
+  await pg.exec(readFileSync(new URL("../../../docs/plugin-v1/migrations/0006_nearby_collection.sql", import.meta.url), "utf8"));
   const sql = Object.assign(async () => [], { query: async <T>(query: string, params: unknown[] = []) => (await pg.query<T>(query, params)).rows }) as Sql;
   const store = () => createNearbyCollectionStore({ environment: "test", sqlProvider: async () => sql, clock: "provided" });
   return { pg, sql, store };
