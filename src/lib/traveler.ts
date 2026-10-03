@@ -2,10 +2,11 @@ import { createElement } from "react";
 import type { FlightStory } from "./types";
 import { upcomingWeatherEvents, weatherOutlook } from "./weather-presentation";
 import { passengerNextEvent } from "./next-event";
+import { operationalDepartureUnix, storyLegDate } from "./flight-story-date.ts";
 
 export const isLanded = (s: FlightStory) => s.currentStage === "gate" || s.times.landKind === "actual" || (s.currentStage === "arrival" && s.aircraft?.onGround === true);
 export function journeyKey(s: FlightStory) {
-  return [s.callsign, s.origin.icao, s.dest.icao, s.times.origPushUnix ?? s.times.origTakeoffUnix ?? new Date(s.fetchedAt).toISOString().slice(0,10)].join("|");
+  return [s.callsign, s.origin.icao, s.dest.icao, s.stateKey ?? storyLegDate(s) ?? new Date(s.fetchedAt).toISOString().slice(0,10)].join("|");
 }
 
 export function rideOutlook(s: FlightStory): string {
@@ -78,9 +79,11 @@ export type AlertKind = "delay" | "gate" | "stage" | "diversion";
 export type JourneyAlert = {kind: AlertKind; text: string; at: number};
 export function journeyChanges(prev: FlightStory, next: FlightStory): JourneyAlert[] {
   if(next.fetchedAt<=prev.fetchedAt) return [];
-  const sameInstance=prev.flightId && next.flightId ? prev.flightId===next.flightId
+  const departure=operationalDepartureUnix(prev);
+  const sameInstance=prev.stateKey && next.stateKey ? prev.stateKey===next.stateKey
+    : prev.flightId && next.flightId ? prev.flightId===next.flightId
     : prev.callsign===next.callsign && prev.origin.icao===next.origin.icao
-      && prev.times.origPushUnix!=null && prev.times.origPushUnix===next.times.origPushUnix;
+      && departure!=null && departure===operationalDepartureUnix(next);
   if(next.diversion && sameInstance && (!prev.diversion || prev.diversion.destination!==next.diversion.destination)) {
     return [{kind:"diversion",text:nextStep(next,next.fetchedAt).title+". Check your airline for onward travel.",at:next.fetchedAt}];
   }

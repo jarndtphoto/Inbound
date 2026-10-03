@@ -185,8 +185,10 @@ export function resumeFromStory(story: FlightStory | undefined, q: string, now =
   if (!t) return;
   // Older releases didn't preserve raw provider timestamps. Keep those values
   // as estimates: some displayed "actual" times were movement inferences.
-  const stamp = (value?: number | null, original?: number | null): Stamp => ({
-    scheduled: original ?? null, estimated: value ?? null, actual: null,
+  const stamp = (value?: number | null, kind?: string | null): Stamp => ({
+    // Legacy orig* fields have no provenance and may contain an estimate or
+    // actual. Only a clock explicitly reported as scheduled proves a schedule.
+    scheduled: kind === "scheduled" ? value ?? null : null, estimated: value ?? null, actual: null,
   });
   return readFlightResume({
     version: 1, callsign, ident: callsign, confirmedAt: story.schedule?.confirmedAt ?? story.fetchedAt,
@@ -197,8 +199,8 @@ export function resumeFromStory(story: FlightStory | undefined, q: string, now =
     originTz: story.origin?.tz, destTz: story.dest?.tz,
     originName: story.origin?.name, originCity: story.origin?.city, destName: story.dest?.name, destCity: story.dest?.city,
     originGate: t.originGate, destGate: t.destGate,
-    gateOut: stamp(t.pushUnix, t.origPushUnix), takeoff: { ...stamp(t.takeoffUnix, t.origTakeoffUnix), actual: readTakeoffDiagnostic(story.confirmedTakeoff, story.fetchedAt / 1000)?.time ?? null },
-    landing: stamp(t.landUnix, t.origLandUnix), gateIn: stamp(t.gateUnix),
+    gateOut: stamp(t.pushUnix, t.pushKind), takeoff: { ...stamp(t.takeoffUnix, t.takeoffKind), actual: readTakeoffDiagnostic(story.confirmedTakeoff, story.fetchedAt / 1000)?.time ?? null },
+    landing: stamp(t.landUnix, t.landKind), gateIn: stamp(t.gateUnix),
     tail: story.aircraft?.registration, hex: story.aircraft?.hex, type: story.aircraft?.type,
     waypoints: [], departureStage: observed,
     takeoffRollStreak: 0, takeoffRollStreakSeenAt: null,

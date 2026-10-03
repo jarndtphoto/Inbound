@@ -6,6 +6,7 @@ import { haversineNm } from "./geo";
 import { FR24_SURFACE_FRESH_SEC, airborneFixSupersedesGround, identityCompatible, normalizedToLive, positionAgeSec } from "./flight-data";
 import { airportByIata, airportByIcao } from "./airports";
 import type { FlightStory } from "./types";
+import { formatClockTime } from "./presentation-time";
 
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
 const SURFACE_STAGES = new Set(["origin_gate", "push", "taxi", "taxi_in", "gate"]);
@@ -208,30 +209,35 @@ export function preferFreshAirborneState(story: FlightStory): FlightStory {
   };
 }
 
+function pushReference(story: FlightStory): { unix: number; kind: "scheduled" | "estimated" } | null {
+  const scheduled = story.times.origPushUnix ?? story.resume?.gateOut.scheduled
+    ?? (story.times.pushKind === "scheduled" ? story.times.pushUnix : null);
+  if (scheduled != null && Number.isFinite(scheduled)) return { unix: scheduled, kind: "scheduled" };
+  // A displayed detected push is not a provider estimate. Only the raw
+  // provider stamp may supply the unscheduled reference.
+  const estimated = story.resume?.gateOut.estimated;
+  return estimated != null && Number.isFinite(estimated) ? { unix: estimated, kind: "estimated" } : null;
+}
+
+function replaceDetectedPush(story: FlightStory, reference: { unix: number; kind: "scheduled" | "estimated" }): FlightStory {
+  return { ...story, times: { ...story.times,
+    push: formatClockTime(reference.unix * 1000, story.origin.tz), pushUnix: reference.unix,
+    pushKind: reference.kind, pushSource: null, pushWas: null,
+    delayMin: reference.kind === "scheduled" ? 0 : null,
+  }, ...(story.resume ? { resume: { ...story.resume, detectedPushUnix: null } } : {}) };
+}
+
 export function sanitizeDetectedPushTime(story: FlightStory): FlightStory {
   const t = story.times;
   const detected = t.pushSource === "live_detected" || t.pushSource === "track_detected";
   if (!detected || t.pushUnix == null) return story;
-  const scheduled = t.origPushUnix ?? null;
+  const reference = pushReference(story);
+  if (!reference) return story;
   const now = story.fetchedAt / 1000;
-  const tooEarlyForLeg = scheduled != null && t.pushUnix < scheduled - 60 * 60;
+  const tooEarlyForLeg = t.pushUnix < reference.unix - 60 * 60;
   const impossibleFuture = t.pushUnix > now + 5 * 60;
   if (!tooEarlyForLeg && !impossibleFuture) return story;
-  return {
-    ...story,
-    times: {
-      ...t,
-      push: t.pushWas ?? (scheduled != null ? new Intl.DateTimeFormat("en-US", {
-        timeZone: story.origin.tz, hour: "numeric", minute: "2-digit", timeZoneName: "short",
-      }).format(scheduled * 1000) : t.push),
-      pushUnix: scheduled,
-      pushKind: scheduled != null ? "scheduled" : t.pushKind,
-      pushSource: null,
-      pushWas: null,
-      delayMin: scheduled != null ? 0 : t.delayMin,
-    },
-    ...(story.resume ? { resume: { ...story.resume, detectedPushUnix: null } } : {}),
-  };
+  return replaceDetectedPush(story, reference);
 }
 
 export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightResume): FlightStory {
@@ -248,10 +254,9 @@ export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightR
     && story.providers?.chosenPosition === "fr24" && !live.extrapolated
     && (live.seenSec ?? 999) <= FR24_SURFACE_FRESH_SEC && (live.gsKt ?? 0) >= 3
     && (story.currentStage === "taxi" || story.currentStage === (TAKEOFF_ROLL_STAGE as FlightStory["currentStage"])));
-  if (!detected || !looksLikeRecentDetection || !firstSeenAlreadyMoving || t.origPushUnix == null) return story;
-  return { ...story, times: { ...t, push: t.pushWas ?? t.push, pushUnix: t.origPushUnix,
-    pushKind: "scheduled", pushSource: null, pushWas: null, delayMin: 0 },
-    ...(story.resume ? { resume: { ...story.resume, detectedPushUnix: null } } : {}) };
+  const reference = pushReference(story);
+  if (!detected || !looksLikeRecentDetection || !firstSeenAlreadyMoving || !reference) return story;
+  return replaceDetectedPush(story, reference);
 }
 
 export const getFlightStory = createServerFn({ method: "POST" })

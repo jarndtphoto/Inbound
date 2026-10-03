@@ -1046,6 +1046,9 @@ var origByFlight = /* @__PURE__ */ new Map();
 function seedUnix(t) {
 	return departureSeedUnix(t);
 }
+function scheduledSeedUnix(t) {
+	return Number.isFinite(t?.scheduled) ? t.scheduled : null;
+}
 function earliestUnix(a, b) {
 	if (a == null) return b;
 	if (b == null) return a;
@@ -1073,19 +1076,19 @@ function rememberOrig(aware) {
 	const key = origKey(aware);
 	const prev = origByFlight.get(key);
 	const postedGo = bestUnix(aware.gateOut);
-	let gateOut = earliestUnix(prev?.gateOut ?? null, seedUnix(aware.gateOut));
-	if (gateOut != null && postedGo != null && Math.abs(postedGo - gateOut) > 8 * 3600) gateOut = seedUnix(aware.gateOut);
+	let gateOut = earliestUnix(prev?.gateOut ?? null, scheduledSeedUnix(aware.gateOut));
+	if (gateOut != null && postedGo != null && Math.abs(postedGo - gateOut) > 8 * 3600) gateOut = scheduledSeedUnix(aware.gateOut);
 	const postedTo = bestUnix(aware.takeoff);
-	let takeoff = earliestUnix(prev?.takeoff ?? null, seedUnix(aware.takeoff));
-	if (takeoff != null && postedTo != null && Math.abs(postedTo - takeoff) > 8 * 3600) takeoff = seedUnix(aware.takeoff);
+	let takeoff = earliestUnix(prev?.takeoff ?? null, scheduledSeedUnix(aware.takeoff));
+	if (takeoff != null && postedTo != null && Math.abs(postedTo - takeoff) > 8 * 3600) takeoff = scheduledSeedUnix(aware.takeoff);
 	const postedLd = bestUnix(aware.landing);
-	let landing = earliestUnix(prev?.landing ?? null, seedUnix(aware.landing));
-	if (landing != null && postedLd != null && Math.abs(postedLd - landing) > 8 * 3600) landing = seedUnix(aware.landing);
+	let landing = earliestUnix(prev?.landing ?? null, scheduledSeedUnix(aware.landing));
+	if (landing != null && postedLd != null && Math.abs(postedLd - landing) > 8 * 3600) landing = scheduledSeedUnix(aware.landing);
 	const next = {
 		gateOut,
 		takeoff,
 		landing,
-		gateIn: earliestUnix(prev?.gateIn ?? null, seedUnix(aware.gateIn))
+		gateIn: earliestUnix(prev?.gateIn ?? null, scheduledSeedUnix(aware.gateIn))
 	};
 	origByFlight.set(key, next);
 	return next;
