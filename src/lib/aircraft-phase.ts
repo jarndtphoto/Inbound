@@ -10,7 +10,8 @@ export function destinationContext(ac: Aircraft, context: PhaseContext): boolean
   if (!context.dest || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon)) return false;
   const here = ac as Coord, toDest = haversineNm(here, context.dest);
   const fromOrigin = context.origin ? haversineNm(here, context.origin) : Infinity;
-  return fromOrigin > 15 && (toDest <= 40 || (toDest <= 100 && toDest < fromOrigin));
+  return (fromOrigin > 15 || toDest < fromOrigin)
+    && (toDest <= 40 || (toDest <= 100 && toDest < fromOrigin));
 }
 
 /** Raw rates remain display measurements; phase needs >=30s of evidence.

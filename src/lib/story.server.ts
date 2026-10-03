@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { phaseOf, verticalTrend, createPhaseHistory, type PhaseContext } from "./aircraft-phase.ts";
+import { phaseOf, verticalTrend, createPhaseHistory, destinationContext, type PhaseContext } from "./aircraft-phase.ts";
 import { loadAeroFlight } from "./aeroapi.server.ts";
 import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
@@ -2453,7 +2453,7 @@ function bearingToDestination(from, dest) {
 	return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-export function finalApproachEvidence(live, dest) {
+export function finalApproachEvidence(live, dest, origin = null) {
 	if (!live || !dest || live.onGround) return { directNm: null, headingDelta: null, result: false };
 	const directNm = haversineNm({ lat: live.lat, lon: live.lon }, dest);
 	const bearing = bearingToDestination(live, dest);
@@ -2465,16 +2465,17 @@ export function finalApproachEvidence(live, dest) {
 	const closeIn = directNm <= 7.5;
 	const outerFinal = directNm <= 12;
 	const plausibleAltitude = !Number.isFinite(live.altFt) || live.altFt <= 9000;
-	const descending = Number.isFinite(live.vertFpm) && live.vertFpm <= -150;
+	const stageRate = live.phaseVertFpm === undefined ? live.vertFpm : live.phaseVertFpm;
+	const descending = Number.isFinite(stageRate) && stageRate <= -300;
 	const approachPhase = live.phase === "approach";
 	const trackingToward = headingDelta != null && headingDelta <= 60;
-	const result = !obviouslyHigh && !implausibleSpeed &&
+	const result = destinationContext(live, { origin, dest }) && !obviouslyHigh && !implausibleSpeed &&
 		(closeIn || (outerFinal && plausibleAltitude && (descending || approachPhase || trackingToward)));
 	return { directNm, headingDelta, result };
 }
 
-export function isFinalApproach(live, dest) {
-	return finalApproachEvidence(live, dest).result;
+export function isFinalApproach(live, dest, origin = null) {
+	return finalApproachEvidence(live, dest, origin).result;
 }
 
 export function currentStageOf(args) {
@@ -2515,8 +2516,11 @@ function baseCurrentStageOf(args) {
 	}
 	if (begun || faAirborne || Boolean(ourTakeoffActual)) {
 		if (live && !live.onGround) {
-			if (isFinalApproach(live, dest)) return "final_approach";
-			if (live.phase === "approach" || remainingNm < 40 || live.altFt != null && live.altFt < 8e3 && (live.vertFpm ?? 0) < 0) return "arrival";
+			if (isFinalApproach(live, dest, origin)) return "final_approach";
+			const stageRate = live.phaseVertFpm === undefined ? live.vertFpm : live.phaseVertFpm;
+			if (destinationContext(live, { origin, dest }) &&
+				(live.phase === "approach" || live.phase === "descent" || remainingNm < 40
+					|| live.altFt != null && live.altFt < 8e3 && (stageRate ?? 0) <= -300)) return "arrival";
 			return "ride";
 		}
 		if (faAirborne || ourTakeoffActual) return "ride";
