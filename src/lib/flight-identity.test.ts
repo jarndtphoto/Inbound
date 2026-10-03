@@ -34,3 +34,9 @@ test("operating carrier and normalized number select the key", () => {
   assert.match(key({ operatingIdent: "SKW5219" })!, /^leg:v1:SKW5219\|/);
   assert.equal(key({ ident: "UAL0219" }), key());
 });
+test("already resolved provider airports outside the local catalog retain durable identity", () => {
+  assert.equal(canonicalLegKey({ ...schedule, destIata: "MSY", destIcao: "KMSY" },
+    { ...context, destination: { iata: "MSY", icao: "KMSY" } }), "leg:v1:UAL219|2026-10-02|ORD|MSY");
+  assert.equal(canonicalLegKey({ ...schedule, destIata: "MSY", destIcao: "KMSY" },
+    { ...context, destination: { iata: "MSY", icao: "KXXX" } }), null);
+});

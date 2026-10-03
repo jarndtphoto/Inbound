@@ -19,7 +19,8 @@ function airport(field: Airport) {
   const byIata = airportByIata(iata), byIcao = airportByIcao(icao);
   if (byIata && icao && byIata.icao !== icao) return null;
   if (byIcao && iata && byIcao.iata !== iata) return null;
-  return byIata ?? byIcao;
+  // The server already resolves provider airports beyond the small local list.
+  return byIata ?? byIcao ?? (/^[A-Z]{3}$/.test(iata) ? { iata, icao, tz: field.tz } : null);
 }
 function operatingIdent(value: unknown): string | null {
   const parsed = parseFlightQuery(clean(value));
@@ -44,6 +45,8 @@ export function canonicalLegKey(schedule: LegSchedule | null, context: LegContex
   const reportedDest = airport({ iata: schedule.destIata, icao: schedule.destIcao });
   if (!origin?.iata || !destination?.iata || origin.iata === destination.iata
     || reportedOrigin?.iata !== origin.iata || reportedDest?.iata !== destination.iata) return null;
+  if ((origin.icao && reportedOrigin.icao && origin.icao !== reportedOrigin.icao)
+    || (destination.icao && reportedDest.icao && destination.icao !== reportedDest.icao)) return null;
   const scheduled = positive(schedule.gateOut?.scheduled) ? schedule.gateOut.scheduled : schedule.takeoff?.scheduled;
   if (!positive(scheduled)) return null;
   const date = departureDate(scheduled, origin.tz ?? context.origin.tz ?? schedule.originTz ?? "");
@@ -67,7 +70,7 @@ export function legacyLegKeys(schedule: LegSchedule | null, context: LegContext)
   const providerId = typeof schedule.flightId === "string" ? schedule.flightId.trim() : "";
   const datedId = providerId.match(/^([A-Z0-9]+)-(\d{10})(?:-|$)/);
   const validDate = !datedId || (operatingIdent(datedId[1]) === ident
-    && departureDate(Number(datedId[2]), airport(context.origin)!.tz) === date);
+    && departureDate(Number(datedId[2]), airport(context.origin)!.tz ?? context.origin.tz ?? schedule.originTz ?? "") === date);
   if (providerId && providerId.length <= 200 && !/[|\x00-\x1f]/.test(providerId) && validDate)
     keys.unshift(`${providerId}|${origin}|${dest}`);
   return keys;
