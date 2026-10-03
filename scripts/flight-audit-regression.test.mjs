@@ -433,7 +433,7 @@ describe('MDW departure surface-stage replays', () => {
     ['WN1035', 14, 'airborne', now - 180, now - 30, 'taxi', true],
     ['WN102', 65, 'airborne', now - 580, now - 480, 'taxi', true],
   ]) {
-    it(`${flight}: a fresh ground fix controls the stage`, async (t) => {
+    it(`${flight}: fresh surface telemetry contradicts a premature provider takeoff`, async (t) => {
       const record = structuredClone(JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8')));
       record.ident = flight;
       record.iataIdent = flight;
@@ -465,6 +465,11 @@ describe('MDW departure surface-stage replays', () => {
       const story = await loadFlightStory(flight, { fresh: true });
       assert.equal(story.currentStage, expectedStage);
       assert.equal(story.times.airborne, false);
+      if (takeoffActual != null) {
+        assert.equal(story.confirmedTakeoff, null);
+        assert.equal(story.selectedStageReason, 'provider_takeoff_contradicted_by_surface');
+        assert.notEqual(story.times.takeoffKind, 'actual');
+      }
       assert.equal(story.times.pushed, expectedPush);
       assert.equal(story.aircraft.onGround, true);
       if (flight === 'WN363') {

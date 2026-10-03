@@ -1,3 +1,5 @@
+import { applyTakeoffFloor } from "@/lib/confirmed-takeoff";
+import { displayStage, flightAirborne, liveFix, elapsedFlight } from "@/lib/flight-presentation";
 import { AppearanceControl } from "@/components/appearance-control";
 import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { TravelerCompanion } from "@/components/traveler-companion";
@@ -522,7 +524,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
         throw new Error("Could not load that flight. Try another number.");
       }
       const merged = keepRecentTrackGeometry(
-        rememberOrigOnClient(s),
+        rememberOrigOnClient(applyTakeoffFloor(s, saved)),
         storyForQuery(saved, query),
       );
       writeCachedStory(query, merged);
@@ -899,37 +901,6 @@ function wheelsDown(story: FlightStory) {
   return false;
 }
 
-function displayStage(story: FlightStory): StageId {
-  const ac = story.aircraft;
-  const positionAge = story.providers?.chosenPositionAgeSec;
-  const freshGroundAtOrigin = Boolean(
-    ac &&
-    ac.onGround === true &&
-    Number.isFinite(ac.lat) &&
-    Number.isFinite(ac.lon) &&
-    typeof positionAge === "number" &&
-    positionAge <= 30 &&
-    haversineNm(ac, story.origin) < 12 &&
-    story.times?.landKind !== "actual" &&
-    story.currentStage !== "taxi_in" &&
-    story.currentStage !== "gate"
-  );
-
-  // Presentation guard only: never tell the passenger the flight is airborne
-  // while a fresh live fix still has the aircraft on the departure airport.
-  if (freshGroundAtOrigin && (
-    story.currentStage === "ride" ||
-    story.currentStage === "arrival" ||
-    story.currentStage === "final_approach"
-  )) {
-    const gsKt = ac?.gsKt ?? 0;
-    if (story.times?.pushed && gsKt >= 6) return "taxi";
-    if (story.times?.pushed || gsKt >= 2) return "push";
-    return "origin_gate";
-  }
-  return story.currentStage;
-}
-
 function stageHeadline(story: FlightStory) {
   const stage = displayStage(story);
   if (stage === "gate") return "At the gate";
@@ -940,36 +911,6 @@ function stageHeadline(story: FlightStory) {
   if (stage === "push") return "Pushback";
   if (stage === "taxi") return "Taxiing out";
   return STAGES.find((s) => s.id === stage)?.label ?? stage;
-}
-
-function liveFix(story: FlightStory) {
-  const ac = story.aircraft;
-  return Boolean(story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
-}
-
-function flightAirborne(story: FlightStory) {
-  if (story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach") return true;
-  if (
-    story.currentStage === "origin_gate" ||
-    story.currentStage === "push" ||
-    story.currentStage === "taxi" ||
-    story.currentStage === "inbound" ||
-    story.currentStage === "taxi_in" ||
-    story.currentStage === "gate"
-  ) {
-    return false;
-  }
-  return Boolean(story.times?.airborne);
-}
-
-function elapsedFlight(story: FlightStory) {
-  const takeoff = story.times?.takeoffUnix;
-  const now = story.fetchedAt / 1000;
-  if (!flightAirborne(story) || takeoff == null || !Number.isFinite(takeoff) || takeoff > now) return null;
-  return {
-    minutes: (now - takeoff) / 60,
-    estimated: story.times?.takeoffKind !== "actual",
-  };
 }
 
 function headStatus(story: FlightStory) {

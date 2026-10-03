@@ -89,6 +89,9 @@ export function flightStateIdentity(schedule: LegSchedule | null, context: LegCo
   const canonical = canonicalLegIdentity(schedule, context);
   const key = canonical.key ?? unvalidatedLegKey(schedule, context, options.nowSec);
   return { key, canonicalKey: canonical.key, reason: canonical.reason, canPersist: Boolean(key && !options.deviceOnly),
+    recentLegacyKeys: !options.deviceOnly && !canonical.key
+      && departureSeedUnix(schedule?.gateOut) == null && departureSeedUnix(schedule?.takeoff) == null
+      ? [unvalidatedLegKey(schedule, context, (options.nowSec ?? Date.now() / 1000) - 86400)].filter((key): key is string => key != null) : [],
     legacyKeys: options.deviceOnly ? [] : canonical.key ? legacyLegKeys(schedule, context) : legacyFallbackKeys(schedule, context, options.nowSec) };
 }
 function legacyFallbackKeys(schedule: LegSchedule | null, context: LegContext, nowSec?: number): string[] {

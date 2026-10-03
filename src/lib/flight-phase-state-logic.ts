@@ -8,7 +8,12 @@
 
 export type PushLatch = { unix: number; source: string | null; live: boolean; at: number } | null;
 export type TaxiOutLatch = { at: number } | null;
-export type PhaseState = { push: PushLatch; taxiOut: TaxiOutLatch };
+export type TakeoffRevocation = { time: number; at: number };
+// Revocations stay in the existing JSONB even when no active latch remains.
+// That lets CAS/legacy merges reject a stale copy of the same provider stamp.
+export type ConfirmedTakeoff = { time: number | null; source: "provider_actual" | "observed_airborne"; confirmedAt: number;
+  observedAt?: number; revocations?: TakeoffRevocation[] };
+export type PhaseState = { push: PushLatch; taxiOut: TaxiOutLatch; confirmedTakeoff?: ConfirmedTakeoff };
 
 export const EMPTY_PHASE_STATE: PhaseState = { push: null, taxiOut: null };
 
@@ -59,10 +64,40 @@ function resolvePush(a: PushLatch, b: PushLatch): PushLatch {
 export function mergeForward(a: PhaseState, b: PhaseState): PhaseState {
   const push = resolvePush(a.push, b.push);
   const taxiOut = !a.taxiOut ? b.taxiOut : !b.taxiOut ? a.taxiOut : (a.taxiOut.at >= b.taxiOut.at ? a.taxiOut : b.taxiOut);
-  return { push, taxiOut };
+  const confirmedTakeoff = mergeConfirmedTakeoff(a.confirmedTakeoff, b.confirmedTakeoff);
+  return { push, taxiOut, ...(confirmedTakeoff ? { confirmedTakeoff } : {}) };
 }
 
 /** Cheap dirty-check so buildStory only writes back when a latch actually changed. */
 export function phaseStateEqual(a: PhaseState, b: PhaseState): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Observed proof is permanent; rejected provider stamps merge as tombstones. */
+export function mergeConfirmedTakeoff(a?: ConfirmedTakeoff, b?: ConfirmedTakeoff): ConfirmedTakeoff | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  const revocations = [...a.revocations ?? [], ...b.revocations ?? []].reduce<TakeoffRevocation[]>((all, item) => {
+    const prior = all.find(r => r.time === item.time);
+    if (prior) prior.at = Math.min(prior.at, item.at); else all.push({ ...item });
+    return all;
+  }, []).sort((x, y) => x.time - y.time);
+  const observations = [a, b].flatMap(x => x.observedAt != null ? [x.observedAt]
+    : x.source === "observed_airborne" ? [x.confirmedAt] : []);
+  const observedAt = observations.length ? Math.min(...observations) : undefined;
+  const actuals = [a, b].filter(x => x.source === "provider_actual" && x.time != null);
+  const accepted = actuals.filter(x => !revocations.some(r => r.time === x.time));
+  const clocks = accepted.length ? accepted : actuals;
+  return { source: actuals.length ? "provider_actual" : "observed_airborne",
+    time: clocks.length ? Math.min(...clocks.map(x => x.time!)) : null,
+    confirmedAt: Math.min(a.confirmedAt, b.confirmedAt),
+    ...(observedAt != null && actuals.length ? { observedAt } : {}),
+    ...(revocations.length ? { revocations } : {}) };
+}
+
+export function activeConfirmedTakeoff(c?: ConfirmedTakeoff): ConfirmedTakeoff | undefined {
+  if (!c) return;
+  if (c.source === "provider_actual" && c.revocations?.some(r => r.time === c.time))
+    return c.observedAt != null ? { ...c, source: "observed_airborne", time: null } : undefined;
+  return c;
 }
