@@ -55,7 +55,7 @@ import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFligh
 import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
 import { displayArrivalProjection } from "./arrival-display.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
-import { emptyRouteMemory, mergeRouteMemory, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress } from "./route-memory.ts";
+import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress } from "./route-memory.ts";
 import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
@@ -3365,6 +3365,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		}
 	}
 	const routeObservation = freshRouteObservation(live);
+	if (routeMemory) filed.flown = mergeObservedTrack(routeMemory.track, routeObservation ? [routeObservation] : []);
 	// A last known anchor shapes the historical/projected route only. It never
 	// becomes `live`, an aircraft marker, or a newly timed observation.
 	const displayAnchor = routeObservation ?? (!ourLanded && ourAirborne ? routeMemory?.lastObserved : null);
@@ -3375,6 +3376,13 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			live: displayAnchor,
 			dest: end
 		});
+		if ((filed.flown?.length ?? 0) < 2 && filed.spine?.length >= 2) {
+			// With a filed-only plan, retain its past reference geometry too.
+			// It stays projected: observedFlownNm still requires real track.
+			const along = progressAlongPath(filed.spine, displayAnchor);
+			const fractions = pathFracs(filed.spine);
+			path = [...filed.spine.filter((p, i) => fractions[i] < along.frac - 0.004), ...path];
+		}
 		if ((filed.flown?.length ?? 0) >= 2) pathSource = "track";
 	}
 	const routeProgressValue = routeProgress(path, routeMemory, routeObservation, ourAirborne, ourLanded);
