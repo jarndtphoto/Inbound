@@ -127,16 +127,18 @@ function origMemKey(story: FlightStory) {
 
 const BRIEF_HISTORY_KEY = "inbound-brief-history-v2";
 
-function briefHistoryKey(story: FlightStory) {
+function briefHistoryKey(story: FlightStory, legacy = false) {
+  if (!legacy && story.stateKey) return story.stateKey;
   const instance = story.flightId?.trim();
   if (instance) return `${instance}:${story.origin.iata}:${story.dest.iata}`;
-  const day = storyLegDate(story) ?? new Date(story.fetchedAt).toISOString().slice(0, 10);
+  const day = storyLegDate(legacy ? { ...story, stateKey: null } : story) ?? new Date(story.fetchedAt).toISOString().slice(0, 10);
   return `${normFlight(story.callsign)}:${story.origin.iata}:${story.dest.iata}:${day}`;
 }
 
 function savedBrief(story: FlightStory): CompiledBrief | null {
   try {
-    const entry = JSON.parse(localStorage.getItem(BRIEF_HISTORY_KEY) || "{}")[briefHistoryKey(story)];
+    const records = JSON.parse(localStorage.getItem(BRIEF_HISTORY_KEY) || "{}");
+    const entry = records[briefHistoryKey(story)] ?? records[briefHistoryKey(story, true)];
     const b = entry?.brief;
     return b && typeof b.lead === "string" && b.snap && Array.isArray(b.log)
       && Array.isArray(b.segments) ? b : null;
