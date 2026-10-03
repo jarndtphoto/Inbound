@@ -314,6 +314,7 @@ export function chooseBest(
   hex: string,
   now: number,
   airside = false,
+  preferObserved = false,
 ): AdsbRaw | null {
   const list = observations.get(hex) ?? [];
   const prev = tracks.get(hex) ?? null;
@@ -331,13 +332,14 @@ export function chooseBest(
     const raw = fusedRaw(best.obs, { extrapolated: false, ageSec: age, lat: best.obs.lat, lon: best.obs.lon });
     return commitTrack(hex, raw, best.obs.provider, now, false);
   }
-  if (prev) {
+  if (prev && !preferObserved) {
     const extra = maybeExtrapolate(prev, now, airside);
     if (extra) return extra;
   }
   if (bestAny) {
     const age = ageOf(bestAny.obs, now);
     const raw = fusedRaw(bestAny.obs, { extrapolated: false, ageSec: age, lat: bestAny.obs.lat, lon: bestAny.obs.lon });
+    if (preferObserved) return commitTrack(hex, raw, bestAny.obs.provider, now, false);
     return {
       ...raw,
       _fusion: { provider: bestAny.obs.provider, extrapolated: false, ageSec: age },
@@ -357,15 +359,15 @@ export function chooseBest(
   return null;
 }
 
-export type ProviderPack = { provider: ProviderId; ac: AdsbRaw[] };
+export type ProviderPack = { provider: ProviderId; ac: AdsbRaw[]; receivedAt?: number };
 
-export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; airside?: boolean }): AdsbRaw[] {
+export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; airside?: boolean; preferObserved?: boolean }): AdsbRaw[] {
   const now = opts?.now ?? Date.now();
   const airside = Boolean(opts?.airside);
   const hexes = new Set<string>();
   for (const pack of packs) {
     for (const raw of pack.ac ?? []) {
-      const obs = rawToObservation(raw, pack.provider, now);
+      const obs = rawToObservation(raw, pack.provider, pack.receivedAt ?? now);
       if (!obs) continue;
       rememberObs(obs);
       hexes.add(obs.hex);
@@ -379,7 +381,7 @@ export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; 
   }
   const out: AdsbRaw[] = [];
   for (const hex of hexes) {
-    const chosen = chooseBest(hex, now, airside);
+    const chosen = chooseBest(hex, now, airside, Boolean(opts?.preferObserved));
     if (chosen) out.push(chosen);
   }
   return out;
@@ -449,6 +451,35 @@ export async function fetchAround(lat: number, lon: number, dist: number): Promi
     })),
   );
   return packs;
+}
+
+/** Status-preserving sibling for shared collection acquisition. Legacy callers
+ * retain fetchAround's existing failure-as-empty behavior. */
+export type ProviderAcquisitionPack = ProviderPack & {
+  status: "ok" | "failed" | "backoff";
+  attempted: boolean;
+  receivedAt: number;
+};
+export async function fetchAroundWithStatus(lat: number, lon: number, dist: number): Promise<ProviderAcquisitionPack[]> {
+  const startedAt = Date.now();
+  return Promise.all(PROVIDER_ORDER.map(async (provider): Promise<ProviderAcquisitionPack> => {
+    if (!providerHealthy(provider, startedAt)) {
+      return { provider, ac: [], status: "backoff", attempted: false, receivedAt: startedAt };
+    }
+    try {
+      const json = await fetchJson(PROVIDERS[provider].around(lat, lon, dist), PROVIDERS[provider].timeoutMs);
+      const receivedAt = Date.now();
+      // An invalid payload is a failed collection, not evidence of an empty sky.
+      const payload = json as { ac?: unknown; aircraft?: unknown } | null;
+      if (!payload || typeof payload !== "object" || !Array.isArray(payload.ac ?? payload.aircraft)) throw new Error("invalid aircraft payload");
+      markProviderOk(provider, receivedAt);
+      return { provider, ac: acList(json), status: "ok", attempted: true, receivedAt };
+    } catch {
+      const receivedAt = Date.now();
+      markProviderFail(provider, receivedAt);
+      return { provider, ac: [], status: "failed", attempted: true, receivedAt };
+    }
+  }));
 }
 
 export async function fetchByHex(hex: string): Promise<ProviderPack[]> {

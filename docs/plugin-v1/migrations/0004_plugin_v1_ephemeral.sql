@@ -1,4 +1,8 @@
 -- STAGED DESIGN ONLY. Not in migrations/*.sql; no automatic application.
+-- Superseded for Part 3B.1 by 0001_nearby_collection.sql in this directory.
+-- Do NOT apply this full staged design before or after the actual minimal DDL:
+-- current_collection/ranked_view now require different runtime columns. Future
+-- stages must add explicit incremental migrations to the actual minimal schema.
 -- Existing getSql()/Sql abstraction and Postgres (local tests: PGLite).
 -- No historical traffic rows. Each environment/group overwrites one collection.
 create schema if not exists inbound_plugin_v1;

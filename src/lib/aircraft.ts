@@ -182,6 +182,15 @@ export function isWidebody(code?: string | null): boolean {
   return airframeOf(code)?.kind === "widebody";
 }
 
+/** Existing Airside interesting-aircraft signal, shared without new ranking rules. */
+export function isInterestingAircraft(code: string | null, year: string | null, utcYear = new Date().getUTCFullYear()): boolean {
+  const kind = airframeOf(code)?.kind;
+  const yearNum = year ? Number(year) : null;
+  return isWidebody(code) || kind === "biz" || code === "A388" || code === "B744"
+    || code === "B748" || code === "B752" || code === "B753"
+    || (yearNum != null && yearNum >= utcYear - 1 && kind !== "ga" && kind !== "heli" && kind !== "other");
+}
+
 export function isVehicleType(code?: string | null, category?: string | null, operator?: string | null): boolean {
   const t = (code ?? "").toUpperCase();
   const cat = (category ?? "").toUpperCase();
