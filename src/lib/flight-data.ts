@@ -93,7 +93,7 @@ export function choosePosition(positions: Array<NormalizedPosition | null | unde
   return { chosen, disagreementNm, candidates };
 }
 export function normalizedToLive(position: NormalizedPosition, context: PhaseContext = {}): LiveAircraft & { seenAt: number; source: FlightProvider; confidence: Confidence } {
-  const trend = verticalTrend(position, context.history);
+  const trend = verticalTrend({ ...position, seenSec: positionAgeSec(position) }, context.history);
   return { ...trend, hex: position.hex ?? "", callsign: position.callsign, registration: position.registration, type: position.type, typeName: position.type, year: null, operator: null,
     lat: position.lat, lon: position.lon, altFt: position.altFt, gsKt: position.gsKt, track: position.track, vertFpm: Number.isFinite(position.vertFpm) ? position.vertFpm! : null, onGround: Boolean(position.onGround),
     phase: phaseOf({ ...position, ...trend }, { ...context, groundTaxiKt: 5 }), extrapolated: false, seenSec: positionAgeSec(position), seenAt: position.seenAt, source: position.provider, confidence: position.confidence };

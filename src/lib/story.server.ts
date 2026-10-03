@@ -553,7 +553,7 @@ function coastTracePt(pt) {
 }
 export function liveFromTracePt(pt, hex, seed, context: PhaseContext = {}) {
 	const c = coastTracePt(pt);
-	const sample = { lat: c.lat, lon: c.lon, altFt: c.alt, gsKt: c.gs, seenAt: pt.t, seenSec: c.age, onGround: false };
+	const sample = { lat: c.lat, lon: c.lon, altFt: c.alt, gsKt: c.gs, seenAt: pt.t, seenSec: c.age, onGround: false, vertFpm: pt.vertFpm };
 	const trend = verticalTrend(sample, context.history);
 	return {
 		...trend,
@@ -2704,8 +2704,8 @@ function buildStages(args) {
 	};
 }
 export function liveFromAware(aware, context: PhaseContext = {}) {
-	const origin = airportByIcao(aware?.originIcao) ?? airportByIata(aware?.originIata);
-	const dest = airportByIcao(aware?.destIcao) ?? airportByIata(aware?.destIata);
+	const origin = airportByIcao(aware?.originIcao ?? "") ?? airportByIata(aware?.originIata ?? "");
+	const dest = airportByIcao(aware?.destIcao ?? "") ?? airportByIata(aware?.destIata ?? "");
 	context = { origin: origin ?? undefined, dest: dest ?? undefined, ...context };
 	const live = liveFromAwareTrack(aware, context);
 	if (!live) return null;

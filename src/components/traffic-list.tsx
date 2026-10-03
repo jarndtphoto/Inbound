@@ -115,7 +115,7 @@ function Row({
               </span>
             ) : null}
           </span>
-          <span className="mt-0.5 block truncate text-xs text-muted">{sub || phaseLabel(t)}</span>
+          <span className="mt-0.5 block truncate text-xs text-muted">{t.onGround ? sub || phaseLabel(t) : [sub, phaseLabel(t)].filter(Boolean).join(" · ")}</span>
         </span>
         <span className="shrink-0 text-right font-mono text-xs tabular-nums text-subtle">
           <span className="block text-fg">{t.onGround ? phaseLabel(t) : formatNm(t.distNm)}</span>
