@@ -168,3 +168,28 @@ test("fallback rows isolate different days/routes and UTC date is validated agai
     assert(!keys.includes("leg:unvalidated:UAL219|ORD|HNL|2026-10-04"));
   } finally { await db.pg.close(); }
 });
+
+
+test("schedule-less push/taxi and arrival survive midnight in cold stores, only from a recent same-route row", async () => {
+  const db = await database();
+  try {
+    const record = { ...schedule, flightId: null, gateOut: {}, takeoff: {} };
+    const before = flightStateIdentity(record, context, { nowSec: Date.parse("2026-10-02T23:59:00Z") / 1000 });
+    const after = flightStateIdentity(record, context, { nowSec: Date.parse("2026-10-03T00:01:00Z") / 1000 });
+    assert.notEqual(before.key, after.key); assert.deepEqual(after.recentLegacyKeys, [before.key]);
+    await db.phase().save(before.key!, departure, 0); await db.arrival().save(before.key!, arrival, 0);
+    assert.deepEqual((await db.phase().load(after.key!, after.legacyKeys, after.recentLegacyKeys)).state, departure);
+    assert.deepEqual((await db.arrival().load(after.key!, after.legacyKeys, after.recentLegacyKeys)).state, arrival);
+    // No previous-day lookup when any departure clock or a device-only scope exists.
+    assert.deepEqual(flightStateIdentity({ ...record, gateOut: { actual: 1790955180 } }, context).recentLegacyKeys, []);
+    assert.deepEqual(flightStateIdentity(record, context, { deviceOnly: true }).recentLegacyKeys, []);
+    const other = flightStateIdentity(record, { ...context, destination: { iata: "LAX" } }, { nowSec: Date.parse("2026-10-03T00:01:00Z") / 1000 });
+    assert.deepEqual((await db.phase().load(other.key!, other.legacyKeys, other.recentLegacyKeys)).state, { push: null, taxiOut: null });
+    // An older flight cannot be inherited on a later day.
+    for (const table of ["flight_phase_state", "arrival_projection_state"])
+      await db.pg.query(`update ${table} set updated_at = now() - interval '19 hours'`);
+    const next = flightStateIdentity(record, context, { nowSec: Date.parse("2026-10-04T00:01:00Z") / 1000 });
+    assert.deepEqual((await db.phase().load(next.key!, next.legacyKeys, next.recentLegacyKeys)).state, { push: null, taxiOut: null });
+    assert.equal((await db.arrival().load(next.key!, next.legacyKeys, next.recentLegacyKeys)).state.active, false);
+  } finally { await db.pg.close(); }
+});

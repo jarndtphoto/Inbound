@@ -3070,8 +3070,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// src/lib/flight-phase-state.server.ts for why this replaced module-scope
 	// Maps). Loaded once here, mutated locally exactly as the old Maps were,
 	// written back once near the end of this function.
-	const loadedPhase = await loadPhaseState(stateKey ?? "", legacyKeys);
-	const loadedArrival = await arrivalStateStore.load(stateKey ?? "", legacyKeys);
+	const loadedPhase = await loadPhaseState(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys);
+	const loadedArrival = await arrivalStateStore.load(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys);
 	let pushLatchValue = loadedPhase.state.push;
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;

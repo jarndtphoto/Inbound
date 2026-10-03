@@ -11,17 +11,18 @@ type SaveResult = Row & { status: "ok" | "conflict_held" | "write_failed" | "rea
 export function createArrivalStateStore(sqlProvider: () => Promise<Sql>) {
   const fallback = new Map<string, ArrivalProjectionState>();
   return {
-    async load(key: string, legacyKeys: string[] = []): Promise<LoadResult> {
+    async load(key: string, legacyKeys: string[] = [], recentLegacyKeys: string[] = []): Promise<LoadResult> {
       if (!key) return { state: emptyArrivalState(), version: 0, status: "ok" };
       try {
         const sql = await sqlProvider();
         const rows = await sql<Row>`select state, version from arrival_projection_state where land_key = ${key}`;
         const carryKeys = !rows.length ? legacyKeys : legacyKeys.filter(key => key.startsWith("leg:unvalidated:"));
-        if (carryKeys.length) {
+        if (carryKeys.length || recentLegacyKeys.length) {
           const candidates = await sql<Row & { land_key: string }>`select land_key, state, version from arrival_projection_state
             where land_key = any(${carryKeys.filter(legacy => legacy !== key)}::text[])
-              or land_key like ${!rows.length ? legacyProviderPattern(key) : ""}`;
-          const legacy = candidates.filter(row => carryKeys.includes(row.land_key) || (!rows.length && legacyProviderBelongsToLeg(row.land_key, key)));
+              or land_key like ${!rows.length ? legacyProviderPattern(key) : ""}
+              or (land_key = any(${recentLegacyKeys}::text[]) and updated_at >= now() - interval '18 hours' and updated_at <= now())`;
+          const legacy = candidates.filter(row => carryKeys.includes(row.land_key) || recentLegacyKeys.includes(row.land_key) || (!rows.length && legacyProviderBelongsToLeg(row.land_key, key)));
           if (legacy.length) {
             // Keep an entire winning path (runway/side/geometry/cursor together).
             // Existing CAS holds a concurrently inserted canonical winner.

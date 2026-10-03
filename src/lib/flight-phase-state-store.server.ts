@@ -62,19 +62,20 @@ export function createFlightPhaseStateStore(sqlProvider: () => Promise<Sql>) {
       return "conflict_dropped";
     } catch (err) { console.error("[flight-phase-state] save failed", err); return "write_failed"; }
   }
-  async function load(landKey: string, legacyKeys: string[] = []): Promise<LoadResult> {
+  async function load(landKey: string, legacyKeys: string[] = [], recentLegacyKeys: string[] = []): Promise<LoadResult> {
     if (!landKey) return { state: { ...EMPTY_PHASE_STATE }, version: 0, status: "ok" };
     try {
       let current = await read(landKey);
       // An unvalidated poll may update its separate row after the canonical
       // row exists. Reconcile that row on later validated polls as well.
       const carryKeys = current.version === 0 ? legacyKeys : legacyKeys.filter(key => key.startsWith("leg:unvalidated:"));
-      if (carryKeys.length) {
+      if (carryKeys.length || recentLegacyKeys.length) {
         const sql = await sqlProvider();
         const candidates = await sql<Row>`select land_key, push_unix, push_source, push_live, push_at, taxi_out_at, version
           from flight_phase_state where land_key = any(${carryKeys.filter(key => key !== landKey)}::text[])
-            or land_key like ${current.version === 0 ? legacyProviderPattern(landKey) : ""}`;
-        const legacy = candidates.filter(row => carryKeys.includes(row.land_key!) || (current.version === 0 && legacyProviderBelongsToLeg(row.land_key!, landKey)));
+            or land_key like ${current.version === 0 ? legacyProviderPattern(landKey) : ""}
+            or (land_key = any(${recentLegacyKeys}::text[]) and updated_at >= now() - interval '18 hours' and updated_at <= now())`;
+        const legacy = candidates.filter(row => carryKeys.includes(row.land_key!) || recentLegacyKeys.includes(row.land_key!) || (current.version === 0 && legacyProviderBelongsToLeg(row.land_key!, landKey)));
         if (legacy.length) {
           const merged = legacy.reduce((state, row) => mergeForward(state, stateFromRow(row).state), current.state);
           if (current.version > 0 && phaseStateEqual(current.state, merged)) return { ...current, status: "ok" };
