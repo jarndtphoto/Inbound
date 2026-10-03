@@ -61,7 +61,9 @@ export type LogEntry = {
 
 export type TabId = "sky" | "field" | "seat" | "log";
 
-export type StageId = "inbound" | "origin_gate" | "push" | "taxi" | "ride" | "arrival" | "final_approach" | "taxi_in" | "gate";
+export type StageId = "inbound" | "origin_gate" | "push" | "taxi" | "takeoff_roll" | "ride" | "arrival" | "final_approach" | "taxi_in" | "gate";
+export type StageStepId = Exclude<StageId, "takeoff_roll">;
+export type FlightScheduleSource = "flightaware_api" | "flightaware_public" | "flightstats_public" | "fr24_live" | "saved_resume" | "unavailable" | "unknown";
 
 export type Chop = "smooth" | "light" | "moderate" | "severe";
 
@@ -167,7 +169,7 @@ export type Comfort = {
   reasons: string[];
   trend?: "up" | "down" | "steady";
   trendWhy?: string | null;
-  segments?: Record<StageId, { grade: "A" | "B" | "C" | "D" | "F"; note: string | null }>;
+  segments?: Record<StageStepId, { grade: "A" | "B" | "C" | "D" | "F"; note: string | null }>;
 };
 
 export type FlightTimes = {
@@ -252,6 +254,7 @@ export type FlightStory = {
   currentStage: StageId;
   arrivalStatus?: "airborne" | "landed" | "taxi_in" | "gate";
   providers?: {
+    scheduleSource?: FlightScheduleSource;
     flightStateKey?: string | null;
     canonicalKey?: string | null;
     canonicalKeyFailure?: "missing_scheduled" | "route_mismatch" | "service_date_mismatch" | "no_ident" | null;
@@ -282,6 +285,8 @@ export type FlightStory = {
     totalNm: number;
     remainingNm: number;
     flownNm: number;
+    /** Distance along observed sector track, excluding projected geometry. */
+    observedFlownNm?: number | null;
     etaMin: number;
     progress: number;
     heading: number;
@@ -301,7 +306,7 @@ export type FlightStory = {
   };
   times: FlightTimes;
   stages: Record<
-    StageId,
+    StageStepId,
     {
       state: "done" | "now" | "next";
       title: string;

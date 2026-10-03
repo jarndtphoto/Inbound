@@ -1,15 +1,30 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 export const INITIAL_FLIGHT_SEARCH_MS = 20_000;
+export const INITIAL_FLIGHT_SEARCH_ATTEMPTS = 5;
+export const TEMPORARY_FLIGHT_RETRY_MS = 30_000;
 export const flightStoryQueryKey = (query: string) => ["story", query] as const;
 
 export function flightNotFound(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return /not found|could(?:n't| not) find|no (?:matching )?flight(?: data)?|try another number|try a flight number|enter a flight number|flight number is too long|HTTP 404\b/i.test(message);
+  return /^\[flight_not_found\]|^Flight not found[.!]?$|^No matching flight(?: for today)?[.!]?$|^Try a flight number|^Enter a flight number|^Flight number is too long/i.test(message);
 }
 
-export function flightSearchCanPoll(data: unknown, error: unknown, stopped = false): boolean {
-  return !stopped && !(error && (!data || flightNotFound(error)));
+/** A blank, blocked or rate-limited provider page is not a negative flight
+ * result. Require an explicit flight-specific message in rendered HTML. */
+export function verifiedFlightNotFoundPage(status: number, html: string): boolean {
+  if (status !== 200 && status !== 404) return false;
+  const text = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<!--[^]*?-->/g, " ")
+    .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  return /\bFlight(?: information)? not found\b|\bNo flights (?:were )?found\b|\bcould(?:n['’]t| not) find (?:this|that|the|your|a) flight\b/i.test(text);
+}
+
+export function flightSearchCanPoll(data: unknown, error: unknown, stopped = false, failures = 0): boolean {
+  return !stopped && !flightNotFound(error) && Boolean(data || failures < INITIAL_FLIGHT_SEARCH_ATTEMPTS);
+}
+
+export function flightSearchShouldRetry(failures: number, error: unknown, stopped = false): boolean {
+  return !stopped && !flightNotFound(error) && failures < INITIAL_FLIGHT_SEARCH_ATTEMPTS - 1;
 }
 
 export function stopFlightSearch(client: QueryClient, query: string): void {

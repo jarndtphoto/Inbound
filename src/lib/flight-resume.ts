@@ -149,7 +149,7 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
 }
 
 function observedDepartureStage(story: FlightStory): DepartureStageCheckpoint | null {
-  if (String(story.currentStage) === "Takeoff roll") return "takeoff_roll";
+  if (story.currentStage === "takeoff_roll" || String(story.currentStage) === "Takeoff roll") return "takeoff_roll";
   return story.currentStage === "taxi" ? "taxi" : story.currentStage === "push" ? "push" : null;
 }
 

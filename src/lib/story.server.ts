@@ -4,6 +4,8 @@ import { loadAeroFlight } from "./aeroapi.server.ts";
 import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
 import { readFlightResume } from "./flight-resume";
+import { flightNotFound, verifiedFlightNotFoundPage } from "./flight-search.ts";
+import { withStoryRequest, noteStoryCache, noteStorySchedule, noteStoryFallback } from "./story-request-log.server.ts";
 import { loadPhaseState, savePhaseState, phaseStateEqual } from "./flight-phase-state.server";
 import { confirmTakeoff, reconcileTakeoff, takeoffFloorStage, takeoffDiagnostic, hasOriginSurfaceFix } from "./confirmed-takeoff.ts";
 import { activeConfirmedTakeoff, mergeConfirmedTakeoff } from "./flight-phase-state-logic.ts";
@@ -73,9 +75,17 @@ var inflight = /* @__PURE__ */ new Map();
 function cached(key, ttlMs, fn) {
 	const hit = cache.get(key);
 	const ttl = hit?.ttl ?? ttlMs;
-	if (hit && Date.now() >= hit.at && Date.now() - hit.at < ttl) return Promise.resolve(hit.value);
+	const storyCache = /^story\d*:|^resume:[a-f0-9]+:story$/.test(key);
+	if (hit && Date.now() >= hit.at && Date.now() - hit.at < ttl) {
+		if (storyCache) noteStoryCache("hit");
+		return Promise.resolve(hit.value);
+	}
 	const pending = inflight.get(key);
-	if (pending) return pending;
+	if (pending) {
+		if (storyCache) noteStoryCache("inflight");
+		return pending;
+	}
+	if (storyCache) noteStoryCache("miss");
 	let timer;
 	const deadline = new Promise((_, reject) => {
 		timer = setTimeout(() => reject(new Error("Flight data request timed out. Please try again.")), 30000);
@@ -1327,6 +1337,8 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 		}
 	}
 	if (!res.ok) {
+		if (res.status === 404 && withInbound && verifiedFlightNotFoundPage(404, await res.text()))
+			throw new Error(`[flight_not_found] No flight found for ${fallbackIdent}.`);
 		let reason = "";
 		if (res.status === 402) {
 			const body = (await res.text()).slice(0, 16000);
@@ -1350,7 +1362,10 @@ export async function fetchAwarePage(url, fallbackIdent, withInbound, redirect =
 		}
 		throw new Error(`Current flight route unavailable: schedule provider returned HTTP ${res.status}${reason ? " (" + reason + ")" : ""}. Please try again shortly.`);
 	}
-	const raw = (await res.text()).split("trackpollBootstrap = ")[1];
+	const html = await res.text();
+	const raw = html.split("trackpollBootstrap = ")[1];
+	if (!raw && withInbound && verifiedFlightNotFoundPage(res.status, html))
+		throw new Error(`[flight_not_found] No flight found for ${fallbackIdent}.`);
 	if (!raw) throw new Error("Current flight route unavailable: schedule provider returned no flight data. Please try again shortly.");
 	const flights = parseJsonObject(raw)?.flights;
 	if (!flights) return null;
@@ -1622,6 +1637,8 @@ async function loadFlightStatsPublic(callsign) {
 			candidates = candidates.concat(details.filter(Boolean));
 		}
 		const selected = chooseFlightStatsScheduleCandidate(candidates);
+		if (!selected && pages.length === dates.length && pages.every(page => verifiedFlightNotFoundPage(200, page.html)))
+			throw new Error(`[flight_not_found] No flight found for ${parsed.iata} on the checked service dates.`);
 		if (selected) {
 			console.info("[flightstats-schedule]", {
 				callsign: parsed.callsign,
@@ -1640,10 +1657,11 @@ async function loadFlightStatsPublic(callsign) {
 const awareRejections = new Map();
 async function loadAware(callsign) {
 	const apiRecord = await loadAeroFlight(callsign);
-	if (apiRecord) return apiRecord;
+	if (apiRecord) return { ...apiRecord, _scheduleSource: "flightaware_api" };
 	const rejected = awareRejections.get(callsign);
 	if (rejected && Date.now() < rejected.until) {
 		const fallback = await loadFlightStatsPublic(callsign);
+		noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
 		if (fallback) return fallback;
 		throw rejected.error;
 	}
@@ -1659,6 +1677,7 @@ async function loadAware(callsign) {
 			if (awareRejections.size >= 100) awareRejections.delete(awareRejections.keys().next().value);
 			awareRejections.set(callsign, { until: Date.now() + 60000, error });
 			const fallback = await loadFlightStatsPublic(callsign);
+			noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
 			if (fallback) return fallback;
 		}
 		throw error;
@@ -2891,6 +2910,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const stateIdent = `${resumed?.scope ?? ""}${identKey}`;
 	let knownHex = hexByIdent.get(stateIdent) || null;
 	const hazardsP = loadHazards();
+	let scheduleError = null;
 	const [rawAc0, publicAware, route] = await Promise.all([
 		knownHex
 			? safe(adsbByHex(knownHex), null)
@@ -2898,6 +2918,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				? safe(adsbByReg(parsed.registration), null)
 				: safe(adsbByCallsign(parsed.callsign), null),
 		(resumed ? Promise.resolve(awareFromResume(resumed.resume, resumed.scope)) : loadAware(parsed.callsign)).catch((err) => {
+			scheduleError = err;
 			console.warn("[schedule-fallback-unavailable]", {
 				callsign: parsed.callsign,
 				reason: err instanceof Error ? err.message.slice(0, 180) : String(err).slice(0, 180),
@@ -2925,6 +2946,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		}));
 	}
 	const currentLegAware = publicAware ?? fr24Aware;
+	const scheduleSource = resumed ? "saved_resume" : publicAware
+		? publicAware._scheduleSource ?? (publicAware._publicScheduleDate ? "flightstats_public" : "flightaware_public")
+		: fr24Aware ? "fr24_live" : "unavailable";
+	noteStorySchedule(scheduleSource);
 	const flightawareOfficial = officialAwareCompatible(currentLegAware, official.flightaware) ? official.flightaware : null;
 	if (official.flightaware && !flightawareOfficial) {
 		console.log("[flightaware-instance-mismatch]", {
@@ -2940,6 +2965,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// to a different city pair. Require either a current schedule record or a
 	// fresh FR24 live record that identifies both ends of this exact active leg.
 	if (!parsed.registration && (!(aware?.originIata || aware?.originIcao) || !(aware?.destIata || aware?.destIcao))) {
+		if (flightNotFound(scheduleError)) throw scheduleError;
 		throw new Error("Current flight route unavailable. Try again when the flight feed responds.");
 	}
 	let rawAc = rawAc0;
@@ -4252,6 +4278,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		currentStage: current,
 		arrivalStatus,
 		providers: {
+			scheduleSource,
 			flightStateKey: stateKey,
 			canonicalKey: stateIdentity.canonicalKey,
 			canonicalKeyFailure: stateIdentity.reason,
@@ -4289,6 +4316,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			routeRemainingNm,
 			directToDestNm,
 			flownNm: Math.max(0, totalNm - remainingNm),
+			observedFlownNm: filed.flown?.length >= 2 ? polylineLengthNm(filed.flown) : null,
 			etaMin,
 			progress,
 			heading,
@@ -4321,6 +4349,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	};
 }
 export async function loadFlightStory(query, opts) {
+	return withStoryRequest(query, Boolean(opts?.fresh), () => loadFlightStoryCore(query, opts));
+}
+async function loadFlightStoryCore(query, opts) {
 	const fresh = Boolean(opts?.fresh);
 	try {
 		const key = `story43:${String(query || "").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
@@ -4352,7 +4383,9 @@ export async function loadFlightStory(query, opts) {
 		}
 	} catch (err) {
 		const msg = err instanceof Error && err.message && err.name !== "AbortError" ? err.message : "Could not load that flight. Try again.";
-		throw new Error(msg);
+		const error = new Error(msg, { cause: err });
+		if (err?.name === "AbortError") error.name = "AbortError";
+		throw error;
 	}
 }
 export async function loadLiveBoard() {

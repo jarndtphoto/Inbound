@@ -1,5 +1,6 @@
 import { applyTakeoffFloor } from "@/lib/confirmed-takeoff";
-import { displayStage, flightAirborne, liveFix, elapsedFlight } from "@/lib/flight-presentation";
+import { displayStage, flightAirborne, liveFix, elapsedFlight, flownDistance, remainingFlight } from "@/lib/flight-presentation";
+import { FLIGHT_STAGES as STAGES, stageStepId, statusProgressIndex } from "@/lib/flight-stage";
 import { AppearanceControl } from "@/components/appearance-control";
 import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { TravelerCompanion } from "@/components/traveler-companion";
@@ -26,7 +27,7 @@ import type { Comfort, FlightStory, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
 import { flightPollingComplete } from "@/lib/flight-polling";
-import { INITIAL_FLIGHT_SEARCH_MS, flightStoryQueryKey, flightNotFound, flightSearchCanPoll, stopFlightSearch, flightStoryRequest } from "@/lib/flight-search";
+import { INITIAL_FLIGHT_SEARCH_MS, TEMPORARY_FLIGHT_RETRY_MS, flightStoryQueryKey, flightNotFound, flightSearchCanPoll, flightSearchShouldRetry, stopFlightSearch, flightStoryRequest } from "@/lib/flight-search";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
 import { sampleWeather } from "@/lib/route-weather-segments";
 import { WeatherEventBody, WeatherEventHeadline, WeatherIntensityLabel } from "@/components/weather-event-copy";
@@ -37,18 +38,6 @@ import { Clock, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, Ho
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type ReactNode } from "react";
 
 const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
-
-const STAGES: { id: StageId; label: string }[] = [
-  { id: "inbound", label: "Inbound" },
-  { id: "origin_gate", label: "At gate" },
-  { id: "push", label: "Pushback" },
-  { id: "taxi", label: "Taxiing out" },
-  { id: "ride", label: "Flight" },
-  { id: "arrival", label: "Arrival" },
-  { id: "final_approach", label: "Final approach" },
-  { id: "taxi_in", label: "Taxiing in" },
-  { id: "gate", label: "At the gate" },
-];
 
 const STORY_CACHE_KEY = "filed-story-cache-v9";
 const LEGACY_STORY_CACHE_KEY = "filed-story-cache-v8";
@@ -430,7 +419,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
   const [briefingFor, setBriefingFor] = useState("");
   const [cacheOk, setCacheOk] = useState(false);
-  const [searchExpired, setSearchExpired] = useState(false);
+  const [stillLooking, setStillLooking] = useState(false);
   const [searchAttempt, setSearchAttempt] = useState(0);
   const leavingRef = useRef(false);
   const [refreshErr, setRefreshErr] = useState<string | null>(null);
@@ -494,7 +483,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       });
       signal.throwIfAborted();
       if (!storyMatchesQuery(s, query)) {
-        throw new Error("Could not load that flight. Try another number.");
+        throw new Error("Flight data is temporarily unavailable: the provider returned a different flight.");
       }
       const merged = keepRecentTrackGeometry(
         rememberOrigOnClient(applyTakeoffFloor(s, saved)),
@@ -511,15 +500,15 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     },
     initialDataUpdatedAt: 0,
     enabled: (q) => cacheOk && query.length > 0
-      && flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current),
+      && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     refetchInterval: (q) => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return false;
-      if (!flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current)) return false;
+      if (!flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount)) return false;
       if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
       if (s && flightPollingComplete(s)) return 60_000;
       if (q.state.status === "error") return /HTTP 402\b/.test(String(q.state.error?.message ?? "")) ? 60_000 : 15_000;
-      if (!s) return 5_000;
+      if (!s) return false; // The bounded retryer owns initial search attempts.
       if (s.live || s.currentStage === "push" || s.currentStage === "taxi") return 3_000;
       if (s.currentStage === "ride" || s.currentStage === "arrival" || s.currentStage === "final_approach" || s.currentStage === "taxi_in") return 4_000;
       if (s.currentStage === "inbound") return 5_000;
@@ -528,18 +517,16 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     staleTime: 2_500,
     gcTime: 10 * 60_000,
     retry: (count, err) => {
-      // Empty searches fail once and wait for an explicit Try again. Saved
-      // flights retain their existing live-update retries for transient errors.
-      if (!storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query)
-        || leavingRef.current || searchExpired || flightNotFound(err)) return false;
+      if (leavingRef.current || flightNotFound(err)) return false;
+      if (!storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query))
+        return flightSearchShouldRetry(count, err, leavingRef.current);
       if (count >= 2 || /HTTP 402\b/.test(err instanceof Error ? err.message : "")) return false;
-      const msg = err instanceof Error ? err.message : "";
-      if (/Try another number|Enter a flight number|Flight number is too long/i.test(msg)) return false;
       return true;
     },
-    retryDelay: (attempt) => Math.min(2_000 * 2 ** attempt, 8_000),
-    refetchOnWindowFocus: (q) => flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current),
-    refetchOnReconnect: (q) => flightSearchCanPoll(q.state.data, q.state.error, searchExpired || leavingRef.current),
+    retryDelay: (attempt) => storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query)
+      ? Math.min(2_000 * 2 ** attempt, 8_000) : TEMPORARY_FLIGHT_RETRY_MS,
+    refetchOnWindowFocus: (q) => Boolean(q.state.data) && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
+    refetchOnReconnect: (q) => Boolean(q.state.data) && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     placeholderData: (previousData) => {
       if (storyForQuery(previousData, query)) return previousData;
       return storyForQuery(readCachedStory(query), query);
@@ -549,14 +536,13 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   const story = storyForQuery(storyQ.data, query);
   useEffect(() => () => stopFlightSearch(queryClient, query), [queryClient, query]);
   useEffect(() => {
-    if (!cacheOk || story || storyQ.isError || searchExpired) return;
+    if (!cacheOk || story || storyQ.isError || stillLooking) return;
     const timer = window.setTimeout(() => {
       if (storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query)) return;
-      setSearchExpired(true);
-      void queryClient.cancelQueries({ queryKey: flightStoryQueryKey(query), exact: true });
+      setStillLooking(true);
     }, INITIAL_FLIGHT_SEARCH_MS);
     return () => window.clearTimeout(timer);
-  }, [cacheOk, query, queryClient, searchAttempt, Boolean(story), storyQ.isError, searchExpired]);
+  }, [cacheOk, query, queryClient, searchAttempt, Boolean(story), storyQ.isError, stillLooking]);
 
   function leaveFlight() {
     leavingRef.current = true;
@@ -565,20 +551,21 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     onHome();
   }
   function trySearchAgain() {
-    setSearchExpired(false);
+    setStillLooking(false);
     setSearchAttempt((attempt) => attempt + 1);
-    void storyQ.refetch();
+    void queryClient.cancelQueries({ queryKey: flightStoryQueryKey(query), exact: true }).then(() => storyQ.refetch());
   }
 
   useEffect(() => {
     const refreshWhenVisible = () => {
       if (document.visibilityState !== "visible" || !query) return;
-      if (!flightSearchCanPoll(storyQ.data, storyQ.error, searchExpired || leavingRef.current)) return;
+      if (!storyQ.data && storyQ.failureCount > 0) return;
+      if (!flightSearchCanPoll(storyQ.data, storyQ.error, leavingRef.current, storyQ.failureCount)) return;
       if (Date.now() - storyQ.dataUpdatedAt > 2_500) void storyQ.refetch();
     };
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => document.removeEventListener("visibilitychange", refreshWhenVisible);
-  }, [query, storyQ.dataUpdatedAt, storyQ.data, storyQ.error, storyQ.refetch, searchExpired]);
+  }, [query, storyQ.dataUpdatedAt, storyQ.data, storyQ.error, storyQ.refetch, storyQ.failureCount]);
 
   useEffect(() => {
     if (storyQ.dataUpdatedAt > 0) setRefreshErr(null);
@@ -592,12 +579,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       setBriefPopupOpen(true);
     }
   }, [query, story?.times.origPushUnix, story?.times.pushUnix, Boolean(story)]);
-  const rawStage = String(stagePref === "auto" ? (story?.currentStage ?? "inbound") : stagePref);
-  const active: StageId = rawStage === "ground"
-    ? "origin_gate"
-    : STAGES.some((s) => s.id === rawStage)
-      ? (rawStage as StageId)
-      : "inbound";
+  const active = stageStepId(stagePref === "auto" ? (story ? displayStage(story) : "inbound") : stagePref);
   const shownBrief = briefing && briefingFor === flightKey ? briefing : null;
   briefingRef.current = shownBrief;
 
@@ -836,13 +818,14 @@ function FlightPages({ onHome }: { onHome: () => void }) {
             {savedScheduleNote(story.schedule.confirmedAt)}
           </div>
         ) : null}
-        {(storyQ.isError || searchExpired) && !story && (
+        {(storyQ.isError || storyQ.failureCount > 0) && !story && (
           <div role="alert" className="mb-4 rounded-md border border-ifr/40 bg-surface px-4 py-3">
             <p className="text-sm text-ifr">
-              {searchExpired || flightNotFound(storyQ.error)
+              {flightNotFound(storyQ.error ?? storyQ.failureReason)
                 ? `We couldn't find ${query}. Check the flight number.`
-                : `We couldn't load ${query}'s flight information. Check the flight number or try again.`}
+                : "Flight data is temporarily unavailable."}
             </p>
+            {!flightNotFound(storyQ.error ?? storyQ.failureReason) && storyQ.isFetching && <p className="mt-1 text-sm text-muted">We’ll try again shortly.</p>}
             <div className="mt-3 flex flex-wrap gap-2">
               <Button type="button" variant="secondary" onClick={leaveFlight}>Back to search</Button>
               <Button type="button" variant="secondary" onClick={trySearchAgain}>Try again</Button>
@@ -850,7 +833,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
           </div>
         )}
 
-        {!story && !storyQ.isError && !searchExpired && <Skeleton query={query || "the flight"} onHome={leaveFlight} />}
+        {!story && !storyQ.isError && storyQ.failureCount === 0 && <Skeleton query={query || "the flight"} onHome={leaveFlight} slow={stillLooking} />}
 
         {story && (
           <div key={normFlight(query)} className={cn("journey-body min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
@@ -916,6 +899,7 @@ function stageHeadline(story: FlightStory) {
   if (stage === "origin_gate") return "At the gate";
   if (stage === "push") return "Pushback";
   if (stage === "taxi") return "Taxiing out";
+  if (stage === "takeoff_roll") return "Takeoff roll";
   return STAGES.find((s) => s.id === stage)?.label ?? stage;
 }
 
@@ -930,6 +914,7 @@ function headStatus(story: FlightStory) {
   if (story.currentStage === "origin_gate") return airline ? `At the gate · ${airline}` : "At the gate";
   if (story.currentStage === "push") return airline ? `Pushback · ${airline}` : "Pushback";
   if (story.currentStage === "taxi") return airline ? `Taxiing out · ${airline}` : "Taxiing out";
+  if (story.currentStage === "takeoff_roll") return airline ? `Takeoff roll · ${airline}` : "Takeoff roll";
   if (story.currentStage === "final_approach") return airline ? `Final approach · ${airline}` : "Final approach";
   if (air && inAirLive) return airline ? `In the air · ${airline}` : "In the air";
   if (air) return "In the air — live position unavailable right now";
@@ -938,15 +923,6 @@ function headStatus(story: FlightStory) {
 }
 
 const STATUS_PROGRESS = ["Gate", "Pushback", "Taxi", "Flight", "Landing", "Gate"] as const;
-
-function statusProgressIndex(stage: StageId) {
-  if (stage === "push") return 1;
-  if (stage === "taxi") return 2;
-  if (stage === "ride") return 3;
-  if (stage === "arrival" || stage === "final_approach") return 4;
-  if (stage === "taxi_in" || stage === "gate") return 5;
-  return 0;
-}
 
 function FlightStatusProgress({ story }: { story: FlightStory }) {
   const active = statusProgressIndex(displayStage(story));
@@ -1194,7 +1170,8 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
   const ac = story.aircraft;
   const showLiveFlight = Boolean(liveFix(story) && flightAirborne(story) && ac && !ac.onGround && (ac.altFt || ac.gsKt));
   const elapsed = airborne ? elapsedFlight(story) : null;
-  const liveFresh = cachedStorySafeDuringRefreshFailure(story);
+  const flown = airborne ? flownDistance(story) : null;
+  const remaining = remainingFlight(story);
   const parked = story.currentStage === "gate";
   const delay = t?.delayMin ?? null;
   const late = (delay ?? 0) >= 5;
@@ -1225,7 +1202,7 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
       : null,
   ].filter(Boolean).join(" · ");
 
-  const preDepartureTakeoffPrimary = shownStage === "push" || shownStage === "taxi";
+  const preDepartureTakeoffPrimary = shownStage === "push" || shownStage === "taxi" || shownStage === "takeoff_roll";
 
   return (
     <section className="flight-times" aria-label="Live timing and position">
@@ -1235,13 +1212,13 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
             <StatusCard
               prominent
               title="Remaining"
-              value={liveFresh ? formatDuration(story.route.etaMin) : "Updating…"}
-              detail={liveFresh ? formatMiles(story.route.remainingNm) : "Live position is stale"}
+              value={remaining.minutes != null ? formatDuration(remaining.minutes) : "Updating…"}
+              detail={remaining.estimated ? [remaining.minutes != null ? "Estimated" : null, remaining.gapNote].filter(Boolean).join(" · ") : formatMiles(story.route.remainingNm)}
             />
             <StatusCard
               title="Flown"
-              value={elapsed ? formatDuration(elapsed.minutes) : "—"}
-              detail={`${elapsed?.estimated || !liveFix(story) ? "Est. " : "Approx. "}${formatMiles(story.route.flownNm)}`}
+              value={elapsed ? `${elapsed.approximate ? "Approx. " : elapsed.estimated ? "Est. " : ""}${formatDuration(elapsed.minutes)}` : "—"}
+              detail={flown ? `Approx. ${flown.nm * 1.15078 < 1 ? "less than 1 mile" : formatMiles(flown.nm)}` : "Distance unavailable"}
             />
           </div>
         ) : down ? (
@@ -1449,7 +1426,7 @@ function StagePager({
   const [width, setWidth] = useState(0);
   const [dx, setDx] = useState(0);
   const [sliding, setSliding] = useState(false);
-  const index = Math.max(0, STAGES.findIndex((s) => s.id === active));
+  const index = STAGES.findIndex((s) => s.id === stageStepId(active));
   const card = width * 0.92;
   const gap = 12;
   const pad = Math.max(0, (width - card) / 2);
@@ -1606,7 +1583,7 @@ function StageBody({
   badge?: string;
   current?: boolean;
 }) {
-  const s = story.stages?.[stage];
+  const s = story.stages?.[stageStepId(stage)];
   const extra = useMemo(() => extraFor(story, stage), [story, stage]);
   if (!s) return null;
   return (
@@ -1821,13 +1798,13 @@ function WxBlock({
   );
 }
 
-function Skeleton({ query, onHome }: { query: string; onHome: () => void }) {
+function Skeleton({ query, onHome, slow = false }: { query: string; onHome: () => void; slow?: boolean }) {
   const label = query.trim() || "the flight";
   return (
     <div className="flight-loading" role="status">
       <RefreshCw className="size-6 animate-spin text-accent" aria-hidden="true" />
-      <h2>Getting {label}</h2>
-      <p>Getting times, weather, and the map…</p>
+      <h2>{slow ? "Still looking…" : `Getting ${label}`}</h2>
+      <p>{slow ? `We're still checking ${label}'s flight information.` : "Getting times, weather, and the map…"}</p>
       <button type="button" onClick={onHome} className="min-h-11 px-3 text-sm font-semibold text-accent underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">Cancel</button>
       <dl><div><dt>Times</dt><dd>Scheduled and estimated clocks load with the flight.</dd></div><div><dt>Briefing</dt><dd>Ride notes appear as soon as weather is in.</dd></div></dl>
     </div>

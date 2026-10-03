@@ -51,7 +51,7 @@ export function nextStep(s: FlightStory, now = Date.now(), failed = false) {
     return {title,body:body.trim(),confidence};
   }
   if (failed || age > 60) return {title:"Waiting for a fresh update",body:"The information below is saved. Position, flight stage, and times may have changed.",confidence};
-  if ((s.currentStage as string) === "Takeoff roll") {
+  if (s.currentStage === "takeoff_roll" || (s.currentStage as string) === "Takeoff roll") {
     return {
       title: "Takeoff roll underway",
       body: "The aircraft is accelerating on the runway. The flight will switch to airborne once takeoff is confirmed.",
