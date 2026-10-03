@@ -92,3 +92,24 @@ describe("phaseStateEqual", () => {
     assert.ok(!phaseStateEqual(state(push(100), null), state(null, null)));
   });
 });
+
+
+describe("confirmed takeoff merge", () => {
+  const empty = { push: null, taxiOut: null };
+  const observed = { ...empty, confirmedTakeoff: { time: null, source: "observed_airborne" as const, confirmedAt: 120 } };
+  const actual = { ...empty, confirmedTakeoff: { time: 100, source: "provider_actual" as const, confirmedAt: 130 } };
+  it("never erases confirmation with an empty or stale ground state", () => {
+    assert.deepEqual(mergeForward(observed, empty), observed);
+    assert.deepEqual(mergeForward(empty, observed), observed);
+  });
+  it("keeps provider actual time over observed and the first confirmation, in either order", () => {
+    const expected = { ...actual, confirmedTakeoff: { ...actual.confirmedTakeoff, confirmedAt: 120 } };
+    assert.deepEqual(mergeForward(actual, observed), expected);
+    assert.deepEqual(mergeForward(observed, actual), expected);
+  });
+  it("observations keep a null event time and confirmations merge associatively", () => {
+    const later = { ...observed, confirmedTakeoff: { ...observed.confirmedTakeoff, confirmedAt: 150 } };
+    assert.equal(mergeForward(observed, later).confirmedTakeoff!.time, null);
+    assert.deepEqual(mergeForward(mergeForward(actual, later), observed), mergeForward(actual, mergeForward(later, observed)));
+  });
+});

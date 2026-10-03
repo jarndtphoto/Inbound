@@ -8,7 +8,8 @@
 
 export type PushLatch = { unix: number; source: string | null; live: boolean; at: number } | null;
 export type TaxiOutLatch = { at: number } | null;
-export type PhaseState = { push: PushLatch; taxiOut: TaxiOutLatch };
+export type ConfirmedTakeoff = { time: number | null; source: "provider_actual" | "observed_airborne"; confirmedAt: number };
+export type PhaseState = { push: PushLatch; taxiOut: TaxiOutLatch; confirmedTakeoff?: ConfirmedTakeoff };
 
 export const EMPTY_PHASE_STATE: PhaseState = { push: null, taxiOut: null };
 
@@ -59,10 +60,21 @@ function resolvePush(a: PushLatch, b: PushLatch): PushLatch {
 export function mergeForward(a: PhaseState, b: PhaseState): PhaseState {
   const push = resolvePush(a.push, b.push);
   const taxiOut = !a.taxiOut ? b.taxiOut : !b.taxiOut ? a.taxiOut : (a.taxiOut.at >= b.taxiOut.at ? a.taxiOut : b.taxiOut);
-  return { push, taxiOut };
+  const confirmedTakeoff = mergeConfirmedTakeoff(a.confirmedTakeoff, b.confirmedTakeoff);
+  return { push, taxiOut, ...(confirmedTakeoff ? { confirmedTakeoff } : {}) };
 }
 
 /** Cheap dirty-check so buildStory only writes back when a latch actually changed. */
 export function phaseStateEqual(a: PhaseState, b: PhaseState): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Confirmation is monotone; only a provider actual supplies an event time. */
+export function mergeConfirmedTakeoff(a?: ConfirmedTakeoff, b?: ConfirmedTakeoff): ConfirmedTakeoff | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  const actuals = [a, b].filter(x => x.source === "provider_actual" && x.time != null);
+  return { source: actuals.length ? "provider_actual" : "observed_airborne",
+    time: actuals.length ? Math.min(...actuals.map(x => x.time!)) : null,
+    confirmedAt: Math.min(a.confirmedAt, b.confirmedAt) };
 }

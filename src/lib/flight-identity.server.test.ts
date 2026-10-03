@@ -18,7 +18,7 @@ const arrival = { ...emptyArrivalState(), active: true, side: -1, startedAt: 179
 
 async function database() {
   const pg = new PGlite();
-  for (const file of ["0002_flight_phase_state.sql", "0003_arrival_projection_state.sql"])
+  for (const file of ["0002_flight_phase_state.sql", "0003_arrival_projection_state.sql", "0004_confirmed_takeoff.sql"])
     await pg.exec(readFileSync(new URL(`../../migrations/${file}`, import.meta.url), "utf8"));
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     let query = strings[0]; for (let i = 0; i < values.length; i++) query += `$${i + 1}${strings[i + 1]}`;
@@ -191,5 +191,25 @@ test("schedule-less push/taxi and arrival survive midnight in cold stores, only 
     const next = flightStateIdentity(record, context, { nowSec: Date.parse("2026-10-04T00:01:00Z") / 1000 });
     assert.deepEqual((await db.phase().load(next.key!, next.legacyKeys, next.recentLegacyKeys)).state, { push: null, taxiOut: null });
     assert.equal((await db.arrival().load(next.key!, next.legacyKeys, next.recentLegacyKeys)).state.active, false);
+  } finally { await db.pg.close(); }
+});
+
+
+test("confirmed takeoff survives concurrent stale CAS writes and same-version omissions", async () => {
+  const db = await database();
+  try {
+    const observed = { time: null, source: "observed_airborne" as const, confirmedAt: 1790957521 };
+    const actual = { time: 1790957520, source: "provider_actual" as const, confirmedAt: 1790957530 };
+    const stale = await db.phase().load(key);
+    assert.equal(await db.phase().save(key, { ...departure, confirmedTakeoff: observed }, 0), "ok");
+    assert.equal(await db.phase().save(key, { ...departure, confirmedTakeoff: actual }, stale.version), "conflict_resolved");
+    const current = await db.phase().load(key);
+    assert.deepEqual(current.state.confirmedTakeoff, { ...actual, confirmedAt: observed.confirmedAt });
+    await db.phase().save(key, { push: null, taxiOut: null }, current.version);
+    await db.phase().save(key, departure, 0);
+    assert.deepEqual((await db.phase().load(key)).state.confirmedTakeoff, current.state.confirmedTakeoff);
+    const status = await Promise.all([db.phase().save(key, departure, 0), db.phase().save(key, { ...departure, confirmedTakeoff: observed }, 0)]);
+    assert(status.every(x => ["conflict_resolved", "conflict_dropped"].includes(x)));
+    assert.deepEqual((await db.phase().load(key)).state.confirmedTakeoff, current.state.confirmedTakeoff);
   } finally { await db.pg.close(); }
 });
