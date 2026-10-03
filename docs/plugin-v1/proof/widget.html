@@ -52,7 +52,7 @@
   let saved = persisted && typeof persisted === 'object' ? persisted : {};
   if (!persisted) { try { saved = JSON.parse(sessionStorage.getItem('inbound-fixture-proof') || '{}'); } catch {} }
   const state = { version:1, areaId:['preset:chicago','airport:KORD','airport:KMDW'].includes(saved.areaId) ? saved.areaId : 'preset:chicago', selectedCardId:typeof saved.selectedCardId === 'string' ? saved.selectedCardId : null, paused:saved.paused === true, fixtureStartedAtEpochMs:Number.isFinite(saved.fixtureStartedAtEpochMs) ? saved.fixtureStartedAtEpochMs : Date.now() };
-  let board = initial, timer = null, ageTimer = null, dismissed = false, busy = false, requestGeneration = 0, refreshCalls = 0, abort = null;
+  let board = initial, timer = null, ageTimer = null, dismissed = false, busy = false, requestGeneration = 0, refreshCalls = 0, abort = null, fixtureReadId = null, fixtureReadSequence = null;
   let hostReady = false, hostContext = { displayMode:'inline', availableDisplayModes:[] }, hostOrigin = null, sequence = 0;
   const pending = new Map();
   const targetOrigin = () => hostOrigin && hostOrigin !== 'null' ? hostOrigin : '*';
@@ -98,13 +98,15 @@
     const picked=board.flights.find(c=>c.cardId===state.selectedCardId);
     $('selected').textContent=picked ? `Focused: ${picked.identity.displayIdent}${liveAge(picked)>120 ? ' — observation expired' : ''}. Detailed resolution is outside this proof.` : state.selectedCardId ? 'The focused fixture is no longer in this area.' : 'Select an aircraft to focus it locally.';
     $('board-notice').textContent=dismissed ? 'Proof dismissed. Refresh stopped.' : state.paused || document.hidden ? 'Paused. Fixture refresh stopped.' : !visible.length && board.status==='ok' ? 'Fixture observations expired. No live data is connected.' : board.status==='empty' ? 'No eligible nearby aircraft right now — fixture.' : board.status==='unavailable' ? 'Fixture aircraft are temporarily unavailable.' : board.status==='invalid_request' ? board.error.message : board.stale || visible.some(c=>liveAge(c)>45) ? 'Last known fixture — observations are aging.' : 'Four invented aircraft. Updated ages advance locally.';
-    $('proof-status').textContent=`Fixture refresh calls: ${refreshCalls}. This UI sends no chat messages or model requests.`;
+    $('proof-status').textContent=`Fixture refresh calls: ${refreshCalls}. Server read: ${fixtureReadSequence ?? 'pending'} · ${fixtureReadId ?? 'pending'}. This UI sends no chat messages or model requests.`;
     hostControls();
   }
   function wanted() { return !dismissed && !state.paused && !document.hidden; }
   function stop() { clearTimeout(timer);clearInterval(ageTimer);timer=null;ageTimer=null;requestGeneration++;abort?.abort();abort=null; }
   function schedule() { stop();if(!wanted())return;ageTimer=setInterval(render,1000);timer=setTimeout(async()=>{await refresh();schedule();},(board.refreshAfterSeconds || 20)*1000); }
   function accept(result) {
+    const meta=result?._meta;
+    if(meta?.fixtureOnly===true && typeof meta.fixtureReadId==='string' && /^[a-f0-9]{18}$/.test(meta.fixtureReadId) && Number.isSafeInteger(meta.fixtureReadSequence)) { fixtureReadId=meta.fixtureReadId;fixtureReadSequence=meta.fixtureReadSequence; }
     const value=result?.structuredContent || result;
     if(value?.schemaVersion==='1.0' && ['ok','empty','unavailable','invalid_request'].includes(value.status) && Array.isArray(value.flights) && value.flights.length<=5) { board=value;if(value.resolvedArea){state.areaId=value.resolvedArea.id;save();}render(); }
   }

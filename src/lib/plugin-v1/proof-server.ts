@@ -39,22 +39,29 @@ function send(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 const rpcError = (id: string | number | null, code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
-function allowedRequest(req: IncomingMessage) {
+export type FixtureProofOptions = {
+  /** Exact opt-in preview authorities. Local proof stays local-only by default. */
+  allowedHosts?: readonly string[];
+  onRead?: (method: string, toolCalls: number) => void;
+};
+function allowedRequest(req: IncomingMessage, options: FixtureProofOptions) {
   let authority: URL;
   try { authority = new URL(`http://${req.headers.host}`); } catch { return false; }
-  if (!["127.0.0.1", "localhost", "[::1]"].includes(authority.hostname)) return false;
+  const local = ["127.0.0.1", "localhost", "[::1]"].includes(authority.hostname);
+  const preview = options.allowedHosts?.includes(authority.host) === true;
+  if (!local && !preview) return false;
   const origin = req.headers.origin;
   if (!origin) return true;
-  try { const parsed = new URL(origin); return parsed.origin === authority.origin; } catch { return false; }
+  try { const parsed = new URL(origin); return parsed.origin === authority.origin || preview && (parsed.origin === `https://${authority.host}` || parsed.origin === "https://chatgpt.com"); } catch { return false; }
 }
 
 /** Isolated stateless JSON Streamable HTTP proof; never mounted in app routes. */
-export function createFixtureProofServer() {
+export function createFixtureProofHandler(options: FixtureProofOptions = {}) {
   const stats = { requests: 0, toolCalls: 0 };
-  const server = createServer(async (req, res) => {
+  const handler = async (req: IncomingMessage, res: ServerResponse) => {
     stats.requests++;
     try {
-      if (!allowedRequest(req)) { send(res, 403, { error: "Fixture proof accepts local requests only." }); return; }
+      if (!allowedRequest(req, options)) { send(res, 403, { error: "Unknown fixture proof authority or origin." }); return; }
       if (req.url === "/" || req.url === "/widget") {
         if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
         const nonce = randomBytes(18).toString("base64url");
@@ -86,17 +93,25 @@ export function createFixtureProofServer() {
         case "initialize": result = { protocolVersion: typeof params.protocolVersion === "string" && versions.includes(params.protocolVersion) ? params.protocolVersion : versions[0], capabilities: { tools: {}, resources: {} }, serverInfo: { name: "inbound-static-fixture-proof", version: "0.1.0" }, instructions: FIXTURE_NOTICE }; break;
         case "ping": result = {}; break;
         case "tools/list": result = { tools: [{ name: PROOF_TOOL, title: "Inbound Live static fixture proof", description: "Render invented Chicago/ORD/MDW aircraft. Test fixtures only; never use as live flight information.", inputSchema, outputSchema, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }, _meta: { ui: { resourceUri: PROOF_RESOURCE, visibility: ["model", "app"] }, "openai/outputTemplate": PROOF_RESOURCE, "openai/widgetAccessible": true } }] }; break;
-        case "tools/call":
+        case "tools/call": {
           if (params.name !== PROOF_TOOL) { send(res, 200, rpcError(id, -32602, "Unknown fixture tool.")); return; }
-          stats.toolCalls++; result = proofFixtureResult(params.arguments); break;
+          stats.toolCalls++;
+          const fixture = proofFixtureResult(params.arguments);
+          result = { ...fixture, _meta: { ...fixture._meta, fixtureReadId: randomBytes(9).toString("hex"), fixtureReadSequence: stats.toolCalls } }; break;
+        }
         case "resources/list": result = { resources: [{ uri: PROOF_RESOURCE, name: "Inbound Live fixture board", mimeType: UI_MIME, description: "Static four-card aviation host proof." }] }; break;
         case "resources/read":
           if (params.uri !== PROOF_RESOURCE) { send(res, 200, rpcError(id, -32602, "Unknown fixture resource.")); return; }
           result = { contents: [{ uri: PROOF_RESOURCE, mimeType: UI_MIME, text: proofWidgetHtml(), _meta: { ui: { prefersBorder: true, csp: { connectDomains: [], resourceDomains: [] } }, "openai/ui": { availableDisplayModes: ["inline", "pip", "fullscreen"] }, "openai/widgetDescription": "Invented static Inbound Live proof; not live flight information." } }] }; break;
         default: send(res, 200, rpcError(id, -32601, "Unknown fixture method.")); return;
       }
+      options.onRead?.(method, stats.toolCalls);
       send(res, 200, { jsonrpc: "2.0", id, result });
     } catch { if (!res.headersSent) send(res, 500, { error: "Fixture proof unavailable." }); else res.end(); }
-  });
-  return { server, stats };
+  };
+  return { handler, stats };
+}
+export function createFixtureProofServer() {
+  const { handler, stats } = createFixtureProofHandler();
+  return { server: createServer(handler), stats };
 }
