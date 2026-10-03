@@ -11,7 +11,7 @@ import { formatClockTime } from "./presentation-time";
 const DEPARTURE_SURFACE_STAGES = new Set(["origin_gate", "push", "taxi"]);
 const SURFACE_STAGES = new Set(["origin_gate", "push", "taxi", "taxi_in", "gate"]);
 const ALT_SURFACE_FRESH_SEC = 120;
-const TAKEOFF_ROLL_STAGE = "Takeoff roll";
+const TAKEOFF_ROLL_STAGE = "takeoff_roll";
 
 function sameResumeLeg(story: FlightStory, prior?: FlightResume) {
   return Boolean(prior && prior.originIcao === story.origin?.icao && prior.destIcao === story.dest?.icao);
@@ -123,7 +123,7 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
         departureStage: "takeoff_roll", takeoffRollStreak: 0, takeoffRollStreakSeenAt: null,
         flightSpeedStreak: 0, flightSpeedStreakSeenAt: null } } : {}) };
     }
-    return { ...story, currentStage: TAKEOFF_ROLL_STAGE as FlightStory["currentStage"],
+    return { ...story, currentStage: TAKEOFF_ROLL_STAGE,
       ...(resumeBase ? { resume: { ...resumeBase, departureStage: "takeoff_roll",
         takeoffRollStreak: 0, takeoffRollStreakSeenAt: null, flightSpeedStreak: 0,
         flightSpeedStreakSeenAt: null } } : {}) };
@@ -136,7 +136,7 @@ export function preserveDepartureProgress(story: FlightStory, prior?: FlightResu
   }
 
   if (priorStage === "takeoff_roll" && !freshSurface) {
-    return { ...story, currentStage: TAKEOFF_ROLL_STAGE as FlightStory["currentStage"],
+    return { ...story, currentStage: TAKEOFF_ROLL_STAGE,
       ...(resumeBase ? { resume: { ...resumeBase, departureStage: "takeoff_roll" } } : {}) };
   }
 
@@ -253,7 +253,7 @@ export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightR
   const firstSeenAlreadyMoving = Boolean(live?.onGround
     && story.providers?.chosenPosition === "fr24" && !live.extrapolated
     && (live.seenSec ?? 999) <= FR24_SURFACE_FRESH_SEC && (live.gsKt ?? 0) >= 3
-    && (story.currentStage === "taxi" || story.currentStage === (TAKEOFF_ROLL_STAGE as FlightStory["currentStage"])));
+    && (story.currentStage === "taxi" || story.currentStage === TAKEOFF_ROLL_STAGE));
   const reference = pushReference(story);
   if (!detected || !looksLikeRecentDetection || !firstSeenAlreadyMoving || !reference) return story;
   return replaceDetectedPush(story, reference);

@@ -1,5 +1,6 @@
 import { applyTakeoffFloor } from "@/lib/confirmed-takeoff";
 import { displayStage, flightAirborne, liveFix, elapsedFlight } from "@/lib/flight-presentation";
+import { FLIGHT_STAGES as STAGES, stageStepId, statusProgressIndex } from "@/lib/flight-stage";
 import { AppearanceControl } from "@/components/appearance-control";
 import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { TravelerCompanion } from "@/components/traveler-companion";
@@ -37,18 +38,6 @@ import { Clock, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, Ho
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type ReactNode } from "react";
 
 const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
-
-const STAGES: { id: StageId; label: string }[] = [
-  { id: "inbound", label: "Inbound" },
-  { id: "origin_gate", label: "At gate" },
-  { id: "push", label: "Pushback" },
-  { id: "taxi", label: "Taxiing out" },
-  { id: "ride", label: "Flight" },
-  { id: "arrival", label: "Arrival" },
-  { id: "final_approach", label: "Final approach" },
-  { id: "taxi_in", label: "Taxiing in" },
-  { id: "gate", label: "At the gate" },
-];
 
 const STORY_CACHE_KEY = "filed-story-cache-v9";
 const LEGACY_STORY_CACHE_KEY = "filed-story-cache-v8";
@@ -592,12 +581,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       setBriefPopupOpen(true);
     }
   }, [query, story?.times.origPushUnix, story?.times.pushUnix, Boolean(story)]);
-  const rawStage = String(stagePref === "auto" ? (story?.currentStage ?? "inbound") : stagePref);
-  const active: StageId = rawStage === "ground"
-    ? "origin_gate"
-    : STAGES.some((s) => s.id === rawStage)
-      ? (rawStage as StageId)
-      : "inbound";
+  const active = stageStepId(stagePref === "auto" ? (story ? displayStage(story) : "inbound") : stagePref);
   const shownBrief = briefing && briefingFor === flightKey ? briefing : null;
   briefingRef.current = shownBrief;
 
@@ -916,6 +900,7 @@ function stageHeadline(story: FlightStory) {
   if (stage === "origin_gate") return "At the gate";
   if (stage === "push") return "Pushback";
   if (stage === "taxi") return "Taxiing out";
+  if (stage === "takeoff_roll") return "Takeoff roll";
   return STAGES.find((s) => s.id === stage)?.label ?? stage;
 }
 
@@ -930,6 +915,7 @@ function headStatus(story: FlightStory) {
   if (story.currentStage === "origin_gate") return airline ? `At the gate · ${airline}` : "At the gate";
   if (story.currentStage === "push") return airline ? `Pushback · ${airline}` : "Pushback";
   if (story.currentStage === "taxi") return airline ? `Taxiing out · ${airline}` : "Taxiing out";
+  if (story.currentStage === "takeoff_roll") return airline ? `Takeoff roll · ${airline}` : "Takeoff roll";
   if (story.currentStage === "final_approach") return airline ? `Final approach · ${airline}` : "Final approach";
   if (air && inAirLive) return airline ? `In the air · ${airline}` : "In the air";
   if (air) return "In the air — live position unavailable right now";
@@ -938,15 +924,6 @@ function headStatus(story: FlightStory) {
 }
 
 const STATUS_PROGRESS = ["Gate", "Pushback", "Taxi", "Flight", "Landing", "Gate"] as const;
-
-function statusProgressIndex(stage: StageId) {
-  if (stage === "push") return 1;
-  if (stage === "taxi") return 2;
-  if (stage === "ride") return 3;
-  if (stage === "arrival" || stage === "final_approach") return 4;
-  if (stage === "taxi_in" || stage === "gate") return 5;
-  return 0;
-}
 
 function FlightStatusProgress({ story }: { story: FlightStory }) {
   const active = statusProgressIndex(displayStage(story));
@@ -1225,7 +1202,7 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
       : null,
   ].filter(Boolean).join(" · ");
 
-  const preDepartureTakeoffPrimary = shownStage === "push" || shownStage === "taxi";
+  const preDepartureTakeoffPrimary = shownStage === "push" || shownStage === "taxi" || shownStage === "takeoff_roll";
 
   return (
     <section className="flight-times" aria-label="Live timing and position">
@@ -1449,7 +1426,7 @@ function StagePager({
   const [width, setWidth] = useState(0);
   const [dx, setDx] = useState(0);
   const [sliding, setSliding] = useState(false);
-  const index = Math.max(0, STAGES.findIndex((s) => s.id === active));
+  const index = STAGES.findIndex((s) => s.id === stageStepId(active));
   const card = width * 0.92;
   const gap = 12;
   const pad = Math.max(0, (width - card) / 2);
@@ -1606,7 +1583,7 @@ function StageBody({
   badge?: string;
   current?: boolean;
 }) {
-  const s = story.stages?.[stage];
+  const s = story.stages?.[stageStepId(stage)];
   const extra = useMemo(() => extraFor(story, stage), [story, stage]);
   if (!s) return null;
   return (

@@ -1,5 +1,6 @@
 import { readTakeoffDiagnostic, takeoffFloorStage } from "./confirmed-takeoff.ts";
 import { haversineNm } from "./geo.ts";
+import { flightStageId } from "./flight-stage.ts";
 import type { FlightStory, StageId } from "./types.ts";
 
 export function displayStage(story: FlightStory): StageId {
@@ -32,7 +33,7 @@ export function displayStage(story: FlightStory): StageId {
     if (story.times?.pushed || gsKt >= 2) return "push";
     return "origin_gate";
   }
-  return story.currentStage;
+  return flightStageId(story.currentStage);
 }
 
 export function liveFix(story: FlightStory) {
@@ -50,6 +51,7 @@ export function flightAirborne(story: FlightStory) {
     story.currentStage === "origin_gate" ||
     story.currentStage === "push" ||
     story.currentStage === "taxi" ||
+    story.currentStage === "takeoff_roll" ||
     story.currentStage === "inbound" ||
     story.currentStage === "taxi_in" ||
     story.currentStage === "gate"
