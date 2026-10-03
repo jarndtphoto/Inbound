@@ -29,6 +29,76 @@ async function database() {
     arrival: () => createArrivalStateStore(async () => sql) };
 }
 
+const deltaContext = { requested: "DL4820", origin: { iata: "MDW" }, destination: { iata: "MSP" } };
+const deltaSchedule = { ident: "EDV4820", iataIdent: "DL4820", originIata: "MDW", destIata: "MSP",
+  gateOut: { scheduled: 1791054000 }, serviceDate: "2026-10-03" };
+const deltaKey = "leg:v1:DAL4820|2026-10-03|MDW|MSP", endeavorKey = "leg:v1:EDV4820|2026-10-03|MDW|MSP";
+const deltaDeparture = { push: { unix: 1791053460, source: "provider_actual", live: true, at: 1791053460 }, taxiOut: { at: 1791054380 } };
+const deltaArrival = { ...arrival, startedAt: 1791054460000, lastFixAt: 1791054460000, points: [{ lat: 44.88, lon: -93.22 }] };
+
+test("EDV/DAL alternation keeps push/taxi/takeoff and arrival in one requested row across cold stores and late alias updates", async () => {
+  const db = await database(), realFetch = globalThis.fetch;
+  globalThis.fetch = () => { throw Error("Alias folding must not request providers"); };
+  try {
+    const initial = { ...deltaDeparture, taxiOut: null };
+    await db.phase().save(endeavorKey, initial, 0); await db.arrival().save(endeavorKey, deltaArrival, 0);
+    const id = flightStateIdentity(deltaSchedule, deltaContext);
+    assert.equal(id.key, deltaKey);
+    assert.deepEqual((await db.phase().load(id.key!, id.legacyKeys)).state, initial);
+    assert.deepEqual((await db.arrival().load(id.key!, id.legacyKeys)).state, deltaArrival);
+
+    // An old deployed instance can still update the alias after our row exists.
+    const confirmed = { ...deltaDeparture, confirmedTakeoff: { time: null, source: "observed_airborne" as const, confirmedAt: 1791054450 } };
+    const newerArrival = { ...deltaArrival, lastFixAt: deltaArrival.lastFixAt + 1000 };
+    await db.phase().save(endeavorKey, confirmed, 1); await db.arrival().save(endeavorKey, newerArrival, 1);
+    for (const ident of ["EDV4820", "DAL4820", "EDV4820"]) {
+      const current = flightStateIdentity({ ...deltaSchedule, ident, iataIdent: ident === "DAL4820" ? "DL4820" : "9E4820" }, deltaContext);
+      assert.equal(current.key, deltaKey);
+      const phase = await db.phase().load(current.key!, current.legacyKeys);
+      const ar = await db.arrival().load(current.key!, current.legacyKeys);
+      assert.deepEqual(phase.state, confirmed); assert.deepEqual(ar.state, newerArrival);
+      await db.phase().save(current.key!, phase.state, phase.version);
+      await db.arrival().save(current.key!, ar.state, ar.version);
+    }
+    for (const table of ["flight_phase_state", "arrival_projection_state"]) {
+      const rows = (await db.pg.query<{ land_key: string; version: number }>(`select land_key, version from ${table}`)).rows;
+      assert.deepEqual(rows.map(r => r.land_key).sort(), [endeavorKey, deltaKey].sort());
+      assert.equal(rows.find(r => r.land_key === endeavorKey)!.version, 2, "alias row is neither deleted nor rewritten by folding");
+    }
+  } finally { globalThis.fetch = realFetch; await db.pg.close(); }
+});
+
+test("validated alias folds isolate dates/routes and preserve CAS winners under concurrent cold loads", async () => {
+  const db = await database();
+  try {
+    const confirmed = { ...deltaDeparture, confirmedTakeoff: { time: 1791054450, source: "provider_actual" as const, confirmedAt: 1791054451 } };
+    await db.phase().save(endeavorKey, confirmed, 0); await db.arrival().save(endeavorKey, deltaArrival, 0);
+    for (const [record, route] of [
+      [{ ...deltaSchedule, gateOut: { scheduled: 1791054000 + 86400 }, serviceDate: "2026-10-04" }, deltaContext],
+      [{ ...deltaSchedule, destIata: "BWI" }, { ...deltaContext, destination: { iata: "BWI" } }],
+    ] as const) {
+      const id = flightStateIdentity(record, route);
+      assert(!id.legacyKeys.includes(endeavorKey));
+      assert.deepEqual((await db.phase().load(id.key!, id.legacyKeys)).state, { push: null, taxiOut: null });
+      assert.equal((await db.arrival().load(id.key!, id.legacyKeys)).state.active, false);
+    }
+    const id = flightStateIdentity(deltaSchedule, deltaContext), phaseStores = [db.phase(), db.phase()], arrivalStores = [db.arrival(), db.arrival()];
+    const [phases, arrivals] = await Promise.all([
+      Promise.all(phaseStores.map(store => store.load(id.key!, id.legacyKeys))),
+      Promise.all(arrivalStores.map(store => store.load(id.key!, id.legacyKeys))),
+    ]);
+    assert(phases.every(p => p.status === "ok")); assert(arrivals.every(a => a.status === "ok"));
+    const current = await db.phase().load(deltaKey), winner = { ...confirmed, taxiOut: { at: 1791054490 } };
+    await phaseStores[0].save(deltaKey, winner, current.version);
+    assert.equal(await phaseStores[1].save(deltaKey, { push: null, taxiOut: null }, current.version), "conflict_resolved");
+    assert.deepEqual((await db.phase().load(deltaKey)).state, winner);
+    const ar = await db.arrival().load(deltaKey), pathWinner = { ...deltaArrival, side: 1, lastFixAt: deltaArrival.lastFixAt + 2000 };
+    await arrivalStores[0].save(deltaKey, pathWinner, ar.version);
+    assert.equal((await arrivalStores[1].save(deltaKey, deltaArrival, ar.version)).status, "conflict_held");
+    assert.deepEqual((await db.arrival().load(deltaKey, id.legacyKeys)).state, pathWinner);
+  } finally { await db.pg.close(); }
+});
+
 test("legacy provider row carries forward; handoff and cold stores use one canonical row, legacy untouched", async () => {
   const db = await database(), realFetch = globalThis.fetch;
   globalThis.fetch = () => { throw Error("Canonical identity must not request providers"); };
