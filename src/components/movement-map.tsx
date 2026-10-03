@@ -1,3 +1,4 @@
+import { phaseOf } from "@/lib/aircraft-phase";
 import { RouteMap } from "./route-map";
 import { getAirportSurfaceCached } from "@/lib/airport-surface";
 import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.server";
@@ -376,7 +377,7 @@ function GroundMovementMap({
     track: fastFix.track ?? aircraft?.track ?? null,
     vertFpm: aircraft?.vertFpm ?? null,
     onGround: fastFix.onGround,
-    phase: fastFix.onGround ? ((fastFix.gsKt ?? 0) > 5 ? "taxi" : "parked") : "cruise",
+    phase: phaseOf({ ...fastFix, phaseVertFpm: aircraft?.phaseVertFpm }, { origin: story.origin, dest: story.dest, groundTaxiKt: 5 }),
     callsign: fastFix.callsign ?? aircraft?.callsign ?? null,
     extrapolated: !fast,
     seenSec: fastAge,

@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { phaseOf, verticalTrend, createPhaseHistory, type PhaseContext } from "./aircraft-phase.ts";
 import { loadAeroFlight } from "./aeroapi.server.ts";
 import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
@@ -479,14 +480,16 @@ async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, fa
 	const faRaw = Array.isArray(faTrack) && faTrack.length >= 2 ? faTrack : [];
 	let raw = faRaw.length ? faRaw.slice() : [];
 	if (hexRaw.length) raw = raw.length ? mergeTraces(raw, hexRaw) : hexRaw;
-	const flown = uniqueTrack(legsForThisSector(splitTraceLegs(raw), origin, dest, live, takeoffUnix ?? null), faRaw.length ? 1.6 : 6);
+	const sector = legsForThisSector(splitTraceLegs(raw), origin, dest, live, takeoffUnix ?? null);
+	const phaseHistory = sector.map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon }));
+	const flown = uniqueTrack(sector, faRaw.length ? 1.6 : 6);
 	if (live && haversineNm({ lat: live.lat, lon: live.lon }, dest) < 68) {
 		const arrival = stitchArrival(flown, live, dest);
-		if (arrival && arrival.length >= 4) return { points: arrival, spine, flown, source: flown.length >= 6 ? "track" : "direct" };
+		if (arrival && arrival.length >= 4) return { phaseHistory, points: arrival, spine, flown, source: flown.length >= 6 ? "track" : "direct" };
 	}
 	if (flown.length >= 6) {
 		return {
-			points: densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48),
+			phaseHistory, points: densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48),
 			spine,
 			flown,
 			source: "track"
@@ -494,28 +497,19 @@ async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, fa
 	}
 	if (flown.length >= 2) {
 		return {
-			points: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36),
+			phaseHistory, points: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36),
 			spine,
 			flown,
 			source: "track"
 		};
 	}
-	if (Array.isArray(waypoints) && waypoints.length >= 4) return { points: spine, spine, flown, source: "filed" };
-	if (live) return { points: directSpine(origin, dest, live), spine, flown, source: "direct" };
-	return { points: spine, spine, flown, source: "direct" };
+	if (Array.isArray(waypoints) && waypoints.length >= 4) return { phaseHistory, points: spine, spine, flown, source: "filed" };
+	if (live) return { phaseHistory, points: directSpine(origin, dest, live), spine, flown, source: "direct" };
+	return { phaseHistory, points: spine, spine, flown, source: "direct" };
 }
 
 function acList(d) {
 	return d?.ac ?? d?.aircraft ?? [];
-}
-function phaseOf(ac) {
-	if (ac.onGround) return (ac.gsKt ?? 0) > 8 ? "taxi" : "parked";
-	const v = ac.vertFpm ?? 0;
-	const alt = ac.altFt ?? 0;
-	if (v < -400 && alt < 8e3) return "approach";
-	if (v < -250) return "descent";
-	if (v > 400 && alt < 12e3) return "climb";
-	return "cruise";
 }
 function destParkedLeftover(cand, dest, aware) {
 	if (!cand || !dest || !aware?.takeoff?.actual || aware?.landing?.actual) return false;
@@ -557,9 +551,12 @@ function coastTracePt(pt) {
 	}
 	return { lat, lon, age, alt: pt.alt ?? null, gs: pt.gs ?? null, track: pt.track ?? null };
 }
-function liveFromTracePt(pt, hex, seed) {
+export function liveFromTracePt(pt, hex, seed, context: PhaseContext = {}) {
 	const c = coastTracePt(pt);
+	const sample = { lat: c.lat, lon: c.lon, altFt: c.alt, gsKt: c.gs, seenAt: pt.t, seenSec: c.age, onGround: false };
+	const trend = verticalTrend(sample, context.history);
 	return {
+		...trend,
 		hex: hex || seed?.hex || "",
 		callsign: seed?.callsign ?? null,
 		registration: seed?.registration ?? null,
@@ -572,11 +569,11 @@ function liveFromTracePt(pt, hex, seed) {
 		altFt: c.alt,
 		gsKt: c.gs,
 		track: c.track ?? seed?.track ?? null,
-		vertFpm: seed?.vertFpm ?? null,
+		vertFpm: Number.isFinite(pt.vertFpm) ? pt.vertFpm : trend.phaseVertFpm,
 		onGround: false,
-		phase: "cruise",
+		phase: phaseOf({ ...sample, ...trend }, context),
 		extrapolated: c.age > 45,
-		seenSec: c.age
+		seenSec: c.age, seenAt: pt.t
 	};
 }
 function rememberKin(identKey, live) {
@@ -625,7 +622,7 @@ function toLive(raw) {
 				? altGeom
 				: null;
 	const gsKt = typeof raw.gs === "number" ? raw.gs : typeof raw.spd === "number" ? raw.spd : null;
-	const vertFpm = typeof raw.baro_rate === "number" ? raw.baro_rate : null;
+	const vertFpm = Number.isFinite(raw.baro_rate) ? raw.baro_rate : Number.isFinite(raw.geom_rate) ? raw.geom_rate : null;
 	const type = raw.t?.trim() || null;
 	const fusedSeen = raw._fusion?.ageSec ?? fusionSeen(raw);
 	const seenSec = fusedSeen === 999 ? null : fusedSeen;
@@ -643,7 +640,7 @@ function toLive(raw) {
 		gsKt,
 		track: typeof raw.track === "number" ? raw.track : null,
 		vertFpm,
-		// Arrival-only raw rate fallback. Existing phaseOf inputs stay unchanged.
+		// Keep the same raw rate input for arrival projection.
 		arrivalVertFpm: Number.isFinite(raw.baro_rate) ? raw.baro_rate : Number.isFinite(raw.geom_rate) ? raw.geom_rate : null,
 		onGround,
 		extrapolated: Boolean(raw.extrapolated ?? raw._fusion?.extrapolated),
@@ -2239,6 +2236,7 @@ const parkByFlight = /* @__PURE__ */ new Map();
 const hexByIdent = /* @__PURE__ */ new Map();
 const hexRouteByIdent = /* @__PURE__ */ new Map();
 const lastKinByIdent = /* @__PURE__ */ new Map();
+const observePhase = createPhaseHistory();
 const routeTrackByFlight = /* @__PURE__ */ new Map();
 const ROUTE_TRACK_HOLD_MS = 20 * 60_000;
 
@@ -2701,8 +2699,11 @@ function buildStages(args) {
 		}
 	};
 }
-function liveFromAware(aware) {
-	const live = liveFromAwareTrack(aware);
+export function liveFromAware(aware, context: PhaseContext = {}) {
+	const origin = airportByIcao(aware?.originIcao) ?? airportByIata(aware?.originIata);
+	const dest = airportByIcao(aware?.destIcao) ?? airportByIata(aware?.destIata);
+	context = { origin: origin ?? undefined, dest: dest ?? undefined, ...context };
+	const live = liveFromAwareTrack(aware, context);
 	if (!live) return null;
 	const type = live.type ?? aware?.type ?? null;
 	return {
@@ -2713,7 +2714,6 @@ function liveFromAware(aware) {
 		typeName: airframeOf(type)?.name ?? type,
 		year: null,
 		operator: null,
-		vertFpm: null,
 	};
 }
 
@@ -2968,7 +2968,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		{ callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean), registration: aware?.tail ?? null, hex: knownHex ?? aware?.hex ?? null },
 		Date.now() / 1000, fieldElev(surfaceField)
 	);
-	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen) : adsbLive ?? liveFromAware(aware);
+	const phaseContext = { origin: { ...origin, elevationFt: fieldElev(origin) }, dest: { ...dest, elevationFt: fieldElev(dest) } };
+	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen, phaseContext) : adsbLive ?? liveFromAware(aware, phaseContext);
 	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
 	live = asOnGround(live, origin);
@@ -3176,10 +3177,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				safe(fetchTrace(hexForTrace, "trace_full"), []),
 				safe(fetchTrace(hexForTrace, "trace_recent"), [])
 			]);
-			const pt = lastAirborneTracePt(mergeTraces(full, recent), aware?.takeoff?.actual ?? null);
+			const trace = mergeTraces(full, recent);
+			const pt = lastAirborneTracePt(trace, aware?.takeoff?.actual ?? null);
 			if (pt) {
 				if (!live) {
-					const cand = liveFromTracePt(pt, hexForTrace, { hex: hexForTrace, callsign: parsed.callsign, registration: aware?.tail ?? null, type: aware?.type ?? null, typeName: airframeOf(aware?.type)?.name ?? aware?.type ?? null });
+					const cand = liveFromTracePt(pt, hexForTrace, { hex: hexForTrace, callsign: parsed.callsign, registration: aware?.tail ?? null, type: aware?.type ?? null, typeName: airframeOf(aware?.type)?.name ?? aware?.type ?? null }, { ...phaseContext, history: trace.map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon })) });
 					if (cand && !destParkedLeftover(cand, dest, aware)) live = cand;
 				} else {
 					live = {
@@ -3388,9 +3390,13 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// Preserve the original distance input to stage classification. Runway
 	// projection changes display/weather distance and ETA, never flight phases.
 	const stageRemainingNm = remainingNm;
+	if (live) {
+		const history = [...filedRaw.phaseHistory ?? [], ...(aware?.faTrack ?? []).map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon }))];
+		live = { ...live, ...observePhase(`${stateKey}|${live.hex || live.registration || live.callsign}`, live, { ...phaseContext, history }) };
+	}
 	let expectedArrival = null;
 	let arrivalPatternKind = null;
-	// Preserve normalized stage inputs; provider/derived rates are arrival-only.
+	// Arrival projection keeps its independent provider/altitude evidence.
 	const arrivalLive = live ? { ...live, vertFpm: positionChoice.chosen?.vertFpm ?? live.arrivalVertFpm ?? live.vertFpm ?? null } : null;
 	const arrivalInput = {
 		live: arrivalLive, dest: { ...end, elevationFt: fieldElev(dest) }, landed: ourLanded,
