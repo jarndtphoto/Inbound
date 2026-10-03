@@ -21,6 +21,19 @@ export function routeLeg(key: string, origin: string, destination: string): Rout
 }
 export const emptyRouteMemory = (leg: RouteLeg): RouteMemory => ({ leg, filed: null, track: [], lastObserved: null });
 export const sameRouteLeg = (a: RouteLeg, b: RouteLeg) => a.origin === b.origin && a.destination === b.destination && a.date === b.date;
+/** Compare facts, not object/JSONB property order, for the per-poll dirty check. */
+export function routeMemoryEqual(a: RouteMemory, b: RouteMemory): boolean {
+  const pointEqual = (x: RoutePoint, y: RoutePoint) => x.lat === y.lat && x.lon === y.lon && (x.label ?? null) === (y.label ?? null);
+  const filedEqual = a.filed === b.filed || Boolean(a.filed && b.filed
+    && a.filed.fingerprint === b.filed.fingerprint && a.filed.observedAt === b.filed.observedAt
+    && a.filed.waypoints.length === b.filed.waypoints.length && a.filed.waypoints.every((p, i) => pointEqual(p, b.filed!.waypoints[i]!)));
+  const observedEqual = a.lastObserved === b.lastObserved || Boolean(a.lastObserved && b.lastObserved
+    && pointEqual(a.lastObserved, b.lastObserved) && a.lastObserved.seenAt === b.lastObserved.seenAt
+    && a.lastObserved.progress === b.lastObserved.progress && a.lastObserved.totalNm === b.lastObserved.totalNm
+    && a.lastObserved.remainingNm === b.lastObserved.remainingNm);
+  return sameRouteLeg(a.leg, b.leg) && filedEqual && observedEqual && a.track.length === b.track.length
+    && a.track.every((p, i) => pointEqual(p, b.track[i]!) && p.seenAt === b.track[i]!.seenAt);
+}
 const validPoint = (p: RoutePoint) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
 
 /** Accept provider waypoints only for the resolved route. Direct spines never

@@ -1,8 +1,9 @@
 import type { Sql } from "./db.ts";
-import { emptyRouteMemory, mergeRouteMemory, routeLeg, sameRouteLeg, type RouteLeg, type RouteMemory } from "./route-memory.ts";
+import { emptyRouteMemory, mergeRouteMemory, routeLeg, sameRouteLeg, routeMemoryEqual, type RouteLeg, type RouteMemory } from "./route-memory.ts";
 
 type Row = { state: RouteMemory; version: number };
 type Result = Row & { status: "ok" | "read_failed" | "write_failed" | "conflict_resolved" | "conflict_held" };
+type Loaded = Result & { storedState: RouteMemory };
 
 export function createRouteMemoryStore(sqlProvider: () => Promise<Sql>) {
   async function read(key: string, leg: RouteLeg): Promise<Row> {
@@ -20,7 +21,7 @@ export function createRouteMemoryStore(sqlProvider: () => Promise<Sql>) {
       for (let attempt = 0; attempt < 3; attempt++) {
         const current = await read(key, state.leg);
         merged = mergeRouteMemory(current.state, merged);
-        if (JSON.stringify(merged) === JSON.stringify(current.state) && current.version > 0)
+        if (routeMemoryEqual(merged, current.state))
           return { ...current, status: attempt ? "conflict_resolved" : "ok" };
         const rows = await sql<Row>`insert into flight_route_state (land_key, state, version)
           values (${key}, ${JSON.stringify(merged)}::jsonb, 1)
@@ -37,10 +38,12 @@ export function createRouteMemoryStore(sqlProvider: () => Promise<Sql>) {
       return { state: merged, version, status: "write_failed" };
     }
   }
-  async function load(key: string, leg: RouteLeg, trustedLegacyKeys: string[] = []): Promise<Result> {
-    if (!key) return { state: emptyRouteMemory(leg), version: 0, status: "ok" };
+  async function load(key: string, leg: RouteLeg, trustedLegacyKeys: string[] = []): Promise<Loaded> {
+    const empty = emptyRouteMemory(leg);
+    if (!key) return { state: empty, storedState: empty, version: 0, status: "ok" };
     try {
       let current = await read(key, leg);
+      const storedState = current.state;
       // These exact same-leg alias/fallback keys come from server identity
       // validation. Never discover neighboring dates or provider-ID rows.
       for (const alias of [...new Set(trustedLegacyKeys)].filter(k => k !== key && k.startsWith("leg:"))) {
@@ -49,11 +52,12 @@ export function createRouteMemoryStore(sqlProvider: () => Promise<Sql>) {
         const legacy = await read(alias, aliasLeg);
         if (legacy.version) current = { ...current, state: mergeRouteMemory(current.state, { ...legacy.state, leg }) };
       }
-      if (trustedLegacyKeys.length) return await save(key, current.state, current.version);
-      return { ...current, status: "ok" };
+      // Carry aliases in memory. The caller compares against the actual stored
+      // row and folds them with this poll's facts in its one final CAS save.
+      return { ...current, storedState, status: "ok" };
     } catch (error) {
       console.error("[route-memory] load failed", { key, error });
-      return { state: emptyRouteMemory(leg), version: 0, status: "read_failed" };
+      return { state: empty, storedState: empty, version: 0, status: "read_failed" };
     }
   }
   return { load, save };

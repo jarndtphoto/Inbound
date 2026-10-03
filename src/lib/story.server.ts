@@ -55,7 +55,7 @@ import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFligh
 import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
 import { displayArrivalProjection } from "./arrival-display.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
-import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress } from "./route-memory.ts";
+import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress, routeMemoryEqual } from "./route-memory.ts";
 import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
@@ -3091,7 +3091,6 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const loadedRoute = memoryLeg ? await routeMemoryStore.load(stateKey, memoryLeg, canPersistState ? legacyKeys : []) : null;
 	let routeMemory = loadedRoute?.state ?? null;
 	let routeMemoryPersistence = loadedRoute?.status ?? "unavailable";
-	let routeMemoryVersion = loadedRoute?.version ?? 0;
 	let pushLatchValue = loadedPhase.state.push;
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;
@@ -3322,14 +3321,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		const poll = emptyRouteMemory(memoryLeg);
 		poll.filed = validatedFiledRoute(aware?.waypoints ?? [], start, end,
 			aware?.originIata === origin.iata && aware?.destIata === dest.iata, Date.now());
-		poll.track = (filedRaw.phaseHistory ?? []).map(p => ({ lat: p.lat, lon: p.lon, seenAt: p.seenAt * 1000 }));
+		if (!ourLanded && ourAirborne && !live?.onGround)
+			poll.track = (filedRaw.phaseHistory ?? []).map(p => ({ lat: p.lat, lon: p.lon, seenAt: p.seenAt * 1000 }));
 		routeMemory = mergeRouteMemory(routeMemory, poll);
-		if (canPersistState) {
-			const savedRoute = await routeMemoryStore.save(stateKey, routeMemory, loadedRoute.version);
-			routeMemory = savedRoute.state;
-			routeMemoryPersistence = savedRoute.status;
-			routeMemoryVersion = savedRoute.version;
-		}
 	}
 	const heldWaypoints = routeMemory?.filed?.waypoints ?? [];
 	const heldSpine = heldWaypoints.length >= 4 ? makeSpine(start, end, heldWaypoints) : filedRaw.spine;
@@ -3479,11 +3473,6 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			...emptyRouteMemory(memoryLeg), track: [routeObservation],
 			lastObserved: { ...routeObservation, progress, totalNm, remainingNm }
 		});
-		if (canPersistState) {
-			const savedRoute = await routeMemoryStore.save(stateKey, routeMemory, routeMemoryVersion);
-			routeMemory = savedRoute.state;
-			routeMemoryPersistence = savedRoute.status;
-		}
 	}
 	const etaMin = remainingEtaMin(remainingNm, directToDestNm, live, aware);
 	const heading = ourLanded
@@ -4257,6 +4246,13 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			: baseResume.detectedPushUnix ?? null,
 		detectedTaxiUnix: taxiOutLatchValue?.at ?? baseResume.detectedTaxiUnix ?? null
 	} : undefined;
+	// Persist the combined filed/track/observation facts once, after the poll.
+	// storedState is the row before alias folding, so that carry is saved too.
+	if (canPersistState && routeMemory && loadedRoute && !routeMemoryEqual(routeMemory, loadedRoute.storedState)) {
+		const savedRoute = await routeMemoryStore.save(stateKey, routeMemory, loadedRoute.version);
+		routeMemory = savedRoute.state;
+		routeMemoryPersistence = savedRoute.status;
+	}
 	return {
 		fetchedAt: Date.now(),
 		stateKey,

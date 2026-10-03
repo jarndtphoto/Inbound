@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import type { Sql } from "./db.ts";
 import { createRouteMemoryStore } from "./route-memory-store.server.ts";
-import { emptyRouteMemory, routeLeg, validatedFiledRoute, mergeRouteMemory } from "./route-memory.ts";
+import { emptyRouteMemory, routeLeg, validatedFiledRoute, mergeRouteMemory, routeMemoryEqual } from "./route-memory.ts";
 
 const key = "leg:v1:UAL219|2026-10-03|ORD|HNL";
 const leg = routeLeg(key, "ORD", "HNL")!;
@@ -57,4 +57,44 @@ test("route memory rejects unvalidated waypoints and isolates date/route/diversi
   const first = poll(); first.filed = validatedFiledRoute(waypoints, origin, dest, true, now);
   for (const other of [{ ...leg, date: "2026-10-04" }, { ...leg, destination: "SFO" }])
     assert.equal(mergeRouteMemory(first, emptyRouteMemory(other)).filed, null);
+});
+
+test("loading aliases is read-only; their facts fold with a concurrent poll in one final CAS save", async () => {
+  const pg = new PGlite();
+  await pg.exec(readFileSync(new URL("../../migrations/0005_route_geometry_state.sql", import.meta.url), "utf8"));
+  let writes = 0;
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    let query = strings[0]; for (let i = 0; i < values.length; i++) query += `$${i + 1}${strings[i + 1]}`;
+    const result = await pg.query(query, values);
+    if (/^\s*insert/i.test(query)) writes += result.rows.length;
+    return result.rows;
+  }) as Sql;
+  const store = createRouteMemoryStore(async () => sql);
+  const fallback = "leg:unvalidated:UAL219|ORD|HNL|2026-10-03";
+  try {
+    const empty = await store.load(key, leg, [fallback]);
+    await store.save(key, empty.state, empty.version);
+    assert.equal(writes, 0, "neither load nor empty save creates a row");
+    const legacy = poll(); legacy.filed = validatedFiledRoute(waypoints, origin, dest, true, now);
+    legacy.track = [{ ...origin, seenAt: now - 100_000 }, { lat: 35, lon: -120, seenAt: now }];
+    await store.save(fallback, legacy, 0);
+    const loaded = await store.load(key, leg, [fallback]);
+    assert.equal(writes, 1, "alias carry is read-only");
+    assert.equal(loaded.storedState.filed, null); assert.equal(loaded.version, 0);
+    assert.deepEqual(loaded.state.filed, legacy.filed);
+    assert(!routeMemoryEqual(loaded.state, loaded.storedState), "carry is dirty against the actual canonical row");
+    const winner = poll(); winner.lastObserved = { lat: 34, lon: -122, seenAt: now + 2000, progress: .5, totalNm: 3900, remainingNm: 1950 };
+    await store.save(key, winner, 0);
+    const merged = mergeRouteMemory(loaded.state, { ...poll(), track: [winner.lastObserved] });
+    const saved = await store.save(key, merged, loaded.version);
+    assert.equal(writes, 3, "one final successful write folds aliases and concurrent facts");
+    assert.deepEqual(saved.state.lastObserved, winner.lastObserved);
+    assert.equal(saved.state.filed!.fingerprint, legacy.filed!.fingerprint);
+    assert.equal(saved.state.track.length, 3);
+    const reloaded = await store.load(key, leg, [fallback]);
+    assert(routeMemoryEqual(reloaded.state, reloaded.storedState), "JSONB property order cannot mark unchanged state dirty");
+    await store.save(key, reloaded.state, reloaded.version);
+    assert.equal(writes, 3, "unchanged/alias-repeat save writes nothing");
+    assert.equal((await pg.query("select * from flight_route_state where land_key=$1", [fallback])).rows.length, 1);
+  } finally { await pg.close(); }
 });
