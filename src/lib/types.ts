@@ -242,6 +242,9 @@ export type FlightStory = {
   currentStage: StageId;
   arrivalStatus?: "airborne" | "landed" | "taxi_in" | "gate";
   providers?: {
+    flightStateKey?: string | null;
+    canonicalKey?: string | null;
+    canonicalKeyFailure?: "missing_scheduled" | "route_mismatch" | "service_date_mismatch" | "no_ident" | null;
     chosenPosition?: string | null;
     chosenPositionAgeSec?: number | null;
     chosenPositionSeenAt?: number | null;

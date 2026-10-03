@@ -1,0 +1,8 @@
+{
+  "description": "Synthetic FR24-only ORD-HNL surface fixture for canonical identity review. No scheduled departure clocks; not a captured live response.",
+  "nowUnix": 1790952840,
+  "data": [{ "fr24_id": "fixture-fr24-219", "callsign": "UAL219", "flight": "UA219",
+    "orig_iata": "ORD", "orig_icao": "KORD", "dest_iata": "HNL", "dest_icao": "PHNL",
+    "lat": 41.9786, "lon": -87.9048, "alt": 0, "gspeed": 0, "track": 90, "on_ground": true,
+    "timestamp": 1790952840, "reg": "N219UA", "hex": "a21900", "type": "B772" }]
+}
