@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canonicalLegKey, canonicalLegIdentity, flightStateIdentity, unvalidatedLegKey, departureSeedUnix, type LegSchedule } from "./flight-identity.ts";
+import { canonicalLegKey, canonicalLegIdentity, legacyLegKeys, flightStateIdentity, unvalidatedLegKey, departureSeedUnix, type LegSchedule } from "./flight-identity.ts";
 
 const schedule: LegSchedule = { ident: "UAL219", iataIdent: "UA219", flightId: "UAL219-1790952900-schedule-0001",
   originIata: "ORD", originIcao: "KORD", destIata: "HNL", destIcao: "PHNL",
@@ -30,9 +30,38 @@ test("reject mismatched service date/route and missing scheduled departure", () 
   assert.equal(key({ destIcao: "KLAX" }), null);
   assert.equal(key({ gateOut: {}, takeoff: {} }), null);
 });
-test("operating carrier and normalized number select the key", () => {
-  assert.match(key({ operatingIdent: "SKW5219" })!, /^leg:v1:SKW5219\|/);
+test("requested carrier and normalized number select the key, regardless of provider carrier", () => {
+  assert.equal(key({ operatingIdent: "SKW5219" }), key());
   assert.equal(key({ ident: "UAL0219" }), key());
+  assert.equal(canonicalLegKey(schedule, { ...context, requested: "UA0219" }), key());
+});
+test("DL4820 uses DAL across EDV/DAL provider alternation and only folds validated same-leg aliases", () => {
+  const route = { requested: "DL4820", origin: { iata: "MDW" }, destination: { iata: "MSP" } };
+  const flight = { originIata: "MDW", destIata: "MSP", gateOut: { scheduled: 1791054000 }, serviceDate: "2026-10-03" };
+  const canonical = "leg:v1:DAL4820|2026-10-03|MDW|MSP";
+  for (const ident of ["EDV4820", "DAL4820", "9E4820"]) {
+    const record = { ...flight, ident, operatingIdent: ident, iataIdent: "DL4820" };
+    assert.equal(canonicalLegKey(record, route), canonical);
+    const aliases = legacyLegKeys(record, route);
+    if (ident !== "DAL4820") assert(aliases.includes("leg:v1:EDV4820|2026-10-03|MDW|MSP"));
+    assert(!aliases.includes(canonical));
+    assert(!aliases.includes("leg:v1:EDV4820|2026-10-04|MDW|MSP"));
+    assert(!aliases.includes("leg:v1:EDV4820|2026-10-03|MDW|BWI"));
+    assert.deepEqual(legacyLegKeys({ ...record, serviceDate: "2026-10-04" }, route), []);
+    assert.deepEqual(legacyLegKeys({ ...record, destIata: "BWI" }, route), []);
+  }
+  assert.equal(canonicalLegKey({ ...flight, ident: "EDV4820" }, { ...route, requested: "9E4820" }),
+    "leg:v1:EDV4820|2026-10-03|MDW|MSP", "separate searches may keep separate rows");
+});
+test("provider aliases use the validated origin-local day, including a UTC date boundary", () => {
+  const record = { ...schedule, operatingIdent: "SKW5219", gateOut: { scheduled: Date.parse("2026-10-03T04:45:00Z") / 1000 },
+    flightId: `SKW5219-${Date.parse("2026-10-03T04:45:00Z") / 1000}-schedule-1` };
+  const aliases = legacyLegKeys(record, context);
+  assert(aliases.includes("leg:v1:SKW5219|2026-10-02|ORD|HNL"));
+  assert(!aliases.includes("leg:v1:SKW5219|2026-10-03|ORD|HNL"));
+  assert(aliases.includes(`${record.flightId}|ORD|HNL`));
+  assert(!legacyLegKeys({ ...record, gateOut: { scheduled: record.gateOut.scheduled + 86400 },
+    _publicScheduleDate: "2026-10-03" }, context).includes(`${record.flightId}|ORD|HNL`));
 });
 test("already resolved provider airports outside the local catalog retain durable identity", () => {
   assert.equal(canonicalLegKey({ ...schedule, destIata: "MSY", destIcao: "KMSY" },
