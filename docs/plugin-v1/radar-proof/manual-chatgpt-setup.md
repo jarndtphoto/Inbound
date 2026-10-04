@@ -8,9 +8,9 @@ This is a new, isolated preview using invented aircraft and invented route evide
 | --- | --- |
 | Suggested name | Inbound Live Radar Transport Preview |
 | Suggested description | Engine-backed Radar transport preview with 40 invented aircraft around Chicago, ORD and MDW. Demonstrates shared Nearby snapshots, Featured cards and bounded local aircraft movement. No live aviation data. |
-| Preview hostname | `inbound-live-fixture-rf27hpb80-jarndtphoto.vercel.app` |
-| MCP URL | `https://inbound-live-fixture-rf27hpb80-jarndtphoto.vercel.app/mcp` |
-| Current access status | Protected: public MCP initialization returns HTTP 401; exact-host exception and public JSON-RPC verification pending |
+| Preview hostname | `inbound-live-fixture-d6eedvyfd-jarndtphoto.vercel.app` |
+| MCP URL | `https://inbound-live-fixture-d6eedvyfd-jarndtphoto.vercel.app/mcp` |
+| Current access status | Public MCP verified: 25/25 request outcomes and 297/297 assertions; exact-host exception active; Standard Protection remains enabled globally |
 | Proof window | Ends 2026-10-11T23:59:59Z |
 | Authentication | No authentication for this isolated fake-data preview |
 | Access prerequisite | Direct MCP inspection passed and a Deployment Protection Exception applies only to this exact preview hostname; Standard Protection stays enabled globally |
@@ -36,6 +36,14 @@ Use this new connection and ask:
 > Open Inbound Live Radar Transport Preview for Chicago.
 
 If ChatGPT offers more than one Inbound connection, choose this new preview explicitly. Confirm the rendered widget identifies its aircraft as invented. Keep the proof open for at least two authoritative update cycles, then test Pause and expiry as described below.
+
+For the specific lifecycle regression, perform this focused sequence before the broader checklist:
+
+1. Open Chicago and confirm directional aircraft are visibly moving.
+2. Click any aircraft. Watch both the selected aircraft and several unselected aircraft for at least five seconds; all directional aircraft must continue moving.
+3. Change Chicago → ORD while the result is loading. The accepted Chicago board must remain visible and moving until ORD is accepted.
+4. Change ORD → MDW, then select a different aircraft. Movement must continue through both actions without a page reload.
+5. Leave the widget open through the next two approximately 20-second authoritative updates. New fixes must replace/correct trajectories and movement must continue. If an accepted fix receives no replacement, local movement may stop only at the certified 25-second bound; a new fix must resume it.
 
 The fake shared snapshot contains 40 invented aircraft on its initial acquisition. One older observation, `SYN140`, retires from subsequent acquisitions, so the normal refreshed snapshot contains 39. A previously warmed preview may already show 39 when the host test begins. Distances, crop and ordering change with area; an area or radius may show fewer targets. None of these counts is a claim about real air traffic.
 

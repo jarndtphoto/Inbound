@@ -34,7 +34,7 @@
     "maxPendingAgingIntervals": 1,
     "focusedPluginTests": "135/135",
     "deploymentArtifactSha256": "c630e2993b362ad4104c8f60840e9908d8a027c0fd95d387e970c1730b13c80c",
-    "fixedSourceCommit": null,
+    "fixedSourceCommit": "3bd726164b841d0b93b1df54b415268833d6408e",
     "externalRequests": 0,
     "consoleOrPageErrors": 0,
     "evidence": [

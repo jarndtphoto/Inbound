@@ -1,0 +1,90 @@
+{
+  "stage": "Part 3B.3 host-lifecycle repair",
+  "status": "ready_public_verified",
+  "source": {
+    "repository": "jarndtphoto/Inbound",
+    "branch": "plugin-v1-radar-transport",
+    "baselineSha": "b35959a924ea7ec2b4f18b26740b339a66608aea",
+    "baselineTree": "d112b544f58befae651d4d5dc857482d67be27f2",
+    "fixCommitSha": "3bd726164b841d0b93b1df54b415268833d6408e",
+    "fixTreeSha": "b6f74cf0f7d2b5f130c19dc78a3074852915a509"
+  },
+  "fixture": {
+    "repository": "jarndtphoto/inbound-live-fixture-dev",
+    "branch": "part-3b3-radar-lifecycle-fix-20261004",
+    "commitSha": "4edaa105a7340cd77ee47b9f0cf861134a7e1c53",
+    "parentSha": "b3151e0b019fceaee336b044f362e13204b0c0fe",
+    "treeSha": "2630eafe287e40cb1fd9682ae51f3407cad9dd23",
+    "files": [
+      {
+        "path": "api/mcp.js",
+        "bytes": 366645,
+        "sha256": "c630e2993b362ad4104c8f60840e9908d8a027c0fd95d387e970c1730b13c80c",
+        "gitBlobSha": "d7ce65ada4ca52a6833aa651ec907893524ad889"
+      },
+      {
+        "path": "package.json",
+        "bytes": 120,
+        "sha256": "d0c4dbd616cdd9749c6b81b6de2f6784410f557fde69826a478ca1ca05556842"
+      },
+      {
+        "path": "vercel.json",
+        "bytes": 317,
+        "sha256": "79cbaec4140200bd874ab5f2afa1faf477626b43da51ef6b3b6a69ebf5b143f2"
+      }
+    ]
+  },
+  "deployment": {
+    "id": "dpl_3uW6ZF44aY6k8Nrb8RFn57ks4P5D",
+    "hostname": "inbound-live-fixture-d6eedvyfd-jarndtphoto.vercel.app",
+    "mcpUrl": "https://inbound-live-fixture-d6eedvyfd-jarndtphoto.vercel.app/mcp",
+    "state": "READY",
+    "target": null,
+    "environment": "preview",
+    "source": "git",
+    "projectId": "prj_J4TIKK2XniE63LqljmrGpU6ypvRd",
+    "teamId": "team_sMdivohsmgPyJ0kE0pIiwskR",
+    "region": "iad1"
+  },
+  "protection": {
+    "newExceptionHostname": "inbound-live-fixture-d6eedvyfd-jarndtphoto.vercel.app",
+    "exactHostnameOnly": true,
+    "wildcardAdded": false,
+    "projectWideBypassAdded": false,
+    "productionDomainExceptionAdded": false,
+    "otherHostnameExceptionAdded": false,
+    "requireLoginEnabled": true,
+    "mode": "Standard Protection",
+    "apiState": {
+      "ssoProtectionEnabled": true,
+      "deploymentType": "all_except_custom_domains"
+    }
+  },
+  "isolation": {
+    "configuredEnvironmentVariables": 0,
+    "hiddenProductionEnvironmentVariables": 0,
+    "providerApiCalls": 0,
+    "productionApiCalls": 0,
+    "productionDbAccess": 0,
+    "mutationCapability": false,
+    "fixtureOnly": true,
+    "staticIsolation": true
+  },
+  "unchangedControls": {
+    "inboundMainSha": "71515b65a5624822d33c1ba1869627c2cc521dc2",
+    "oldPart3B3": {
+      "deploymentId": "dpl_3QCUsdCSpiqfk3DvppKqkdbQ42Rz",
+      "hostname": "inbound-live-fixture-rf27hpb80-jarndtphoto.vercel.app",
+      "commitSha": "b3151e0b019fceaee336b044f362e13204b0c0fe",
+      "state": "READY"
+    },
+    "part3A6": {
+      "deploymentId": "dpl_4PPrHVSC5msykCWdh2MzGXP3d4Nq",
+      "hostname": "inbound-live-fixture-qfln7wi7t-jarndtphoto.vercel.app",
+      "commitSha": "cd2fbb4d7b88fe5e7cd6b666d4810a217d0a9e90",
+      "state": "READY"
+    },
+    "productionDeploymentChanged": false,
+    "part3B4Started": false
+  }
+}
