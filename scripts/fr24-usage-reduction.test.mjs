@@ -79,6 +79,14 @@ test("visibility and Map selection are wired through to the ground observer", as
   assert.match(hook, /removeEventListener\("visibilitychange", onChange\)/);
 });
 
+test("ground position uses one direct live FR24 identity probe per poll", async () => {
+  const source = await readFile(resolve("src/lib/ground-position.ts"), "utf8");
+  assert.match(source, /if \(resolvedRegistration\)[\s\S]*?\} else if \(data\.flightNumber\)/);
+  assert.match(source, /\} else \{[\s\S]*?for \(const callsign of callsigns\)[\s\S]*?break;/);
+  assert.doesNotMatch(source, /\n    if \(data\.flightNumber\) \{/);
+  assert.match(source, /loadFr24RecentArrivalIdentity/, "cached completed-leg identity recovery remains available for arrivals");
+});
+
 test("matched FR24 registration skips failed route lookup, but wrong leg/missing/stale/expired matches fall back", async () => {
   const directory = await mkdtemp(resolve("node_modules/.fr24-lookup-test-"));
   const realFetch = globalThis.fetch, realNow = Date.now;
