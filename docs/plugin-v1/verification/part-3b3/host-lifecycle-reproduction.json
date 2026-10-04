@@ -1,0 +1,45 @@
+{
+  "scope": "Part 3B.3 Radar host lifecycle only",
+  "baselineRemoteSha": "b35959a924ea7ec2b4f18b26740b339a66608aea",
+  "baselineTree": "d112b544f58befae651d4d5dc857482d67be27f2",
+  "hostSimulation": "One changed setWidgetState snapshot is echoed through openai:set_globals with the updated widgetState and retained launch toolOutput.",
+  "beforeFix": {
+    "evidence": "host-lifecycle-before-fix.json",
+    "freshCollectionVersionBeforeSelection": 4,
+    "regressedCollectionVersionAfterSelectionEcho": 3,
+    "stateWriteDelta": 2,
+    "hostEchoDelta": 1,
+    "refreshCallDelta": 0,
+    "directionalTargetsAtTPlus26": 38,
+    "stoppedDirectionalTargetsAtTPlus26": 38,
+    "rafPending": 1,
+    "frameDeltaOverFrozen500ms": 31,
+    "displayPositionsUnchanged": true,
+    "externalRequests": 0,
+    "consoleOrPageErrors": 0
+  },
+  "causalPath": [
+    "selectAircraft or area change called save",
+    "save called window.openai.setWidgetState",
+    "the host echoed openai:set_globals with retained launch toolOutput",
+    "accept unconditionally replaced the newer board with the retained older board and called save again",
+    "the regressed accepted anchors reached the certified 25-second motion bound, so every directional display position stopped even though RAF and polling were still active"
+  ],
+  "afterFix": {
+    "sourceBrowserAssertionGroups": 19,
+    "compiledBrowserAssertionGroups": 19,
+    "lifecycleSnapshots": 22,
+    "maxPendingAnimationFrames": 1,
+    "maxPendingPollingTimers": 1,
+    "maxPendingAgingIntervals": 1,
+    "focusedPluginTests": "135/135",
+    "deploymentArtifactSha256": "c630e2993b362ad4104c8f60840e9908d8a027c0fd95d387e970c1730b13c80c",
+    "fixedSourceCommit": null,
+    "externalRequests": 0,
+    "consoleOrPageErrors": 0,
+    "evidence": [
+      "browser-proof.json",
+      "browser-proof-compiled.json"
+    ]
+  }
+}

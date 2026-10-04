@@ -1,8 +1,10 @@
 {
-  "startingSha": "7277994ccbb921382849c5e1e30cae8388ee68bd",
+  "baselineRemoteSha": "b35959a924ea7ec2b4f18b26740b339a66608aea",
+  "baselineTree": "d112b544f58befae651d4d5dc857482d67be27f2",
   "branch": "plugin-v1-radar-transport",
+  "finalSequential": true,
   "check": {
-    "command": "env -u DATABASE_URL -u NEARBY_VERIFY_DATABASE_URL taskset -c 0,1,2 npm run check",
+    "command": "env -u DATABASE_URL -u POSTGRES_URL -u POSTGRES_PRISMA_URL -u POSTGRES_URL_NON_POOLING -u NEON_DATABASE_URL -u VERCEL_POSTGRES_URL -u NEARBY_VERIFY_DATABASE_URL npm run check",
     "exitCode": 0,
     "tests": 957,
     "suites": 92,
@@ -11,28 +13,35 @@
     "cancelled": 0,
     "skipped": 0,
     "todo": 1,
-    "durationMs": 200480.942037,
     "existingTodo": {
       "test": "loads an exact route from a FlightStats-style public status page",
       "reason": "Held #6: unknown-airport route support"
-    },
-    "logSha256": "71df18574f278ec2217bc8cbbc7f289721b6683c54f63bd4e220d9cf875101f9"
+    }
   },
   "build": {
-    "command": "env -u DATABASE_URL -u NEARBY_VERIFY_DATABASE_URL npm run build",
+    "command": "env -u DATABASE_URL -u POSTGRES_URL -u POSTGRES_PRISMA_URL -u POSTGRES_URL_NON_POOLING -u NEON_DATABASE_URL -u VERCEL_POSTGRES_URL -u NEARBY_VERIFY_DATABASE_URL npm run build",
     "exitCode": 0,
-    "productionMigrator": "skipped: DATABASE_URL not set",
-    "logSha256": "70eaabf9df6019cca71336180c5c8f0a1019aec194cb41a98a323ccedd02ce68"
+    "productionMigrator": "skipped: DATABASE_URL not set"
   },
   "browser": {
-    "sourceAssertionGroups": 17,
-    "compiledAssertionGroups": 17,
+    "sourceAssertionGroups": 19,
+    "compiledAssertionGroups": 19,
+    "lifecycleSnapshots": 22,
+    "mcpRequestsEach": 23,
+    "maxPendingAnimationFrames": 1,
+    "maxPendingPollingTimers": 1,
+    "maxPendingAgingIntervals": 1,
     "externalRequests": 0,
     "consoleOrPageErrors": 0,
     "actualChatGptVerified": false,
     "realPipVerified": false
   },
-  "focusedNewTests": 48,
+  "focusedPluginTests": {
+    "tests": 135,
+    "suites": 4,
+    "pass": 135,
+    "fail": 0
+  },
   "initialUnconstrainedCheck": {
     "tests": 959,
     "passed": 954,
@@ -45,6 +54,11 @@
     "tests": 7,
     "pass": 7,
     "fail": 0
+  },
+  "deploymentArtifact": {
+    "files": 3,
+    "mcpBytes": 366645,
+    "mcpSha256": "c630e2993b362ad4104c8f60840e9908d8a027c0fd95d387e970c1730b13c80c"
   },
   "providerApiCalls": 0,
   "productionApiCalls": 0,

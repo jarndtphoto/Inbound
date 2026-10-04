@@ -6,7 +6,7 @@ type DisplayMode = "inline" | "fullscreen" | "pip";
 type WidgetState = { version: 3; areaId: InboundNearbyResponse["area"]["id"]; selectedRadarId: string | null; views: Record<DisplayMode, View>; paused: boolean };
 type HostContext = { displayMode: DisplayMode; availableDisplayModes: string[] };
 type OpenAi = { widgetState?: Partial<WidgetState>; toolOutput?: unknown; setWidgetState?: (state: WidgetState) => void; callTool?: (name: string, args: object) => Promise<unknown>; requestClose?: () => void };
-declare global { interface Window { __INBOUND_RADAR_INITIAL__: InboundNearbyResponse; openai?: OpenAi; inboundRadarProof?: { read: () => object; refresh: () => Promise<void> } } }
+declare global { interface Window { __INBOUND_RADAR_INITIAL__: InboundNearbyResponse; openai?: OpenAi; inboundRadarProof?: { read: () => object } } }
 
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const node = document.getElementById(id); if (!node) throw new Error(`Missing Radar element: ${id}`); return node as T;
@@ -22,11 +22,18 @@ const state: WidgetState = {
   selectedRadarId: typeof saved.selectedRadarId === "string" ? saved.selectedRadarId : null,
   views: { inline: validView(saved.views?.inline) ? saved.views.inline : "flights", fullscreen: validView(saved.views?.fullscreen) ? saved.views.fullscreen : "radar", pip: validView(saved.views?.pip) ? saved.views.pip : "flights" }, paused: saved.paused === true,
 };
-let board = initial, dismissed = false, busy = false, refreshCalls = 0, frameCount = 0, requestGeneration = 0;
+let board = initial, dismissed = false, pageInactive = false, refreshCalls = 0, frameCount = 0, requestGeneration = 0;
 let timer: ReturnType<typeof setTimeout> | null = null, ageTimer: ReturnType<typeof setInterval> | null = null, frame: number | null = null;
-let abort: AbortController | null = null, mapKey = "", hostReady = false, hostOrigin: string | null = null, sequence = 0;
+let timerToken: number | null = null, ageTimerToken: number | null = null, timerSequence = 0, ageTimerSequence = 0;
+const pendingPollTimers = new Set<number>(), pendingAgeTimers = new Set<number>();
+let maxPendingPollTimers = 0, maxPendingAgeTimers = 0, pollTimerFires = 0, ageTimerFires = 0;
+let abort: AbortController | null = null, activeRequestGeneration: number | null = null, nextPollAt: number | null = null, pollScheduleEpoch = 0;
+let mapKey = "", hostReady = false, hostOrigin: string | null = null, sequence = 0;
 let selectedTarget: PublicRadarTarget | null = null, selectedFeatured: PublicFeaturedFlight | null = null;
 let hostContext: HostContext = { displayMode: "inline", availableDisplayModes: [] };
+let latestAcceptedVersion = initial.collectionVersion, latestAcceptedGeneratedAt = Date.parse(initial.generatedAt);
+let acceptedResults = 0, rejectedResults = 0, globalsEvents = 0, hostContextEvents = 0;
+let lastRejectedReason: string | null = null;
 const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> }>();
 let displayPositions: Array<{ radarId: string; latitude: number; longitude: number; altitudeFt: number | null; extrapolatedSeconds: number; stopped: boolean }> = [];
 let labelIds: string[] = [];
@@ -35,7 +42,8 @@ const targetOrigin = () => hostOrigin && hostOrigin !== "null" ? hostOrigin : "*
 const displayMode = (): DisplayMode => ["inline", "fullscreen", "pip"].includes(hostContext.displayMode) ? hostContext.displayMode : "inline";
 const currentView = () => state.views[displayMode()];
 const liveAge = (observedAt: string) => Math.max(0, (Date.now() - Date.parse(observedAt)) / 1_000);
-const wanted = () => !dismissed && !state.paused && !document.hidden;
+const wanted = () => !dismissed && !pageInactive && !state.paused && !document.hidden;
+const animationWanted = () => !dismissed && !pageInactive && !document.hidden;
 const liveFeaturedAge = (card: PublicFeaturedFlight) => { const fix = board.radarTargets.find(target => target.radarId === card.radarId); return fix ? liveAge(fix.observedAt) : card.freshness.ageSeconds + liveAge(board.generatedAt); };
 const save = () => { try { const copy = { ...state, views: { ...state.views } }; host()?.setWidgetState ? host()!.setWidgetState!(copy) : sessionStorage.setItem("inbound-radar-preview-v3", JSON.stringify(copy)); } catch { /* local persistence is optional */ } };
 function rpc(method: string, params: object): Promise<unknown> {
@@ -51,8 +59,8 @@ function updateSelection() {
   const selected = radarSelectionSnapshot(state.selectedRadarId, board.radarTargets, board.featuredFlights, selectedTarget, selectedFeatured);
   selectedTarget = selected.target; selectedFeatured = selected.featured;
 }
-function selectAircraft(radarId: string) { state.selectedRadarId = radarId; updateSelection(); save(); render(); }
-function setView(view: View) { if (dismissed) return; state.views[displayMode()] = view; save(); render(); }
+function selectAircraft(radarId: string) { state.selectedRadarId = radarId; updateSelection(); save(); render(); ensureAnimationLoop(); }
+function setView(view: View) { if (dismissed) return; state.views[displayMode()] = view; save(); render(); ensureAnimationLoop(); }
 function svgElement(tag: string, attributes: Record<string, string | number> = {}, text = ""): SVGElement {
   const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
   for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value));
@@ -167,7 +175,7 @@ function render() {
   hostControls(); const view = currentView();
   el("area-title").textContent = board.area.id === "airport:KORD" ? "Near ORD" : board.area.id === "airport:KMDW" ? "Near MDW" : "Near Chicago";
   el("reference").textContent = `Distances from ${board.area.reference.label}`; el<HTMLSelectElement>("area").value = state.areaId;
-  el("pause").textContent = state.paused ? "Resume" : "Pause"; el<HTMLButtonElement>("refresh").disabled = dismissed || busy; el<HTMLButtonElement>("pause").disabled = dismissed; el<HTMLSelectElement>("area").disabled = dismissed;
+  el("pause").textContent = state.paused ? "Resume" : "Pause"; el<HTMLButtonElement>("refresh").disabled = dismissed || activeRequestGeneration === requestGeneration; el<HTMLButtonElement>("pause").disabled = dismissed; el<HTMLSelectElement>("area").disabled = dismissed;
   for (const name of ["radar", "flights"] as const) { const tab = el<HTMLButtonElement>(`view-${name}`); tab.setAttribute("aria-selected", String(view === name)); tab.tabIndex = view === name ? 0 : -1; tab.disabled = dismissed; el(`${name}-panel`).hidden = dismissed || view !== name; }
   el("content").dataset.view = view;
   const current = board.radarTargets.filter(target => liveAge(target.observedAt) <= 120);
@@ -177,53 +185,111 @@ function render() {
   el("proof-status").textContent = `Nearby refresh calls: ${refreshCalls}. Shared collection version: ${board.collectionVersion ?? "warming"}. This UI sends no chat messages or model requests.`;
   renderCards(); renderSelection(); renderRadar();
 }
-function stopPolling() { if (timer !== null) clearTimeout(timer); if (ageTimer !== null) clearInterval(ageTimer); timer = null; ageTimer = null; requestGeneration++; abort?.abort(); abort = null; }
-function schedule() {
-  stopPolling(); if (dismissed || document.hidden) return; ageTimer = setInterval(render, 1_000); if (!wanted()) return;
-  timer = setTimeout(async () => { timer = null; await refresh(); schedule(); }, 20_000);
+function clearPollingTimers() {
+  if (timer !== null) clearTimeout(timer); if (ageTimer !== null) clearInterval(ageTimer);
+  if (timerToken !== null) pendingPollTimers.delete(timerToken); if (ageTimerToken !== null) pendingAgeTimers.delete(ageTimerToken);
+  timer = null; ageTimer = null; timerToken = null; ageTimerToken = null; pollScheduleEpoch++;
 }
-function accept(result: unknown) {
+function stopPolling() { clearPollingTimers(); requestGeneration++; abort?.abort(); abort = null; }
+function schedule(resetDeadline = false) {
+  clearPollingTimers(); const epoch = pollScheduleEpoch; if (dismissed || pageInactive || document.hidden) return;
+  const nextAgeToken = ++ageTimerSequence; ageTimerToken = nextAgeToken; pendingAgeTimers.add(nextAgeToken); maxPendingAgeTimers = Math.max(maxPendingAgeTimers, pendingAgeTimers.size);
+  ageTimer = setInterval(() => { ageTimerFires++; render(); }, 1_000); if (!wanted()) return;
+  if (resetDeadline || nextPollAt === null) nextPollAt = Date.now() + 20_000;
+  const nextTimerToken = ++timerSequence; timerToken = nextTimerToken; pendingPollTimers.add(nextTimerToken); maxPendingPollTimers = Math.max(maxPendingPollTimers, pendingPollTimers.size);
+  timer = setTimeout(async () => {
+    pendingPollTimers.delete(nextTimerToken); pollTimerFires++;
+    if (timerToken === nextTimerToken) { timer = null; timerToken = null; }
+    if (epoch !== pollScheduleEpoch) return; const generation = requestGeneration; nextPollAt = Date.now() + 20_000; const started = await refresh();
+    if (started && generation === requestGeneration) scheduleAfterRefresh();
+  }, Math.max(0, nextPollAt - Date.now()));
+}
+function scheduleAfterRefresh() { schedule(nextPollAt === null || nextPollAt <= Date.now()); }
+function accept(result: unknown, options: { expectedArea?: WidgetState["areaId"] | null } = {}) {
   const value = result && typeof result === "object" && "structuredContent" in result ? (result as { structuredContent: unknown }).structuredContent : result;
-  const parsed = InboundNearbyResponseSchema.safeParse(value); if (!parsed.success) return;
-  board = parsed.data; state.areaId = board.area.id; updateSelection(); save(); render();
+  const parsed = InboundNearbyResponseSchema.safeParse(value);
+  if (!parsed.success) { rejectedResults++; lastRejectedReason = `schema:${parsed.error.issues.map(issue => issue.message).join("|")}`; return false; }
+  const candidate = parsed.data, expectedArea = options.expectedArea === undefined ? state.areaId : options.expectedArea;
+  const candidateGeneratedAt = Date.parse(candidate.generatedAt);
+  if (expectedArea !== null && candidate.area.id !== expectedArea) { rejectedResults++; lastRejectedReason = `area:${candidate.area.id}->${expectedArea}`; return false; }
+  if (candidateGeneratedAt < latestAcceptedGeneratedAt) { rejectedResults++; lastRejectedReason = "generatedAt:older"; return false; }
+  if (candidateGeneratedAt === latestAcceptedGeneratedAt && candidate.collectionVersion !== null && latestAcceptedVersion !== null && candidate.collectionVersion < latestAcceptedVersion) {
+    rejectedResults++; lastRejectedReason = "collectionVersion:older-at-same-generatedAt"; return false;
+  }
+  board = candidate;
+  if (candidateGeneratedAt > latestAcceptedGeneratedAt) { latestAcceptedGeneratedAt = candidateGeneratedAt; latestAcceptedVersion = candidate.collectionVersion; }
+  else if (candidate.collectionVersion !== null) latestAcceptedVersion = latestAcceptedVersion === null ? candidate.collectionVersion : Math.max(latestAcceptedVersion, candidate.collectionVersion);
+  acceptedResults++;
+  updateSelection(); render(); ensureAnimationLoop(); return true;
 }
-async function refresh() {
-  if (!wanted() || busy) return; busy = true; const generation = requestGeneration; render();
+async function refresh(): Promise<boolean> {
+  if (!wanted() || activeRequestGeneration === requestGeneration) return false; const generation = requestGeneration; activeRequestGeneration = generation; render();
   const area = state.areaId;
+  let requestAbort: AbortController | null = null;
   try {
     let result: unknown;
     if (hostReady) result = await rpc("tools/call", { name: "get_nearby_flights", arguments: { area, limit: 4 } });
     else if (host()?.callTool) result = await host()!.callTool!("get_nearby_flights", { area, limit: 4 });
     else if (window.parent === window) {
-      abort = new AbortController(); const response = await fetch("/mcp", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, signal: abort.signal, body: JSON.stringify({ jsonrpc: "2.0", id: ++sequence, method: "tools/call", params: { name: "get_nearby_flights", arguments: { area, limit: 4 } } }) });
+      requestAbort = new AbortController(); abort = requestAbort; const response = await fetch("/mcp", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, signal: requestAbort.signal, body: JSON.stringify({ jsonrpc: "2.0", id: ++sequence, method: "tools/call", params: { name: "get_nearby_flights", arguments: { area, limit: 4 } } }) });
       if (!response.ok) throw new Error("Nearby refresh unavailable"); result = (await response.json()).result;
-    } else { el("host-status").textContent = "No callable host bridge. Periodic refresh is unavailable; accepted positions remain bounded."; return; }
+    } else { el("host-status").textContent = "No callable host bridge. Periodic refresh is unavailable; accepted positions remain bounded."; return true; }
     refreshCalls++; if (generation === requestGeneration && wanted()) accept(result);
-  } catch { if (wanted()) el("board-notice").textContent = "Refresh temporarily unavailable. Last accepted positions remain bounded and continue to age."; }
-  finally { busy = false; abort = null; el<HTMLButtonElement>("refresh").disabled = dismissed; }
+  } catch { if (generation === requestGeneration && wanted()) el("board-notice").textContent = "Refresh temporarily unavailable. Last accepted positions remain bounded and continue to age."; }
+  finally { if (activeRequestGeneration === generation) activeRequestGeneration = null; if (abort === requestAbort) abort = null; el<HTMLButtonElement>("refresh").disabled = dismissed || activeRequestGeneration === requestGeneration; }
+  return true;
+}
+async function refreshAndSchedule(mode: "reset" | "after") {
+  const generation = requestGeneration, started = await refresh();
+  if (!started || generation !== requestGeneration) return false;
+  if (mode === "reset") schedule(true); else scheduleAfterRefresh();
+  return true;
 }
 async function display(mode: DisplayMode) {
   if (!hostReady || !hostContext.availableDisplayModes.includes(mode)) return;
-  try { const result = await rpc("ui/request-display-mode", { mode }) as { mode?: DisplayMode }; if (result?.mode && ["inline", "fullscreen", "pip"].includes(result.mode)) hostContext.displayMode = result.mode; render(); schedule(); }
+  try { const result = await rpc("ui/request-display-mode", { mode }) as { mode?: DisplayMode }; if (result?.mode && ["inline", "fullscreen", "pip"].includes(result.mode)) hostContext.displayMode = result.mode; render(); ensureAnimationLoop(); }
   catch { el("host-status").textContent = "Host declined the display request. The current view remains available."; }
 }
-function animate() { if (dismissed || document.hidden) { frame = null; return; } frameCount++; renderRadar(); frame = requestAnimationFrame(animate); }
+function stopAnimationLoop() { if (frame !== null) cancelAnimationFrame(frame); frame = null; }
+function ensureAnimationLoop() { if (frame !== null || !animationWanted()) return; frame = requestAnimationFrame(animate); }
+function animate() { frame = null; if (!animationWanted()) return; frameCount++; try { renderRadar(); } finally { ensureAnimationLoop(); } }
 el("view-radar").onclick = () => setView("radar"); el("view-flights").onclick = () => setView("flights");
 for (const view of ["radar", "flights"] as const) el(`view-${view}`).onkeydown = event => {
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault();
   const next = event.key === "Home" ? "radar" : event.key === "End" ? "flights" : view === "radar" ? "flights" : "radar"; setView(next); el(`view-${next}`).focus();
 };
 el("pip").onclick = () => { void display("pip"); }; el("fullscreen").onclick = () => { void display(displayMode() === "fullscreen" ? "inline" : "fullscreen"); };
-el("refresh").onclick = async () => { await refresh(); schedule(); };
-el("pause").onclick = async () => { state.paused = !state.paused; save(); render(); if (!state.paused) await refresh(); schedule(); };
-el<HTMLSelectElement>("area").onchange = async () => { const area = el<HTMLSelectElement>("area").value; if (!validArea(area)) return; state.areaId = area; save(); stopPolling(); await refresh(); schedule(); };
-el("dismiss").onclick = () => { dismissed = true; stopPolling(); if (frame !== null) cancelAnimationFrame(frame); frame = null; save(); render(); host()?.requestClose?.(); };
-document.addEventListener("visibilitychange", async () => { stopPolling(); if (frame !== null) cancelAnimationFrame(frame); frame = null; render(); if (wanted()) { await refresh(); schedule(); } if (!dismissed && !document.hidden) frame = requestAnimationFrame(animate); });
-window.addEventListener("pagehide", () => { dismissed = true; stopPolling(); if (frame !== null) cancelAnimationFrame(frame); frame = null; save(); });
+el("refresh").onclick = async () => { await refreshAndSchedule("reset"); ensureAnimationLoop(); };
+el("pause").onclick = async () => { state.paused = !state.paused; save(); stopPolling(); render(); ensureAnimationLoop(); if (!state.paused) await refreshAndSchedule("reset"); else schedule(); };
+el<HTMLSelectElement>("area").onchange = async () => { const area = el<HTMLSelectElement>("area").value; if (!validArea(area)) return; state.areaId = area; save(); stopPolling(); render(); ensureAnimationLoop(); await refreshAndSchedule("after"); };
+el("dismiss").onclick = () => { dismissed = true; stopPolling(); stopAnimationLoop(); render(); host()?.requestClose?.(); };
+document.addEventListener("visibilitychange", () => {
+  stopPolling(); stopAnimationLoop(); render();
+  if (!dismissed && !pageInactive && !document.hidden) {
+    ensureAnimationLoop(); if (wanted()) void refreshAndSchedule("reset"); else schedule();
+  }
+});
+window.addEventListener("pagehide", () => { pageInactive = true; stopPolling(); stopAnimationLoop(); render(); });
+window.addEventListener("pageshow", () => {
+  if (!pageInactive) return; pageInactive = false; render(); ensureAnimationLoop();
+  if (wanted()) void refreshAndSchedule("reset"); else schedule();
+});
 window.addEventListener("openai:set_globals", event => {
   const globals = (event as CustomEvent<{ globals?: { toolOutput?: unknown; widgetState?: Partial<WidgetState> } }>).detail?.globals;
-  if (globals?.toolOutput) accept(globals.toolOutput); const next = globals?.widgetState;
-  if (next) { if (typeof next.selectedRadarId === "string" || next.selectedRadarId === null) state.selectedRadarId = next.selectedRadarId; for (const mode of ["inline", "fullscreen", "pip"] as const) if (validView(next.views?.[mode])) state.views[mode] = next.views[mode]; render(); }
+  globalsEvents++; const next = globals?.widgetState, previousArea = state.areaId, previousPaused = state.paused;
+  if (next) {
+    if (validArea(next.areaId)) state.areaId = next.areaId;
+    if (typeof next.selectedRadarId === "string" || next.selectedRadarId === null) state.selectedRadarId = next.selectedRadarId;
+    for (const mode of ["inline", "fullscreen", "pip"] as const) if (validView(next.views?.[mode])) state.views[mode] = next.views[mode];
+    if (typeof next.paused === "boolean") state.paused = next.paused;
+  }
+  const areaChanged = state.areaId !== previousArea, pausedChanged = state.paused !== previousPaused;
+  if (areaChanged || pausedChanged) stopPolling();
+  const acceptedToolOutput = globals?.toolOutput ? accept(globals.toolOutput) : false; render(); ensureAnimationLoop();
+  if (areaChanged || pausedChanged) {
+    const needsRefresh = pausedChanged && !state.paused || areaChanged && (!acceptedToolOutput || board.area.id !== state.areaId);
+    if (wanted() && needsRefresh) void refreshAndSchedule("after"); else schedule(true);
+  }
 });
 window.addEventListener("message", event => {
   if (event.source !== window.parent || event.data?.jsonrpc !== "2.0" || hostOrigin && event.origin !== hostOrigin) return;
@@ -232,18 +298,20 @@ window.addEventListener("message", event => {
     const request = pending.get(message.id)!; pending.delete(message.id); clearTimeout(request.timeout); if (!hostOrigin) hostOrigin = event.origin;
     message.error ? request.reject(new Error("Host request failed")) : request.resolve(message.result); return;
   }
+  if (message.method === "ui/resource-teardown") { dismissed = true; stopPolling(); stopAnimationLoop(); render(); window.parent.postMessage({ jsonrpc: "2.0", id: message.id, result: {} }, targetOrigin()); return; }
   if (!hostReady) return;
   if (message.method === "ui/notifications/tool-result" && wanted()) accept(message.params);
-  if (message.method === "ui/notifications/host-context-changed") { hostContext = { ...hostContext, ...message.params }; render(); schedule(); }
-  if (message.method === "ui/resource-teardown") { dismissed = true; stopPolling(); if (frame !== null) cancelAnimationFrame(frame); frame = null; save(); render(); window.parent.postMessage({ jsonrpc: "2.0", id: message.id, result: {} }, targetOrigin()); }
+  if (message.method === "ui/notifications/host-context-changed") { hostContextEvents++; hostContext = { ...hostContext, ...message.params }; render(); ensureAnimationLoop(); }
 });
 new ResizeObserver(() => renderRadar()).observe(el("radar-surface"));
 window.inboundRadarProof = {
-  read: () => ({ selectedRadarId: state.selectedRadarId, selectedView: currentView(), views: { ...state.views }, areaId: board.area.id, collectionVersion: board.collectionVersion, health: board.health, positions: board.radarTargets.map(target => ({ radarId: target.radarId, latitude: target.latitude, longitude: target.longitude, observedAt: target.observedAt, altitudeFt: target.altitudeFt, groundspeedKt: target.groundspeedKt, groundTrackDeg: target.groundTrackDeg, positionKind: target.positionKind })), displayPositions: displayPositions.map(position => ({ ...position })), labelIds: [...labelIds], refreshCalls, pollScheduled: timer !== null, displayMode: displayMode(), hostReady, frameCount, paused: state.paused, dismissed }), refresh,
+  read: () => ({ selectedRadarId: state.selectedRadarId, selectedView: currentView(), views: { ...state.views }, requestedAreaId: state.areaId, areaId: board.area.id, collectionVersion: board.collectionVersion, generatedAt: board.generatedAt, health: board.health, positions: board.radarTargets.map(target => ({ radarId: target.radarId, latitude: target.latitude, longitude: target.longitude, observedAt: target.observedAt, altitudeFt: target.altitudeFt, groundspeedKt: target.groundspeedKt, groundTrackDeg: target.groundTrackDeg, positionKind: target.positionKind })), displayPositions: displayPositions.map(position => ({ ...position })), labelIds: [...labelIds], refreshCalls, refreshInFlight: activeRequestGeneration === requestGeneration, pollScheduled: timer !== null, ageScheduled: ageTimer !== null, pollTimers: { pending: pendingPollTimers.size, maxPending: maxPendingPollTimers, fired: pollTimerFires }, ageTimers: { pending: pendingAgeTimers.size, maxPending: maxPendingAgeTimers, fired: ageTimerFires }, nextPollAt, pollScheduleEpoch, requestGeneration, activeRequestGeneration, displayMode: displayMode(), hostReady, hostContext: { ...hostContext, availableDisplayModes: [...hostContext.availableDisplayModes] }, hostWidgetState: host()?.widgetState ? { ...host()!.widgetState, views: host()!.widgetState!.views ? { ...host()!.widgetState!.views } : undefined } : null, frameCount, animationScheduled: frame !== null, paused: state.paused, documentHidden: document.hidden, pageInactive, dismissed, acceptedResults, rejectedResults, lastRejectedReason, latestAcceptedVersion, latestAcceptedGeneratedAt, globalsEvents, hostContextEvents }),
 };
 const restoredArea = state.areaId;
-save(); accept(host()?.toolOutput || initial); state.areaId = restoredArea; render(); schedule(); frame = requestAnimationFrame(animate);
+accept(host()?.toolOutput || initial, { expectedArea: null }); state.areaId = restoredArea; render(); schedule(true); ensureAnimationLoop();
 if (window.parent !== window) void rpc("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "Inbound invented Radar proof", version: "0.3.0" }, appCapabilities: { availableDisplayModes: ["inline", "pip", "fullscreen"] } }).then(value => {
-  const result = value as { hostContext?: Partial<HostContext> }; hostReady = true; hostContext = { ...hostContext, ...result.hostContext }; notify("ui/notifications/initialized"); render(); schedule();
-}).catch(() => hostControls());
-if (state.areaId !== board.area.id) void refresh();
+  if (dismissed) return;
+  const result = value as { hostContext?: Partial<HostContext> }; hostReady = true; hostContext = { ...hostContext, ...result.hostContext }; notify("ui/notifications/initialized"); render(); ensureAnimationLoop();
+  if (state.areaId !== board.area.id && wanted()) { stopPolling(); void refreshAndSchedule("after"); } else schedule();
+}).catch(() => { if (!dismissed) hostControls(); });
+if (window.parent === window && state.areaId !== board.area.id) { stopPolling(); void refreshAndSchedule("after"); }
