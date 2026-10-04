@@ -2,7 +2,7 @@ import { phaseOf } from "@/lib/aircraft-phase";
 import { RouteMap } from "./route-map";
 import { getAirportSurfaceCached } from "@/lib/airport-surface";
 import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.server";
-import { haversineNm } from "@/lib/geo";
+import { haversineNm, initialBearing } from "@/lib/geo";
 import { flightPollingComplete, groundPollingEnabled } from "@/lib/flight-polling";
 import { usePageVisible } from "@/lib/use-page-visible";
 import { getGroundPosition } from "@/lib/ground-position";
@@ -357,6 +357,34 @@ function GroundMovementMap({
   const queriedFastAge = queriedFast?.seenAt ? Math.max(0, Date.now() / 1000 - queriedFast.seenAt) : null;
   const fast = storyFast ?? (queriedFast && (queriedFastAge ?? Infinity) <= 30 ? queriedFast : null);
   const fastKey = identityKey;
+  const motionTrackRef = useRef<{
+    key: string;
+    point: { lat: number; lon: number; seenAt: number };
+    track: number | null;
+  } | null>(null);
+  if (fast) {
+    const providerTrack = typeof fast.track === "number" && Number.isFinite(fast.track) ? fast.track : null;
+    const previous = motionTrackRef.current?.key === fastKey ? motionTrackRef.current : null;
+    let track = providerTrack ?? previous?.track ?? null;
+    if (providerTrack == null && previous) {
+      const dt = fast.seenAt - previous.point.seenAt;
+      const movedNm = haversineNm(previous.point, fast);
+      if (dt >= 0.5 && dt <= 20 && movedNm >= 0.004) {
+        track = initialBearing(previous.point, fast);
+      }
+    }
+    if (!previous || fast.seenAt > previous.point.seenAt + 0.25) {
+      motionTrackRef.current = {
+        key: fastKey,
+        point: { lat: fast.lat, lon: fast.lon, seenAt: fast.seenAt },
+        track,
+      };
+    } else if (providerTrack != null && previous.track !== providerTrack) {
+      motionTrackRef.current = { ...previous, track: providerTrack };
+    }
+  }
+  const motionTrack = motionTrackRef.current?.key === fastKey ? motionTrackRef.current.track : null;
+
   const lastFastRef = useRef<{ key: string; fix: NonNullable<typeof fast> } | null>(null);
   if (fast) lastFastRef.current = { key: fastKey, fix: fast };
 
@@ -377,7 +405,7 @@ function GroundMovementMap({
     lon: fastFix.lon,
     altFt: fastFix.altFt ?? 0,
     gsKt: fastFix.gsKt ?? 0,
-    track: fastFix.track ?? aircraft?.track ?? null,
+    track: (typeof fastFix.track === "number" && Number.isFinite(fastFix.track) ? fastFix.track : null) ?? motionTrack ?? aircraft?.track ?? null,
     vertFpm: aircraft?.vertFpm ?? null,
     onGround: fastFix.onGround,
     phase: phaseOf({ ...fastFix, phaseVertFpm: aircraft?.phaseVertFpm }, { origin: story.origin, dest: story.dest, groundTaxiKt: 5 }),
