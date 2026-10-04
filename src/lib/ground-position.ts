@@ -105,70 +105,59 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       };
     };
 
-    // Registration is the strongest identity key. Without it, departures are
-    // better keyed by the transponder callsign (AAL2952) while arrivals can
-    // keep using the commercial flight number (AA2952) before summary-based
-    // registration recovery. Make only one direct live-FR24 identity probe per
-    // ground poll so this does not increase usage.
-    if (resolvedRegistration) {
-      const byRegistration = await loadFr24FlightByRegistration(resolvedRegistration).catch(() => null);
-      const position = usable(byRegistration);
-      if (position) {
-        diagnostic("fr24-registration-hit", { ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-        return position;
-      }
-      diagnostic("fr24-registration-miss", { registration: resolvedRegistration });
-    } else if (data.movementKind === "departure" && callsigns[0]) {
-      const callsign = callsigns[0];
-      const byCallsign = await loadFr24Flight(callsign).catch(() => null);
-      const position = usable(byCallsign);
-      if (position) {
-        console.info("[ground-position]", { provider: "fr24-callsign", callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-        diagnostic("fr24-callsign-hit", { callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-        return position;
-      }
-      diagnostic("fr24-callsign-miss", { callsign });
-    } else if (data.flightNumber) {
-      const byFlightNumber = await loadFr24FlightByNumber(data.flightNumber, bounds).catch(() => null);
-      const position = usable(byFlightNumber);
-      if (position) {
-        console.info("[ground-position]", { provider: "fr24-flight-number", flight: data.flightNumber, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-        diagnostic("fr24-flight-number-hit", { ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-        return position;
-      }
-      diagnostic("fr24-flight-number-miss");
-    } else if (callsigns[0]) {
-      const callsign = callsigns[0];
-      const byCallsign = await loadFr24Flight(callsign).catch(() => null);
-      const position = usable(byCallsign);
-      if (position) {
-        diagnostic("fr24-callsign-hit", { callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-        return position;
-      }
-      diagnostic("fr24-callsign-miss", { callsign });
-    }
-
-    // Arrival flights can disappear from FR24's live flight-number index as
-    // soon as the leg ends, especially when that number continues on another
-    // segment. A small, cached summary lookup recovers the exact completed
-    // leg's registration; then we resume normal exact-registration tracking.
-    // This replaces the old broad ORD bounds scan, which could return dozens
-    // of paid live records every few seconds.
-    if (data.movementKind === "arrival" && !resolvedRegistration && data.flightNumber && data.originIata && data.destIata) {
-      const recent = await loadFr24RecentArrivalIdentity(data.flightNumber, data.originIata, data.destIata).catch(() => null);
-      if (recent?.registration) {
-        resolvedRegistration = recent.registration;
-        wantedReg = normRegistration(resolvedRegistration);
+    // The tracked-flight story owns FR24 polling for departures so the main
+    // 8-second flight loop and the 3-second ground-map loop never compete for
+    // the Explorer plan's 10 queries/minute allowance. Departure ground-map
+    // refreshes still use the open ADS-B feeds below between story updates.
+    if (data.movementKind === "departure") {
+      diagnostic("fr24-owned-by-story");
+    } else {
+      // Arrivals retain the exact identity recovery path because the live
+      // flight number can disappear immediately after landing.
+      if (resolvedRegistration) {
         const byRegistration = await loadFr24FlightByRegistration(resolvedRegistration).catch(() => null);
         const position = usable(byRegistration);
         if (position) {
-          console.info("[ground-position]", {
-            provider: "fr24-summary-registration",
-            flight: data.flightNumber,
-            registration: resolvedRegistration,
-            ageSec: Math.round(Date.now() / 1000 - position.seenAt),
-          });
+          diagnostic("fr24-registration-hit", { ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
           return position;
+        }
+        diagnostic("fr24-registration-miss", { registration: resolvedRegistration });
+      } else if (data.flightNumber) {
+        const byFlightNumber = await loadFr24FlightByNumber(data.flightNumber, bounds).catch(() => null);
+        const position = usable(byFlightNumber);
+        if (position) {
+          console.info("[ground-position]", { provider: "fr24-flight-number", flight: data.flightNumber, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+          diagnostic("fr24-flight-number-hit", { ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+          return position;
+        }
+        diagnostic("fr24-flight-number-miss");
+      } else if (callsigns[0]) {
+        const callsign = callsigns[0];
+        const byCallsign = await loadFr24Flight(callsign).catch(() => null);
+        const position = usable(byCallsign);
+        if (position) {
+          diagnostic("fr24-callsign-hit", { callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+          return position;
+        }
+        diagnostic("fr24-callsign-miss", { callsign });
+      }
+
+      if (data.movementKind === "arrival" && !resolvedRegistration && data.flightNumber && data.originIata && data.destIata) {
+        const recent = await loadFr24RecentArrivalIdentity(data.flightNumber, data.originIata, data.destIata).catch(() => null);
+        if (recent?.registration) {
+          resolvedRegistration = recent.registration;
+          wantedReg = normRegistration(resolvedRegistration);
+          const byRegistration = await loadFr24FlightByRegistration(resolvedRegistration).catch(() => null);
+          const position = usable(byRegistration);
+          if (position) {
+            console.info("[ground-position]", {
+              provider: "fr24-summary-registration",
+              flight: data.flightNumber,
+              registration: resolvedRegistration,
+              ageSec: Math.round(Date.now() / 1000 - position.seenAt),
+            });
+            return position;
+          }
         }
       }
     }
