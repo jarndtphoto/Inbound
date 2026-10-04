@@ -81,9 +81,10 @@ test("visibility and Map selection are wired through to the ground observer", as
 
 test("ground position uses one direct live FR24 identity probe per poll", async () => {
   const source = await readFile(resolve("src/lib/ground-position.ts"), "utf8");
-  assert.match(source, /if \(resolvedRegistration\)[\s\S]*?\} else if \(data\.flightNumber\)/);
-  assert.match(source, /\} else \{[\s\S]*?for \(const callsign of callsigns\)[\s\S]*?break;/);
-  assert.doesNotMatch(source, /\n    if \(data\.flightNumber\) \{/);
+  assert.match(source, /if \(resolvedRegistration\)[\s\S]*?else if \(data\.movementKind === "departure" && callsigns\[0\]\)/);
+  assert.match(source, /const byCallsign = await loadFr24Flight\(callsign\)/, "departure without registration uses the transponder callsign");
+  assert.match(source, /else if \(data\.flightNumber\)/, "arrival without registration retains the commercial flight-number path");
+  assert.doesNotMatch(source, /for \(const callsign of callsigns\)/, "one poll never cascades through multiple FR24 aliases");
   assert.match(source, /loadFr24RecentArrivalIdentity/, "cached completed-leg identity recovery remains available for arrivals");
 });
 
