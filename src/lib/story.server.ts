@@ -1595,7 +1595,7 @@ async function loadFlightStatsPublic(callsign) {
 	const parsed = parseFlightQuery(callsign);
 	const m = String(parsed?.iata ?? "").match(/^([A-Z0-9]{2})(\d{1,4}[A-Z]?)$/);
 	if (!m) return null;
-	const now = new Date();
+	const now = new Date(Date.now());
 	const dates = [0, -1, 1].map((offset) => {
 		const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offset));
 		return { key: d.toISOString().slice(0, 10), year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
@@ -2260,7 +2260,7 @@ const lastKinByIdent = /* @__PURE__ */ new Map();
 const observePhase = createPhaseHistory();
 function inboundSnapKey(aware, origin, dest, query) {
 	if (aware) return origKey(aware);
-	const day = new Date().toISOString().slice(0, 10);
+	const day = new Date(Date.now()).toISOString().slice(0, 10);
 	return `${String(query || "").toUpperCase()}|${origin?.iata ?? ""}|${dest?.iata ?? ""}|${day}`;
 }
 function rememberInboundSnap(key, patch) {
