@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": {
-      "plugin-v1-foundation": false
+      "plugin-v1-foundation": false,
+      "plugin-v1-nearby-acquisition": false
     }
   }
 }

@@ -13,11 +13,12 @@ fixture-only host proof before backend integration, and existing engine isolatio
 `src/lib/plugin-v1/` contains strict Zod contracts and exported TypeScript types,
 deterministic invented fixtures, Inbound-owned area resolution, pure geographic
 cropping, frozen ranking, and shared-view stability. None is mounted in the
-existing app's routes or current UI. The only existing runtime source edit moves
-the exact private `sky.ts` `phaseOf` body to `traffic-motion.ts` and imports it.
-An equivalence test compares it with approved main and exercises 630 combinations
-at the original thresholds. Provider selection, fusion, persistence, detailed
-phases, arrival/departure calculations, and existing map behavior are unchanged.
+existing app's routes or current UI. The original Part 3A extraction moved the
+private `sky.ts` phase helper into `traffic-motion.ts`. After integrating current
+main, the plugin reuses PR #40's shared `aircraft-phase.ts` helper. The obsolete,
+unused `traffic-motion.ts` has been removed. Provider selection, fusion,
+persistence, arrival/departure calculations, and existing map behavior are
+unchanged by this cleanup.
 
 `npm run plugin:test` runs the deterministic foundation tests. `npm run
 plugin:proof` explicitly starts a loopback-only static fixture server with one
