@@ -15,6 +15,7 @@ const H = 800;
 const MIN_GROUND_ZOOM = 1.45;
 const MAX_GROUND_ZOOM = 64;
 const INITIAL_GROUND_ZOOM = 7;
+const MAX_SURFACE_RADIUS_NM = 7;
 const SURFACE_CACHE_MS = 12 * 60 * 60_000;
 
 const overviewView = (): View => ({
@@ -391,7 +392,18 @@ function GroundMovementMap({
     x: W / 2 + ((p.lon - airport.lon) / lonHalf) * (W / 2 - 28),
     y: H / 2 - ((p.lat - airport.lat) / latHalf) * (H / 2 - 28),
   });
-  const features = (surfaceQ.data as AirportSurface | undefined)?.features ?? [];
+  const features = useMemo(() => {
+    const source = (surfaceQ.data as AirportSurface | undefined)?.features ?? [];
+    return source
+      .map((feature) => ({
+        ...feature,
+        // Overpass can return the complete geometry for a way that only
+        // intersects our airport query box. Ignore those remote tails so a
+        // bad/distant aeroway cannot pull the whole ground map off-center.
+        points: feature.points.filter((point) => haversineNm(point, airport) <= MAX_SURFACE_RADIUS_NM),
+      }))
+      .filter((feature) => feature.points.length >= 2);
+  }, [surfaceQ.data, airport.lat, airport.lon]);
   const taxiwayLabels = useMemo(() => {
     const unique = new Map<string, SurfaceFeature>();
     for (const feature of features) {
