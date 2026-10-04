@@ -76,12 +76,32 @@ test("A genuinely new curated Briefing event can reopen Welcome, but routine pol
   assert.equal(shouldOpenWelcomeSummary(current, changed, { storage }), false);
 });
 
-test("a late provider confirmation reopens even when its physical event time predates dismissal", () => {
+test("routine stage progression never reopens a dismissed Welcome", () => {
+  const storage = memoryStorage();
+  const current = story();
+  const push = brief([{ at: current.fetchedAt, kind: "stage", text: "Pushback" }]);
+  dismissWelcomeSummary(current, push, current.fetchedAt, { storage });
+
+  for (const text of ["Taxiing out", "In flight", "Final approach", "Landed at ORD at 11:04 AM CDT", "Taxiing in", "At the gate"]) {
+    const next = brief([...push.log, { at: current.fetchedAt + 60_000, kind: "stage", text }]);
+    assert.equal(shouldOpenWelcomeSummary(current, next, { storage }), false, text);
+  }
+
+  const measuredTaxi = brief([...push.log, { at: current.fetchedAt + 60_000, kind: "schedule", text: "Taxi out was 18 minutes" }]);
+  assert.equal(shouldOpenWelcomeSummary(current, measuredTaxi, { storage }), false);
+});
+
+test("a genuine new passenger alert still reopens a dismissed Welcome", () => {
   const storage = memoryStorage();
   const current = story();
   dismissWelcomeSummary(current, brief(), current.fetchedAt, { storage });
-  const confirmedAfterClose = brief([{ at: current.fetchedAt - 120_000, kind: "stage", text: "Took off from OGG at 4:27 PM HST" }]);
-  assert.equal(shouldOpenWelcomeSummary(current, confirmedAfterClose, { storage }), true);
+
+  const weather = brief([{ at: current.fetchedAt + 60_000, kind: "weather", text: "Turbulence easing — ride looks smooth" }]);
+  assert.equal(shouldOpenWelcomeSummary(current, weather, { storage }), true);
+  dismissWelcomeSummary(current, weather, current.fetchedAt + 60_001, { storage });
+
+  const gate = brief([...weather.log, { at: current.fetchedAt + 120_000, kind: "schedule", text: "Arrival gate changed to B17" }]);
+  assert.equal(shouldOpenWelcomeSummary(current, gate, { storage }), true);
 });
 
 test("the dismissal baseline prevents its current events reopening, but a repeated event is new", () => {
