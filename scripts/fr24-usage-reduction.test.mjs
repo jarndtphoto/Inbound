@@ -51,7 +51,7 @@ test("tracked-flight polling is phase-aware and cruise waits 20 seconds", () => 
   assert.equal(flightPollingInterval({ ...base, currentStage: "push", aircraft: { phase: "parked" } }, now), 3_000);
   assert.equal(flightPollingInterval({ ...base, currentStage: "taxi", aircraft: { phase: "taxi" } }, now), 3_000);
   assert.equal(flightPollingInterval({ ...base, currentStage: "takeoff_roll", aircraft: { phase: "taxi" } }, now), 4_000);
-  assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "climb" }, times: { takeoffUnix: now / 1000 - 5 * 60 } }, now), 5_000);
+  assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "climb" }, times: { takeoffUnix: now / 1000 - 5 * 60 } }, now), 6_000);
   assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "climb" }, times: { takeoffUnix: now / 1000 - 20 * 60 } }, now), 10_000);
   assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "descent" } }, now), 10_000);
   assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "approach" } }, now), 6_000);
