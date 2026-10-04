@@ -129,6 +129,9 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /fitFeatures\.flatMap/);
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
     assert.match(groundSource, /resetViewRef\.current = next/);
+    assert.match(groundSource, /movedNm >= 0\.004/);
+    assert.match(groundSource, /initialBearing\(previous\.point, fast\)/);
+    assert.match(groundSource, /\? fastFix\.track : null\) \?\? motionTrack/);
   });
 });
 
