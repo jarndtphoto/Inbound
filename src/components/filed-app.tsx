@@ -478,7 +478,10 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   const [refreshErr, setRefreshErr] = useState<string | null>(null);
   const [pullPx, setPullPx] = useState(0);
   const [manualBusy, setManualBusy] = useState(false);
-  const freshRef = useRef(false);
+  // A newly opened flight must bypass the short server/story cache once so
+  // the first visible stage/position is current. Routine polling can resume
+  // normal cache behavior after this initial fresh request.
+  const freshRef = useRef(true);
   const refreshingRef = useRef(false);
   const pullPxRef = useRef(0);
   const briefGen = useRef(0);
@@ -578,6 +581,9 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
     },
     retryDelay: (attempt) => storyForQuery(queryClient.getQueryData(storyQueryKey), query, linkedDate)
       ? Math.min(2_000 * 2 ** attempt, 8_000) : TEMPORARY_FLIGHT_RETRY_MS,
+    // Reopening/searching a flight must make one network request even when
+    // React Query still has a very recent copy from the previous screen.
+    refetchOnMount: "always",
     refetchOnWindowFocus: (q) => Boolean(q.state.data) && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     refetchOnReconnect: (q) => Boolean(q.state.data) && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     placeholderData: (previousData) => {
