@@ -84,15 +84,15 @@ test("non-route-advisory feed failures keep the normal current ride wording", ()
   flight.weatherCoverage = { failedSources: ["Pilot reports", "Storm forecasts", "Local advisories"] };
   assert.equal(flightWeatherSummary(flight, now), "Light bumps possible now");
   assert.match(rideOutlook(flight), /Projected ride is currently choppy/);
-  assert.doesNotMatch(rideOutlook(flight), /current ride is uncertain/);
+  assert.doesNotMatch(rideOutlook(flight), /Current weather along the route is unavailable right now\./);
 });
 
-test("a failed turbulence or storm advisory feed makes the current ride uncertain", () => {
+test("a failed turbulence or storm advisory feed says current route weather is unavailable", () => {
   for (const source of ["Turbulence advisories", "Storm advisories"]) {
-    const flight = story([point(0, { chop: "moderate" }), point(1)]);
+    const flight = story([point(0, { chop: "moderate" }), point(.75, { pilotReports: [report] }), point(1)]);
     flight.weatherCoverage = { failedSources: ["Pilot reports", source] };
-    assert.equal(flightWeatherSummary(flight, now), "Current ride uncertain");
-    assert.match(rideOutlook(flight), /Weather coverage is incomplete, so the current ride is uncertain/);
+    assert.equal(flightWeatherSummary(flight, now), "Current weather along route unavailable · moderate bumps reported ahead");
+    assert.match(rideOutlook(flight), /Current weather along the route is unavailable right now\./);
     assert.doesNotMatch(rideOutlook(flight), /currently choppy|Storms are possible near the current route/);
   }
 });

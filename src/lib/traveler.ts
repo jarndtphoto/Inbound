@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import type { FlightStory } from "./types";
-import { currentRideCoverageUncertain, flightWeatherSummary, upcomingWeatherEvents, weatherOutlook } from "./weather-presentation";
+import { currentRouteWeatherUnavailable, flightWeatherSummary, upcomingWeatherEvents, weatherOutlook } from "./weather-presentation";
 import { passengerNextEvent } from "./next-event";
 import { operationalDepartureUnix, storyLegDate } from "./flight-story-date.ts";
 import { orderedWeatherSamples } from "./route-weather-segments";
@@ -17,9 +17,9 @@ export function rideOutlook(s: FlightStory): string {
   const ordered = orderedWeatherSamples(samples);
   const current = ordered.filter(sample => sample.frac <= s.route.progress).at(-1) ?? ordered[0] ?? samples[0];
   const incomplete = !s.weatherCoverage || s.weatherCoverage.failedSources.length > 0;
-  const currentCoverageUncertain = currentRideCoverageUncertain(s.weatherCoverage);
-  let text = currentCoverageUncertain
-    ? "Weather coverage is incomplete, so the current ride is uncertain."
+  const currentWeatherUnavailable = currentRouteWeatherUnavailable(s.weatherCoverage);
+  let text = currentWeatherUnavailable
+    ? "Current weather along the route is unavailable right now."
     : current.chop !== "smooth"
       ? "Projected ride is currently choppy."
       : current.convective
