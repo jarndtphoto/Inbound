@@ -1,11 +1,12 @@
 import type { Sql } from "./db.ts";
+import { cleanupFlightStateRows, type FlightStateCleanup } from "./flight-state-retention.server.ts";
 import { emptyRouteMemory, mergeRouteMemory, routeLeg, sameRouteLeg, routeMemoryEqual, type RouteLeg, type RouteMemory } from "./route-memory.ts";
 
 type Row = { state: RouteMemory; version: number };
 type Result = Row & { status: "ok" | "read_failed" | "write_failed" | "conflict_resolved" | "conflict_held" };
 type Loaded = Result & { storedState: RouteMemory };
 
-export function createRouteMemoryStore(sqlProvider: () => Promise<Sql>) {
+export function createRouteMemoryStore(sqlProvider: () => Promise<Sql>, cleanup: FlightStateCleanup = cleanupFlightStateRows) {
   async function read(key: string, leg: RouteLeg): Promise<Row> {
     const sql = await sqlProvider();
     const rows = await sql<Row>`select state, version from flight_route_state where land_key = ${key}`;
@@ -29,7 +30,7 @@ export function createRouteMemoryStore(sqlProvider: () => Promise<Sql>) {
             version = flight_route_state.version + 1, updated_at = now()
           where flight_route_state.version = ${version}
           returning state, version`;
-        if (rows[0]) return { ...rows[0], status: attempt ? "conflict_resolved" : "ok" };
+        if (rows[0]) { await cleanup(sql); return { ...rows[0], status: attempt ? "conflict_resolved" : "ok" }; }
         version = (await read(key, state.leg)).version;
       }
       return { ...(await read(key, state.leg)), status: "conflict_held" };

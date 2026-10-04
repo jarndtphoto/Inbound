@@ -1,4 +1,5 @@
 import type { Sql } from "./db.ts";
+import { cleanupFlightStateRows, type FlightStateCleanup } from "./flight-state-retention.server.ts";
 import { emptyArrivalState, type ArrivalProjectionState } from "./arrival-projection-state.ts";
 import type { AtisEntry } from "./arrival-runway.ts";
 import { legacyProviderPattern, legacyProviderBelongsToLeg } from "./flight-identity.ts";
@@ -8,7 +9,7 @@ type LoadResult = Row & { status: "ok" | "read_failed" };
 type SaveResult = Row & { status: "ok" | "conflict_held" | "write_failed" | "read_failed" };
 /** Injecting the SQL connection lets tests exercise actual Postgres semantics
  * with fresh store instances, without relying on any serverless module maps. */
-export function createArrivalStateStore(sqlProvider: () => Promise<Sql>) {
+export function createArrivalStateStore(sqlProvider: () => Promise<Sql>, cleanup: FlightStateCleanup = cleanupFlightStateRows) {
   const fallback = new Map<string, ArrivalProjectionState>();
   return {
     async load(key: string, legacyKeys: string[] = [], recentLegacyKeys: string[] = []): Promise<LoadResult> {
@@ -49,7 +50,7 @@ export function createArrivalStateStore(sqlProvider: () => Promise<Sql>) {
             version = arrival_projection_state.version + 1, updated_at = now()
           where arrival_projection_state.version = ${version}
           returning state, version`;
-        if (rows[0]) { fallback.delete(key); return { ...rows[0], status: "ok" as const }; }
+        if (rows[0]) { await cleanup(sql); fallback.delete(key); return { ...rows[0], status: "ok" as const }; }
         // A concurrent winner owns the path and side. Never blindly overwrite
         // it with our older snapshot; return it for this response as well.
         const current = await this.load(key);
@@ -74,10 +75,12 @@ export function createArrivalStateStore(sqlProvider: () => Promise<Sql>) {
       if (!entries.length) return;
       try {
         const sql = await sqlProvider();
-        await sql`insert into arrival_atis_cache (airport, entries, fetched_at)
+        const rows = await sql`insert into arrival_atis_cache (airport, entries, fetched_at)
           values (${airport}, ${JSON.stringify(entries)}::jsonb, ${now})
           on conflict (airport) do update set entries = excluded.entries, fetched_at = excluded.fetched_at
-          where arrival_atis_cache.fetched_at < excluded.fetched_at`;
+          where arrival_atis_cache.fetched_at < excluded.fetched_at
+          returning airport`;
+        if (rows[0]) await cleanup(sql);
       } catch (error) { console.error("[arrival-atis] cache write failed", error); }
     },
   };
