@@ -2898,12 +2898,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		safe(loadRoute(parsed.callsign), null),
 	]);
 	const operatingIdent = operatingIdentFromSchedule(publicAware, parsed.callsign);
+	const fr24SurfaceDeparture = Boolean(publicAware?.gateOut?.actual && !publicAware?.takeoff?.actual && !publicAware?.landing?.actual);
 	const official = await loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
 		fr24OriginIata: publicAware?.originIata ?? null,
 		fr24DestIata: publicAware?.destIata ?? null,
 		fr24Registration: publicAware?.tail ?? null,
 		fr24OperatingCallsign: operatingIdent,
+		fr24SurfaceDeparture,
 	});
 	const fr24Aware = publicAware ? null : awareFromLiveFr24(official.fr24);
 	if (fr24Aware) {
