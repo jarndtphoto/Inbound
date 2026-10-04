@@ -1,0 +1,1023 @@
+{
+  "ok": true,
+  "compiled": false,
+  "scope": "Local actual engine/MCP/widget; explicitly simulated host messages only",
+  "actualChatGptVerified": false,
+  "realPipVerified": false,
+  "inventedAircraft": 40,
+  "overlappingCenters": 30,
+  "assertions": [
+    "Standalone inline defaults to four Featured cards; unavailable host controls stay disabled",
+    "All forty glyph centers select the intended aircraft with genuine pointer events, including overlapping touch areas",
+    "Forty invented targets render directional accepted track and a neutral missing-track symbol; Track flight remains disabled",
+    "Repeated RAF frames visibly move aircraft with the certified motion function; authoritative fixes/altitude stay unchanged and animation causes no MCP calls",
+    "Paused polling still allows bounded local motion, which stops at 25 seconds and never drifts farther",
+    "A deterministic authoritative update replaces the anchor; the stale retiring target drops out without silently switching its selected panel",
+    "The next 20-second refresh produces an accepted T+40 fix and preserves keyboard focus and selected aircraft",
+    "Keyboard tabs/target focus and selection work; Chicago/ORD/MDW re-center one collection version without mutating accepted fixes",
+    "Standalone session storage restores the exact selected aircraft after reload",
+    "Real fake-engine Featured cards render unknown, generic hint and independently dated confirmed routes without provider labels",
+    "Actual MCP limit five renders five Featured cards while Radar retains thirty-nine targets; normal widget refresh returns four",
+    "MOCK ONLY: Valid safe DTO health variants render partial coverage, stopped stale positions and unavailable coverage rather than empty sky",
+    "MOCK ONLY: Declined fullscreen stays inline; accepted fullscreen defaults Radar, preserves selection, and PiP remains capability-gated disabled",
+    "375px simulation: All thirty-nine current targets are genuinely pointer-selectable, have 44px accessible targets, at-most-five collision-free labels, four Featured cards and no horizontal overflow",
+    "MOCK ONLY: OpenAI widget-state adapter preserves selection and view across a simulated remount",
+    "Expired selected observations disappear safely but retain an explicit expired panel and original selection; paused polling makes no requests",
+    "MOCK ONLY: Standard teardown is acknowledged and terminates polling"
+  ],
+  "motionSamples": [
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e81",
+      "latitude": 42.024970763714464,
+      "longitude": -87.80239575384917,
+      "altitudeFt": 7800,
+      "extrapolatedSeconds": 0.496,
+      "stopped": false,
+      "css": {
+        "left": "323.6px",
+        "top": "141.961px"
+      }
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e81",
+      "latitude": 42.024608023771954,
+      "longitude": -87.80190745710706,
+      "altitudeFt": 7800,
+      "extrapolatedSeconds": 1,
+      "stopped": false,
+      "css": {
+        "left": "323.681px",
+        "top": "142.043px"
+      }
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e81",
+      "latitude": 42.024256797411205,
+      "longitude": -87.8014346671581,
+      "altitudeFt": 7800,
+      "extrapolatedSeconds": 1.488,
+      "stopped": false,
+      "css": {
+        "left": "323.76px",
+        "top": "142.122px"
+      }
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e81",
+      "latitude": 42.02388829553727,
+      "longitude": -87.80093863085972,
+      "altitudeFt": 7800,
+      "extrapolatedSeconds": 2,
+      "stopped": false,
+      "css": {
+        "left": "323.843px",
+        "top": "142.204px"
+      }
+    }
+  ],
+  "displayTransitions": [
+    {
+      "at": "before-declined-fullscreen",
+      "state": {
+        "displayMode": "inline",
+        "selectedView": "flights",
+        "views": {
+          "inline": "flights",
+          "fullscreen": "radar",
+          "pip": "flights"
+        },
+        "radarSelected": "false",
+        "hostMode": "inline",
+        "hostState": {
+          "version": 3,
+          "areaId": "preset:chicago",
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+          "views": {
+            "inline": "flights",
+            "fullscreen": "radar",
+            "pip": "flights"
+          },
+          "paused": false
+        },
+        "responses": []
+      }
+    },
+    {
+      "at": "after-declined-fullscreen",
+      "state": {
+        "displayMode": "inline",
+        "selectedView": "flights",
+        "views": {
+          "inline": "flights",
+          "fullscreen": "radar",
+          "pip": "flights"
+        },
+        "radarSelected": "false",
+        "hostMode": "inline",
+        "hostState": {
+          "version": 3,
+          "areaId": "preset:chicago",
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+          "views": {
+            "inline": "flights",
+            "fullscreen": "radar",
+            "pip": "flights"
+          },
+          "paused": false
+        },
+        "responses": [
+          {
+            "id": 3,
+            "requested": "fullscreen",
+            "granted": "inline"
+          }
+        ]
+      }
+    },
+    {
+      "at": "before-accepted-fullscreen",
+      "state": {
+        "displayMode": "inline",
+        "selectedView": "flights",
+        "views": {
+          "inline": "flights",
+          "fullscreen": "radar",
+          "pip": "flights"
+        },
+        "radarSelected": "false",
+        "hostMode": "inline",
+        "hostState": {
+          "version": 3,
+          "areaId": "preset:chicago",
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+          "views": {
+            "inline": "flights",
+            "fullscreen": "radar",
+            "pip": "flights"
+          },
+          "paused": false
+        },
+        "responses": [
+          {
+            "id": 3,
+            "requested": "fullscreen",
+            "granted": "inline"
+          }
+        ]
+      }
+    },
+    {
+      "at": "after-accepted-fullscreen",
+      "state": {
+        "displayMode": "fullscreen",
+        "selectedView": "radar",
+        "views": {
+          "inline": "flights",
+          "fullscreen": "radar",
+          "pip": "flights"
+        },
+        "radarSelected": "true",
+        "hostMode": "fullscreen",
+        "hostState": {
+          "version": 3,
+          "areaId": "preset:chicago",
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+          "views": {
+            "inline": "flights",
+            "fullscreen": "radar",
+            "pip": "flights"
+          },
+          "paused": false
+        },
+        "responses": [
+          {
+            "id": 3,
+            "requested": "fullscreen",
+            "granted": "inline"
+          },
+          {
+            "id": 4,
+            "requested": "fullscreen",
+            "granted": "fullscreen"
+          }
+        ]
+      }
+    }
+  ],
+  "desktopLabels": [
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e81",
+      "x": 658.390625,
+      "y": 414.203125,
+      "width": 74,
+      "height": 32,
+      "top": 414.203125,
+      "right": 732.390625,
+      "bottom": 446.203125,
+      "left": 658.390625
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e9e",
+      "x": 581.65625,
+      "y": 355.421875,
+      "width": 74,
+      "height": 32,
+      "top": 355.421875,
+      "right": 655.65625,
+      "bottom": 387.421875,
+      "left": 581.65625
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea1",
+      "x": 713.84375,
+      "y": 453.5,
+      "width": 74,
+      "height": 32,
+      "top": 453.5,
+      "right": 787.84375,
+      "bottom": 485.5,
+      "left": 713.84375
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea4",
+      "x": 501.65625,
+      "y": 470.953125,
+      "width": 74,
+      "height": 32,
+      "top": 470.953125,
+      "right": 575.65625,
+      "bottom": 502.953125,
+      "left": 501.65625
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea5",
+      "x": 488.515625,
+      "y": 428.375,
+      "width": 74,
+      "height": 32,
+      "top": 428.375,
+      "right": 562.515625,
+      "bottom": 460.375,
+      "left": 488.515625
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea3",
+      "x": 590.359375,
+      "y": 522.5,
+      "width": 74,
+      "height": 32,
+      "top": 522.5,
+      "right": 664.359375,
+      "bottom": 554.5,
+      "left": 590.359375
+    }
+  ],
+  "ordLabels": [
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e81",
+      "x": 687.234375,
+      "y": 431.640625,
+      "width": 74,
+      "height": 32,
+      "top": 431.640625,
+      "right": 761.234375,
+      "bottom": 463.640625,
+      "left": 687.234375
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e9e",
+      "x": 597.171875,
+      "y": 359.46875,
+      "width": 74,
+      "height": 32,
+      "top": 359.46875,
+      "right": 671.171875,
+      "bottom": 391.46875,
+      "left": 597.171875
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea1",
+      "x": 771.421875,
+      "y": 491.375,
+      "width": 74,
+      "height": 32,
+      "top": 491.375,
+      "right": 845.421875,
+      "bottom": 523.375,
+      "left": 771.421875
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea4",
+      "x": 502.15625,
+      "y": 517.90625,
+      "width": 74,
+      "height": 32,
+      "top": 517.90625,
+      "right": 576.15625,
+      "bottom": 549.90625,
+      "left": 502.15625
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea5",
+      "x": 482.1875,
+      "y": 453.1875,
+      "width": 74,
+      "height": 32,
+      "top": 453.1875,
+      "right": 556.1875,
+      "bottom": 485.1875,
+      "left": 482.1875
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e9f",
+      "x": 737.046875,
+      "y": 380.46875,
+      "width": 74,
+      "height": 32,
+      "top": 380.46875,
+      "right": 811.046875,
+      "bottom": 412.46875,
+      "left": 737.046875
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea2",
+      "x": 727.921875,
+      "y": 543.140625,
+      "width": 74,
+      "height": 32,
+      "top": 543.140625,
+      "right": 801.921875,
+      "bottom": 575.140625,
+      "left": 727.921875
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea6",
+      "x": 506.328125,
+      "y": 394.90625,
+      "width": 74,
+      "height": 32,
+      "top": 394.90625,
+      "right": 580.328125,
+      "bottom": 426.90625,
+      "left": 506.328125
+    }
+  ],
+  "mdwLabels": [
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e81",
+      "x": 648.53125,
+      "y": 366.234375,
+      "width": 74,
+      "height": 32,
+      "top": 366.234375,
+      "right": 722.53125,
+      "bottom": 398.234375,
+      "left": 648.53125
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e9e",
+      "x": 558.359375,
+      "y": 294.0625,
+      "width": 74,
+      "height": 32,
+      "top": 294.0625,
+      "right": 632.359375,
+      "bottom": 326.0625,
+      "left": 558.359375
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea1",
+      "x": 732.96875,
+      "y": 425.96875,
+      "width": 74,
+      "height": 32,
+      "top": 425.96875,
+      "right": 806.96875,
+      "bottom": 457.96875,
+      "left": 732.96875
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea4",
+      "x": 463.1875,
+      "y": 452.5,
+      "width": 74,
+      "height": 32,
+      "top": 452.5,
+      "right": 537.1875,
+      "bottom": 484.5,
+      "left": 463.1875
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea5",
+      "x": 443.1875,
+      "y": 387.78125,
+      "width": 74,
+      "height": 32,
+      "top": 387.78125,
+      "right": 517.1875,
+      "bottom": 419.78125,
+      "left": 443.1875
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e9f",
+      "x": 698.484375,
+      "y": 315.046875,
+      "width": 74,
+      "height": 32,
+      "top": 315.046875,
+      "right": 772.484375,
+      "bottom": 347.046875,
+      "left": 698.484375
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea2",
+      "x": 689.34375,
+      "y": 477.734375,
+      "width": 74,
+      "height": 32,
+      "top": 477.734375,
+      "right": 763.34375,
+      "bottom": 509.734375,
+      "left": 689.34375
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea3",
+      "x": 520.59375,
+      "y": 488.296875,
+      "width": 74,
+      "height": 32,
+      "top": 488.296875,
+      "right": 594.59375,
+      "bottom": 520.296875,
+      "left": 520.59375
+    }
+  ],
+  "mobileLabels": [
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e81",
+      "x": 205.9375,
+      "y": 405.125,
+      "width": 74,
+      "height": 32,
+      "top": 405.125,
+      "right": 279.9375,
+      "bottom": 437.125,
+      "left": 205.9375
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003e9e",
+      "x": 129.4375,
+      "y": 345.96875,
+      "width": 74,
+      "height": 32,
+      "top": 345.96875,
+      "right": 203.4375,
+      "bottom": 377.96875,
+      "left": 129.4375
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea4",
+      "x": 48.984375,
+      "y": 461.4375,
+      "width": 74,
+      "height": 32,
+      "top": 461.4375,
+      "right": 122.984375,
+      "bottom": 493.4375,
+      "left": 48.984375
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea1",
+      "x": 261.28125,
+      "y": 444.390625,
+      "width": 74,
+      "height": 32,
+      "top": 444.390625,
+      "right": 335.28125,
+      "bottom": 476.390625,
+      "left": 261.28125
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea5",
+      "x": 36.015625,
+      "y": 418.78125,
+      "width": 74,
+      "height": 32,
+      "top": 418.78125,
+      "right": 110.015625,
+      "bottom": 450.78125,
+      "left": 36.015625
+    }
+  ],
+  "desktop": {
+    "width": 1120,
+    "overflow": false,
+    "radar": {
+      "x": 24,
+      "y": 283.203125,
+      "width": 796,
+      "height": 620,
+      "top": 283.203125,
+      "right": 820,
+      "bottom": 903.203125,
+      "left": 24
+    },
+    "summary": {
+      "x": 832,
+      "y": 251.8125,
+      "width": 264,
+      "height": 347.765625,
+      "top": 251.8125,
+      "right": 1096,
+      "bottom": 599.578125,
+      "left": 832
+    }
+  },
+  "mobile": {
+    "width": 375,
+    "overflow": false,
+    "radar": {
+      "x": 12,
+      "y": 265.90625,
+      "width": 351,
+      "height": 340,
+      "top": 265.90625,
+      "right": 363,
+      "bottom": 605.90625,
+      "left": 12
+    },
+    "markers": [
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e81",
+        "label": "SYN102, 7,280 ft, Descending, falling, track 167 degrees",
+        "x": 169.9375,
+        "y": 396.125,
+        "width": 44,
+        "height": 44,
+        "top": 396.125,
+        "right": 213.9375,
+        "bottom": 440.125,
+        "left": 169.9375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e80",
+        "label": "SYN101, 8,320 ft, Climbing, rising, track 122 degrees",
+        "x": 163.8125,
+        "y": 385.234375,
+        "width": 44,
+        "height": 44,
+        "top": 385.234375,
+        "right": 207.8125,
+        "bottom": 429.234375,
+        "left": 163.8125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e82",
+        "label": "SYN103, 8,320 ft, Climbing, rising, track 212 degrees",
+        "x": 166.328125,
+        "y": 408.5625,
+        "width": 44,
+        "height": 44,
+        "top": 408.5625,
+        "right": 210.328125,
+        "bottom": 452.5625,
+        "left": 166.328125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e83",
+        "label": "SYN104, 8,320 ft, Climbing, rising, track 258 degrees",
+        "x": 154.53125,
+        "y": 414.96875,
+        "width": 44,
+        "height": 44,
+        "top": 414.96875,
+        "right": 198.53125,
+        "bottom": 458.96875,
+        "left": 154.53125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e8d",
+        "label": "SYN114, 15,480 ft, Descending, falling, track 47 degrees",
+        "x": 167.71875,
+        "y": 428.3125,
+        "width": 44,
+        "height": 44,
+        "top": 428.3125,
+        "right": 211.71875,
+        "bottom": 472.3125,
+        "left": 167.71875
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e84",
+        "label": "SYN105, 15,480 ft, Descending, falling, track 311 degrees",
+        "x": 140.921875,
+        "y": 407.21875,
+        "width": 44,
+        "height": 44,
+        "top": 407.21875,
+        "right": 184.921875,
+        "bottom": 451.21875,
+        "left": 140.921875
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e8c",
+        "label": "SYN113, 16,520 ft, Climbing, rising, track 351 degrees",
+        "x": 161.203125,
+        "y": 438.140625,
+        "width": 44,
+        "height": 44,
+        "top": 438.140625,
+        "right": 205.203125,
+        "bottom": 482.140625,
+        "left": 161.203125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e89",
+        "label": "SYN110, 16,520 ft, Climbing, rising, track 184 degrees",
+        "x": 185.234375,
+        "y": 442.359375,
+        "width": 44,
+        "height": 44,
+        "top": 442.359375,
+        "right": 229.234375,
+        "bottom": 486.359375,
+        "left": 185.234375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e93",
+        "label": "SYN120, 15,480 ft, Descending, falling, track 154 degrees",
+        "x": 197.0625,
+        "y": 401.9375,
+        "width": 44,
+        "height": 44,
+        "top": 401.9375,
+        "right": 241.0625,
+        "bottom": 445.9375,
+        "left": 197.0625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e95",
+        "label": "SYN122, 16,520 ft, Climbing, rising, track 248 degrees",
+        "x": 175.28125,
+        "y": 446.25,
+        "width": 44,
+        "height": 44,
+        "top": 446.25,
+        "right": 219.28125,
+        "bottom": 490.25,
+        "left": 175.28125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e90",
+        "label": "SYN117, 15,480 ft, Descending, falling, track 15 degrees",
+        "x": 133.46875,
+        "y": 403.390625,
+        "width": 44,
+        "height": 44,
+        "top": 403.390625,
+        "right": 177.46875,
+        "bottom": 447.390625,
+        "left": 133.46875
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e8f",
+        "label": "SYN116, 16,520 ft, Climbing, rising, track 341 degrees",
+        "x": 132.53125,
+        "y": 421.5,
+        "width": 44,
+        "height": 44,
+        "top": 421.5,
+        "right": 176.53125,
+        "bottom": 465.5,
+        "left": 132.53125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e96",
+        "label": "SYN123, 15,480 ft, Descending, falling, track 294 degrees",
+        "x": 148.5625,
+        "y": 443.15625,
+        "width": 44,
+        "height": 44,
+        "top": 443.15625,
+        "right": 192.5625,
+        "bottom": 487.15625,
+        "left": 148.5625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e92",
+        "label": "SYN119, 16,520 ft, Climbing, rising, track 108 degrees",
+        "x": 178.265625,
+        "y": 382.671875,
+        "width": 44,
+        "height": 44,
+        "top": 382.671875,
+        "right": 222.265625,
+        "bottom": 426.671875,
+        "left": 178.265625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e87",
+        "label": "SYN108, 15,480 ft, Descending, falling, track 90 degrees",
+        "x": 157.421875,
+        "y": 379.84375,
+        "width": 44,
+        "height": 44,
+        "top": 379.84375,
+        "right": 201.421875,
+        "bottom": 423.84375,
+        "left": 157.421875
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e86",
+        "label": "SYN107, 16,520 ft, Climbing, rising, track 44 degrees",
+        "x": 143.765625,
+        "y": 383.015625,
+        "width": 44,
+        "height": 44,
+        "top": 383.015625,
+        "right": 187.765625,
+        "bottom": 427.015625,
+        "left": 143.765625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e8a",
+        "label": "SYN111, 15,480 ft, Descending, falling, track 239 degrees",
+        "x": 177.34375,
+        "y": 450.890625,
+        "width": 44,
+        "height": 44,
+        "top": 450.890625,
+        "right": 221.34375,
+        "bottom": 494.890625,
+        "left": 177.34375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e9b",
+        "label": "SYN128, 16,520 ft, Climbing, rising, track 282 degrees",
+        "x": 152.65625,
+        "y": 460.828125,
+        "width": 44,
+        "height": 44,
+        "top": 460.828125,
+        "right": 196.65625,
+        "bottom": 504.828125,
+        "left": 152.65625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e99",
+        "label": "SYN126, 15,480 ft, Descending, falling, track 190 degrees",
+        "x": 212.921875,
+        "y": 424.59375,
+        "width": 44,
+        "height": 44,
+        "top": 424.59375,
+        "right": 256.921875,
+        "bottom": 468.59375,
+        "left": 212.921875
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e9c",
+        "label": "SYN129, 15,480 ft, Descending, falling, track 328 degrees",
+        "x": 122.703125,
+        "y": 437.015625,
+        "width": 44,
+        "height": 44,
+        "top": 437.015625,
+        "right": 166.703125,
+        "bottom": 481.015625,
+        "left": 122.703125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e98",
+        "label": "SYN125, 16,520 ft, Climbing, rising, track 144 degrees",
+        "x": 206,
+        "y": 386.9375,
+        "width": 44,
+        "height": 44,
+        "top": 386.9375,
+        "right": 250,
+        "bottom": 430.9375,
+        "left": 206
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e9e",
+        "label": "SYN131, 16,520 ft, Climbing, rising, track 60 degrees",
+        "x": 144.4375,
+        "y": 369.96875,
+        "width": 44,
+        "height": 44,
+        "top": 369.96875,
+        "right": 188.4375,
+        "bottom": 413.96875,
+        "left": 144.4375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003ea4",
+        "label": "SYN137, 16,520 ft, Climbing, rising, track 320 degrees",
+        "x": 114.984375,
+        "y": 452.4375,
+        "width": 44,
+        "height": 44,
+        "top": 452.4375,
+        "right": 158.984375,
+        "bottom": 496.4375,
+        "left": 114.984375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003ea1",
+        "label": "SYN134, 16,520 ft, Climbing, rising, track 198 degrees",
+        "x": 225.28125,
+        "y": 435.390625,
+        "width": 44,
+        "height": 44,
+        "top": 435.390625,
+        "right": 269.28125,
+        "bottom": 479.390625,
+        "left": 225.28125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003ea2",
+        "label": "SYN135, 15,480 ft, Descending, falling, track 238 degrees",
+        "x": 196.5,
+        "y": 469.375,
+        "width": 44,
+        "height": 44,
+        "top": 469.375,
+        "right": 240.5,
+        "bottom": 513.375,
+        "left": 196.5
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003ea5",
+        "label": "SYN138, 15,480 ft, Descending, falling, track 1 degrees",
+        "x": 102.015625,
+        "y": 409.78125,
+        "width": 44,
+        "height": 44,
+        "top": 409.78125,
+        "right": 146.015625,
+        "bottom": 453.78125,
+        "left": 102.015625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e9f",
+        "label": "SYN132, 15,480 ft, Descending, falling, track 123 degrees",
+        "x": 202.984375,
+        "y": 362.421875,
+        "width": 44,
+        "height": 44,
+        "top": 362.421875,
+        "right": 246.984375,
+        "bottom": 406.421875,
+        "left": 202.984375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e8e",
+        "label": "SYN115, 32,000 ft, In flight, level, track 103 degrees",
+        "x": 179.5625,
+        "y": 428.40625,
+        "width": 44,
+        "height": 44,
+        "top": 428.40625,
+        "right": 223.5625,
+        "bottom": 472.40625,
+        "left": 179.5625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e88",
+        "label": "SYN109, 31,000 ft, In flight, level, track 128 degrees",
+        "x": 182.421875,
+        "y": 431.109375,
+        "width": 44,
+        "height": 44,
+        "top": 431.109375,
+        "right": 226.421875,
+        "bottom": 475.109375,
+        "left": 182.421875
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e85",
+        "label": "SYN106, 28,000 ft, In flight, level, track 357 degrees",
+        "x": 137.015625,
+        "y": 394.75,
+        "width": 44,
+        "height": 44,
+        "top": 394.75,
+        "right": 181.015625,
+        "bottom": 438.75,
+        "left": 137.015625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e94",
+        "label": "SYN121, 28,000 ft, In flight, level, track 201 degrees",
+        "x": 195.78125,
+        "y": 428.8125,
+        "width": 44,
+        "height": 44,
+        "top": 428.8125,
+        "right": 239.78125,
+        "bottom": 472.8125,
+        "left": 195.78125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e91",
+        "label": "SYN118, 30,000 ft, In flight, level, track 61 degrees",
+        "x": 151.328125,
+        "y": 383.296875,
+        "width": 44,
+        "height": 44,
+        "top": 383.296875,
+        "right": 195.328125,
+        "bottom": 427.296875,
+        "left": 151.328125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e8b",
+        "label": "SYN112, 29,000 ft, In flight, level, track 295 degrees",
+        "x": 165.859375,
+        "y": 448.921875,
+        "width": 44,
+        "height": 44,
+        "top": 448.921875,
+        "right": 209.859375,
+        "bottom": 492.921875,
+        "left": 165.859375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e9a",
+        "label": "SYN127, 29,000 ft, In flight, level, track 236 degrees",
+        "x": 190.484375,
+        "y": 455.609375,
+        "width": 44,
+        "height": 44,
+        "top": 455.609375,
+        "right": 234.484375,
+        "bottom": 499.609375,
+        "left": 190.484375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e9d",
+        "label": "SYN130, 32,000 ft, In flight, level, track 14 degrees",
+        "x": 119.171875,
+        "y": 398.84375,
+        "width": 44,
+        "height": 44,
+        "top": 398.84375,
+        "right": 163.171875,
+        "bottom": 442.84375,
+        "left": 119.171875
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e97",
+        "label": "SYN124, 31,000 ft, In flight, level, track 106 degrees",
+        "x": 182.890625,
+        "y": 368.359375,
+        "width": 44,
+        "height": 44,
+        "top": 368.359375,
+        "right": 226.890625,
+        "bottom": 412.359375,
+        "left": 182.890625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003ea3",
+        "label": "SYN136, 28,000 ft, In flight, level, track 279 degrees",
+        "x": 152.609375,
+        "y": 476.15625,
+        "width": 44,
+        "height": 44,
+        "top": 476.15625,
+        "right": 196.609375,
+        "bottom": 520.15625,
+        "left": 152.609375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003ea0",
+        "label": "SYN133, 30,000 ft, In flight, level, track 157 degrees",
+        "x": 224.765625,
+        "y": 390.8125,
+        "width": 44,
+        "height": 44,
+        "top": 390.8125,
+        "right": 268.765625,
+        "bottom": 434.8125,
+        "left": 224.765625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003ea6",
+        "label": "SYN139, 31,000 ft, In flight, level, track unavailable",
+        "x": 117.90625,
+        "y": 371.734375,
+        "width": 44,
+        "height": 44,
+        "top": 371.734375,
+        "right": 161.90625,
+        "bottom": 415.734375,
+        "left": 117.90625
+      }
+    ]
+  },
+  "externalRequests": 0,
+  "errors": [],
+  "mcpRequests": 7
+}

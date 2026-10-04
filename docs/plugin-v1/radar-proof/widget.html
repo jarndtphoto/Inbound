@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Inbound Live — invented Radar transport preview</title>
+  <style nonce="__PROOF_NONCE__">
+    :root { color-scheme:light dark; --bg:#fff; --fg:#1c252b; --muted:#53616a; --line:#dbe1e5; --soft:#f4f6f7; --accent:#215c77; --chosen:#edf5f9; --radius:12px; --radar-bg:#101d27; --radar-lake:#193747; --radar-line:#334955; --radar-text:#b4c6d0; --radar-ink:#f0f6f9; --radar-accent:#8fd7e9; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:680px; margin:0 auto; padding:16px; }
+    main[data-display-mode="fullscreen"] { max-width:1280px; padding:24px; }
+    header { display:flex; gap:12px; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
+    h1 { font-size:21px; line-height:1.2; margin:0 0 4px; letter-spacing:-.025em; font-weight:650; }
+    h2 { margin:0; font-size:21px; line-height:1.3; letter-spacing:-.02em; }
+    p { margin:0; } .muted { color:var(--muted); } .kicker { font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin-bottom:5px; }
+    .fixture { font-size:10px; font-weight:650; border:1px solid var(--line); border-radius:6px; padding:5px 8px; white-space:nowrap; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; align-items:center; }
+    button,select { min-height:44px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); padding:8px 12px; font:inherit; cursor:pointer; }
+    button:hover { background:var(--soft); } button:disabled { color:var(--muted); opacity:.6; cursor:default; }
+    button:focus-visible,select:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+    .navigation { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+    .tabs { display:flex; gap:4px; padding:3px; border-radius:10px; background:var(--soft); }
+    .tabs button { min-width:88px; border-color:transparent; padding:7px 16px; font-size:12px; font-weight:650; letter-spacing:.06em; }
+    .tabs button[aria-selected="true"] { background:var(--bg); border-color:var(--line); color:var(--accent); box-shadow:0 1px 2px #0001; }
+    #view-count { font-size:12px; color:var(--muted); }
+    .content { display:grid; gap:12px; align-items:start; }
+    #cards { display:grid; gap:8px; }
+    .card { text-align:left; width:100%; min-width:0; border:1px solid var(--line); border-radius:var(--radius); padding:10px 12px; background:var(--bg); }
+    .card[aria-pressed="true"] { background:var(--chosen); border-color:var(--accent); box-shadow:inset 3px 0 var(--accent); }
+    .card-top,.card-bottom { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .ident { font-size:16px; font-weight:650; letter-spacing:.005em; } .altitude { font-size:15px; font-weight:550; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .route { display:block; margin:3px 0 6px; color:var(--muted); font-size:13px; }
+    .card-bottom { color:var(--muted); font-size:12px; flex-wrap:wrap; gap:4px; }
+    .card[aria-pressed="true"] .ident::after { content:" · Selected"; font-size:11px; font-weight:550; }
+    .static-warning { font-size:12px; color:var(--muted); margin-top:12px; }
+    .notice { color:var(--muted); font-size:12px; padding:8px 0; }
+    #selection-note { font-size:12px; color:var(--muted); margin-bottom:12px; }
+    #radar-panel { min-width:0; border-radius:var(--radius); overflow:hidden; background:var(--radar-bg); color:var(--radar-ink); }
+    .radar-heading { display:flex; justify-content:space-between; gap:8px; padding:14px 16px 0; align-items:center; }
+    .radar-heading strong { font-size:12px; font-weight:550; } .radar-heading span { font-size:11px; color:var(--radar-text); }
+    #radar-surface { position:relative; width:100%; height:340px; overflow:hidden; }
+    #radar-map { display:block; width:100%; height:100%; position:absolute; inset:0; }
+    .lake { fill:var(--radar-lake); stroke:var(--radar-line); stroke-width:1.5; }
+    .range-ring { fill:none; stroke:var(--radar-line); stroke-width:1; stroke-dasharray:3 6; }
+    .map-grid { stroke:var(--radar-line); stroke-width:.5; opacity:.4; }
+    .map-label { fill:var(--radar-text); font:11px system-ui,sans-serif; letter-spacing:.04em; }
+    .city-label { fill:var(--radar-text); font:13px system-ui,sans-serif; }
+    .reference-point { fill:var(--radar-text); }
+    .airport-shape { fill:var(--radar-bg); stroke:var(--radar-text); stroke-width:1.5; }
+    .airport-label { fill:var(--radar-ink); font:600 12px system-ui,sans-serif; }
+    .airport-primary { stroke:var(--radar-accent); stroke-width:2.5; }
+    .north { position:absolute; right:14px; top:12px; color:var(--radar-text); font-size:11px; text-align:center; pointer-events:none; }
+    #radar-markers { position:absolute; inset:0; }
+    .aircraft-marker { position:absolute; width:44px; height:44px; padding:0; border:0; border-radius:50%; transform:translate(-50%,-50%); color:var(--radar-accent); background:transparent; z-index:1; }
+    .aircraft-marker:hover { background:var(--radar-line); }
+    .aircraft-marker:focus-visible { outline-color:var(--radar-ink); z-index:4; }
+    .aircraft-marker[aria-pressed="true"] { box-shadow:inset 0 0 0 2px var(--radar-ink),0 0 0 3px var(--radar-line); color:var(--radar-ink); background:var(--radar-lake); z-index:3; }
+    .aircraft-glyph { width:22px; height:22px; display:block; margin:auto; fill:currentColor; }
+    .marker-label { position:absolute; left:42px; top:8px; width:112px; line-height:14px; overflow:hidden; text-overflow:ellipsis; background:var(--radar-bg); border-radius:4px; padding:2px 5px; color:var(--radar-ink); font-size:11px; font-weight:550; white-space:nowrap; pointer-events:none; }
+    .marker-label small { display:block; color:var(--radar-text); font-size:10px; font-weight:400; }
+    .marker-check { display:none; } .aircraft-marker[aria-pressed="true"] .marker-check { display:inline; }
+    .radar-footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; padding:0 16px 12px; font-size:10px; color:var(--radar-text); }
+    #radar-empty { position:absolute; inset:45% 24px auto; text-align:center; color:var(--radar-text); font-size:13px; }
+    .selection { min-width:0; padding:16px; border:1px solid var(--line); border-radius:var(--radius); background:var(--soft); }
+    .selection .route { margin:6px 0 12px; font-size:14px; }
+    #selected-altitude { font-size:22px; font-weight:550; font-variant-numeric:tabular-nums; }
+    #selected-motion { margin:3px 0 12px; } #selected-distance,#selected-age,#selected-track { font-size:12px; color:var(--muted); margin-top:5px; }
+    #track-flight { width:100%; margin-top:16px; } .track-notice { font-size:11px; color:var(--muted); margin-top:6px; }
+    .host-controls { margin-top:4px; }
+    details { margin-top:8px; border-top:1px solid var(--line); padding-top:8px; color:var(--muted); font-size:12px; }
+    summary { min-height:32px; cursor:pointer; } details p + p { margin-top:6px; }
+    .aircraft-marker[data-stale="true"] { opacity:.62; }
+    .badge { font-size:10px; border:1px solid var(--line); border-radius:5px; padding:2px 5px; }
+    .health { font-size:12px; color:var(--muted); margin-bottom:10px; }
+    main { overflow-wrap:break-word; }
+    [hidden] { display:none !important; }
+    @media(min-width:820px) { main[data-display-mode="fullscreen"] .content[data-view="radar"] { grid-template-columns:minmax(0,1fr) 264px; } main[data-display-mode="fullscreen"] #radar-surface { height:clamp(420px,60vh,620px); } }
+    @media(max-width:420px) { main,main[data-display-mode="fullscreen"] { padding:12px; } h1 { font-size:19px; } #reference { font-size:12px; } .fixture { font-size:9px; padding:4px 6px; } .navigation { gap:8px; } .tabs button { min-width:76px; padding:6px 12px; } .controls { gap:6px; } .controls button,.controls select { padding:8px 10px; font-size:13px; } .card-top { gap:8px; } .ident { font-size:14px; } .altitude { font-size:14px; } .card[aria-pressed="true"] .ident::after { content:" ✓"; } #radar-surface { height:340px; } }
+    @media(prefers-color-scheme:dark) { :root { --bg:#171c20; --fg:#edf1f3; --muted:#abb7c0; --line:#35414a; --soft:#222b32; --accent:#82b6cb; --chosen:#213a47; } }
+  </style>
+</head>
+<body>
+<main id="proof" data-display-mode="inline">
+  <header><div><p class="kicker">Inbound Live</p><h1 id="area-title">Near Chicago</h1><p id="reference" class="muted">Distances from Chicago area center</p></div><span class="fixture">INVENTED PREVIEW</span></header>
+  <nav class="navigation" aria-label="Aircraft views"><div class="tabs" role="tablist" aria-label="View"><button id="view-radar" role="tab" aria-controls="radar-panel" aria-selected="false" tabindex="-1">RADAR</button><button id="view-flights" role="tab" aria-controls="flights-panel" aria-selected="true">FLIGHTS</button></div><span id="view-count">Invented aircraft</span></nav>
+  <div class="controls"><label for="area" class="muted">Area</label><select id="area"><option value="preset:chicago">Chicago</option><option value="airport:KORD">ORD</option><option value="airport:KMDW">MDW</option></select><button id="refresh">Refresh</button><button id="pause">Pause</button></div>
+  <p id="board-notice" class="health" role="status"></p>
+  <div id="content" class="content" data-view="flights">
+    <section id="radar-panel" role="tabpanel" aria-labelledby="view-radar" hidden><div class="radar-heading"><strong id="radar-reference">Chicago area center</strong><span id="radar-range"></span></div><div id="radar-surface" aria-label="Invented Chicago aircraft radar"><svg id="radar-map" aria-hidden="true"></svg><div id="radar-markers" role="group" aria-label="Select an invented aircraft"></div><span class="north" aria-hidden="true">▲<br>N</span><p id="radar-empty" hidden></p></div><div class="radar-footer"><span>North up · Local geographic sketch</span><span>Accepted ground track · Bounded motion</span></div></section>
+    <section id="flights-panel" role="tabpanel" aria-labelledby="view-flights"><div id="cards" aria-label="Featured invented aircraft"></div><p id="flights-empty" class="notice" hidden>No current Featured aircraft. Coverage may be temporarily unavailable.</p></section>
+    <aside id="selected" class="selection" aria-label="Focused aircraft" hidden><p class="kicker">Focused aircraft · Invented</p><h2 id="selected-ident">Select an aircraft</h2><p id="selected-route" class="route">Tap a marker to see its observation.</p><p id="selected-altitude"></p><p id="selected-motion"></p><p id="selected-distance"></p><p id="selected-age"></p><p id="selected-track"></p><button id="track-flight" disabled title="Detailed tracking is not available in this preview">Track flight</button><p class="track-notice">Detailed tracking is not available in this preview.</p></aside>
+  </div>
+  <p id="selection-note" aria-live="polite">Select an aircraft to focus it locally.</p>
+  <p class="static-warning">Invented aircraft only. Smooth display movement is bounded to 25 seconds from each accepted fix.</p>
+  <div class="controls host-controls"><button id="pip" disabled title="Available only when the host advertises Picture-in-Picture">Request PiP</button><button id="fullscreen" disabled>Expand</button><button id="dismiss">Dismiss preview</button></div>
+  <details><summary>About this preview</summary><p>Invented aircraft and route evidence exercise Inbound's shared Nearby engine. No live aviation providers, production APIs, map tiles or external resources.</p><p>Radar and Featured use the same shared Chicago snapshot. Distances refer to the named center or airport, never your location. Coverage is available data, not every aircraft.</p><p>Symbols move locally between accepted updates. Missing track stays neutral; stale positions stop; accepted altitude is unchanged. A new fix replaces the display trajectory.</p><p id="host-status">Inline fallback. ChatGPT host behavior is awaiting manual verification.</p><p id="proof-status">Nearby refresh calls: 0. This UI sends no chat messages or model requests.</p></details>
+</main>
+<script nonce="__PROOF_NONCE__">window.__INBOUND_RADAR_INITIAL__ = __INITIAL_NEARBY__;</script>
+<script nonce="__PROOF_NONCE__">__RADAR_WIDGET_JS__</script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+{
+  "startingSha": "7277994ccbb921382849c5e1e30cae8388ee68bd",
+  "branch": "plugin-v1-radar-transport",
+  "check": {
+    "command": "env -u DATABASE_URL -u NEARBY_VERIFY_DATABASE_URL taskset -c 0,1,2 npm run check",
+    "exitCode": 0,
+    "tests": 957,
+    "suites": 92,
+    "pass": 956,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 1,
+    "durationMs": 200480.942037,
+    "existingTodo": {
+      "test": "loads an exact route from a FlightStats-style public status page",
+      "reason": "Held #6: unknown-airport route support"
+    },
+    "logSha256": "71df18574f278ec2217bc8cbbc7f289721b6683c54f63bd4e220d9cf875101f9"
+  },
+  "build": {
+    "command": "env -u DATABASE_URL -u NEARBY_VERIFY_DATABASE_URL npm run build",
+    "exitCode": 0,
+    "productionMigrator": "skipped: DATABASE_URL not set",
+    "logSha256": "70eaabf9df6019cca71336180c5c8f0a1019aec194cb41a98a323ccedd02ce68"
+  },
+  "browser": {
+    "sourceAssertionGroups": 17,
+    "compiledAssertionGroups": 17,
+    "externalRequests": 0,
+    "consoleOrPageErrors": 0,
+    "actualChatGptVerified": false,
+    "realPipVerified": false
+  },
+  "focusedNewTests": 48,
+  "initialUnconstrainedCheck": {
+    "tests": 959,
+    "passed": 954,
+    "failedChildProcesses": 4,
+    "todo": 1,
+    "signalsUnknown": true,
+    "resourcePressurePlausibleNotProven": true
+  },
+  "unchangedReplayDiagnostic": {
+    "tests": 7,
+    "pass": 7,
+    "fail": 0
+  },
+  "providerApiCalls": 0,
+  "productionApiCalls": 0,
+  "productionDbAccess": 0,
+  "realAircraftExposed": 0
+}
