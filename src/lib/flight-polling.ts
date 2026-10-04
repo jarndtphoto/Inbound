@@ -16,14 +16,14 @@ export function flightPollingInterval(
   const phase = story.aircraft?.phase ?? null;
   if (story.currentStage === "push" || story.currentStage === "taxi" || story.currentStage === "taxi_in") return 3_000;
   if (story.currentStage === "takeoff_roll") return 4_000;
-  if (story.currentStage === "final_approach" || phase === "approach") return 5_000;
+  if (story.currentStage === "final_approach" || phase === "approach") return 6_000;
   if (story.currentStage === "arrival" || phase === "descent") return 10_000;
 
   if (story.currentStage === "ride") {
     if (phase === "climb") {
       const takeoffAt = story.times.takeoffUnix;
       const sinceTakeoffSec = typeof takeoffAt === "number" ? nowMs / 1000 - takeoffAt : Number.POSITIVE_INFINITY;
-      return sinceTakeoffSec >= 0 && sinceTakeoffSec <= 10 * 60 ? 5_000 : 10_000;
+      return sinceTakeoffSec >= 0 && sinceTakeoffSec <= 10 * 60 ? 6_000 : 10_000;
     }
     return 20_000;
   }
