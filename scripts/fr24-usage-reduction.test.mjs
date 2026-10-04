@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { groundPollingEnabled, flightPollingComplete } from "../src/lib/flight-polling.ts";
+import { groundPollingEnabled, flightPollingComplete, flightPollingInterval } from "../src/lib/flight-polling.ts";
 import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -39,9 +39,36 @@ test("only completed/actual old arrivals slow down, never scheduled arrival or d
   assert.equal(flightPollingComplete({ currentStage: "gate", times: {} }, now), true);
 });
 
+test("tracked-flight polling is phase-aware and cruise waits 20 seconds", () => {
+  const now = Date.UTC(2026, 9, 4, 17);
+  const base = {
+    currentStage: "ride",
+    live: true,
+    times: { takeoffUnix: now / 1000 - 60 * 60 },
+    aircraft: { phase: "cruise" },
+  };
+  assert.equal(flightPollingInterval(base, now), 20_000, "live cruise no longer inherits the old 3-second live override");
+  assert.equal(flightPollingInterval({ ...base, currentStage: "push", aircraft: { phase: "parked" } }, now), 3_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "taxi", aircraft: { phase: "taxi" } }, now), 3_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "takeoff_roll", aircraft: { phase: "taxi" } }, now), 4_000);
+  assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "climb" }, times: { takeoffUnix: now / 1000 - 5 * 60 } }, now), 6_000);
+  assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "climb" }, times: { takeoffUnix: now / 1000 - 20 * 60 } }, now), 10_000);
+  assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "descent" } }, now), 10_000);
+  assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "approach" } }, now), 6_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "final_approach", aircraft: { phase: "cruise" } }, now), 6_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "taxi_in", aircraft: { phase: "taxi" } }, now), 3_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "origin_gate", aircraft: { phase: "parked" } }, now), 3_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "origin_gate", live: false, aircraft: null }, now), 8_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "inbound", live: false, aircraft: null }, now), 5_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "gate", aircraft: { phase: "parked" } }, now), 60_000);
+});
+
 test("visibility and Map selection are wired through to the ground observer", async () => {
   const read = path => readFile(resolve(path), "utf8");
-  assert.match(await read("src/components/filed-app.tsx"), /active=\{flightTab === "Route"\}/);
+  const app = await read("src/components/filed-app.tsx");
+  assert.match(app, /active=\{flightTab === "Route"\}/);
+  assert.match(app, /return flightPollingInterval\(s\)/);
+  assert.doesNotMatch(app, /if \(s\.live \|\| s\.currentStage === "push"/);
   assert.match(await read("src/components/route-map-experiment.tsx"), /active=\{props.active\}/);
   const movement = await read("src/components/movement-map.tsx");
   assert.match(movement, /enabled: groundPollingEnabled\(active, pageVisible/);
