@@ -314,7 +314,7 @@ html[data-theme="sunrise"], html[data-theme="sunrise"] .inbound-redesign {
 .timing-value-prominent .timing-number { font-weight: 650; }
 .timing-number-clock { font-size: 20px; }
 .timing-detail { margin-top: 3px; font-size: 12px; line-height: 1.5; color: var(--color-muted); text-wrap: pretty; }
-.timing-position { font-size: 12px; line-height: 1.5; color: var(--color-muted); }
+.timing-position { font-size: 13px; line-height: 1.5; color: var(--color-muted); }
 .timing-position > span { white-space: nowrap; }
 .timing-disclosure > summary { min-height: 44px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; font-size: 14px; border-top: 1px solid var(--color-border); }
 .timing-disclosure > summary::after { content: "+"; font-size: 20px; color: var(--color-muted); }

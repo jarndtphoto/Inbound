@@ -871,7 +871,7 @@ function headStatus(story: FlightStory) {
   const airline = story.airline;
   const air = flightAirborne(story);
   const live = liveFix(story);
-  const inAirLive = Boolean(live && story.aircraft && !story.aircraft.onGround);
+  const inAirLive = Boolean(live && story.aircraft && !story.aircraft.onGround && !remainingFlight(story).estimated);
   if (story.currentStage === "gate") return airline ?? "Parked";
   if (story.currentStage === "taxi_in") return airline ? `Taxiing in · ${airline}` : "Taxiing in";
   if (wheelsDown(story)) return airline ? `Landed · ${airline}` : "Landed";
@@ -879,8 +879,7 @@ function headStatus(story: FlightStory) {
   if (story.currentStage === "push") return airline ? `Pushback · ${airline}` : "Pushback";
   if (story.currentStage === "taxi") return airline ? `Taxiing out · ${airline}` : "Taxiing out";
   if (story.currentStage === "takeoff_roll") return airline ? `Takeoff roll · ${airline}` : "Takeoff roll";
-  if (story.currentStage === "final_approach") return airline ? `Final approach · ${airline}` : "Final approach";
-  if (air && inAirLive) return airline ? `In the air · ${airline}` : "In the air";
+  if (air && inAirLive) return airline ?? "";
   if (air) return "In the air — live position unavailable right now";
   if (live) return airline ? `On the ground · ${airline}` : "On the ground";
   return airline ?? "";

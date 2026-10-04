@@ -55,7 +55,7 @@ import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFligh
 import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
 import { displayArrivalProjection } from "./arrival-display.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
-import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress, routeMemoryEqual } from "./route-memory.ts";
+import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress, routeMemoryEqual, sanitizeRouteMemory } from "./route-memory.ts";
 import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
@@ -288,7 +288,9 @@ function legsForThisSector(legs, origin, dest, live, takeoffUnix) {
 		const start = leg[0];
 		const end = leg[leg.length - 1];
 		if (t0 != null && end.t < t0) continue;
-		if (polylineLengthNm(leg) < 12) continue;
+		// A just-departed sector is short. Rejecting it used to make the
+		// fallback choose the same tail's previous arrival into this airport.
+		if (polylineLengthNm(leg) < 12 && !(haversineNm(start, origin) < 15 && livePt && nearLiveNm(leg, livePt) < 15)) continue;
 		const startOrig = haversineNm(start, origin);
 		const startDest = haversineNm(start, dest);
 		const endOrig = haversineNm(end, origin);
@@ -304,14 +306,8 @@ function legsForThisSector(legs, origin, dest, live, takeoffUnix) {
 		if (off > corridor && liveD > 50 && startOrig > 90) continue;
 		kept.push(leg);
 	}
-	if (!kept.length && livePt) {
-		for (let i = legs.length - 1; i >= 0; i--) {
-			if (nearLiveNm(legs[i], livePt) < 45) {
-				kept.push(legs[i]);
-				break;
-			}
-		}
-	}
+	// Never bypass sector/date checks merely because an old trace ended
+	// near the live position. Missing current-sector history stays missing.
 	// A tail's day trace can contain more than one geographically plausible
 	// sector. Concatenating every match makes the map draw an old flight path
 	// underneath the current one. Keep exactly one current leg: prefer a leg
@@ -428,7 +424,7 @@ function distanceToPathNm(point, path) {
 	return best;
 }
 
-export function canonicalLiveDisplayPath({ filedPath, flownTrack, live, dest }) {
+export function canonicalLiveDisplayPath({ filedPath, flownTrack, live, dest, origin = null }) {
 	if (!live || live.onGround || live.extrapolated || !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) {
 		return Array.isArray(filedPath) ? filedPath : [];
 	}
@@ -446,6 +442,10 @@ export function canonicalLiveDisplayPath({ filedPath, flownTrack, live, dest }) 
 		if (nearestNm <= 30) behind = behind.slice(0, nearest + 1);
 		else if (haversineNm(behind[behind.length - 1], here) > 30) behind = [];
 	}
+	// With no track, the origin-to-fix chord is an approximation of travel,
+	// never the filed spine's nearest (possibly much later) route point.
+	if (origin && (!behind.length || haversineNm(origin, behind[0]) > 0.1))
+		behind.unshift({ lat: origin.lat, lon: origin.lon });
 	if (!behind.length || haversineNm(behind[behind.length - 1], here) > 0.1) behind.push(here);
 	else behind[behind.length - 1] = here;
 
@@ -477,7 +477,9 @@ export function canonicalLiveDisplayPath({ filedPath, flownTrack, live, dest }) 
 	}
 	const future = densifyPath([here, ...ahead], Math.max(8, Math.min(70, ahead.length * 3)));
 	const joined = [...behind, ...future.slice(1)];
-	return uniqueTrack(joined, 0.4);
+	// Keep the exact aircraft boundary even when the previous observation is
+	// closer than the usual downsampling distance.
+	return joined;
 }
 
 async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, faTrack) {
@@ -3316,6 +3318,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		lon: dest.lon
 	};
 	const hex = live ? (live.hex || "").toLowerCase() : null;
+	const previousRouteAnchor = routeMemory?.lastObserved ?? loadedRoute?.storedState?.lastObserved ?? null;
 	const filedRaw = await loadFiledPath(!ourLanded && ourAirborne ? hex : null, start, end, !ourLanded && ourAirborne ? live : null, aware?.takeoff?.actual ?? aware?.takeoff?.estimated ?? null, aware?.waypoints ?? [], aware?.faTrack ?? []);
 	if (memoryLeg) {
 		const poll = emptyRouteMemory(memoryLeg);
@@ -3324,6 +3327,15 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		if (!ourLanded && ourAirborne && !live?.onGround)
 			poll.track = (filedRaw.phaseHistory ?? []).map(p => ({ lat: p.lat, lon: p.lon, seenAt: p.seenAt * 1000 }));
 		routeMemory = mergeRouteMemory(routeMemory, poll);
+		// Repair legacy whole-tail traces only with a real confirmed takeoff
+		// clock and an actual early-origin observation. A first oceanic fix,
+		// schedule or estimate must never trim a correctly held sector.
+		const takeoffMs = confirmedTakeoff?.time != null ? confirmedTakeoff.time * 1000 : null;
+		const earlyFix = freshRouteObservation(live);
+		const departurePoints = [...routeMemory.track, ...(earlyFix ? [earlyFix] : [])];
+		if (takeoffMs != null && departurePoints.some(p => p.seenAt >= takeoffMs
+			&& p.seenAt <= takeoffMs + 15 * 60_000 && haversineNm(p, start) <= 25))
+			routeMemory = sanitizeRouteMemory(routeMemory, takeoffMs);
 	}
 	const heldWaypoints = routeMemory?.filed?.waypoints ?? [];
 	const heldSpine = heldWaypoints.length >= 4 ? makeSpine(start, end, heldWaypoints) : filedRaw.spine;
@@ -3359,27 +3371,27 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		}
 	}
 	const routeObservation = freshRouteObservation(live);
-	if (routeMemory) filed.flown = mergeObservedTrack(routeMemory.track, routeObservation ? [routeObservation] : []);
+	const repairedAnchor = !ourLanded && ourAirborne && previousRouteAnchor
+		&& (!routeMemory?.lastObserved || routeMemory.progressGeometryVersion !== 1)
+		&& (routeMemory?.trackNotBeforeMs == null || previousRouteAnchor.seenAt >= routeMemory.trackNotBeforeMs)
+		? previousRouteAnchor : null;
 	// A last known anchor shapes the historical/projected route only. It never
 	// becomes `live`, an aircraft marker, or a newly timed observation.
-	const displayAnchor = routeObservation ?? (!ourLanded && ourAirborne ? routeMemory?.lastObserved : null);
+	const displayAnchor = routeObservation ?? (!ourLanded && ourAirborne ? routeMemory?.lastObserved ?? repairedAnchor : null);
+	if (routeMemory) filed.flown = mergeObservedTrack(routeMemory.track, routeObservation ? [routeObservation] : [])
+		.filter(p => !displayAnchor || p.seenAt <= displayAnchor.seenAt);
 	if (!ourLanded && ourAirborne && displayAnchor) {
 		path = canonicalLiveDisplayPath({
 			filedPath: filed.spine ?? path,
 			flownTrack: filed.flown ?? [],
 			live: displayAnchor,
-			dest: end
+			dest: end, origin: start
 		});
-		if ((filed.flown?.length ?? 0) < 2 && filed.spine?.length >= 2) {
-			// With a filed-only plan, retain its past reference geometry too.
-			// It stays projected: observedFlownNm still requires real track.
-			const along = progressAlongPath(filed.spine, displayAnchor);
-			const fractions = pathFracs(filed.spine);
-			path = [...filed.spine.filter((p, i) => fractions[i] < along.frac - 0.004), ...path];
-		}
 		if ((filed.flown?.length ?? 0) >= 2) pathSource = "track";
 	}
-	const routeProgressValue = routeProgress(path, routeMemory, routeObservation, ourAirborne, ourLanded);
+	const recomputedProgress = routeProgress(path, routeMemory, routeObservation ?? repairedAnchor, ourAirborne, ourLanded);
+	const routeProgressValue = !routeObservation && repairedAnchor && !ourLanded
+		? { ...recomputedProgress, source: "last_known" as const } : recomputedProgress;
 	let totalNm = routeProgressValue.totalNm;
 	let remainingNm;
 	let routeRemainingNm = routeProgressValue.remainingNm;
@@ -3468,10 +3480,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		phase: live?.phase ?? null, extrapolated: live?.extrapolated ?? false, seenSec: live?.seenSec ?? null,
 		kind: arrivalPatternKind, remainingNm, stageRemainingNm
 	});
-	if (routeMemory && routeObservation && !ourLanded && ourAirborne) {
+	const progressAnchor = routeObservation ?? repairedAnchor;
+	if (routeMemory && progressAnchor && !ourLanded && ourAirborne) {
 		routeMemory = mergeRouteMemory(routeMemory, {
-			...emptyRouteMemory(memoryLeg), track: [routeObservation],
-			lastObserved: { ...routeObservation, progress, totalNm, remainingNm }
+			...emptyRouteMemory(memoryLeg), progressGeometryVersion: 1, track: routeObservation ? [routeObservation] : [],
+			lastObserved: { ...progressAnchor, progress, totalNm, remainingNm }
 		});
 	}
 	const etaMin = remainingEtaMin(remainingNm, directToDestNm, live, aware);
@@ -4317,7 +4330,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			routeRemainingNm,
 			directToDestNm,
 			flownNm: Math.max(0, totalNm - remainingNm),
-			observedFlownNm: (routeMemory?.track?.length ?? 0) >= 2 ? polylineLengthNm(routeMemory.track) : filed.flown?.length >= 2 ? polylineLengthNm(filed.flown) : null,
+			observedFlownNm: filed.flown?.length >= 2 ? polylineLengthNm(filed.flown) : null,
 			progressSource: routeProgressValue.source,
 			progressObservedAt: routeProgressValue.observedAt,
 			etaMin,
