@@ -38,6 +38,11 @@ export function pilotReportTiming(observedAt: number | undefined, now = Date.now
 }
 
 /** A single current-versus-later statement for all passenger views. */
+export function currentRideCoverageUncertain(weatherCoverage: FlightStory["weatherCoverage"]): boolean {
+  return Boolean(weatherCoverage?.failedSources.some(source =>
+    source === "Turbulence advisories" || source === "Storm advisories"));
+}
+
 export function flightWeatherSummary(story: FlightStory, now = Date.now()): string {
   const samples = orderedWeatherSamples(story.route.samples);
   // Route edges inherit their entry condition. Nearest-sample lookup would
@@ -45,7 +50,7 @@ export function flightWeatherSummary(story: FlightStory, now = Date.now()): stri
   const current = samples.filter(sample => sample.frac <= story.route.progress).at(-1) ?? samples[0] ?? null;
   const levels = { smooth: 0, light: 1, moderate: 2, severe: 3 };
   const bump = (chop: string) => `${chop} bumps`;
-  const currentText = !current || !story.weatherCoverage || story.weatherCoverage.failedSources.length
+  const currentText = !current || currentRideCoverageUncertain(story.weatherCoverage)
     ? "Current ride uncertain" : current.convective ? "Storms possible now"
       : current.chop !== "smooth" ? `${bump(current.chop).replace(/^./, c => c.toUpperCase())} possible now` : "Smooth now";
   const forecast = samples.filter(sample => sample.frac > story.route.progress && sample.etaMin > 1
