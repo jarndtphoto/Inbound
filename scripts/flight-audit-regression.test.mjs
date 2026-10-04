@@ -115,10 +115,13 @@ describe('zoom-stable route presentation', () => {
     assert.match(lakePath, /fillRule="evenodd"/);
   });
 
-  it('fits the initial ground-map view to the local airport surface only', () => {
+  it('fits the initial ground-map view to the airport runway footprint', () => {
     assert.match(groundSource, /fitGroundSurfaceView/);
     assert.match(groundSource, /MAX_SURFACE_RADIUS_NM = 4/);
     assert.match(groundSource, /haversineNm\(point, airport\) <= MAX_SURFACE_RADIUS_NM/);
+    assert.match(groundSource, /feature\.kind === "runway" \|\| feature\.kind === "runway_area"/);
+    assert.match(groundSource, /return runways\.length \? runways : features/);
+    assert.match(groundSource, /fitFeatures\.flatMap/);
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
     assert.match(groundSource, /resetViewRef\.current = next/);
   });
