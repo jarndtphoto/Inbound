@@ -68,7 +68,7 @@ export async function loadOfficialFlightData(
   const preferredFlightNumber = options?.fr24FlightNumber?.replace(/\s/g, "").trim().toUpperCase() || null;
   const routeOrigin = options?.fr24OriginIata?.trim().toUpperCase() || null;
   const routeDestination = options?.fr24DestIata?.trim().toUpperCase() || null;
-  const lookupKey = JSON.stringify([new Date().toISOString().slice(0, 10), ident.toUpperCase(), preferredFlightNumber,
+  const lookupKey = JSON.stringify([new Date(Date.now()).toISOString().slice(0, 10), ident.toUpperCase(), preferredFlightNumber,
     routeOrigin, routeDestination, options?.fr24Registration?.trim().toUpperCase(), options?.fr24Bounds, options?.fr24OperatingCallsign?.trim().toUpperCase()]);
   const remembered = matchedLookups.get(lookupKey);
   if (remembered && Date.now() - remembered.at < MATCHED_LOOKUP_TTL_MS) {
