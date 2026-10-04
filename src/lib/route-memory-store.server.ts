@@ -1,6 +1,6 @@
 import type { Sql } from "./db.ts";
 import { cleanupFlightStateRows, type FlightStateCleanup } from "./flight-state-retention.server.ts";
-import { emptyRouteMemory, mergeRouteMemory, routeLeg, sameRouteLeg, routeMemoryEqual, type RouteLeg, type RouteMemory } from "./route-memory.ts";
+import { emptyRouteMemory, mergeRouteMemory, routeLeg, sameRouteLeg, routeMemoryEqual, sanitizeRouteMemory, type RouteLeg, type RouteMemory } from "./route-memory.ts";
 
 type Row = { state: RouteMemory; version: number };
 type Result = Row & { status: "ok" | "read_failed" | "write_failed" | "conflict_resolved" | "conflict_held" };
@@ -13,8 +13,8 @@ export function createRouteMemoryStore(sqlProvider: () => Promise<Sql>, cleanup:
     return rows[0] && sameRouteLeg(rows[0].state.leg, leg) ? rows[0] : { state: emptyRouteMemory(leg), version: 0 };
   }
   async function save(key: string, state: RouteMemory, expectedVersion: number): Promise<Result> {
-    if (!key) return { state, version: expectedVersion, status: "ok" };
-    let merged = state, version = expectedVersion;
+    if (!key) return { state: sanitizeRouteMemory(state), version: expectedVersion, status: "ok" };
+    let merged = sanitizeRouteMemory(state), version = expectedVersion;
     try {
       const sql = await sqlProvider();
       // Merge before every CAS, including a current-version write. Weak polls
@@ -33,7 +33,8 @@ export function createRouteMemoryStore(sqlProvider: () => Promise<Sql>, cleanup:
         if (rows[0]) { await cleanup(sql); return { ...rows[0], status: attempt ? "conflict_resolved" : "ok" }; }
         version = (await read(key, state.leg)).version;
       }
-      return { ...(await read(key, state.leg)), status: "conflict_held" };
+      const held = await read(key, state.leg);
+      return { ...held, state: sanitizeRouteMemory(held.state), status: "conflict_held" };
     } catch (error) {
       console.error("[route-memory] save failed", { key, error });
       return { state: merged, version, status: "write_failed" };
@@ -45,6 +46,7 @@ export function createRouteMemoryStore(sqlProvider: () => Promise<Sql>, cleanup:
     try {
       let current = await read(key, leg);
       const storedState = current.state;
+      current = { ...current, state: sanitizeRouteMemory(current.state) };
       // These exact same-leg alias/fallback keys come from server identity
       // validation. Never discover neighboring dates or provider-ID rows.
       for (const alias of [...new Set(trustedLegacyKeys)].filter(k => k !== key && k.startsWith("leg:"))) {

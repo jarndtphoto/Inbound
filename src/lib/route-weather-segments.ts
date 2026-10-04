@@ -1,3 +1,4 @@
+import { interpolateGreatCircle } from "./geo.ts";
 import type { RouteSample } from "./types.ts";
 
 export type TurbulenceIntensity = "smooth" | "light" | "light-moderate" | "moderate" | "moderate-severe" | "severe";
@@ -26,6 +27,20 @@ export type RouteWeatherSegment = ReturnType<typeof sampleWeather> & { past: boo
 /** Each edge inherits its entry sample; both adjacent segments share the boundary. */
 export function routeWeatherSegments(samples: RouteSample[], progress = -Infinity): RouteWeatherSegment[] {
   const ordered = orderedWeatherSamples(samples), segments: RouteWeatherSegment[] = [];
+  // Split the flown/projected edge at progress, retaining an exact observed
+  // sample when one already exists. Never reconnect a skipped dateline edge.
+  for (let i = 0; i + 1 < ordered.length; i++) {
+    const start = ordered[i], end = ordered[i + 1];
+    if (start.frac < progress && end.frac > progress && Math.abs(end.lon - start.lon) <= 180) {
+      const t = (progress - start.frac) / (end.frac - start.frac);
+      const between = (a: number, b: number) => a + (b - a) * t;
+      const boundary: RouteSample = { ...start, ...interpolateGreatCircle(start, end, t), frac: progress,
+        distNm: between(start.distNm, end.distNm), remainingNm: between(start.remainingNm, end.remainingNm),
+        etaMin: between(start.etaMin, end.etaMin), fix: false };
+      ordered.splice(i + 1, 0, boundary);
+      break;
+    }
+  }
   ordered.forEach((sample, i) => {
     const candidate = ordered[i + 1];
     const next = candidate && Math.abs(candidate.lon - sample.lon) <= 180 ? candidate : undefined;
