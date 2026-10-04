@@ -415,16 +415,24 @@ function GroundMovementMap({
     return [...unique.entries()].slice(0, 120);
   }, [features]);
   const plane = displayAircraft ? project(displayAircraft) : null;
+  const fitFeatures = useMemo(() => {
+    // Runways define the airport's real footprint much more reliably than
+    // every nearby OSM aeroway. PHX in particular contains isolated surface
+    // objects inside the broad query radius that should render when visible
+    // but must not determine the initial zoom/centering.
+    const runways = features.filter((feature) => feature.kind === "runway" || feature.kind === "runway_area");
+    return runways.length ? runways : features;
+  }, [features]);
   const surfaceFitRef = useRef("");
   useEffect(() => {
-    if (!features.length) return;
+    if (!fitFeatures.length) return;
     const key = `${story.iata}:${airport.iata}:${mode.kind}`;
     if (surfaceFitRef.current === key) return;
-    const points = features.flatMap((feature) => feature.points.map(project));
+    const points = fitFeatures.flatMap((feature) => feature.points.map(project));
     if (points.length < 2) return;
     surfaceFitRef.current = key;
     zoom.fitPoints(points);
-  }, [story.iata, airport.iata, mode.kind, features]);
+  }, [story.iata, airport.iata, mode.kind, fitFeatures]);
 
   useEffect(() => {
     if (!plane || !displayAircraft) return;
