@@ -96,23 +96,30 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     // Registration is the strongest identity key. If it is unknown, FR24's
     // commercial flight-number filter is often more reliable on the surface
     // than the transponder callsign filter, especially at a large airport.
+    // Make only one direct live-FR24 identity probe per ground poll. A miss or
+    // throttle on the strongest key should fall through to open ADS-B instead
+    // of immediately spending more FR24 calls on weaker aliases in the same
+    // 3-second cycle.
     if (resolvedRegistration) {
       const byRegistration = await loadFr24FlightByRegistration(resolvedRegistration).catch(() => null);
       const position = usable(byRegistration);
       if (position) return position;
-    }
-    if (data.flightNumber) {
+    } else if (data.flightNumber) {
       const byFlightNumber = await loadFr24FlightByNumber(data.flightNumber, bounds).catch(() => null);
       const position = usable(byFlightNumber);
       if (position) {
         console.info("[ground-position]", { provider: "fr24-flight-number", flight: data.flightNumber, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
         return position;
       }
-    }
-    for (const callsign of callsigns) {
-      const byCallsign = await loadFr24Flight(callsign).catch(() => null);
-      const position = usable(byCallsign);
-      if (position) return position;
+    } else {
+      for (const callsign of callsigns) {
+        const byCallsign = await loadFr24Flight(callsign).catch(() => null);
+        const position = usable(byCallsign);
+        if (position) return position;
+        // Callsigns is a tiny compatibility list (flight-id then story
+        // callsign); do not probe a second alias in the same poll.
+        break;
+      }
     }
 
     // Arrival flights can disappear from FR24's live flight-number index as
