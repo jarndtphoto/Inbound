@@ -115,8 +115,10 @@ describe('zoom-stable route presentation', () => {
     assert.match(lakePath, /fillRule="evenodd"/);
   });
 
-  it('fits the initial ground-map view to the loaded airport surface', () => {
+  it('fits the initial ground-map view to the local airport surface only', () => {
     assert.match(groundSource, /fitGroundSurfaceView/);
+    assert.match(groundSource, /MAX_SURFACE_RADIUS_NM = 7/);
+    assert.match(groundSource, /haversineNm\(point, airport\) <= MAX_SURFACE_RADIUS_NM/);
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
     assert.match(groundSource, /resetViewRef\.current = next/);
   });
