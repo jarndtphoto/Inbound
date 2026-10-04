@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { build } from 'vite';
+import { installTestClock } from './test-clock.mjs';
 
 // Match the app's extensionless TypeScript imports in the Node test runner.
 registerHooks({ resolve(specifier, context, nextResolve) {
@@ -270,7 +271,7 @@ describe('September 12 flight audit replay', () => {
   ]) {
     it(`${query}: preserves departure facts when no position is available`, async (t) => {
       const record = JSON.parse(readFileSync(new URL(`./fixtures/${ident}-2026-09-12.json`, import.meta.url), 'utf8'));
-      t.mock.method(Date, 'now', () => 1789231976000);
+      t.after(installTestClock(() => 1789231976000));
       const requests = [];
       t.mock.method(globalThis, 'fetch', async (url) => {
         const u = String(url); requests.push(u);
@@ -308,7 +309,7 @@ describe('September 12 flight audit replay', () => {
     let lon = -87.9048;
     let gs = 0;
     let traceRequests = 0;
-    t.mock.method(Date, 'now', () => now);
+    t.after(installTestClock(() => now));
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).includes('/data/traces/')) traceRequests += 1;
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
@@ -366,7 +367,7 @@ describe('September 12 flight audit replay', () => {
     record.waypoints = []; record.track = null; record.coord = null;
     record.gateDepartureTimes = { scheduled: 1789239000, estimated: 1789240320, actual: 1789240320 };
     record.takeoffTimes = { scheduled: 1789240200, estimated: 1789241220, actual: 1789241220 };
-    t.mock.method(Date, 'now', () => 1789238100000); // 1:35 PM CDT
+    t.after(installTestClock(() => 1789238100000)); // 1:35 PM CDT
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
         return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
@@ -402,7 +403,7 @@ describe('September 12 flight audit replay', () => {
     record.landingTimes = { scheduled: 1789305600, estimated: 1789305600, actual: null };
     record.gateArrivalTimes = { scheduled: 1789306200, estimated: 1789306200, actual: null };
     record.inboundFlight = { flightId: 'UAL219-1789190000-airline-0001' };
-    t.mock.method(Date, 'now', () => 1789257600000);
+    t.after(installTestClock(() => 1789257600000));
     t.mock.method(globalThis, 'fetch', async (url) => {
       const u = String(url);
       if (u.includes('/live/flight/id/UAL219-')) {
@@ -457,7 +458,7 @@ describe('MDW departure surface-stage replays', () => {
         seen: 1, seen_pos: 1,
       };
       let groundTraceRequests = 0;
-      t.mock.method(Date, 'now', () => now * 1000);
+      t.after(installTestClock(() => now * 1000));
       t.mock.method(globalThis, 'fetch', async (url) => {
         if (String(url).includes('/trace_recent_')) groundTraceRequests++;
         if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
@@ -602,7 +603,7 @@ describe('on the move evidence', () => {
     record.takeoffTimes = { scheduled: 1789231800, estimated: 1789232400, actual: null };
     let now = 1789230600000; // 9:30: estimate passed five minutes ago.
     let lat = 41.9786; let lon = -87.9048; let gs = 0;
-    t.mock.method(Date, 'now', () => now);
+    t.after(installTestClock(() => now));
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
         return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
@@ -688,7 +689,7 @@ describe('on the move evidence', () => {
     record.takeoffTimes = { scheduled: 1789232400, estimated: 1789233000, actual: null };
     let now = 1789230600000;
     let aircraft = { hex: 'a93600', flight: 'UAL9360', lat: 41.9786, lon: -87.9048, gs: 0, track: 90, alt_baro: 'ground', seen_pos: 0 };
-    t.mock.method(Date, 'now', () => now);
+    t.after(installTestClock(() => now));
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
         return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
@@ -736,7 +737,7 @@ describe('on the move evidence', () => {
     record.inboundFlight = null; record.flightStatus = 'scheduled';
     record.gateDepartureTimes = { scheduled: 1789230000, estimated: 1789230100, actual: null };
     record.takeoffTimes = { scheduled: 1789230600, estimated: 1789230700, actual: null };
-    t.mock.method(Date, 'now', () => 1789231976000);
+    t.after(installTestClock(() => 1789231976000));
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
       return new Response(JSON.stringify({ ac: [{ hex: 'a99177', flight: 'AAL9917', lat: 41.99, lon: -87.91, gs: 0, alt_baro: 'ground', seen_pos: 0 }], features: [] }));
@@ -750,7 +751,7 @@ describe('on the move evidence', () => {
 it('preserves missing weather feeds as unknown while the flight still loads', async (t) => {
   const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
   record.ident = 'UAL1599'; record.iataIdent = 'UA1599';
-  t.mock.method(Date, 'now', () => 1789311976000);
+  t.after(installTestClock(() => 1789311976000));
   t.mock.method(globalThis, 'fetch', async (url) => {
     const u = String(url);
     if (u.startsWith('https://www.flightaware.com/live/flight/')) return new Response(`trackpollBootstrap = ${JSON.stringify({flights:{replay:record}})};`);

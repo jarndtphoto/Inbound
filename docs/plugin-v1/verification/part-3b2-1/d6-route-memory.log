@@ -1,0 +1,74 @@
+[aeroapi] key unavailable; using public feed
+[flight-telemetry] {
+  callsignRequested: 'UA219',
+  callsign: 'UAL219',
+  registration: 'N219UA',
+  hex: 'a21900',
+  destination: { iata: 'HNL', icao: 'PHNL', lat: 21.3187, lon: -157.9225 },
+  livePosition: { lat: 24.95, lon: -153.1667 },
+  altitudeFt: 36000,
+  groundspeedKt: 462,
+  onGround: false,
+  track: 237,
+  verticalRateFpm: null,
+  phase: 'cruise',
+  headingToDestinationDelta: 5.74751028259675,
+  isFinalApproach: false,
+  routeRemainingNm: 346.2215211039816,
+  directToDestNm: 341.23417427770994,
+  remainingNm: 346.2215211039816,
+  etaMin: 47.469266664981845,
+  currentStage: 'ride',
+  arrivalStatus: 'airborne',
+  ourLanded: false,
+  positionProvider: 'flightaware-public',
+  positionSeenAt: 1790983650.844,
+  positionAgeSec: 1,
+  flightawarePosition: null,
+  fr24Position: null,
+  adsbPosition: null,
+  providerStatus: { flightaware: 'DISABLED', fr24: 'DISABLED' },
+  providerEta: { flightaware: null, fr24: null },
+  providerDistancesNm: {
+    flightawareToFr24: null,
+    flightawareToAdsb: null,
+    fr24ToAdsb: null
+  },
+  fusionDisagreementNm: null,
+  filedRouteDeviationNm: 23.969175968165754,
+  displayPathSource: 'track'
+}
+[story-request] {"scheduleSource":"flightaware_public","fallbackOutcome":"not_needed","cacheStatus":"miss","event":"story_request","requested":"UA219","fresh":true,"durationMs":4267,"outcome":"ok","errorCategory":null}
+[aeroapi] key unavailable; using public feed
+[schedule-fallback-unavailable] {
+  callsign: 'UAL219',
+  reason: 'Current flight route unavailable: schedule provider returned HTTP 402 (unidentified response; host=www.flightaware.com; server=absent; type=absent; bodyChars=0; branding=unidentifi'
+}
+[story-request] {"scheduleSource":"unavailable","fallbackOutcome":"flightstats_unavailable","cacheStatus":"miss","event":"story_request","requested":"UA219","fresh":true,"durationMs":21,"outcome":"error","errorCategory":"source_unavailable"}
+✖ UA219 durable filed/track geometry and oceanic progress survive provider handoff, cold instances, reroute and recovery (4858.90236ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15013.005485
+
+✖ failing tests:
+
+test at scripts/route-memory-replay.test.mjs:12:1
+✖ UA219 durable filed/track geometry and oceanic progress survive provider handoff, cold instances, reroute and recovery (4858.90236ms)
+  Error: Current flight route unavailable. Try again when the flight feed responds.
+      at loadFlightStoryCore (file:///workspace/scratch/edf34a5d3bf1/inbound/node_modules/.route-memory-replay-c4cHU2/story.mjs?cold=2:11695:17)
+      at async file:///workspace/scratch/edf34a5d3bf1/inbound/node_modules/.route-memory-replay-c4cHU2/story.mjs?cold=2:2633:19
+      ... 2 lines matching cause stack trace ...
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    [cause]: Error: Current flight route unavailable. Try again when the flight feed responds.
+        at buildStory (file:///workspace/scratch/edf34a5d3bf1/inbound/node_modules/.route-memory-replay-c4cHU2/story.mjs?cold=2:10119:9)
+        at async loadFlightStoryCore (file:///workspace/scratch/edf34a5d3bf1/inbound/node_modules/.route-memory-replay-c4cHU2/story.mjs?cold=2:11679:11)
+        at async file:///workspace/scratch/edf34a5d3bf1/inbound/node_modules/.route-memory-replay-c4cHU2/story.mjs?cold=2:2633:19
+        at async TestContext.<anonymous> (file:///workspace/scratch/83746901af9a/inbound-d6-clock-repro/scripts/route-memory-replay.test.mjs:63:17)
+        at async Test.run (node:internal/test_runner/test:1389:7)
+        at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  }

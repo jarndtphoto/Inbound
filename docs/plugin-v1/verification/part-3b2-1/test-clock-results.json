@@ -1,0 +1,209 @@
+{
+  "stage": "Part 3B.2.1",
+  "certificationScope": "Tests-only clock consistency fix; application and route behavior unchanged.",
+  "reproducedBeforeEdits": [
+    {
+      "sourceSha": "d6ef464a4d5c80fe70aa8191e3d1d664e759ac5b",
+      "test": "scripts/route-memory-replay.test.mjs",
+      "tests": 1,
+      "pass": 0,
+      "fail": 1,
+      "todo": 0,
+      "exitCode": 1,
+      "log": "d6-route-memory.log",
+      "sha256": "5c50330a45ec8077c7cf3da1b2aa86b34043df53486485b57e82bc3bd19f6931"
+    },
+    {
+      "sourceSha": "d6ef464a4d5c80fe70aa8191e3d1d664e759ac5b",
+      "test": "scripts/takeoff-floor-replay.test.mjs",
+      "tests": 1,
+      "pass": 0,
+      "fail": 1,
+      "todo": 0,
+      "exitCode": 1,
+      "log": "d6-takeoff-floor.log",
+      "sha256": "679c2ae04345ef742804f83e9180ff843b2544e224972c6f8b5209f1d7bb92cc"
+    },
+    {
+      "sourceSha": "11abfb4896658f22525433a40d3e1ac637e2cecb",
+      "test": "scripts/route-memory-replay.test.mjs",
+      "tests": 1,
+      "pass": 0,
+      "fail": 1,
+      "todo": 0,
+      "exitCode": 1,
+      "log": "11ab-route-memory.log",
+      "sha256": "dfefd5150fc7a42e4e59151dd548447124bc947110ab2751e2692286387c1984"
+    },
+    {
+      "sourceSha": "11abfb4896658f22525433a40d3e1ac637e2cecb",
+      "test": "scripts/takeoff-floor-replay.test.mjs",
+      "tests": 1,
+      "pass": 0,
+      "fail": 1,
+      "todo": 0,
+      "exitCode": 1,
+      "log": "11ab-takeoff-floor.log",
+      "sha256": "e3a5f4fa701483befea4111d7c5cbb3868ce21da9e6ae30327f39fb37b5bfa14"
+    }
+  ],
+  "rootCause": {
+    "diagnosticLog": "date-diagnostic.log",
+    "diagnosticSha256": "b33510b12c8fd26d43984b6ed6a8ace641fc580c91d46305ffaaea61cd605e3b",
+    "mockedDateNowIso": "2026-10-02T23:27:31.844Z",
+    "realNoArgumentDateIso": "2026-10-04T01:30:52.691Z",
+    "actualSearchDates": [
+      "2026-10-04",
+      "2026-10-03",
+      "2026-10-05"
+    ],
+    "intendedReplaySearchDates": [
+      "2026-10-02",
+      "2026-10-01",
+      "2026-10-03"
+    ],
+    "flightStatsMockAcceptsDate": "2026-10-02",
+    "partialDateNowDoesNotOverrideNoArgumentDate": true,
+    "calendarSources": [
+      "src/lib/story.server.ts:1598",
+      "src/lib/story.server.ts:2263",
+      "src/lib/official-flight-data.server.ts:71"
+    ]
+  },
+  "helper": {
+    "path": "scripts/test-clock.mjs",
+    "freezes": [
+      "Date.now()",
+      "zero-argument new Date()",
+      "Date()"
+    ],
+    "preserves": [
+      "each replay's original historical timestamp and advancing callback",
+      "explicit Date constructor arguments",
+      "Date.parse",
+      "Date.UTC",
+      "instanceof",
+      "Date subclasses",
+      "real timers",
+      "performance.now()"
+    ],
+    "restoration": "finally or test cleanup",
+    "regressionTests": "scripts/test-clock.test.mjs",
+    "addedTests": 2
+  },
+  "changedEquivalentPartialMocks": [
+    {
+      "file": "scripts/route-memory-replay.test.mjs",
+      "reason": "Calls actual loadFlightStory and FlightStats schedule fallback, which derives calendar search dates using new Date()."
+    },
+    {
+      "file": "scripts/takeoff-floor-replay.test.mjs",
+      "reason": "Calls actual loadFlightStory and FlightStats handoff with a historical October 2 fixture."
+    },
+    {
+      "file": "scripts/route-memory-write-replay.test.mjs",
+      "reason": "Calls actual story aggregator, including the no-argument Date official lookup key."
+    },
+    {
+      "file": "scripts/flight-identity-replay.test.mjs",
+      "reason": "Calls actual cold story instances, including calendar lookup and fallback snapshot keys."
+    },
+    {
+      "file": "scripts/flight-resilience.test.mjs",
+      "reason": "Calls actual story aggregator during schedule outages, including calendar lookup and inbound snapshot day keys."
+    },
+    {
+      "file": "scripts/fr24-usage-reduction.test.mjs",
+      "reason": "Matched-lookup test calls actual loadOfficialFlightData whose lookup key includes the no-argument Date UTC day; advancing Date.now alone could cross a real-day boundary inconsistently."
+    },
+    {
+      "file": "scripts/flight-audit-regression.test.mjs",
+      "reason": "Nine partial-clock sites call actual loadFlightStory, whose buildStory calls loadOfficialFlightData and its no-argument Date calendar key.",
+      "sitesChanged": 9,
+      "unchangedPureMotionClockSites": 1
+    }
+  ],
+  "unchangedClockCases": [
+    {
+      "file": "scripts/scheduled-original-replay.test.mjs",
+      "reason": "Already has a complete Date subclass; remains byte-identical."
+    },
+    {
+      "file": "src/lib/app-data/app-data.test.ts",
+      "reason": "Already uses a complete Node Date mock."
+    },
+    {
+      "files": [
+        "scripts/aircraft-phase-replay.test.mjs",
+        "scripts/fr24-fusion.test.mjs",
+        "scripts/stage-timing-replay.test.mjs",
+        "scripts/takeoff-floor-presentation.test.mjs"
+      ],
+      "reason": "Pure phase, fusion or presentation cases do not reach the calendar mismatch."
+    },
+    {
+      "files": [
+        "src/lib/nearby-v1/acquisition.test.ts",
+        "src/lib/plugin-v1/proof-preview.test.ts",
+        "src/lib/plugin-v1/preview-isolation.test.ts"
+      ],
+      "reason": "Narrow timestamp/expiry checks and explicit injected clocks; no calendar schedule code."
+    },
+    {
+      "reason": "Explicit timestamp parameters and timeout-only mocks remain unchanged."
+    }
+  ],
+  "afterFix": {
+    "targeted": {
+      "exitCode": 0,
+      "tests": 116,
+      "suites": 24,
+      "pass": 115,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 1,
+      "durationMs": 17219.066754,
+      "log": "targeted-after.log",
+      "sha256": "f2868f80dc56a0ada4ab60029667c8e5e1f4d44c90108e1be0bbd0e9fab65e2c"
+    },
+    "check": {
+      "command": "npm run check",
+      "exitCode": 0,
+      "typecheck": "passed",
+      "tests": 909,
+      "suites": 88,
+      "pass": 908,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 1,
+      "durationMs": 68408.348135,
+      "log": "check-after.log",
+      "sha256": "d3ae104490bb66085343dbcd5776097ce24239317e9f3028507d2179512a908f"
+    },
+    "build": {
+      "command": "npm run build",
+      "runAfterCheck": true,
+      "exitCode": 0,
+      "databaseMigration": "DATABASE_URL not set — skipping",
+      "log": "build-after.log",
+      "sha256": "78669821f62c64154fd43b1e59712ba695bf6a66c79def6a9996b07c9f118cd9"
+    },
+    "preservedTodo": "Held #6: unknown-airport FlightStats public route support; not converted to skip and no assertion weakened."
+  },
+  "safety": {
+    "databaseUrlUnsetForAllCommands": true,
+    "nearbyVerifyDatabaseUrlUnsetForAllCommands": true,
+    "applicationSourceChanged": false,
+    "productionMigrationApplied": false,
+    "providerMocksOnly": true,
+    "aviationProviderApiCalls": 0,
+    "liveDatabaseAccess": false,
+    "providerCredentialsRequested": false,
+    "productionDeployment": false,
+    "fixtureDeploymentChanged": false,
+    "commitsOrPushesByThisAgent": false
+  },
+  "scratchLogDirectory": "/workspace/scratch/83746901af9a/part-3b2-1-clock"
+}

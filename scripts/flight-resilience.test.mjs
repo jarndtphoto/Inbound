@@ -1,16 +1,16 @@
-import { after, before, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "vite";
 import { readFlightResume, resumeFromStory } from "../src/lib/flight-resume.ts";
+import { installTestClock } from "./test-clock.mjs";
 
 // Exercise the actual server aggregator with controlled upstream responses.
 // No live provider traffic or deployment credentials are used by this suite.
-let directory, moduleNumber = 0, server, now, upstream, aircraft, requests;
+let directory, moduleNumber = 0, server, now, upstream, aircraft, requests, restoreClock;
 const realFetch = globalThis.fetch;
-const realNow = Date.now;
 const initialNow = Date.parse("2026-09-13T17:00:00Z");
 const stamp = (scheduled, actual = null) => ({ scheduled, estimated: null, actual });
 function resume() {
@@ -47,7 +47,7 @@ beforeEach(async () => {
   requests = [];
   aircraft = { hex: "a12345", flight: "SWA1111", r: "N12345", t: "B738", lat: 41.787, lon: -87.752,
     gs: 0, alt_baro: "ground", track: 310, seen: 1, seen_pos: 1 };
-  Date.now = () => now;
+  restoreClock = installTestClock(() => now);
   globalThis.fetch = async (input) => {
     const url = new URL(String(input));
     requests.push(url.href);
@@ -71,9 +71,9 @@ beforeEach(async () => {
   const pg = await globalThis.__pgliteInstance__;
   await pg.exec("delete from flight_phase_state");
 });
+afterEach(() => restoreClock?.());
 after(async () => {
   globalThis.fetch = realFetch;
-  Date.now = realNow;
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 

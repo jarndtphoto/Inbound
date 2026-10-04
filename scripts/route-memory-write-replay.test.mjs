@@ -6,19 +6,21 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { build } from 'vite';
+import { installTestClock } from './test-clock.mjs';
 
 test('cold airborne and at-gate polls save route state only when changed, once per poll', async () => {
   const dir = await mkdtemp(resolve('node_modules/.route-write-replay-'));
-  const realFetch = globalThis.fetch, realNow = Date.now, realInfo = console.info;
+  const realFetch = globalThis.fetch, realInfo = console.info;
   const keys = ['FR24_API_TOKEN', 'FLIGHTAWARE_AEROAPI_KEY', 'DATABASE_URL'];
   const env = keys.map(k => process.env[k]);
   const fixture = JSON.parse(readFileSync(new URL('./fixtures/ua219-provider-handoff.json', import.meta.url)));
   let record = structuredClone(fixture.flightawareRecord), now = fixture.firstAtUnix * 1000, instance = 0;
+  let restoreClock = () => {};
   let surface = false, tally = null, requests = 0;
   const evidence = [], wps = [[-87.9048,41.9786],[-110,42],[-130,36],[-145,29],[-157.9225,21.3187]];
   let pg, query;
   try {
-    keys.forEach(k => delete process.env[k]); Date.now = () => now;
+    keys.forEach(k => delete process.env[k]); restoreClock = installTestClock(() => now);
     console.info = () => {};
     globalThis.fetch = async input => {
       const url = new URL(String(input)); requests++;
@@ -111,7 +113,7 @@ test('cold airborne and at-gate polls save route state only when changed, once p
     if (process.env.ROUTE_WRITE_REPORT) await writeFile(process.env.ROUTE_WRITE_REPORT,JSON.stringify({fixture:fixture.description,backend:'PGLite; mocked providers; cold story instances; wall clocks exclude bundle/migration initialization',requests,cases:evidence},null,2));
   } finally {
     if (pg && query) pg.query=query;
-    globalThis.fetch=realFetch; Date.now=realNow; console.info=realInfo;
+    globalThis.fetch=realFetch; restoreClock(); console.info=realInfo;
     keys.forEach((k,i)=>env[i]==null?delete process.env[k]:process.env[k]=env[i]);
     await rm(dir,{recursive:true,force:true});
   }

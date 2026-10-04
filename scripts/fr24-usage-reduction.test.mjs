@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { installTestClock } from "./test-clock.mjs";
 import assert from "node:assert/strict";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { groundPollingEnabled, flightPollingComplete } from "../src/lib/flight-polling.ts";
@@ -54,16 +55,17 @@ test("visibility and Map selection are wired through to the ground observer", as
 
 test("matched FR24 registration skips failed route lookup, but wrong leg/missing/stale/expired matches fall back", async () => {
   const directory = await mkdtemp(resolve("node_modules/.fr24-lookup-test-"));
-  const realFetch = globalThis.fetch, realNow = Date.now;
+  const realFetch = globalThis.fetch;
   const keys = ["FR24_API_TOKEN", "FR24_ENABLE_TRACKS", "FR24_ENABLE_SUMMARY", "FLIGHTAWARE_PAID_API_ENABLED"];
   const saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
-  let now = realNow(), calls = [], mode = "good";
+  let now = Date.now(), calls = [], mode = "good";
+  let restoreClock = () => {};
   try {
     await build({ configFile: false, logLevel: "silent", build: { ssr: resolve("src/lib/official-flight-data.server.ts"), outDir: directory,
       rollupOptions: { output: { entryFileNames: "official.mjs" } } } });
     process.env.FR24_API_TOKEN = "test-only";
     delete process.env.FR24_ENABLE_TRACKS; delete process.env.FR24_ENABLE_SUMMARY; delete process.env.FLIGHTAWARE_ENABLE_PAID_API;
-    Date.now = () => now;
+    restoreClock = installTestClock(() => now);
     globalThis.fetch = async input => {
       const url = new URL(String(input)); assert.equal(url.hostname, "fr24api.flightradar24.com");
       const params = url.searchParams; calls.push(params.has("registrations") ? "registration" : params.has("callsigns") ? "callsign" : "route");
@@ -94,7 +96,7 @@ test("matched FR24 registration skips failed route lookup, but wrong leg/missing
     now += 6000; calls = []; await api.loadOfficialFlightData("AAL1", { ...options, fr24DestIata: "DEN" });
     assert.equal(calls[0], "route", "another leg cannot reuse remembered lookup");
   } finally {
-    globalThis.fetch = realFetch; Date.now = realNow;
+    globalThis.fetch = realFetch; restoreClock();
     for (const key of keys) { if (saved[key] == null) delete process.env[key]; else process.env[key] = saved[key]; }
     await rm(directory, { recursive: true, force: true });
   }

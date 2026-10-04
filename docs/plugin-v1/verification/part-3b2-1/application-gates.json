@@ -1,0 +1,35 @@
+{
+  "sourceSha": "cd9dbf611ed95e5a734d7173c9aefea93285b88d",
+  "implementationSha": "11abfb4896658f22525433a40d3e1ac637e2cecb",
+  "databaseUrlUnset": true,
+  "nearbyVerifyDatabaseUrlUnset": true,
+  "sequential": true,
+  "check": {
+    "passed": true,
+    "exitCode": 0,
+    "tests": 909,
+    "pass": 908,
+    "fail": 0,
+    "todo": 1,
+    "suites": 88,
+    "skipped": 0,
+    "cancelled": 0
+  },
+  "build": {
+    "passed": true,
+    "exitCode": 0,
+    "productionMigrationSkipped": true
+  },
+  "testOnlyFixSha256": {
+    "scripts/flight-audit-regression.test.mjs": "fd2a2dff0a8f56f823c0d3749b6739403fb21cd7b1de0260707b9a7b4f95c6c5",
+    "scripts/flight-identity-replay.test.mjs": "3ba979cd684dcc81e76ad9f87f973c3e76f962a38bc9d373cc6f0fc267cb6969",
+    "scripts/flight-resilience.test.mjs": "d4c434909292f08828886c98256eb98792b94daca7b187925d9b180bb7ca1ed9",
+    "scripts/fr24-usage-reduction.test.mjs": "c2cbc61fdfe2ce5bd8786b7e710dbd9fe301cd3597db2b57a654ac60cdd89a16",
+    "scripts/route-memory-replay.test.mjs": "c6d620b439dc1dcd9ce185ad2be548ec5d1920a50069601eae950929a987fb8c",
+    "scripts/route-memory-write-replay.test.mjs": "c6ded3b736a98070676bb7c936461ecebb85fd1f1d6b80cf29ac22922b72f74d",
+    "scripts/takeoff-floor-replay.test.mjs": "462e03afd6827f04ac5b1cc4ebea85e4c83d9cebfee1a30dcd6598d57ff09ac4",
+    "scripts/test-clock.mjs": "ea049913da23a90e1c881f987e6bdb28641b2a9c60ac55e08ecf051ee97e5744",
+    "scripts/test-clock.test.mjs": "c7b19010c372697d08706c5c06828892d56b9e394ea558e5f171efc498a754e8"
+  },
+  "applicationAndPluginMigrationsUnchangedFromImplementation": true
+}
