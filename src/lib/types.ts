@@ -67,6 +67,14 @@ export type FlightScheduleSource = "flightaware_api" | "flightaware_public" | "f
 
 export type Chop = "smooth" | "light" | "moderate" | "severe";
 
+/** An aircraft observation, never a forecast for when this flight arrives. */
+export type PilotReportObservation = {
+  id: string;
+  chop: Chop;
+  observedAt: number;
+  detail: string;
+};
+
 export type RouteSample = {
   lat: number;
   lon: number;
@@ -79,6 +87,7 @@ export type RouteSample = {
   convective: boolean;
   note: string | null;
   fix: boolean;
+  pilotReports?: PilotReportObservation[];
 };
 
 export type Hazard = {
@@ -92,6 +101,7 @@ export type Hazard = {
   lon?: number;
   source?: "observed" | "advisory" | "forecast";
   validity?: string;
+  observedAt?: number;
 };
 
 export type NasDelay = {

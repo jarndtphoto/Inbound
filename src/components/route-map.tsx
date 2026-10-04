@@ -5,9 +5,9 @@ import { upcomingStorms } from "@/lib/route-hazards";
 import { weatherEventNumber } from "@/lib/weather-events";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
 import { WeatherPreviewLabel, WeatherIntensityLabel } from "@/components/weather-event-copy";
-import { upcomingWeatherEvents, eventWeatherCopy } from "@/lib/weather-presentation";
+import { upcomingWeatherEvents, eventWeatherCopy, pilotReportTiming } from "@/lib/weather-presentation";
 import { useFiled } from "@/lib/store";
-import type { FlightStory, RouteSample } from "@/lib/types";
+import type { FlightStory, PilotReportObservation, RouteSample } from "@/lib/types";
 import { ADMIN1_RINGS } from "@/lib/admin1-lines";
 import { GREAT_LAKES } from "@/lib/great-lakes";
 import { HAWAII_COASTLINES } from "@/lib/hawaii-coastlines";
@@ -444,7 +444,7 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { intensityBand?: string; intensity?: string; eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] } }) {
+export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { reported?: boolean; pilotReports?: PilotReportObservation[]; intensityBand?: string; intensity?: string; eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] } }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const geometryRef = useRef<SVGGElement>(null);
   const [mapHeight, setMapHeight] = useState(800);
@@ -532,14 +532,20 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const plannedMinutes = takeoffAt != null && story.times.landUnix != null && story.times.landUnix > takeoffAt
     ? (story.times.landUnix - takeoffAt) / 60 : null;
   const mapEvents = upcomingWeatherEvents(samples, progress);
+  const previewEntry = weatherPreview ? samples.reduce((best, sample) =>
+    Math.abs(sample.frac - weatherPreview.startFrac) < Math.abs(best.frac - weatherPreview.startFrac) ? sample : best, samples[0]) : null;
   // Both the full map and preview pin the event's entry point. The affected
   // route line still spans every range through the event's exit.
   const ticks = weatherPreview
     ? [{
         eventNumber: weatherPreview.eventNumber,
-        ...samples.reduce((best, sample) =>
-          Math.abs(sample.frac - weatherPreview.startFrac) < Math.abs(best.frac - weatherPreview.startFrac) ? sample : best, samples[0]),
+        ...previewEntry!,
+        etaMin: weatherPreview.startEtaMin,
+        pilotReports: weatherPreview.pilotReports,
         alertLabel: weatherPreview.label,
+        reported: Boolean(weatherPreview.reported),
+        chop: weatherPreview.reported ? weatherPreview.intensity?.includes("moderate") ? "moderate" as const : weatherPreview.intensity === "severe" ? "severe" as const : "light" as const
+          : previewEntry!.chop,
         intensity: weatherPreview.intensity,
         intensityBand: weatherPreview.intensityBand,
         durationMin: weatherPreview.endEtaMin - weatherPreview.startEtaMin,
@@ -549,7 +555,9 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
     : mapEvents.map((event, index) => ({
         eventNumber: weatherEventNumber(mapEvents, event),
         ...event.start,
-        alertLabel: eventWeatherCopy(event, story.dest.city || story.dest.iata).mapLabel + (/\b(?:PIREP|REPORTED)\b/i.test(event.note ?? "") ? " reported" : ""),
+        pilotReports: event.pilotReports,
+        alertLabel: eventWeatherCopy(event, story.dest.city || story.dest.iata).mapLabel,
+        reported: event.source === "observed",
         intensityBand: event.intensities.length === 1 && event.intensities[0] === "light-moderate" ? "light" : undefined,
         intensity: event.key.startsWith("turbulence:") ? event.key.slice(11) : undefined,
         durationMin: airborneNow ? event.endEtaMin - event.startEtaMin
@@ -694,6 +702,16 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           );
         })}
 
+        {mapEvents.filter(event => event.source === "observed").flatMap(event => event.ranges.map((range, i) => {
+          const points = [...new Map([event.start, ...samples, event.end]
+            .filter(sample => sample.frac >= range.from && sample.frac <= range.to)
+            .sort((a, b) => a.frac - b.frac).map(sample => [sample.frac, sample])).values()];
+          if (points.length < 2 || points.some((point, j) => j > 0 && Math.abs(point.lon - points[j - 1].lon) > 180)) return null;
+          return <path key={`reported-${event.startFrac}-${i}`} data-pilot-report-area
+            d={points.map((point, j) => `${j ? "L" : "M"}${sx(point.lon).toFixed(1)} ${sy(point.lat).toFixed(1)}`).join(" ")}
+            className="fill-none stroke-muted" strokeWidth="3" strokeDasharray="3 5" vectorEffect="non-scaling-stroke" />;
+        }))}
+
         <g data-map-obstacle transform={`translate(${sx(origin.lon)} ${sy(origin.lat)}) scale(${1 / zoom.s})`}>
           <circle r="5.5" className="fill-accent stroke-bg" strokeWidth="2" vectorEffect="non-scaling-stroke" />
           <text y="22" textAnchor="middle" className="fill-muted" fontSize="13" fontFamily="Barlow Condensed, sans-serif" letterSpacing="0.12em">{story.origin.iata}</text>
@@ -788,7 +806,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
         <details name={panelGroup} className="group">
           <summary className="cursor-pointer py-3 font-semibold">Weather alerts</summary>
           <div className="absolute inset-x-0 bottom-full max-h-48 overflow-y-auto rounded-t-xl border border-border bg-surface p-3 text-sm shadow-lg">
-            {ticks.map((s) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{s.eventNumber || (s.convective ? "⚡" : "☁")}</span><div>{s.intensity && <p><WeatherIntensityLabel intensity={s.intensity} band={s.intensityBand} /> turbulence</p>}<p className={sampleWeather(s).band === "light" ? "font-semibold text-turbulence-light" : sampleWeather(s).band === "moderate" ? "font-semibold text-turbulence-moderate" : "font-semibold"}>{s.alertLabel}</p><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</div></div>)}
+            {ticks.map((s) => <div key={s.frac} className="flex items-start gap-2 py-2"><span className="shrink-0 rounded border border-border bg-bg px-1.5 font-semibold">{s.eventNumber || (s.convective ? "⚡" : "☁")}</span><div>{s.intensity && <p><WeatherIntensityLabel intensity={s.intensity} band={s.intensityBand} /> {s.reported ? "bumps reported" : "turbulence"}</p>}<p className={sampleWeather(s).band === "light" ? "font-semibold text-turbulence-light" : sampleWeather(s).band === "moderate" ? "font-semibold text-turbulence-moderate" : "font-semibold"}>{s.alertLabel}</p>{s.reported ? <p>{s.etaMin <= 1 ? "You’re passing this reported area around now" : `You’ll pass this area in about ${formatDuration(s.etaMin)}`}</p> : <><p>{s.intoMin == null ? "Time into flight unavailable" : `Around ${formatDuration(s.intoMin)} into flight`}</p><p>{s.durationMin != null && s.durationMin > 0 ? `Approximate duration: ${formatDuration(s.durationMin)}` : "Duration not established"}</p>{airborneNow && <p className="text-muted">About {formatDuration(s.etaMin)} from now</p>}</>}{s.pilotReports?.map(report => <p key={report.id} className="text-muted">Reported by another aircraft · {pilotReportTiming(report.observedAt)}</p>)}</div></div>)}
             
             {!ticks.length && <p>No map alerts shown. Coverage may be incomplete.</p>}
           </div>

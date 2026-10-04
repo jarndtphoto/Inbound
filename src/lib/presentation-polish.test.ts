@@ -71,7 +71,7 @@ describe("next weather before strongest weather", () => {
     assert.ok(lines[0].startsWith(eventWeatherCopy(events[0], "Honolulu").mapLabel));
     assert.ok(lines[1].startsWith(eventWeatherCopy(events[1], "Honolulu").mapLabel));
     const outlook = rideOutlook({ route: { samples, progress: 0 }, weatherCoverage: { failedSources: [] }, dest: { city: "Honolulu" } } as unknown as FlightStory);
-    assert.match(outlook, /^Light bumps possible in about 11 min\.\nModerate bumps later, about 3h 48m ahead\./);
+    assert.match(outlook, /^Smooth now · moderate bumps possible later\nLight bumps possible in about 11 min\.\nModerate bumps later, about 3h 48m ahead\./);
   });
   it("removes passed events, includes an event starting now, and does not mutate samples", () => {
     const snapshot = structuredClone(samples);

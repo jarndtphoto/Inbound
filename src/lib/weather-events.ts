@@ -1,7 +1,10 @@
-import type { Chop, RouteSample } from "./types.ts";
-import { routeWeatherSegments, type TurbulenceIntensity } from "./route-weather-segments.ts";
+import type { Chop, PilotReportObservation, RouteSample } from "./types.ts";
+import { routeWeatherSegments, sampleWeather, type TurbulenceIntensity } from "./route-weather-segments.ts";
+import { isFreshPilotReport } from "./pirep-time.ts";
 
 export type RouteWeatherEvent = {
+  source?: "observed" | "advisory" | "forecast";
+  pilotReports?: PilotReportObservation[];
   key: string;
   start: RouteSample;
   end: RouteSample;
@@ -18,6 +21,9 @@ export type RouteWeatherEvent = {
 };
 const ranks: Record<Chop, number> = { smooth: 0, light: 1, moderate: 2, severe: 3 };
 const mergeNotes = (a: string | null, b: string | null) => [...new Set([a, b].filter(Boolean))].join("\n") || null;
+function uniqueReports(reports: PilotReportObservation[]) {
+  return [...new Map(reports.map(report => [`${report.id}:${report.observedAt}`, report])).values()];
+}
 function extend(a: RouteWeatherEvent, b: RouteWeatherEvent, gap = false) {
   a.end = b.end;
   a.endFrac = b.endFrac;
@@ -26,6 +32,8 @@ function extend(a: RouteWeatherEvent, b: RouteWeatherEvent, gap = false) {
   else a.ranges[a.ranges.length - 1].to = b.endFrac;
   a.gaps ||= gap;
   a.note = mergeNotes(a.note, b.note);
+  a.pilotReports = uniqueReports([...(a.pilotReports ?? []), ...(b.pilotReports ?? [])]);
+  if (b.source === "advisory") a.source = "advisory";
   if (ranks[b.weakestChop] < ranks[a.weakestChop]) a.weakestChop = b.weakestChop;
   if (ranks[b.strongestChop] > ranks[a.strongestChop]) a.strongestChop = b.strongestChop;
   a.intensities = [...new Set([...a.intensities, ...b.intensities])];
@@ -40,7 +48,7 @@ function displayKey(event: RouteWeatherEvent) {
 /** Events and line strokes consume the exact same segments and shared boundaries.
  * Smooth gaps split events by default; optional explicit merging retains teal gaps.
  */
-export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity, mergeGapMin = 0): RouteWeatherEvent[] {
+function eventsForSamples(samples: RouteSample[], progress: number, mergeGapMin: number, now: number, observed = false): RouteWeatherEvent[] {
   const runs: Array<RouteWeatherEvent | { key: null; start: RouteSample; end: RouteSample }> = [];
   for (const segment of routeWeatherSegments(samples, progress).filter(s => !s.past)) {
     const start = segment.points[0], end = segment.points.at(-1)!;
@@ -51,6 +59,8 @@ export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity,
     // The shared exit point belongs to the next condition, so exclude its note.
     const interior = segment.points.length > 1 ? segment.points.slice(0, -1) : segment.points;
     const event: RouteWeatherEvent = {
+      source: observed ? "observed" : interior.some(point => /AIRMET|SIGMET|CWA|Center weather advisory|Low cloud \/ mountain obscuration/i.test(point.note ?? "")) ? "advisory" : "forecast",
+      pilotReports: uniqueReports(interior.flatMap(point => point.pilotReports ?? []).filter(report => isFreshPilotReport(report.observedAt, now))),
       key: segment.kind, start, end, startFrac: start.frac, endFrac: end.frac,
       startEtaMin: start.etaMin, endEtaMin: end.etaMin,
       ranges: [{ from: start.frac, to: end.frac }], gaps: false,
@@ -70,6 +80,21 @@ export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity,
     } else i++;
   }
   return runs.filter((run): run is RouteWeatherEvent => run.key !== null).map(event => ({ ...event, key: displayKey(event) }));
+}
+
+/** Forecast samples retain their own severity. Reports are observations of an area,
+ * either listed alongside an overlapping forecast or presented as a separate event.
+ */
+export function routeWeatherEvents(samples: RouteSample[], progress = -Infinity, mergeGapMin = 0, now = Date.now()): RouteWeatherEvent[] {
+  const forecasts = eventsForSamples(samples, progress, mergeGapMin, now);
+  const observations = samples.map(sample => {
+    const reports = sampleWeather(sample).kind === "smooth"
+      ? (sample.pilotReports ?? []).filter(report => isFreshPilotReport(report.observedAt, now)) : [];
+    const chop = reports.reduce<Chop>((worst, report) => ranks[report.chop] > ranks[worst] ? report.chop : worst, "smooth");
+    return { ...sample, chop, cloud: false, convective: false, note: null, pilotReports: reports };
+  });
+  return [...forecasts, ...eventsForSamples(observations, progress, mergeGapMin, now, true)]
+    .sort((a, b) => a.startEtaMin - b.startEtaMin || a.startFrac - b.startFrac);
 }
 export function weatherEventMarker(event: RouteWeatherEvent) {
   return { lat: event.start.lat, lon: event.start.lon, frac: event.startFrac, etaMin: event.startEtaMin };

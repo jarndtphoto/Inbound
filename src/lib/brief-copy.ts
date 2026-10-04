@@ -54,6 +54,7 @@ export type RideFacts = {
   inboundDetail: string;
   inboundStatus?: string;
   rideLabel?: string;
+  weatherSummary?: string;
   push: string | null;
   pushKind?: string | null;
   pushSource?: "provider_actual" | "track_detected" | "live_detected" | null;
@@ -436,6 +437,7 @@ function taxiOutClause(d: RideFacts) {
 
 function rideClause(d: RideFacts) {
   if (d.now === "arrival" || d.now === "gate") return "";
+  if (d.weatherSummary != null) return d.weatherSummary;
   const label = d.rideLabel || "Smooth";
   if (label === "Smooth") return "Ride looks smooth.";
   if (label === "Weather coverage incomplete" || label === "Weather coverage unavailable") return `${label}.`;

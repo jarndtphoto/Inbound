@@ -14,7 +14,9 @@ import { activeConfirmedTakeoff, mergeConfirmedTakeoff } from "./flight-phase-st
 const takeoffContinuity = new Map();
 import { departureSeedUnix, flightStateIdentity } from "./flight-identity.ts";
 import { advisoryTiming, distinctRouteHazards } from "./route-hazards";
+import { isFreshPilotReport, observationTime } from "./pirep-time.ts";
 import { routeWeatherEvents } from "./weather-events";
+import { flightWeatherSummary } from "./weather-presentation";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
 import { AIRPORT_BY_ICAO, airportByIata, airportByIcao } from "./airports";
 import { IATA_TO_ICAO, displayIata, parseFlightQuery } from "./flight-parse";
@@ -1885,7 +1887,7 @@ function catRank(c) {
 	if (c === "MVFR") return 1;
 	return 0;
 }
-function comfortOf(samples, hazards, dest, origin, progress, times, inboundStatus) {
+function comfortOf(samples, hazards, dest, origin, progress, times, inboundStatus, weatherCoverage) {
 	const chopPenalty = {
 		smooth: 0,
 		light: 9,
@@ -1950,9 +1952,10 @@ function comfortOf(samples, hazards, dest, origin, progress, times, inboundStatu
 	score = Math.max(22, Math.min(99, Math.round(score)));
 	const grade = letterOf(score);
 	const label = "";
-	const weatherEvents = arriving ? [] : routeWeatherEvents(ahead);
+	// Comfort's forecast wording and grade describe advisories/forecasts only;
+	// timestamped aircraft observations are presented separately by the weather UI.
+	const weatherEvents = arriving ? [] : routeWeatherEvents(ahead).filter(event => event.source !== "observed");
 	const bumpEvent = weatherEvents.find((event) => (event.strongestChop ?? event.start.chop) !== "smooth" && event.startEtaMin > 4);
-	const bump = bumpEvent?.start ?? null;
 	const reasons = [];
 	if (inboundOpen && (originDelayed || originLow)) reasons.push(`Inbound isn’t at the gate yet, and ${origin.iata} weather/delays are already in the trip grade.`);
 	if (bumpEvent) {
@@ -1973,15 +1976,7 @@ function comfortOf(samples, hazards, dest, origin, progress, times, inboundStatu
 	if (depDelay >= 15) ground.push(`${depDelay} min ground delay`);
 	else if (originDelayed) ground.push(`Ground delay at ${origin.iata}`);
 	if (taxiOut != null && taxiOut >= 18) ground.push(`${taxiOut} min taxi out`);
-	let ride = "Smooth ride";
-	const strongest = lateWorst === "severe" || worstAhead === "severe" ? "severe"
-		: lateWorst === "moderate" || worstAhead === "moderate" ? "moderate"
-			: bump?.chop === "light" || worstAhead === "light" ? "light" : "smooth";
-	const timedSentenceCarriesStrongest = Boolean(bumpEvent && (bumpEvent.strongestChop ?? bumpEvent.start.chop) === strongest);
-	if (strongest === "severe") ride = timedSentenceCarriesStrongest ? "Choppy ride" : "Severe chop";
-	else if (strongest === "moderate") ride = timedSentenceCarriesStrongest ? "Choppy ride" : "Moderate chop";
-	else if (strongest === "light") ride = timedSentenceCarriesStrongest ? "Mostly smooth ride" : "Light chop";
-	if (convAhead) ride = `${ride}. Storms on the path`;
+	const ride = flightWeatherSummary({ route: { samples, progress }, weatherCoverage });
 	const arrival = [];
 	if (destLow) arrival.push(`Low weather into ${dest.iata}`);
 	if (destDelayed) arrival.push(`Ground delay at ${dest.iata}`);
@@ -3654,37 +3649,50 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const pirepPacks = await Promise.all(pirepRouteBounds(path).map((bbox) =>
 		cached(`pirep:${bbox}`, 120_000, () => safe(fetchJson(`https://aviationweather.gov/api/data/pirep?format=geojson&bbox=${bbox}`).then((d) => d.features ?? []), null))
 	));
+	const pirepNow = Date.now();
 	for (const f of pirepPacks.flatMap(pack => pack ?? [])) {
 		const coords = f.geometry?.type === "Point" ? f.geometry.coordinates : null;
 		if (!coords || coords.length < 2) continue;
 		const lon = coords[0];
 		const lat = coords[1];
+		if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
 		const raw = String(f.properties?.rawOb ?? "PIREP");
+		const observedAt = observationTime(f.properties, raw, pirepNow);
+		if (!isFreshPilotReport(observedAt ?? undefined, pirepNow)) continue;
 		const c = pirepChop(String(f.properties?.tbInt1 ?? f.properties?.turbulence ?? f.properties?.tb ?? raw));
 		if (!c) continue;
 		const pAlt = pirepAltFt(f.properties, raw);
+		const providerId = (typeof f.id === "number" && Number.isFinite(f.id)) || (typeof f.id === "string" && f.id.trim())
+			? String(f.id) : createHash("sha256").update(JSON.stringify([lat, lon, pAlt, raw])).digest("hex").slice(0, 16);
+		const id = `p-${providerId}-${observedAt}-${lat}-${lon}`;
+		const observation = { id, chop: c, observedAt, detail: raw.slice(0, 140) };
 		let hit = false;
+		let remaining = false;
 		for (const s of samples) {
 			const d = haversineNm({ lat, lon }, s);
 			const sAlt = sampleAltFt(s.frac, s.remainingNm, live?.altFt ?? null);
 			if (!pirepMatchesSample({ lat, lon, altFt: pAlt }, { lat: s.lat, lon: s.lon, altFt: sAlt }, d)) continue;
-			s.chop = worse(s.chop, c);
+			s.pilotReports ??= [];
+			if (!s.pilotReports.some(report => report.id === id && report.observedAt === observedAt)) s.pilotReports.push(observation);
 			hit = true;
+			if (s.frac >= progress) remaining = true;
 		}
 		if (!hit) continue;
 		hazards.push({
-			id: `p-${lat.toFixed(2)}-${lon.toFixed(2)}`,
+			id,
 			kind: "pirep",
 			chop: c,
 			label: `${c} chop reported`,
-			detail: raw.slice(0, 140),
-			remaining: true,
+			detail: observation.detail,
+			observedAt,
+			remaining,
 			lat,
 			lon,
 			source: "observed"
 		});
 	}
 	const uniqHazards = distinctRouteHazards(hazards);
+	const weatherCoverage = { failedSources: [...(hazardsPack.failedSources ?? []), ...(pirepPacks.some(pack => pack == null) ? ["Pilot reports"] : [])] };
 	const aeroPush = flightawareOfficial?.push ?? null;
 	const aeroPushMatchesFlight = Boolean(
 		aeroPush &&
@@ -3951,7 +3959,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		snap
 	});
 	const lateWorst = samples.filter((s) => s.frac >= Math.max(progress, .68)).reduce((acc, s) => worse(acc, s.chop), "smooth");
-	let comfort = comfortOf(samples, uniqHazards, dest, origin, progress, times, inbound.status);
+	let comfort = comfortOf(samples, uniqHazards, dest, origin, progress, times, inbound.status, weatherCoverage);
 	comfort = applyGradeTrend(`${stateIdent}|${origin.iata}|${dest.iata}`, {
 		at: Date.now(),
 		score: comfort.score,
@@ -4343,7 +4351,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				.map((p) => ({ lat: p.lat, lon: p.lon, label: p.label }))
 		},
 		hazards: uniqHazards.slice(0, 12),
-		weatherCoverage: { failedSources: [...(hazardsPack.failedSources ?? []), ...(pirepPacks.some(pack => pack == null) ? ["Pilot reports"] : [])] },
+		weatherCoverage,
 		comfort,
 		wx,
 		inbound,
