@@ -50,9 +50,10 @@ export function flightWeatherSummary(story: FlightStory, now = Date.now()): stri
   const current = samples.filter(sample => sample.frac <= story.route.progress).at(-1) ?? samples[0] ?? null;
   const levels = { smooth: 0, light: 1, moderate: 2, severe: 3 };
   const bump = (chop: string) => `${chop} bumps`;
-  const currentText = !current || currentRouteWeatherUnavailable(story.weatherCoverage)
-    ? "Current weather along route unavailable" : current.convective ? "Storms possible now"
-      : current.chop !== "smooth" ? `${bump(current.chop).replace(/^./, c => c.toUpperCase())} possible now` : "Smooth now";
+  const currentText = !current ? "Current weather along route unavailable"
+    : current.convective ? "Storms possible now"
+      : current.chop !== "smooth" ? `${bump(current.chop).replace(/^./, c => c.toUpperCase())} possible now`
+        : currentRouteWeatherUnavailable(story.weatherCoverage) ? "Current weather along route unavailable" : "Smooth now";
   const forecast = samples.filter(sample => sample.frac > story.route.progress && sample.etaMin > 1
     && sampleWeather(sample).kind !== "smooth"
     && (!current || levels[sample.chop] > levels[current.chop] || sampleWeather(sample).kind !== sampleWeather(current).kind))

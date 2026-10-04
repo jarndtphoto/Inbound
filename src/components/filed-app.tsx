@@ -21,6 +21,8 @@ import { weatherEventNumber, type RouteWeatherEvent } from "@/lib/weather-events
 import { upcomingWeatherEvents, eventWeatherCopy, eventWeatherSource, flightWeatherSummary, pilotReportTiming } from "@/lib/weather-presentation";
 import { scheduledTimes, type ScheduledTimes } from "@/lib/scheduled-times";
 import { formatClockTime, timeKindLabel } from "@/lib/presentation-time";
+import { formatStoryEventTime } from "@/lib/flight-event-time";
+import { FLIGHT_TABS, flightHref, parseFlightLocation, storyMatchesFlightLink, type FlightLocation, type FlightTab } from "@/lib/flight-url";
 import { passengerAirportWeather } from "@/lib/passenger-airport-weather";
 import { getFlightStory } from "@/lib/story";
 import type { Chop, Comfort, FlightStory, PilotReportObservation, StageId } from "@/lib/types";
@@ -36,8 +38,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { Clock, Plane, Map as MapIcon, CloudSun, NotebookText, PanelsTopLeft, House, ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, Info } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Component, type ReactNode } from "react";
-
-const FLIGHT_TABS = ["Overview", "Route", "Weather", "Briefing"] as const;
 
 const STORY_CACHE_KEY = "filed-story-cache-v9";
 const LEGACY_STORY_CACHE_KEY = "filed-story-cache-v8";
@@ -173,9 +173,13 @@ function rememberOrigOnClient(story: FlightStory): FlightStory {
   return { ...story, times: {
     ...t, origPushUnix: original.pushUnix, origTakeoffUnix: original.takeoffUnix, origLandUnix: original.landUnix,
     delayMin: delayMin ?? t.delayMin, arriveDelayMin: arriveDelayMin ?? t.arriveDelayMin,
-    pushWas: (delayMin ?? 0) >= 5 ? formatLocalUnix(original.pushUnix, story.origin.tz) : null,
-    takeoffWas: (delayMin ?? 0) >= 5 ? formatLocalUnix(original.takeoffUnix, story.origin.tz) : null,
-    landWas: (arriveDelayMin ?? 0) >= 5 ? formatLocalUnix(original.landUnix, story.dest.tz) : null,
+    push: formatStoryEventTime(story, t.pushUnix, story.origin.tz) ?? t.push,
+    takeoff: formatStoryEventTime(story, t.takeoffUnix, story.origin.tz) ?? t.takeoff,
+    land: formatStoryEventTime(story, t.landUnix, story.dest.tz) ?? t.land,
+    gate: formatStoryEventTime(story, t.gateUnix, story.dest.tz) ?? t.gate,
+    pushWas: (delayMin ?? 0) >= 5 ? formatStoryEventTime(story, original.pushUnix, story.origin.tz) : null,
+    takeoffWas: (delayMin ?? 0) >= 5 ? formatStoryEventTime(story, original.takeoffUnix, story.origin.tz) : null,
+    landWas: (arriveDelayMin ?? 0) >= 5 ? formatStoryEventTime(story, original.landUnix, story.dest.tz) : null,
   } };
 }
 
@@ -183,8 +187,8 @@ function isUsableStory(s: FlightStory | undefined): s is FlightStory {
   return Boolean(s?.iata && s.origin && s.dest && s.comfort && s.stages?.inbound && s.route?.samples);
 }
 
-function storyForQuery(s: FlightStory | undefined, q: string): FlightStory | undefined {
-  return isUsableStory(s) && storyMatchesQuery(s, q) ? s : undefined;
+function storyForQuery(s: FlightStory | undefined, q: string, date?: string | null): FlightStory | undefined {
+  return isUsableStory(s) && storyMatchesFlightLink(s, q, date) ? s : undefined;
 }
 
 function rideLabelOf(story: FlightStory) {
@@ -306,39 +310,91 @@ class ScreenErrorBoundary extends Component<{ children: ReactNode }, { err: Erro
 
 export function FiledApp() {
   const history = useRouter().history;
+  const initialLocation = useRef<FlightLocation | null>(null);
+  if (!initialLocation.current) initialLocation.current = parseFlightLocation(history.location.href);
+  const initial = initialLocation.current;
   const [ready, setReady] = useState(false);
-  const [entered, setEntered] = useState(false);
-  const [page, setPage] = useState<"home" | "flight">("home");
-  const [flight, setFlight] = useState("");
+  const [entered, setEntered] = useState(initial.kind !== "landing");
+  const [location, setLocation] = useState<FlightLocation>(initial);
+  const [flight, setFlight] = useState(initial.kind === "landing" ? "" : initial.flight);
   const recents = useFiled(s => s.recents);
   const hydrate = useFiled(s => s.hydrate);
   const setQuery = useFiled(s => s.setQuery);
-  useEffect(() => {
+
+  const applyLocation = (next: FlightLocation) => {
+    setLocation(next);
+    setEntered(true);
+    if (next.kind === "flight") {
+      setFlight(next.flight);
+      setQuery(next.flight);
+    } else if (next.kind === "invalid") {
+      setFlight(next.flight);
+    }
+  };
+
+  useLayoutEffect(() => {
     hydrate();
+    if (initial.kind === "flight") setQuery(initial.flight);
     setReady(true);
-  }, [hydrate]);
-  useEffect(() => history.subscribe(({ location, action }) => {
+  }, [hydrate, initial, setQuery]);
+
+  useEffect(() => history.subscribe(({ location: next, action }) => {
+    // PUSH/REPLACE are applied synchronously by the handlers below. Browser
+    // traversal is derived only from the URL, never stale history.state.
     if (action.type === "PUSH" || action.type === "REPLACE") return;
-    const value = (location.state as { inboundFlightQuery?: string }).inboundFlightQuery;
-    if (value) {
-      setFlight(value);
-      setQuery(value.trim());
-      setPage("flight");
-    } else setPage("home");
+    applyLocation(parseFlightLocation(next.href));
   }), [history, setQuery]);
-  const start = (value: string) => {
-    const q = value.trim();
-    if (!q) return;
-    setFlight(value);
-    setQuery(q);
-    // Use the router's history so its index/key bookkeeping stays intact.
-    history.push(history.location.href, { ...history.location.state, inboundFlightQuery: value });
-    setPage("flight");
+
+  const start = (value: string, mode: "push" | "replace" = "push") => {
+    const parsed = parseFlightLocation(flightHref(value));
+    if (parsed.kind !== "flight") {
+      setFlight(value);
+      setLocation({ kind: "invalid", flight: value.trim().toUpperCase(), reason: "invalid_flight" });
+      setEntered(true);
+      return;
+    }
+    const next = { ...parsed, tab: "Overview" as const, date: null };
+    setFlight(next.flight);
+    setQuery(next.flight);
+    setLocation(next);
+    setEntered(true);
+    const existingState = history.location.state as { inboundFromSearch?: boolean };
+    const state = { ...history.location.state, inboundFlightQuery: next.flight,
+      inboundFromSearch: mode === "push" || Boolean(existingState.inboundFromSearch) };
+    if (mode === "replace") history.replace(flightHref(next.flight), state);
+    else history.push(flightHref(next.flight), state);
   };
+
+  const changeTab = (tab: FlightTab) => {
+    if (location.kind !== "flight") return;
+    const current = parseFlightLocation(history.location.href);
+    const date = current.kind === "flight" ? current.date : location.date;
+    setLocation({ ...location, tab });
+    history.replace(flightHref(location.flight, tab, date), history.location.state);
+  };
+
+  const publishLegDate = (date: string) => {
+    if (location.kind !== "flight") return;
+    const current = parseFlightLocation(history.location.href);
+    if (current.kind !== "flight" || current.date) return;
+    // Do not update local selection here: changing a query key after the first
+    // successful load would start a duplicate request. Reload/POP will enforce
+    // this reliable leg date from the URL.
+    history.replace(flightHref(location.flight, location.tab, date), history.location.state);
+  };
+
   const onHome = () => {
-    setPage("home");
-    if ((history.location.state as { inboundFlightQuery?: string }).inboundFlightQuery) history.back();
+    const state = history.location.state as { inboundFromSearch?: boolean };
+    if (state.inboundFromSearch) {
+      history.back();
+      return;
+    }
+    const nextState = { ...history.location.state, inboundFlightQuery: undefined, inboundFromSearch: undefined };
+    history.replace("/", nextState);
+    setLocation({ kind: "landing" });
+    setEntered(true);
   };
+
   if (!entered) return <main className="inbound-welcome inbound-redesign">
     <header className="journey-header header-without-brand"><AppearanceControl /></header>
     <div className="inbound-welcome-content">
@@ -351,7 +407,30 @@ export function FiledApp() {
       </button>
     </div>
   </main>;
-  if (page === "flight") return <FlightPages onHome={onHome} />;
+
+  if (location.kind === "flight") {
+    if (!ready) return <main className="inbound-home inbound-redesign">
+      <header className="journey-header header-without-brand"><AppearanceControl /></header>
+      <div className="home-content"><p className="text-sm text-muted">Preparing {location.flight}…</p></div>
+    </main>;
+    return <FlightPages
+      key={`${location.flight}|${location.date ?? "current"}`}
+      query={location.flight}
+      linkedDate={location.date}
+      flightTab={location.tab}
+      onTabChange={changeTab}
+      onLegDate={publishLegDate}
+      onOpenFlight={(next) => start(next, "replace")}
+      onSearch={(next) => start(next, "replace")}
+      onHome={onHome}
+    />;
+  }
+
+  const invalidMessage = location.kind === "invalid"
+    ? location.reason === "invalid_date"
+      ? `This ${location.flight || "flight"} link is no longer available. Search for the flight again.`
+      : `We couldn't find ${location.flight || "that flight"}. Check the flight number.`
+    : null;
   return <main className="inbound-home inbound-redesign">
     <header className="journey-header header-without-brand"><AppearanceControl /></header>
     <div className="home-content">
@@ -359,6 +438,7 @@ export function FiledApp() {
         <p className="home-eyebrow">Live flight tracking</p>
         <h1>Know what’s happening with your flight.</h1>
         <p className="home-description">Follow the aircraft, see the route and weather ahead, and stay current as the flight moves.</p>
+        {invalidMessage ? <p role="alert" className="mb-4 rounded-md border border-ifr/40 bg-surface px-4 py-3 text-sm text-ifr">{invalidMessage}</p> : null}
         <form onSubmit={e => { e.preventDefault(); start(flight); }}>
           <label htmlFor="home-flight">Flight number</label>
           <input id="home-flight" required maxLength={16} value={flight} onChange={e => setFlight(e.target.value)} placeholder="For example, AA1114" autoCapitalize="characters" autoComplete="off" spellCheck={false} />
@@ -373,21 +453,27 @@ export function FiledApp() {
   </main>;
 }
 
-function FlightPages({ onHome }: { onHome: () => void }) {
+function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onOpenFlight, onSearch, onHome }: {
+  query: string;
+  linkedDate: string | null;
+  flightTab: FlightTab;
+  onTabChange: (tab: FlightTab) => void;
+  onLegDate: (date: string) => void;
+  onOpenFlight: (query: string) => void;
+  onSearch: (query: string) => void;
+  onHome: () => void;
+}) {
   const queryClient = useQueryClient();
-  const query = useFiled((s) => s.query);
   const stagePref = useFiled((s) => s.stage);
-  const setQuery = useFiled((s) => s.setQuery);
   const setStage = useFiled((s) => s.setStage);
-  const hydrate = useFiled((s) => s.hydrate);
   const [briefPopupOpen, setBriefPopupOpen] = useState(false);
   const openedBriefings = useRef(new Set<string>());
-  const [flightTab, setFlightTab] = useState<typeof FLIGHT_TABS[number]>("Overview");
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
   const [briefingFor, setBriefingFor] = useState("");
   const [cacheOk, setCacheOk] = useState(false);
   const [stillLooking, setStillLooking] = useState(false);
   const [searchAttempt, setSearchAttempt] = useState(0);
+  const [errorSearch, setErrorSearch] = useState(query);
   const leavingRef = useRef(false);
   const [refreshErr, setRefreshErr] = useState<string | null>(null);
   const [pullPx, setPullPx] = useState(0);
@@ -401,7 +487,9 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   const manualBriefBase = useRef<CompiledBrief | null>(null);
   const [briefFeedback, setBriefFeedback] = useState<"no_change" | "failed" | null>(null);
   const mainRef = useRef<HTMLElement>(null);
+  const publishedLegDate = useRef<string | null>(null);
   const flightKey = normFlight(query);
+  const storyQueryKey = flightStoryQueryKey(query, linkedDate);
   const shellStyle = {
     background: "var(--color-bg)",
     color: "var(--color-fg)",
@@ -416,14 +504,12 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     setBriefing(null);
     setBriefingFor("");
     setBriefPopupOpen(false);
-    setFlightTab("Overview");
-    setQuery(next);
+    onOpenFlight(next);
   }
 
   useLayoutEffect(() => {
-    hydrate();
     setCacheOk(true);
-  }, [hydrate]);
+  }, []);
 
   useEffect(() => {
     const meta = document.querySelector('meta[name="viewport"]');
@@ -435,12 +521,13 @@ function FlightPages({ onHome }: { onHome: () => void }) {
   }, []);
 
   const storyQ = useQuery({
-    queryKey: flightStoryQueryKey(query),
+    queryKey: storyQueryKey,
     queryFn: async ({ client, signal }) => {
       if (leavingRef.current) throw new DOMException("Left flight search", "AbortError");
       const fresh = freshRef.current;
       freshRef.current = false;
-      const saved = storyForQuery(client.getQueryData<FlightStory>(["story", query]), query) ?? readCachedStory(query);
+      const saved = storyForQuery(client.getQueryData<FlightStory>(storyQueryKey), query, linkedDate)
+        ?? storyForQuery(readCachedStory(query), query, linkedDate);
       const resume = resumeFromStory(saved, query);
       const s = await flightStoryRequest(signal, (requestSignal) =>
         getFlightStory({ data: { q: query, fresh, resume }, signal: requestSignal }),
@@ -450,11 +537,14 @@ function FlightPages({ onHome }: { onHome: () => void }) {
       });
       signal.throwIfAborted();
       if (!storyMatchesQuery(s, query)) {
-        throw new Error("Flight data is temporarily unavailable: the provider returned a different flight.");
+        throw new Error(`[flight_not_found] ${query} does not match the returned flight.`);
+      }
+      if (linkedDate && flightDepartureDate(s) !== linkedDate) {
+        throw new Error(`[flight_not_found] ${query} does not match the linked flight date.`);
       }
       const merged = keepRecentTrackGeometry(
         rememberOrigOnClient(applyTakeoffFloor(s, saved)),
-        storyForQuery(saved, query),
+        storyForQuery(saved, query, linkedDate),
       );
       writeCachedStory(query, merged);
       return merged;
@@ -462,7 +552,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     // Seed saved data once; failed requests must remain errors, not successful
     // cache reads. React Query retains the last good story during a failure.
     initialData: () => {
-      const cached = storyForQuery(readCachedStory(query), query);
+      const cached = storyForQuery(readCachedStory(query), query, linkedDate);
       return cached ? rememberOrigOnClient(cached) : undefined;
     },
     initialDataUpdatedAt: 0,
@@ -485,42 +575,50 @@ function FlightPages({ onHome }: { onHome: () => void }) {
     gcTime: 10 * 60_000,
     retry: (count, err) => {
       if (leavingRef.current || flightNotFound(err)) return false;
-      if (!storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query))
+      if (!storyForQuery(queryClient.getQueryData(storyQueryKey), query, linkedDate))
         return flightSearchShouldRetry(count, err, leavingRef.current);
       if (count >= 2 || /HTTP 402\b/.test(err instanceof Error ? err.message : "")) return false;
       return true;
     },
-    retryDelay: (attempt) => storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query)
+    retryDelay: (attempt) => storyForQuery(queryClient.getQueryData(storyQueryKey), query, linkedDate)
       ? Math.min(2_000 * 2 ** attempt, 8_000) : TEMPORARY_FLIGHT_RETRY_MS,
     refetchOnWindowFocus: (q) => Boolean(q.state.data) && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     refetchOnReconnect: (q) => Boolean(q.state.data) && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     placeholderData: (previousData) => {
-      if (storyForQuery(previousData, query)) return previousData;
-      return storyForQuery(readCachedStory(query), query);
+      if (storyForQuery(previousData, query, linkedDate)) return previousData;
+      return storyForQuery(readCachedStory(query), query, linkedDate);
     },
   });
 
-  const story = storyForQuery(storyQ.data, query);
-  useEffect(() => () => stopFlightSearch(queryClient, query), [queryClient, query]);
+  const story = storyForQuery(storyQ.data, query, linkedDate);
+  useEffect(() => () => stopFlightSearch(queryClient, query, linkedDate), [queryClient, query, linkedDate]);
   useEffect(() => {
     if (!cacheOk || story || storyQ.isError || stillLooking) return;
     const timer = window.setTimeout(() => {
-      if (storyForQuery(queryClient.getQueryData(flightStoryQueryKey(query)), query)) return;
+      if (storyForQuery(queryClient.getQueryData(storyQueryKey), query, linkedDate)) return;
       setStillLooking(true);
     }, INITIAL_FLIGHT_SEARCH_MS);
     return () => window.clearTimeout(timer);
-  }, [cacheOk, query, queryClient, searchAttempt, Boolean(story), storyQ.isError, stillLooking]);
+  }, [cacheOk, query, linkedDate, queryClient, searchAttempt, Boolean(story), storyQ.isError, stillLooking]);
+
+  useEffect(() => {
+    if (!story || linkedDate) return;
+    const date = flightDepartureDate(story);
+    if (!date || publishedLegDate.current === date) return;
+    publishedLegDate.current = date;
+    onLegDate(date);
+  }, [linkedDate, onLegDate, story]);
 
   function leaveFlight() {
     leavingRef.current = true;
     briefGen.current += 1;
-    stopFlightSearch(queryClient, query);
+    stopFlightSearch(queryClient, query, linkedDate);
     onHome();
   }
   function trySearchAgain() {
     setStillLooking(false);
     setSearchAttempt((attempt) => attempt + 1);
-    void queryClient.cancelQueries({ queryKey: flightStoryQueryKey(query), exact: true }).then(() => storyQ.refetch());
+    void queryClient.cancelQueries({ queryKey: storyQueryKey, exact: true }).then(() => storyQ.refetch());
   }
 
   useEffect(() => {
@@ -793,6 +891,13 @@ function FlightPages({ onHome }: { onHome: () => void }) {
                 : "Flight data is temporarily unavailable."}
             </p>
             {!flightNotFound(storyQ.error ?? storyQ.failureReason) && storyQ.isFetching && <p className="mt-1 text-sm text-muted">We’ll try again shortly.</p>}
+            <form className="mt-3" onSubmit={(event) => { event.preventDefault(); onSearch(errorSearch); }}>
+              <label className="text-sm font-semibold" htmlFor="flight-error-search">Flight number</label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <input id="flight-error-search" required maxLength={16} value={errorSearch} onChange={(event) => setErrorSearch(event.target.value)} autoCapitalize="characters" autoComplete="off" spellCheck={false} className="min-h-11 min-w-0 flex-1 rounded-md border border-border bg-bg px-3 text-fg" />
+                <Button type="submit">Search</Button>
+              </div>
+            </form>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button type="button" variant="secondary" onClick={leaveFlight}>Back to search</Button>
               <Button type="button" variant="secondary" onClick={trySearchAgain}>Try again</Button>
@@ -835,11 +940,11 @@ function FlightPages({ onHome }: { onHome: () => void }) {
             return <button key={tab} id={`tab-${tab}`} type="button"
               aria-current={flightTab === tab ? "page" : undefined} aria-controls={`panel-${tab}`}
               className={cn("flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md px-1 py-0.5 text-[11px] font-semibold transition-colors", flightTab === tab ? "bg-surface-2 text-fg" : "text-muted")}
-              onClick={() => { setFlightTab(tab); mainRef.current?.scrollTo(0, 0); }}
+              onClick={() => { onTabChange(tab); mainRef.current?.scrollTo(0, 0); }}
               onKeyDown={(e) => {
                 const next = e.key === "ArrowRight" ? (index + 1) % 4 : e.key === "ArrowLeft" ? (index + 3) % 4 : e.key === "Home" ? 0 : e.key === "End" ? 3 : -1;
                 if (next < 0) return;
-                e.preventDefault(); setFlightTab(FLIGHT_TABS[next]);
+                e.preventDefault(); onTabChange(FLIGHT_TABS[next]);
                 document.getElementById(`tab-${FLIGHT_TABS[next]}`)?.focus(); mainRef.current?.scrollTo(0, 0);
               }}><Icon className="size-4.5" aria-hidden="true" /><span>{label}</span></button>;
           })}
@@ -950,6 +1055,9 @@ function FlightHead({
   failed?: boolean;
   onRefresh: () => void;
 }) {
+  const gateMatch = story.times.gate?.match(/^(.*?)\s+([A-Z]{2,5}|GMT[+-]\d+(?::\d+)?)(\s+\+\d+)?$/);
+  const gateClock = gateMatch?.[1] ?? story.times.gate ?? "—";
+  const gateZone = gateMatch ? `${gateMatch[2]}${gateMatch[3] ?? ""}` : "";
   return (
     <div className="flight-summary rounded-xl border border-border bg-surface p-4">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2">
@@ -959,8 +1067,8 @@ function FlightHead({
         </div>
         <div className="max-w-36 text-right">
           <p className="text-xs text-muted">{story.times.gateKind === "actual" ? "ARRIVED" : "ARRIVES"}</p>
-          <p className="summary-arrival font-display font-semibold leading-tight">{story.times.gate?.replace(/\s+(?:[A-Z]{2,5}|GMT[+-]\d+(?::\d+)?)$/, "") ?? "—"}</p>
-          <p className="text-xs text-muted">{story.times.gate?.match(/\s+([A-Z]{2,5}|GMT[+-]\d+(?::\d+)?)$/)?.[1] ?? ""}</p>
+          <p className="summary-arrival font-display font-semibold leading-tight">{gateClock}</p>
+          <p className="text-xs text-muted">{gateZone}</p>
           <p className="text-xs text-muted">{kindLabel(story.times.gateKind) || "Time unavailable"}</p>
         </div>
         <p className="summary-route col-span-2 text-sm text-muted">
@@ -977,11 +1085,6 @@ function FlightHead({
 
 type OverviewDetailKey = "flight" | "aircraft" | "airports" | "baggage";
 const CLOSED_OVERVIEW_DETAILS: Record<OverviewDetailKey, boolean> = { flight: false, aircraft: false, airports: false, baggage: false };
-
-function formatLocalUnix(unix: number | null | undefined, timeZone?: string) {
-  if (unix == null || !Number.isFinite(unix)) return null;
-  return formatClockTime(unix * 1000, timeZone);
-}
 
 function plannedDuration(story: FlightStory) {
   const schedule = clientSchedules(story);
@@ -1069,8 +1172,8 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
     baggage.result?.status === "posted" && baggage.result.carousel ? `Carousel ${baggage.result.carousel}` : "Baggage not assigned yet",
   ].filter(Boolean).join(" · ");
   const schedule = clientSchedules(story);
-  const scheduledPush = formatLocalUnix(schedule.pushUnix, story.origin.tz);
-  const scheduledTakeoff = formatLocalUnix(schedule.takeoffUnix, story.origin.tz);
+  const scheduledPush = formatStoryEventTime(story, schedule.pushUnix, story.origin.tz);
+  const scheduledTakeoff = formatStoryEventTime(story, schedule.takeoffUnix, story.origin.tz);
   const pushActualLabel = story.times.pushSource === "provider_actual" ? "Actual"
     : story.times.pushSource === "live_detected" || story.times.pushSource === "track_detected" ? "Detected"
       : story.times.pushKind !== "scheduled" ? timeKindLabel(story.times.pushKind) : null;
@@ -1094,7 +1197,7 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
           <DetailRow label="Scheduled" value={scheduledTakeoff} />
           {takeoffActualLabel ? <DetailRow label={takeoffActualLabel} value={story.times.takeoff} /> : null}
         </div>
-        <DetailRow label="Scheduled landing" value={formatLocalUnix(schedule.landUnix, story.dest.tz)} />
+        <DetailRow label="Scheduled landing" value={formatStoryEventTime(story, schedule.landUnix, story.dest.tz)} />
         {story.times.landKind !== "scheduled" && <DetailRow label={timeKindLabel(story.times.landKind, "landing")} value={story.times.land} />}
         <DetailRow label={timeKindLabel(story.times.gateKind, "gate arrival")} value={story.times.gate} />
         <DetailRow label="Planned flight time" value={plannedDuration(story)} />

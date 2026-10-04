@@ -39,3 +39,24 @@ test("overlapping flights keep request diagnostics isolated, including failure a
   assert.deepEqual(logs.map(l => [l.requested, l.cacheStatus, l.scheduleSource, l.fallbackOutcome]),
     [["UA219", "hit", "saved_resume", "resume_used"], ["DL4820", "miss", "fr24_live", "fr24_used"]]);
 });
+
+test("a poll logs one compact, deduplicated list when weather sources failed", async () => {
+  const requestLogs: StoryRequestLog[] = [];
+  const weatherLogs: string[][] = [];
+  await withStoryRequest("UA203", false, async () => ({
+    weatherCoverage: { failedSources: ["Pilot reports", "Storm forecasts", "Pilot reports"] },
+  }), record => requestLogs.push(record), sources => weatherLogs.push(sources));
+  await withStoryRequest("UA203", false, async () => ({
+    weatherCoverage: { failedSources: [] },
+  }), record => requestLogs.push(record), sources => weatherLogs.push(sources));
+
+  assert.equal(requestLogs.length, 2);
+  assert.deepEqual(weatherLogs, [["Pilot reports", "Storm forecasts"]]);
+});
+
+test("weather diagnostics never break a successful flight poll", async () => {
+  const result = await withStoryRequest("UA203", false, async () => ({
+    weatherCoverage: { failedSources: ["Local advisories"] }, ok: true,
+  }), () => {}, () => { throw new Error("log sink unavailable"); });
+  assert.equal(result.ok, true);
+});

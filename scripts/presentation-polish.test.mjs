@@ -78,6 +78,46 @@ test('identical arrival clocks retain the same reported kind in header, timing, 
   }
 });
 
+test('overnight event clocks use each airport zone and mark the next local day across Overview, Flight details, and Briefing', () => {
+  const oldStorage = globalThis.localStorage;
+  const memory = new Map();
+  globalThis.localStorage = { getItem: key => memory.get(key) ?? null, setItem: (key, value) => memory.set(key, value) };
+  try {
+    const push = 1791080160, takeoff = 1791080820, land = 1791105360, gate = 1791106020;
+    const base = polishStory();
+    const story = { ...base,
+      stateKey: 'leg:v1:UAL203|2026-10-03|OGG|ORD', query: 'UA203', callsign: 'UAL203', iata: 'UA203',
+      origin: { ...base.origin, iata: 'OGG', icao: 'PHOG', city: 'Kahului', tz: 'Pacific/Honolulu' },
+      dest: { ...base.dest, iata: 'ORD', icao: 'KORD', city: 'Chicago', tz: 'America/Chicago' },
+      times: { ...base.times,
+        pushUnix: push, pushKind: 'actual', pushSource: 'provider_actual', push: 'wrong',
+        takeoffUnix: takeoff, takeoffKind: 'actual', takeoff: 'wrong',
+        landUnix: land, landKind: 'actual', land: 'wrong',
+        gateUnix: gate, gateKind: 'estimated', gate: 'wrong',
+        origPushUnix: push - 15 * 60, origTakeoffUnix: takeoff - 15 * 60, origLandUnix: land - 15 * 60 },
+      resume: {
+        gateOut: { scheduled: push - 15 * 60, estimated: null, actual: push },
+        takeoff: { scheduled: takeoff - 15 * 60, estimated: null, actual: takeoff },
+        landing: { scheduled: land - 15 * 60, estimated: null, actual: land },
+        gateIn: { scheduled: gate - 15 * 60, estimated: null, actual: null },
+      },
+    };
+    const shown = ui.rememberOrigOnClient(story);
+    assert.equal(shown.times.push, '4:16 PM HST'); assert.equal(shown.times.takeoff, '4:27 PM HST');
+    assert.equal(shown.times.land, '4:16 AM CDT +1'); assert.equal(shown.times.gate, '4:27 AM CDT +1');
+
+    const head = render(ui.FlightHead, { story: shown, fetching: false, refreshing: false, onRefresh() {} });
+    const details = render(ui.OverviewDetails, { story: shown, timing: h(ui.TimesStrip, { story: shown }) });
+    const brief = composeBrief(ui.rideFacts({ ...shown, currentStage: 'arrival' }, 'UA203', 'arrival'));
+    assert.match(head, /4:27 AM/); assert.match(head, /CDT \+1/);
+    for (const value of ['4:16 PM HST', '4:27 PM HST', '4:16 AM CDT +1', '4:27 AM CDT +1']) assert.match(details, new RegExp(value.replace('+', '\\+')));
+    assert.match(JSON.stringify(brief), /4:16 AM CDT \+1|4:27 AM CDT \+1/);
+  } finally {
+    if (oldStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = oldStorage;
+  }
+});
+
 test('actual Overview weather, Weather timeline, and map alerts agree on light at 11 minutes and moderate at 228', async () => {
   const story = polishStory();
   const overview = render(ui.TravelerCompanion, { story });
