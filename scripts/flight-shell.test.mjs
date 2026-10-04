@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../src/components/filed-app.tsx',import.meta.url),'utf8');
 const styles=readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
 const flightPages=source.slice(source.indexOf('function FlightPages'),source.indexOf('function wheelsDown'));
+const filedApp=source.slice(source.indexOf('export function FiledApp'),source.indexOf('function FlightPages'));
 
 test('tracked-flight shell identifies the flight with appearance controls and uses Home navigation',()=>{
   assert.match(flightPages, /<header className="journey-header">/);
@@ -46,4 +47,21 @@ test('tracked-flight polling pauses while hidden and refreshes stale state on re
   assert.match(flightPages,/addEventListener\("visibilitychange", refreshWhenVisible\)/);
   assert.match(flightPages,/Date\.now\(\) - storyQ\.dataUpdatedAt > 2_500/);
   assert.match(flightPages,/void storyQ\.refetch\(\)/);
+});
+
+test('flight and tab navigation are URL-backed before the story query mounts',()=>{
+  assert.match(filedApp,/parseFlightLocation\(history\.location\.href\)/);
+  assert.match(filedApp,/if \(initial\.kind === "flight"\) setQuery\(initial\.flight\)/);
+  assert.match(filedApp,/history\.push\(flightHref\(next\.flight\), state\)/);
+  assert.match(filedApp,/history\.replace\(flightHref\(location\.flight, tab, date\), history\.location\.state\)/);
+  assert.match(filedApp,/linkedDate=\{location\.date\}/);
+  assert.doesNotMatch(flightPages,/useFiled\(\(s\) => s\.query\)/);
+});
+
+test('invalid and dated-link failures keep a corrective search visible and stop mismatched legs',()=>{
+  assert.match(filedApp,/location\.kind === "invalid"/);
+  assert.match(filedApp,/role="alert"/);
+  assert.match(flightPages,/id="flight-error-search"/);
+  assert.match(flightPages,/flightDepartureDate\(s\) !== linkedDate/);
+  assert.match(flightPages,/\[flight_not_found\]/);
 });

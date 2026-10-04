@@ -27,6 +27,17 @@ test("leaving aborts the pending transport, removes only this story, and cannot 
   } finally { unsubscribe(); client.unmount(); client.clear(); focusManager.setFocused(undefined); }
 });
 
+test("a dated link stops only its exact leg query", () => {
+  const client = new QueryClient();
+  const dated = flightStoryQueryKey("UA203", "2026-10-03");
+  client.setQueryData(dated, { date: "2026-10-03" });
+  client.setQueryData(flightStoryQueryKey("UA203"), { date: "current" });
+  stopFlightSearch(client, "UA203", "2026-10-03");
+  assert.equal(client.getQueryData(dated), undefined);
+  assert.deepEqual(client.getQueryData(flightStoryQueryKey("UA203")), { date: "current" });
+  client.clear();
+});
+
 test("a not-found query makes one request and stays stopped on focus/reconnect; explicit retry can recover", async () => {
   const client = new QueryClient(); client.mount(); let requests = 0, found = false;
   const observer = new QueryObserver(client, { queryKey: flightStoryQueryKey("US5558"),

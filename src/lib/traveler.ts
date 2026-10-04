@@ -18,12 +18,12 @@ export function rideOutlook(s: FlightStory): string {
   const current = ordered.filter(sample => sample.frac <= s.route.progress).at(-1) ?? ordered[0] ?? samples[0];
   const incomplete = !s.weatherCoverage || s.weatherCoverage.failedSources.length > 0;
   const currentWeatherUnavailable = currentRouteWeatherUnavailable(s.weatherCoverage);
-  let text = currentWeatherUnavailable
-    ? "Current weather along the route is unavailable right now."
-    : current.chop !== "smooth"
-      ? "Projected ride is currently choppy."
-      : current.convective
-        ? "Storms are possible near the current route; the ride may be unsettled."
+  let text = current.chop !== "smooth"
+    ? "Projected ride is currently choppy."
+    : current.convective
+      ? "Storms are possible near the current route; the ride may be unsettled."
+      : currentWeatherUnavailable
+        ? "Current weather along the route is unavailable right now."
         : "Projected ride is currently smooth, based on available forecasts.";
 
   const highlights = weatherOutlook(upcomingWeatherEvents(samples, s.route.progress), s.dest?.city || s.dest?.iata || "");

@@ -87,12 +87,27 @@ test("non-route-advisory feed failures keep the normal current ride wording", ()
   assert.doesNotMatch(rideOutlook(flight), /Current weather along the route is unavailable right now\./);
 });
 
-test("a failed turbulence or storm advisory feed says current route weather is unavailable", () => {
+test("a failed turbulence or storm advisory feed replaces only a smooth current condition", () => {
   for (const source of ["Turbulence advisories", "Storm advisories"]) {
-    const flight = story([point(0, { chop: "moderate" }), point(.75, { pilotReports: [report] }), point(1)]);
+    const flight = story([point(0), point(.75, { pilotReports: [report] }), point(1)]);
     flight.weatherCoverage = { failedSources: ["Pilot reports", source] };
     assert.equal(flightWeatherSummary(flight, now), "Current weather along route unavailable · moderate bumps reported ahead");
     assert.match(rideOutlook(flight), /Current weather along the route is unavailable right now\./);
-    assert.doesNotMatch(rideOutlook(flight), /currently choppy|Storms are possible near the current route/);
+  }
+});
+
+test("a known current hazard wins over unavailable route-weather wording", () => {
+  for (const source of ["Turbulence advisories", "Storm advisories"]) {
+    const bumpy = story([point(0, { chop: "moderate" }), point(1)]);
+    bumpy.weatherCoverage = { failedSources: [source] };
+    assert.equal(flightWeatherSummary(bumpy, now), "Moderate bumps possible now");
+    assert.match(rideOutlook(bumpy), /Projected ride is currently choppy\./);
+    assert.doesNotMatch(rideOutlook(bumpy), /weather along the route is unavailable/i);
+
+    const stormy = story([point(0, { convective: true }), point(1)]);
+    stormy.weatherCoverage = { failedSources: [source] };
+    assert.equal(flightWeatherSummary(stormy, now), "Storms possible now");
+    assert.match(rideOutlook(stormy), /Storms are possible near the current route/);
+    assert.doesNotMatch(rideOutlook(stormy), /weather along the route is unavailable/i);
   }
 });

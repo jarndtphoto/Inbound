@@ -3,7 +3,8 @@ import type { QueryClient } from "@tanstack/react-query";
 export const INITIAL_FLIGHT_SEARCH_MS = 20_000;
 export const INITIAL_FLIGHT_SEARCH_ATTEMPTS = 5;
 export const TEMPORARY_FLIGHT_RETRY_MS = 30_000;
-export const flightStoryQueryKey = (query: string) => ["story", query] as const;
+export const flightStoryQueryKey = (query: string, legDate?: string | null) =>
+  legDate ? (["story", query, legDate] as const) : (["story", query] as const);
 
 export function flightNotFound(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -27,8 +28,8 @@ export function flightSearchShouldRetry(failures: number, error: unknown, stoppe
   return !stopped && !flightNotFound(error) && failures < INITIAL_FLIGHT_SEARCH_ATTEMPTS - 1;
 }
 
-export function stopFlightSearch(client: QueryClient, query: string): void {
-  const filters = { queryKey: flightStoryQueryKey(query), exact: true };
+export function stopFlightSearch(client: QueryClient, query: string, legDate?: string | null): void {
+  const filters = { queryKey: flightStoryQueryKey(query, legDate), exact: true };
   void client.cancelQueries(filters);
   client.removeQueries(filters);
 }

@@ -1,6 +1,6 @@
 import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { parseFlightQuery } from "@/lib/flight-parse";
-import { airlineStatusLink } from "@/lib/airline-status";
+import { airlineStatusLink, flightDepartureDate } from "@/lib/airline-status";
 import { getAirportSurfaceCached } from "@/lib/airport-surface";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useId } from "react";
@@ -42,7 +42,7 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
     && !inbound?.locked && ["airborne","watching","at_field"].includes(story.inbound.status)
     && ["inbound","push"].includes(story.currentStage) && !story.times.pushed);
   const airlineLink=airlineStatusLink(story);
-  const gateArrivalTime=destinationGateTime(story.times.gateUnix,story.times.gate,story.dest.tz);
+  const gateArrivalTime=destinationGateTime(story.times.gateUnix,story.times.gate,story.dest.tz,flightDepartureDate(story));
   return <div className="mt-5 space-y-4">
     {story.inboundDiversion && <section role="status" className="rounded-xl border border-accent bg-surface p-5" aria-label="Inbound aircraft diversion">
       <h2 className="text-xl font-semibold">Inbound aircraft was diverted</h2>

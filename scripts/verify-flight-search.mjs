@@ -30,8 +30,8 @@ try {
     import {polishStory} from ${JSON.stringify(resolve('scripts/fixtures/presentation-polish.mjs'))};
     import ${JSON.stringify(resolve('src/styles.css'))};
     const client = new QueryClient();
-    window.searchFixture = {client,mode:'pending',requests:0,aborts:0,load({signal}) {
-      this.requests++;
+    window.searchFixture = {client,mode:localStorage.getItem('fixture-mode') || 'pending',requests:0,aborts:0,queries:[],load({data,signal}) {
+      this.requests++;this.queries.push(data?.q);
       if(this.mode==='notfound') return Promise.reject(new Error('Flight not found'));
       if(this.mode==='temporary') return Promise.reject(new Error('Current flight route unavailable: schedule provider returned HTTP 402; FlightStats unavailable'));
       if(this.mode==='loaded') return Promise.resolve({...polishStory(),fetchedAt:Date.now()});
@@ -81,6 +81,58 @@ try {
       blocked.push(host); return route.abort();
     });
     await page.clock.install({ time: new Date('2026-10-03T14:00:00Z') });
+
+    // URL state is applied before stored-query hydration. Invalid links stay on
+    // a corrective search and cannot start a story request.
+    await page.goto(url + '?flight=NOT-A-FLIGHT&tab=map');
+    await page.getByLabel('Flight number', { exact: true }).waitFor();
+    assert.match(await page.getByRole('alert').innerText(), /couldn't find NOT-A-FLIGHT/i);
+    assert.equal(await page.evaluate(() => window.searchFixture.requests), 0);
+    await page.evaluate(() => {
+      localStorage.setItem('filed-q-v1', 'AA1');
+      localStorage.setItem('filed-recents-v1', JSON.stringify(['AA1']));
+      localStorage.setItem('fixture-mode', 'loaded');
+    });
+
+    // Every passenger tab survives a reload. The stored AA1 never gets a
+    // request, and tab navigation replaces the current history entry.
+    await page.goto(url + '?flight=UA219&tab=map');
+    await page.getByRole('navigation', { name: 'Flight pages' }).waitFor();
+    const closeWelcome = async () => {
+      const close = page.getByRole('button', { name: 'Close flight briefing' });
+      if (await close.count()) await close.click();
+    };
+    await closeWelcome();
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('date') === '2026-10-03');
+    assert.equal(await page.locator('#panel-Route').isVisible(), true);
+    assert.deepEqual(await page.evaluate(() => [...window.searchFixture.queries]), ['UA219']);
+    const beforeTabHistory = await page.evaluate(() => history.length);
+    await page.evaluate(() => {
+      const replace = history.replaceState.bind(history); window.replaceCalls = 0;
+      history.replaceState = (...args) => { window.replaceCalls++; return replace(...args); };
+    });
+    await page.getByRole('button', { name: 'Weather', exact: true }).click();
+    assert.equal(new URL(page.url()).searchParams.get('tab'), 'weather');
+    assert.equal(await page.evaluate(() => history.length), beforeTabHistory);
+    assert.equal(await page.evaluate(() => window.replaceCalls), 1);
+    for (const [label, slug, panel] of [['Overview', 'overview', 'Overview'], ['Map', 'map', 'Route'], ['Weather', 'weather', 'Weather'], ['Briefing', 'briefing', 'Briefing']]) {
+      await page.getByRole('button', { name: label, exact: true }).click();
+      assert.equal(new URL(page.url()).searchParams.get('tab'), slug);
+      await page.reload(); await page.getByRole('navigation', { name: 'Flight pages' }).waitFor(); await closeWelcome();
+      assert.equal(await page.locator(`#panel-${panel}`).isVisible(), true);
+      assert.ok((await page.evaluate(() => window.searchFixture.queries)).every(query => query === 'UA219'));
+    }
+
+    // A dated link may not display today's same-number flight, and its explicit
+    // not-found result stops polling while keeping a search input available.
+    await page.goto(url + '?flight=UA219&tab=overview&date=2026-10-02');
+    const oldLinkAlert = page.getByRole('alert'); await oldLinkAlert.waitFor();
+    assert.match(await oldLinkAlert.innerText(), /couldn't find UA219/i);
+    assert.equal(await oldLinkAlert.getByLabel('Flight number').inputValue(), 'UA219');
+    const oldLinkRequests = await page.evaluate(() => window.searchFixture.requests);
+    await page.clock.fastForward(65_000);
+    assert.equal(await page.evaluate(() => window.searchFixture.requests), oldLinkRequests);
+    await page.evaluate(() => { localStorage.setItem('fixture-mode', 'pending'); localStorage.removeItem('filed-story-cache-v9'); });
     await page.goto(url);
     await page.getByRole('button', { name: 'Track my flight', exact: true }).click();
     const requests = () => page.evaluate(() => window.searchFixture.requests);

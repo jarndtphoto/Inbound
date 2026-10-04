@@ -9,6 +9,7 @@ export type StoryRequestLog = RequestTrace & {
   event: "story_request"; requested: string; fresh: boolean; durationMs: number;
   outcome: "ok" | "error"; errorCategory: "not_found" | "timeout" | "aborted" | "source_unavailable" | "unexpected" | null;
 };
+type WeatherFailureEmitter = (sources: string[]) => void;
 const requests = new AsyncLocalStorage<RequestTrace>();
 
 export function noteStoryCache(status: CacheStatus) {
@@ -37,7 +38,8 @@ function errorCategory(error: unknown): StoryRequestLog["errorCategory"] {
 /** One record per caller, including cached/coalesced results and failures.
  * Async context prevents overlapping flight requests from mixing diagnostics. */
 export async function withStoryRequest<T>(query: string, fresh: boolean, load: () => Promise<T>,
-  emit: (record: StoryRequestLog) => void = record => console.info("[story-request] " + JSON.stringify(record))): Promise<T> {
+  emit: (record: StoryRequestLog) => void = record => console.info("[story-request] " + JSON.stringify(record)),
+  emitWeatherFailures: WeatherFailureEmitter = sources => console.info("[weather-coverage] " + sources.join(","))): Promise<T> {
   const trace: RequestTrace = { scheduleSource: "unknown", fallbackOutcome: "not_needed" };
   const started = performance.now();
   return requests.run(trace, async () => {
@@ -46,6 +48,13 @@ export async function withStoryRequest<T>(query: string, fresh: boolean, load: (
       const result = await load();
       const source = (result as { providers?: { scheduleSource?: FlightScheduleSource } })?.providers?.scheduleSource;
       if (source) noteStorySchedule(source); // Cache hits retain the original source.
+      const failedSources = (result as { weatherCoverage?: { failedSources?: unknown } })?.weatherCoverage?.failedSources;
+      if (Array.isArray(failedSources)) {
+        const names = [...new Set(failedSources.filter((name): name is string => typeof name === "string" && name.length > 0))];
+        if (names.length) {
+          try { emitWeatherFailures(names); } catch { /* Diagnostics must not break a flight poll. */ }
+        }
+      }
       return result;
     } catch (error) {
       category = errorCategory(error);
