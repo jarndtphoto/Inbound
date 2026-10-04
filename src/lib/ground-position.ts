@@ -105,13 +105,11 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       };
     };
 
-    // Registration is the strongest identity key. If it is unknown, FR24's
-    // commercial flight-number filter is often more reliable on the surface
-    // than the transponder callsign filter, especially at a large airport.
-    // Make only one direct live-FR24 identity probe per ground poll. A miss or
-    // throttle on the strongest key should fall through to open ADS-B instead
-    // of immediately spending more FR24 calls on weaker aliases in the same
-    // 3-second cycle.
+    // Registration is the strongest identity key. Without it, departures are
+    // better keyed by the transponder callsign (AAL2952) while arrivals can
+    // keep using the commercial flight number (AA2952) before summary-based
+    // registration recovery. Make only one direct live-FR24 identity probe per
+    // ground poll so this does not increase usage.
     if (resolvedRegistration) {
       const byRegistration = await loadFr24FlightByRegistration(resolvedRegistration).catch(() => null);
       const position = usable(byRegistration);
@@ -120,6 +118,16 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         return position;
       }
       diagnostic("fr24-registration-miss", { registration: resolvedRegistration });
+    } else if (data.movementKind === "departure" && callsigns[0]) {
+      const callsign = callsigns[0];
+      const byCallsign = await loadFr24Flight(callsign).catch(() => null);
+      const position = usable(byCallsign);
+      if (position) {
+        console.info("[ground-position]", { provider: "fr24-callsign", callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+        diagnostic("fr24-callsign-hit", { callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+        return position;
+      }
+      diagnostic("fr24-callsign-miss", { callsign });
     } else if (data.flightNumber) {
       const byFlightNumber = await loadFr24FlightByNumber(data.flightNumber, bounds).catch(() => null);
       const position = usable(byFlightNumber);
@@ -129,19 +137,15 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         return position;
       }
       diagnostic("fr24-flight-number-miss");
-    } else {
-      for (const callsign of callsigns) {
-        const byCallsign = await loadFr24Flight(callsign).catch(() => null);
-        const position = usable(byCallsign);
-        if (position) {
-          diagnostic("fr24-callsign-hit", { callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-          return position;
-        }
-        diagnostic("fr24-callsign-miss", { callsign });
-        // Callsigns is a tiny compatibility list (flight-id then story
-        // callsign); do not probe a second alias in the same poll.
-        break;
+    } else if (callsigns[0]) {
+      const callsign = callsigns[0];
+      const byCallsign = await loadFr24Flight(callsign).catch(() => null);
+      const position = usable(byCallsign);
+      if (position) {
+        diagnostic("fr24-callsign-hit", { callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+        return position;
       }
+      diagnostic("fr24-callsign-miss", { callsign });
     }
 
     // Arrival flights can disappear from FR24's live flight-number index as
