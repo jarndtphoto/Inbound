@@ -28,7 +28,7 @@ import { getFlightStory } from "@/lib/story";
 import type { Chop, Comfort, FlightStory, PilotReportObservation, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
-import { flightPollingComplete, flightPollingInterval } from "@/lib/flight-polling";
+import { flightPollingInterval } from "@/lib/flight-polling";
 import { dismissWelcomeSummary, shouldOpenWelcomeSummary, welcomeLegKey, welcomeSummaryVersion } from "@/lib/flight-welcome-state";
 import { INITIAL_FLIGHT_SEARCH_MS, TEMPORARY_FLIGHT_RETRY_MS, flightStoryQueryKey, flightNotFound, flightSearchCanPoll, flightSearchShouldRetry, stopFlightSearch, flightStoryRequest } from "@/lib/flight-search";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
