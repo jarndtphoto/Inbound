@@ -1,4 +1,5 @@
 import type { Sql } from "./db.ts";
+import { cleanupFlightStateRows, type FlightStateCleanup } from "./flight-state-retention.server.ts";
 import { legacyProviderPattern, legacyProviderBelongsToLeg } from "./flight-identity.ts";
 import { EMPTY_PHASE_STATE, mergeForward, mergeConfirmedTakeoff, phaseStateEqual } from "./flight-phase-state-logic";
 import type { PhaseState, PushLatch, TaxiOutLatch, ConfirmedTakeoff } from "./flight-phase-state-logic";
@@ -34,7 +35,7 @@ function stateFromRow(row: Row | undefined): { state: PhaseState; version: numbe
 }
 
 /** SQL injection keeps actual CAS and legacy-fold races testable across cold stores. */
-export function createFlightPhaseStateStore(sqlProvider: () => Promise<Sql>) {
+export function createFlightPhaseStateStore(sqlProvider: () => Promise<Sql>, cleanup: FlightStateCleanup = cleanupFlightStateRows) {
   async function read(key: string) {
     const sql = await sqlProvider();
     const rows = await sql<Row>`select push_unix, push_source, push_live, push_at, taxi_out_at, confirmed_takeoff, version
@@ -52,6 +53,7 @@ export function createFlightPhaseStateStore(sqlProvider: () => Promise<Sql>) {
         version = flight_phase_state.version + 1, updated_at = now()
       where flight_phase_state.version = ${expectedVersion}
       returning push_unix, push_source, push_live, push_at, taxi_out_at, confirmed_takeoff, version`;
+    if (rows[0]) await cleanup(sql);
     return rows[0];
   }
   async function save(landKey: string, next: PhaseState, expectedVersion: number): Promise<SaveStatus> {
