@@ -39,8 +39,8 @@
         "/workspace/scratch/83746901af9a/inbound-radar-transport/src/lib/plugin-v1/radar-widget.ts"
       ],
       "externalImports": [],
-      "bytes": 167628,
-      "sha256": "9283016e67778afbb90542b7e66da84e8553160fb74e858b721764ea39fa6d1e"
+      "bytes": 168241,
+      "sha256": "a5aea3cd70caad6402b0701249de3977500cacedc066171556a8374bc82e0eb4"
     },
     {
       "input": "src/lib/plugin-v1/radar-proof-preview.ts",
@@ -92,8 +92,8 @@
       "externalImports": [
         "node:crypto"
       ],
-      "bytes": 367904,
-      "sha256": "211e3808221648eef231f377a2a39df157614edfdd946632adc44c60afc0c84c"
+      "bytes": 368517,
+      "sha256": "2d76a651eec022387544f1e28c615284859fe864ae1b1bf89f7353dbb45f7a43"
     }
   ],
   "files": [

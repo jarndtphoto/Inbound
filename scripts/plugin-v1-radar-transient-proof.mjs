@@ -9,6 +9,7 @@ import { createRadarProofServer } from '../src/lib/plugin-v1/radar-proof-server.
 import { installTestClock } from './test-clock.mjs';
 
 const expectGap = process.argv.includes('--expect-gap');
+const expectWatchdogFreeze = process.argv.includes('--expect-watchdog-freeze');
 const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
 const evidenceDirectory = resolve('docs/plugin-v1/verification/part-3b3');
 mkdirSync(evidenceDirectory, { recursive: true });
@@ -79,7 +80,7 @@ try {
     const directional = value.positions.filter(target => target.groundTrackDeg !== null && target.groundspeedKt > 0).slice(0, 3);
     return { label, at: new Date(simulationNow).toISOString(), frameCount: value.frameCount, animationScheduled: value.animationScheduled,
       pollScheduled: value.pollScheduled, refreshInFlight: value.refreshInFlight, refreshCalls: value.refreshCalls,
-      collectionVersion: value.collectionVersion, generatedAt: value.generatedAt,
+      collectionVersion: value.collectionVersion, generatedAt: value.generatedAt, trajectoryKey: value.trajectoryKey,
       aircraft: directional.map(target => { const display = value.displayPositions.find(candidate => candidate.radarId === target.radarId); return {
         radarId: target.radarId, observedAt: target.observedAt, liveAge: (simulationNow - Date.parse(target.observedAt)) / 1000,
         extrapolatedSeconds: display?.extrapolatedSeconds, stopped: display?.stopped,
@@ -87,7 +88,9 @@ try {
       activeRequestGeneration: value.activeRequestGeneration, acceptedResults: value.acceptedResults,
       rejectedResults: value.rejectedResults, lastRejectedReason: value.lastRejectedReason,
       selectedRadarId: value.selectedRadarId, requestedAreaId: value.requestedAreaId, areaId: value.areaId, health: value.health,
-      nextPollKind: value.nextPollKind, shortRetryUsed: value.shortRetryUsed, shortRetrySchedules: value.shortRetrySchedules,
+      nextPollKind: value.nextPollKind, shortRetryUsed: value.shortRetryUsed, shortRetryTrajectoryKey: value.shortRetryTrajectoryKey,
+      motionRetryCount: value.motionRetryCount, motionRetryBudgetRemaining: value.motionRetryBudgetRemaining,
+      lastMotionRetryAt: value.lastMotionRetryAt, motionCapDeadline: value.motionCapDeadline, shortRetrySchedules: value.shortRetrySchedules,
       shortRetryFires: value.shortRetryFires, pollTimers: value.pollTimers, ageTimers: value.ageTimers };
   };
 
@@ -103,9 +106,7 @@ try {
   }, initialCalls);
   const clientT0 = simulationNow;
   const armed = await capture('T+0 client deadline armed');
-  assert.equal(armed.nextPollAt, clientT0 + 20_000);
 
-  await advanceTo(clientT0 + 800);
   await page.evaluate(publicationAt => {
     const result = structuredClone(window.radarLastResult), content = result.structuredContent;
     content.collectionVersion += 1; content.generatedAt = new Date(publicationAt).toISOString();
@@ -121,7 +122,7 @@ try {
     document.getElementById('radar').contentWindow.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: result }, location.origin);
   }, simulationNow);
   await waitFor(page, version => document.getElementById('radar').contentWindow.inboundRadarProof.read().collectionVersion === version, armed.collectionVersion + 1);
-  const published = await capture('T+0.8 fresh collection published without changing client deadline');
+  const published = await capture('T+0 fresh collection clears retry state and arms normal cadence');
   assert.equal(published.nextPollAt, clientT0 + 20_000);
 
   await page.evaluate(retryAt => {
@@ -175,7 +176,7 @@ try {
     assert.equal(afterBound.pollTimers.maxPending, 1);
     assert.equal(afterBound.ageTimers.maxPending, 1);
   }
-  let boundedSameRetry = null, hostLike65Seconds = null;
+  let boundedSameRetry = null, hostLike90Seconds = null;
   if (!expectGap) {
     const freshResult = await page.evaluate(() => structuredClone(window.radarLastResult));
     await advanceTo(clientT0 + 26_000);
@@ -197,14 +198,32 @@ try {
     await page.evaluate(result => { window.radarScriptedResults.push(result); }, freshResult);
     await advanceTo(nearSame.nextPollAt + 100);
     await waitFor(page, calls => document.getElementById('radar').contentWindow.inboundRadarProof.read().refreshCalls > calls, nearSame.refreshCalls);
-    const retryStillSame = await capture('Short retry still same returns to bounded normal cadence');
-    assert.equal(retryStillSame.shortRetrySchedules, nearSame.shortRetrySchedules);
-    assert.equal(retryStillSame.nextPollKind, 'normal');
-    assert.ok(retryStillSame.nextPollAt - simulationNow >= 19_900);
-    const callsAfterBoundedRetry = retryStillSame.refreshCalls;
+    const retryOneStillSame = await capture('First watchdog retry still same schedules the second bounded retry');
+    assert.equal(retryOneStillSame.motionRetryCount, 1);
+    assert.equal(retryOneStillSame.nextPollKind, 'short-retry');
+    assert.ok(retryOneStillSame.nextPollAt - simulationNow >= 3_800);
+
+    await page.evaluate(result => { window.radarScriptedResults.push(result); }, freshResult);
+    await advanceTo(retryOneStillSame.nextPollAt + 100);
+    await waitFor(page, calls => document.getElementById('radar').contentWindow.inboundRadarProof.read().refreshCalls > calls, retryOneStillSame.refreshCalls);
+    const retryTwoStillSame = await capture('Second watchdog retry still same schedules the final bounded retry');
+    assert.equal(retryTwoStillSame.motionRetryCount, 2);
+    assert.equal(retryTwoStillSame.nextPollKind, 'short-retry');
+
+    await page.evaluate(result => { window.radarScriptedResults.push(result); }, freshResult);
+    await advanceTo(retryTwoStillSame.nextPollAt + 100);
+    await waitFor(page, calls => document.getElementById('radar').contentWindow.inboundRadarProof.read().refreshCalls > calls, retryTwoStillSame.refreshCalls);
+    const retryBudgetExhausted = await capture('Third watchdog retry exhausts the bounded budget and returns to normal cadence');
+    assert.equal(retryBudgetExhausted.motionRetryCount, 3);
+    assert.equal(retryBudgetExhausted.motionRetryBudgetRemaining, 0);
+    assert.equal(retryBudgetExhausted.nextPollKind, 'normal');
+    assert.ok(retryBudgetExhausted.nextPollAt - simulationNow >= 19_900);
+    assert.ok(retryBudgetExhausted.aircraft.every(target => target.extrapolatedSeconds === 25 && target.stopped));
+    const callsAfterBoundedRetry = retryBudgetExhausted.refreshCalls;
     await advanceTo(simulationNow + 5_000);
     assert.equal((await read()).refreshCalls, callsAfterBoundedRetry, 'No rapid loop follows the one bounded retry');
-    boundedSameRetry = { youngSame, nearSame, retryStillSame, callsFiveSecondsLater: (await read()).refreshCalls };
+    boundedSameRetry = { youngSame, nearSame, retryOneStillSame, retryTwoStillSame, retryBudgetExhausted,
+      callsFiveSecondsLater: (await read()).refreshCalls, maximumShortRetriesPerTrajectory: 3 };
 
     await page.goto(harnessRoot + '/harness');
     await waitFor(page, () => document.getElementById('radar').contentWindow.inboundRadarProof?.read().hostReady);
@@ -245,97 +264,153 @@ try {
     const advanceHostTo = async offset => { await advanceTo(hostT0 + offset); };
     const select = async radarId => { await hostFrame.locator(`.aircraft-marker[data-radar-id="${radarId}"]`).click({ force: true }); await waitFor(page, id => document.getElementById('radar').contentWindow.inboundRadarProof.read().selectedRadarId === id, radarId); };
 
-    await advanceHostTo(800);
-    let currentResult = synthetic(await rpc('preset:chicago'), null, 100, simulationNow, simulationNow);
+    let currentResult = synthetic(await rpc('preset:chicago'), null, 100, hostT0, hostT0);
     await notifyResult(currentResult);
     await waitFor(page, () => document.getElementById('radar').contentWindow.inboundRadarProof.read().collectionVersion === 100);
-    const published65 = await hostCapture('T+0.8 publication');
-    assert.equal(published65.nextPollAt, initialDeadline);
+    const published90 = await hostCapture('T+0 fresh authoritative Chicago board');
+    assert.equal(published90.nextPollAt, initialDeadline);
     const movingIds = (await read()).positions.filter(target => target.groundTrackDeg !== null && target.groundspeedKt > 0).slice(0, 4).map(target => target.radarId);
     assert.equal(movingIds.length, 4);
 
     await advanceHostTo(5_000); await select(movingIds[0]);
     const selectedA = await hostCapture('T+5 select aircraft A'); assert.equal(selectedA.nextPollAt, initialDeadline);
-    await advanceHostTo(12_000); await select(movingIds[1]);
-    const selectedB = await hostCapture('T+12 select aircraft B'); assert.equal(selectedB.nextPollAt, initialDeadline);
-
-    await advanceHostTo(18_000);
-    await queue(synthetic(await rpc('airport:KORD'), currentResult, 100, hostT0 + 800, simulationNow));
+    await advanceHostTo(10_000);
+    currentResult = synthetic(await rpc('airport:KORD'), currentResult, 100, hostT0, simulationNow);
+    await queue(currentResult);
     await hostFrame.locator('#area').selectOption('airport:KORD');
     await waitFor(page, () => { const state = document.getElementById('radar').contentWindow.inboundRadarProof.read(); return state.areaId === 'airport:KORD' && !state.refreshInFlight; });
-    const ord = await hostCapture('T+18 Chicago to ORD'); assert.equal(ord.nextPollAt, initialDeadline);
+    const ord = await hostCapture('T+10 Chicago to ORD with shared trajectory'); assert.equal(ord.nextPollAt, initialDeadline);
 
-    await queue(synthetic(await rpc('airport:KORD'), currentResult, 100, hostT0 + 800, hostT0 + 20_000));
+    currentResult = synthetic(await rpc('airport:KORD'), currentResult, 100, hostT0, hostT0 + 20_000);
+    await queue(currentResult);
     await advanceHostTo(20_000);
     await waitFor(page, calls => document.getElementById('radar').contentWindow.inboundRadarProof.read().refreshCalls > calls, ord.refreshCalls);
-    const same20 = await hostCapture('T+20 same-version cadence edge');
+    const same20 = await hostCapture('T+20 normal request returns the unchanged trajectory');
     assert.equal(same20.nextPollKind, 'short-retry'); assert.equal(same20.nextPollAt, hostT0 + 23_000);
 
     await advanceHostTo(22_900);
-    currentResult = synthetic(await rpc('airport:KORD'), null, 101, hostT0 + 23_000, hostT0 + 23_000);
+    currentResult = synthetic(await rpc('airport:KORD'), currentResult, 100, hostT0, hostT0 + 23_000);
     await queue(currentResult);
     await advanceHostTo(23_100);
-    await waitFor(page, () => document.getElementById('radar').contentWindow.inboundRadarProof.read().collectionVersion === 101);
-    const fresh23 = await hostCapture('T+23 bounded retry accepts fresh version');
-    assert.equal(fresh23.nextPollKind, 'normal'); assert.ok(fresh23.aircraft.every(target => !target.stopped));
+    await waitFor(page, fires => document.getElementById('radar').contentWindow.inboundRadarProof.read().shortRetryFires > fires, same20.shortRetryFires);
+    const same23 = await hostCapture('T+23 first short retry also returns the unchanged trajectory');
+    assert.equal(same23.trajectoryKey, published90.trajectoryKey);
 
-    await advanceHostTo(27_000); await select(movingIds[2]);
-    const selectedC = await hostCapture('T+27 select aircraft C'); assert.equal(selectedC.nextPollAt, fresh23.nextPollAt);
-    await advanceHostTo(34_000);
-    await queue(synthetic(await rpc('airport:KMDW'), currentResult, 101, hostT0 + 23_000, simulationNow));
+    await advanceHostTo(25_100);
+    const cap25 = await hostCapture('T+25.1 unchanged trajectory reaches the motion cap');
+    assert.ok(cap25.aircraft.every(target => target.extrapolatedSeconds === 25 && target.stopped));
+    assert.ok(cap25.frameCount > same23.frameCount, 'RAF must continue while bounded aircraft are stopped');
+    assert.equal(cap25.animationScheduled, true);
+
+    let same27 = null;
+    if (expectWatchdogFreeze) {
+      await advanceHostTo(27_100);
+      same27 = await hostCapture('T+27.1 old guard has no second short retry');
+      assert.equal(same27.refreshCalls, cap25.refreshCalls);
+    } else {
+      await advanceHostTo(26_900);
+      currentResult = synthetic(await rpc('airport:KORD'), currentResult, 100, hostT0, hostT0 + 27_000);
+      await queue(currentResult);
+      await advanceHostTo(27_100);
+      await waitFor(page, fires => document.getElementById('radar').contentWindow.inboundRadarProof.read().shortRetryFires > fires, same23.shortRetryFires);
+      same27 = await hostCapture('T+27 second bounded watchdog retry remains unchanged');
+      assert.equal(same27.trajectoryKey, published90.trajectoryKey);
+    }
+
+    await advanceHostTo(29_900);
+    currentResult = synthetic(await rpc('airport:KMDW'), currentResult, 100, hostT0, hostT0 + 30_000);
+    await queue(currentResult);
+    await advanceHostTo(30_000);
     await hostFrame.locator('#area').selectOption('airport:KMDW');
     await waitFor(page, () => { const state = document.getElementById('radar').contentWindow.inboundRadarProof.read(); return state.areaId === 'airport:KMDW' && !state.refreshInFlight; });
-    const mdw = await hostCapture('T+34 ORD to MDW'); assert.equal(mdw.nextPollAt, fresh23.nextPollAt);
+    const mdw30 = await hostCapture('T+30 ORD to MDW returns the same shared trajectory');
+    assert.equal(mdw30.trajectoryKey, published90.trajectoryKey);
 
-    await advanceHostTo(42_000);
-    await queue(synthetic(await rpc('airport:KMDW'), currentResult, 101, hostT0 + 23_000, simulationNow));
-    await hostFrame.locator('#refresh').click();
-    await waitFor(page, calls => document.getElementById('radar').contentWindow.inboundRadarProof.read().refreshCalls > calls, mdw.refreshCalls);
-    const manual = await hostCapture('T+42 manual Refresh');
-    assert.equal(manual.nextPollKind, 'short-retry'); assert.equal(manual.nextPollAt, hostT0 + 45_000);
+    await advanceHostTo(30_500); await select(movingIds[1]);
+    const selected30 = await hostCapture('T+30.5 select aircraft immediately after area change');
+    assert.ok(selected30.aircraft.every(target => target.extrapolatedSeconds === 25 && target.stopped));
+    assert.equal(selected30.animationScheduled, true);
+    assert.ok(selected30.frameCount > cap25.frameCount);
+    assert.equal(selected30.trajectoryKey, published90.trajectoryKey);
+    assert.equal(selected30.nextPollAt, mdw30.nextPollAt, 'selection must not change the meaningful polling deadline');
 
-    await advanceHostTo(44_900);
-    currentResult = synthetic(await rpc('airport:KMDW'), null, 102, hostT0 + 45_000, hostT0 + 45_000);
-    await queue(currentResult); await advanceHostTo(45_100);
-    await waitFor(page, () => document.getElementById('radar').contentWindow.inboundRadarProof.read().collectionVersion === 102);
-    const fresh45 = await hostCapture('T+45 manual bounded retry accepts fresh version');
-    await advanceHostTo(48_000); await select(movingIds[3]);
-    const selectedD = await hostCapture('T+48 select aircraft D'); assert.equal(selectedD.nextPollAt, fresh45.nextPollAt);
+    if (expectWatchdogFreeze) {
+      assert.equal(selected30.shortRetryUsed, true);
+      assert.equal(selected30.shortRetryTrajectoryKey, selected30.trajectoryKey);
+      assert.ok(selected30.nextPollAt - simulationNow > 10_000, 'old normal deadline is significantly later than the capped trajectory');
+      const beforeManualVersion = selected30.collectionVersion;
+      currentResult = synthetic(await rpc('airport:KMDW'), null, 101, simulationNow, simulationNow);
+      await queue(currentResult);
+      await hostFrame.locator('#refresh').click();
+      await waitFor(page, version => document.getElementById('radar').contentWindow.inboundRadarProof.read().collectionVersion === version, 101);
+      const manualResume = await hostCapture('T+30.5 manual Refresh accepts a newer trajectory and resumes motion');
+      assert.equal(manualResume.collectionVersion, beforeManualVersion + 1);
+      assert.ok(manualResume.aircraft.every(target => !target.stopped && target.extrapolatedSeconds < 1));
+      hostLike90Seconds = { durationMs: simulationNow - hostT0, timeline, frozenAtSelection: selected30, resumedBy: 'manual-refresh', resumed: manualResume,
+        authoritativeVersions: [100, 101], meaningfulDeadlineUnchangedBySelections: true,
+        maxPendingRaf: 1, maxPendingPollTimers: manualResume.pollTimers.maxPending, maxPendingAgeTimers: manualResume.ageTimers.maxPending };
+    } else {
+      assert.ok(selected30.nextPollAt <= hostT0 + 31_000, 'area reprojection preserves the earlier watchdog deadline');
+      await advanceHostTo(30_900);
+      currentResult = synthetic(await rpc('airport:KMDW'), null, 101, hostT0 + 31_000, hostT0 + 31_000);
+      await queue(currentResult);
+      await advanceHostTo(31_100);
+      await waitFor(page, version => document.getElementById('radar').contentWindow.inboundRadarProof.read().collectionVersion === version, 101);
+      const automaticResume = await hostCapture('T+31 bounded watchdog accepts a newer trajectory without manual Refresh');
+      assert.ok(automaticResume.aircraft.every(target => !target.stopped && target.extrapolatedSeconds < 1));
+      assert.equal(automaticResume.selectedRadarId, selected30.selectedRadarId);
 
-    await advanceTo(fresh45.nextPollAt - 100);
-    currentResult = synthetic(await rpc('airport:KMDW'), null, 103, fresh45.nextPollAt, fresh45.nextPollAt);
-    await queue(currentResult); await advanceTo(fresh45.nextPollAt + 100);
-    await waitFor(page, () => document.getElementById('radar').contentWindow.inboundRadarProof.read().collectionVersion === 103);
-    const final65 = await hostCapture('T+65 normal cadence accepts fresh version');
-    assert.ok(simulationNow - hostT0 >= 65_000);
-    assert.ok(timeline.every(sample => sample.animationScheduled));
-    assert.ok(timeline.every(sample => !sample.aircraft.length || sample.aircraft.some(target => !target.stopped)));
-    assert.equal(final65.pollTimers.maxPending, 1); assert.equal(final65.ageTimers.maxPending, 1);
-    assert.deepEqual(timeline.filter(sample => /fresh version/.test(sample.label) || /publication|normal cadence/.test(sample.label)).map(sample => sample.collectionVersion), [100, 101, 102, 103]);
+      await advanceHostTo(35_000); await select(movingIds[2]);
+      const selectedC = await hostCapture('T+35 select aircraft C'); assert.equal(selectedC.nextPollAt, automaticResume.nextPollAt);
+      await advanceHostTo(40_000); await hostFrame.locator('#view-flights').click();
+      const flights40 = await hostCapture('T+40 Radar to Flights'); assert.equal(flights40.animationScheduled, true);
+      await advanceHostTo(42_000); await hostFrame.locator('#view-radar').click();
+      const radar42 = await hostCapture('T+42 Flights to Radar'); assert.equal(radar42.animationScheduled, true);
 
-    await hostFrame.locator('#pause').click();
-    const stoppedAnchor = (await read()).positions.find(target => target.radarId === movingIds[0]);
-    await advanceTo(Date.parse(stoppedAnchor.observedAt) + 25_100);
-    const genuinelyStopped = await hostCapture('Backend stopped: unchanged fix reaches the 25-second safety cap');
-    const stoppedDisplay = genuinelyStopped.aircraft.find(target => target.radarId === movingIds[0]);
-    assert.equal(stoppedDisplay.extrapolatedSeconds, 25); assert.equal(stoppedDisplay.stopped, true);
-    assert.equal(genuinelyStopped.animationScheduled, true);
-    hostLike65Seconds = { durationMs: simulationNow - hostT0, timeline, safetyCap: genuinelyStopped,
-      authoritativeVersions: [100, 101, 102, 103], meaningfulDeadlineUnchangedBySelections: true,
-      maxPendingRaf: 1, maxPendingPollTimers: final65.pollTimers.maxPending, maxPendingAgeTimers: final65.ageTimers.maxPending };
+      await advanceHostTo(50_900);
+      currentResult = synthetic(await rpc('airport:KMDW'), null, 102, hostT0 + 51_000, hostT0 + 51_000);
+      await queue(currentResult); await advanceHostTo(51_100);
+      await waitFor(page, version => document.getElementById('radar').contentWindow.inboundRadarProof.read().collectionVersion === version, 102);
+      const fresh51 = await hostCapture('T+51 normal cadence accepts fresh trajectory');
+      assert.ok(Math.abs(fresh51.nextPollAt - (hostT0 + 71_000)) <= 100);
+
+      await advanceHostTo(56_000); await select(movingIds[3]);
+      const selectedD = await hostCapture('T+56 select aircraft D'); assert.equal(selectedD.nextPollAt, fresh51.nextPollAt);
+      await advanceHostTo(70_000);
+      currentResult = synthetic(await rpc('airport:KMDW'), null, 103, simulationNow, simulationNow);
+      await queue(currentResult); await hostFrame.locator('#refresh').click();
+      await waitFor(page, version => document.getElementById('radar').contentWindow.inboundRadarProof.read().collectionVersion === version, 103);
+      const manualControl = await hostCapture('T+70 manual Refresh control accepts fresh trajectory');
+      assert.ok(manualControl.aircraft.every(target => !target.stopped));
+
+      await advanceHostTo(75_000); await select(movingIds[0]);
+      const selectedE = await hostCapture('T+75 select aircraft A again'); assert.equal(selectedE.nextPollAt, manualControl.nextPollAt);
+      await advanceHostTo(89_900);
+      currentResult = synthetic(await rpc('airport:KMDW'), null, 104, hostT0 + 90_000, hostT0 + 90_000);
+      await queue(currentResult); await advanceHostTo(90_100);
+      await waitFor(page, version => document.getElementById('radar').contentWindow.inboundRadarProof.read().collectionVersion === version, 104);
+      const final90 = await hostCapture('T+90 normal cadence remains healthy');
+      assert.ok(simulationNow - hostT0 >= 90_000);
+      assert.ok(timeline.every(sample => sample.animationScheduled));
+      assert.ok(timeline.filter(sample => sample.at >= automaticResume.at).every(sample => !sample.aircraft.length || sample.aircraft.some(target => !target.stopped)));
+      assert.equal(final90.pollTimers.maxPending, 1); assert.equal(final90.ageTimers.maxPending, 1);
+      hostLike90Seconds = { durationMs: simulationNow - hostT0, timeline, safetyCap: cap25, resumedBy: 'automatic-watchdog', resumed: automaticResume,
+        manualRefreshControl: manualControl, authoritativeVersions: [100, 101, 102, 103, 104], meaningfulDeadlineUnchangedBySelections: true,
+        maxPendingRaf: 1, maxPendingPollTimers: final90.pollTimers.maxPending, maxPendingAgeTimers: final90.ageTimers.maxPending };
+    }
   }
 
   const diagnostics = service.diagnostics();
   assert.equal(diagnostics.providerApiCalls, 0); assert.equal(diagnostics.productionApiCalls, 0); assert.equal(diagnostics.productionDbAccess, 0);
-  const result = { ok: true, expected: expectGap ? 'baseline-gap' : 'bounded-retry-fix', policyTimeline: {
+  const result = { ok: true, expected: expectGap ? 'baseline-gap' : expectWatchdogFreeze ? 'motion-watchdog-before-fix' : 'motion-watchdog-fix', policyTimeline: {
     clientDeadlineArmedAt: new Date(clientT0).toISOString(), publicationAt: new Date(clientT0 + 800).toISOString(),
     scheduledRequestAt: new Date(clientT0 + 20_000).toISOString(), retryOpportunityAt: new Date(clientT0 + 23_000).toISOString(),
-    originalMotionCapAt: new Date(clientT0 + 25_800).toISOString(),
+    originalMotionCapAt: new Date(clientT0 + 25_000).toISOString(),
   }, captures: [armed, published, selectionAt19, sameAtTwenty, beforeRetry, afterRetry, selectionAt24, afterBound], remainingScriptedResults,
-    boundedSameRetry, hostLike65Seconds, isolation: { aviationProviderCalls: stats.aviationProviderCalls, productionApiCalls: stats.productionApiCalls,
+    boundedSameRetry, hostLike90Seconds, isolation: { aviationProviderCalls: stats.aviationProviderCalls, productionApiCalls: stats.productionApiCalls,
       productionDbAccess: stats.productionDbAccess, serviceProviderApiCalls: diagnostics.providerApiCalls,
       serviceProductionApiCalls: diagnostics.productionApiCalls, serviceProductionDbAccess: diagnostics.productionDbAccess } };
-  const output = resolve(evidenceDirectory, expectGap ? 'transient-gap-before-fix.json' : 'transient-gap-after-fix.json');
+  const output = resolve(evidenceDirectory, expectGap ? 'transient-gap-before-fix.json' : expectWatchdogFreeze ? 'motion-watchdog-before-fix.json' : 'motion-watchdog-after-fix.json');
   writeFileSync(output, JSON.stringify(result, null, 2) + '\n');
   console.log(JSON.stringify({ ok: true, expected: result.expected, output, finalVersion: afterBound.collectionVersion,
     rafAdvancedAtCap: afterBound.frameCount > framesBeforeBound, allStoppedAtCap: afterBound.aircraft.every(target => target.stopped) }));

@@ -512,16 +512,16 @@
       {
         "label": "Retained-deadline authoritative fix",
         "before": {
-          "frameCount": 129,
+          "frameCount": 130,
           "displayPosition": {
-            "latitude": 41.94618268884264,
-            "longitude": -87.78162113375112,
-            "extrapolatedSeconds": 4,
+            "latitude": 41.9577295603147,
+            "longitude": -87.77539261846323,
+            "extrapolatedSeconds": 12,
             "stopped": false
           },
           "raf": {
-            "scheduled": 130,
-            "fired": 129,
+            "scheduled": 131,
+            "fired": 130,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -529,23 +529,23 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 2
+            "fired": 3
           },
           "ageTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 4
+            "fired": 5
           },
           "hostAgeTimers": {
-            "scheduled": 6,
-            "fired": 4,
-            "cancelled": 5,
+            "scheduled": 7,
+            "fired": 5,
+            "cancelled": 6,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 4,
+          "refreshCalls": 5,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -553,26 +553,26 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
           "stateWrites": 3,
           "globalsEvents": 2,
           "hostEchoEvents": 2,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 7
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 8
         },
         "after": {
-          "frameCount": 160,
+          "frameCount": 161,
           "displayPosition": {
-            "latitude": 41.945706055215865,
-            "longitude": -87.78184485564407,
-            "extrapolatedSeconds": 4.496,
+            "latitude": 41.95722549484303,
+            "longitude": -87.77543032423353,
+            "extrapolatedSeconds": 12.496,
             "stopped": false
           },
           "raf": {
-            "scheduled": 161,
-            "fired": 160,
+            "scheduled": 162,
+            "fired": 161,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -580,23 +580,23 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 2
+            "fired": 3
           },
           "ageTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 4
+            "fired": 5
           },
           "hostAgeTimers": {
-            "scheduled": 6,
-            "fired": 4,
-            "cancelled": 5,
+            "scheduled": 7,
+            "fired": 5,
+            "cancelled": 6,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 4,
+          "refreshCalls": 5,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -604,30 +604,30 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
           "stateWrites": 3,
           "globalsEvents": 2,
           "hostEchoEvents": 2,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 7
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 8
         },
         "frameDelta": 31
       },
       {
         "label": "MDW while tool response is held",
         "before": {
-          "frameCount": 160,
+          "frameCount": 161,
           "displayPosition": {
-            "latitude": 41.945702211394526,
-            "longitude": -87.78184665983929,
-            "extrapolatedSeconds": 4.5,
+            "latitude": 41.95722142979886,
+            "longitude": -87.77543062830989,
+            "extrapolatedSeconds": 12.5,
             "stopped": false
           },
           "raf": {
-            "scheduled": 161,
-            "fired": 160,
+            "scheduled": 162,
+            "fired": 161,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -635,23 +635,23 @@
           "pollTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 2
+            "fired": 3
           },
           "ageTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 4
+            "fired": 5
           },
           "hostAgeTimers": {
-            "scheduled": 6,
-            "fired": 4,
-            "cancelled": 6,
+            "scheduled": 7,
+            "fired": 5,
+            "cancelled": 7,
             "pending": 0,
             "maxPending": 1
           },
           "pollScheduled": false,
           "refreshInFlight": true,
-          "refreshCalls": 4,
+          "refreshCalls": 5,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -659,26 +659,26 @@
           "requestedAreaId": "airport:KMDW",
           "areaId": "airport:KORD",
           "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
           "stateWrites": 4,
           "globalsEvents": 3,
           "hostEchoEvents": 3,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 8
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 9
         },
         "after": {
-          "frameCount": 191,
+          "frameCount": 192,
           "displayPosition": {
-            "latitude": 41.94522942115479,
-            "longitude": -87.78206857419195,
-            "extrapolatedSeconds": 4.992,
+            "latitude": 41.95672142935902,
+            "longitude": -87.77546802940742,
+            "extrapolatedSeconds": 12.992,
             "stopped": false
           },
           "raf": {
-            "scheduled": 192,
-            "fired": 191,
+            "scheduled": 193,
+            "fired": 192,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -686,23 +686,23 @@
           "pollTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 2
+            "fired": 3
           },
           "ageTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 4
+            "fired": 5
           },
           "hostAgeTimers": {
-            "scheduled": 6,
-            "fired": 4,
-            "cancelled": 6,
+            "scheduled": 7,
+            "fired": 5,
+            "cancelled": 7,
             "pending": 0,
             "maxPending": 1
           },
           "pollScheduled": false,
           "refreshInFlight": true,
-          "refreshCalls": 4,
+          "refreshCalls": 5,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -710,30 +710,30 @@
           "requestedAreaId": "airport:KMDW",
           "areaId": "airport:KORD",
           "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
           "stateWrites": 4,
           "globalsEvents": 3,
           "hostEchoEvents": 3,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 8
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 9
         },
         "frameDelta": 31
       },
       {
         "label": "MDW accepted and reprojected",
         "before": {
-          "frameCount": 191,
+          "frameCount": 192,
           "displayPosition": {
-            "latitude": 41.945221733505086,
-            "longitude": -87.78207218252822,
-            "extrapolatedSeconds": 5,
+            "latitude": 41.956713299270476,
+            "longitude": -87.77546863755049,
+            "extrapolatedSeconds": 13,
             "stopped": false
           },
           "raf": {
-            "scheduled": 192,
-            "fired": 191,
+            "scheduled": 193,
+            "fired": 192,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -741,23 +741,23 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 2
+            "fired": 3
           },
           "ageTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 4
+            "fired": 5
           },
           "hostAgeTimers": {
-            "scheduled": 7,
-            "fired": 4,
-            "cancelled": 6,
+            "scheduled": 8,
+            "fired": 5,
+            "cancelled": 7,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 5,
+          "refreshCalls": 6,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -765,26 +765,26 @@
           "requestedAreaId": "airport:KMDW",
           "areaId": "airport:KMDW",
           "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
           "stateWrites": 4,
           "globalsEvents": 3,
           "hostEchoEvents": 3,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
         },
         "after": {
-          "frameCount": 222,
+          "frameCount": 223,
           "displayPosition": {
-            "latitude": 41.94475278665944,
-            "longitude": -87.78229228939489,
-            "extrapolatedSeconds": 5.488,
+            "latitude": 41.956217363862685,
+            "longitude": -87.7755057339848,
+            "extrapolatedSeconds": 13.488,
             "stopped": false
           },
           "raf": {
-            "scheduled": 223,
-            "fired": 222,
+            "scheduled": 224,
+            "fired": 223,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -792,23 +792,23 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 2
+            "fired": 3
           },
           "ageTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 4
+            "fired": 5
           },
           "hostAgeTimers": {
-            "scheduled": 7,
-            "fired": 4,
-            "cancelled": 6,
+            "scheduled": 8,
+            "fired": 5,
+            "cancelled": 7,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 5,
+          "refreshCalls": 6,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -816,30 +816,30 @@
           "requestedAreaId": "airport:KMDW",
           "areaId": "airport:KMDW",
           "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
           "stateWrites": 4,
           "globalsEvents": 3,
           "hostEchoEvents": 3,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
         },
         "frameDelta": 31
       },
       {
         "label": "Unselected aircraft after second selection",
         "before": {
-          "frameCount": 222,
+          "frameCount": 223,
           "displayPosition": {
-            "latitude": 41.944741255174335,
-            "longitude": -87.78229770181804,
-            "extrapolatedSeconds": 5.5,
+            "latitude": 41.956205168729554,
+            "longitude": -87.77550664618497,
+            "extrapolatedSeconds": 13.5,
             "stopped": false
           },
           "raf": {
-            "scheduled": 223,
-            "fired": 222,
+            "scheduled": 224,
+            "fired": 223,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -847,58 +847,7 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 2
-          },
-          "ageTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 4
-          },
-          "hostAgeTimers": {
-            "scheduled": 7,
-            "fired": 4,
-            "cancelled": 6,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollScheduled": true,
-          "refreshInFlight": false,
-          "refreshCalls": 5,
-          "paused": false,
-          "documentHidden": false,
-          "pageInactive": false,
-          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
-          "requestedAreaId": "airport:KMDW",
-          "areaId": "airport:KMDW",
-          "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
-          "health": "ok",
-          "stateWrites": 5,
-          "globalsEvents": 4,
-          "hostEchoEvents": 4,
-          "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
-        },
-        "after": {
-          "frameCount": 254,
-          "displayPosition": {
-            "latitude": 41.944260776402274,
-            "longitude": -87.78252321770879,
-            "extrapolatedSeconds": 6,
-            "stopped": false
-          },
-          "raf": {
-            "scheduled": 255,
-            "fired": 254,
-            "cancelled": 0,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 2
+            "fired": 3
           },
           "ageTimers": {
             "pending": 1,
@@ -906,15 +855,15 @@
             "fired": 5
           },
           "hostAgeTimers": {
-            "scheduled": 7,
+            "scheduled": 8,
             "fired": 5,
-            "cancelled": 6,
+            "cancelled": 7,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 5,
+          "refreshCalls": 6,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -922,30 +871,81 @@
           "requestedAreaId": "airport:KMDW",
           "areaId": "airport:KMDW",
           "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
           "stateWrites": 5,
           "globalsEvents": 4,
           "hostEchoEvents": 4,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
+        },
+        "after": {
+          "frameCount": 255,
+          "displayPosition": {
+            "latitude": 41.9556970381761,
+            "longitude": -87.77554465421338,
+            "extrapolatedSeconds": 14,
+            "stopped": false
+          },
+          "raf": {
+            "scheduled": 256,
+            "fired": 255,
+            "cancelled": 0,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 3
+          },
+          "ageTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 6
+          },
+          "hostAgeTimers": {
+            "scheduled": 8,
+            "fired": 6,
+            "cancelled": 7,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollScheduled": true,
+          "refreshInFlight": false,
+          "refreshCalls": 6,
+          "paused": false,
+          "documentHidden": false,
+          "pageInactive": false,
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+          "requestedAreaId": "airport:KMDW",
+          "areaId": "airport:KMDW",
+          "collectionVersion": 4,
+          "observedAt": "2026-10-04T03:01:06.000Z",
+          "health": "ok",
+          "stateWrites": 5,
+          "globalsEvents": 4,
+          "hostEchoEvents": 4,
+          "hostContextEvents": 0,
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
         },
         "frameDelta": 32
       },
       {
         "label": "New selected aircraft",
         "before": {
-          "frameCount": 254,
+          "frameCount": 255,
           "displayPosition": {
-            "latitude": 41.99978050078728,
-            "longitude": -87.78415384466257,
-            "extrapolatedSeconds": 6,
+            "latitude": 42.01094757200224,
+            "longitude": -87.78999410389002,
+            "extrapolatedSeconds": 14,
             "stopped": false
           },
           "raf": {
-            "scheduled": 255,
-            "fired": 254,
+            "scheduled": 256,
+            "fired": 255,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -953,23 +953,23 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 2
+            "fired": 3
           },
           "ageTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 5
+            "fired": 6
           },
           "hostAgeTimers": {
-            "scheduled": 7,
-            "fired": 5,
-            "cancelled": 6,
+            "scheduled": 8,
+            "fired": 6,
+            "cancelled": 7,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 5,
+          "refreshCalls": 6,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -977,26 +977,26 @@
           "requestedAreaId": "airport:KMDW",
           "areaId": "airport:KMDW",
           "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
           "stateWrites": 5,
           "globalsEvents": 4,
           "hostEchoEvents": 4,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
         },
         "after": {
-          "frameCount": 285,
+          "frameCount": 286,
           "displayPosition": {
-            "latitude": 41.99934861917505,
-            "longitude": -87.78386617301464,
-            "extrapolatedSeconds": 6.496,
+            "latitude": 42.010590835389436,
+            "longitude": -87.78955807009692,
+            "extrapolatedSeconds": 14.496,
             "stopped": false
           },
           "raf": {
-            "scheduled": 286,
-            "fired": 285,
+            "scheduled": 287,
+            "fired": 286,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -1004,23 +1004,23 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 2
+            "fired": 3
           },
           "ageTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 5
+            "fired": 6
           },
           "hostAgeTimers": {
-            "scheduled": 7,
-            "fired": 5,
-            "cancelled": 6,
+            "scheduled": 8,
+            "fired": 6,
+            "cancelled": 7,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 5,
+          "refreshCalls": 6,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -1028,30 +1028,30 @@
           "requestedAreaId": "airport:KMDW",
           "areaId": "airport:KMDW",
           "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
           "stateWrites": 5,
           "globalsEvents": 4,
           "hostEchoEvents": 4,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
         },
         "frameDelta": 31
       },
       {
         "label": "Stale retained toolOutput rejected",
         "before": {
-          "frameCount": 285,
+          "frameCount": 287,
           "displayPosition": {
-            "latitude": 41.94378029718894,
-            "longitude": -87.78274873020052,
-            "extrapolatedSeconds": 6.5,
+            "latitude": 41.953156385220815,
+            "longitude": -87.77573468526481,
+            "extrapolatedSeconds": 16.5,
             "stopped": false
           },
           "raf": {
-            "scheduled": 286,
-            "fired": 285,
+            "scheduled": 288,
+            "fired": 287,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -1059,270 +1059,7 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 2
-          },
-          "ageTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 5
-          },
-          "hostAgeTimers": {
-            "scheduled": 7,
-            "fired": 5,
-            "cancelled": 6,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollScheduled": true,
-          "refreshInFlight": false,
-          "refreshCalls": 5,
-          "paused": false,
-          "documentHidden": false,
-          "pageInactive": false,
-          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
-          "requestedAreaId": "airport:KMDW",
-          "areaId": "airport:KMDW",
-          "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
-          "health": "ok",
-          "stateWrites": 5,
-          "globalsEvents": 5,
-          "hostEchoEvents": 5,
-          "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
-        },
-        "after": {
-          "frameCount": 316,
-          "displayPosition": {
-            "latitude": 41.94329981753433,
-            "longitude": -87.78297423929354,
-            "extrapolatedSeconds": 7,
-            "stopped": false
-          },
-          "raf": {
-            "scheduled": 317,
-            "fired": 316,
-            "cancelled": 0,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 2
-          },
-          "ageTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 6
-          },
-          "hostAgeTimers": {
-            "scheduled": 7,
-            "fired": 6,
-            "cancelled": 6,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollScheduled": true,
-          "refreshInFlight": false,
-          "refreshCalls": 5,
-          "paused": false,
-          "documentHidden": false,
-          "pageInactive": false,
-          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
-          "requestedAreaId": "airport:KMDW",
-          "areaId": "airport:KMDW",
-          "collectionVersion": 4,
-          "observedAt": "2026-10-04T03:01:26.000Z",
-          "health": "ok",
-          "stateWrites": 5,
-          "globalsEvents": 5,
-          "hostEchoEvents": 5,
-          "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
-        },
-        "frameDelta": 31
-      },
-      {
-        "label": "Cold-isolate T1/v1 accepted; older T0/v999 rejected",
-        "before": {
-          "frameCount": 316,
-          "displayPosition": {
-            "latitude": 41.94329981753433,
-            "longitude": -87.78297423929354,
-            "extrapolatedSeconds": 7,
-            "stopped": false
-          },
-          "raf": {
-            "scheduled": 317,
-            "fired": 316,
-            "cancelled": 0,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 2
-          },
-          "ageTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 6
-          },
-          "hostAgeTimers": {
-            "scheduled": 7,
-            "fired": 6,
-            "cancelled": 6,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollScheduled": true,
-          "refreshInFlight": false,
-          "refreshCalls": 5,
-          "paused": false,
-          "documentHidden": false,
-          "pageInactive": false,
-          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
-          "requestedAreaId": "airport:KMDW",
-          "areaId": "airport:KMDW",
-          "collectionVersion": 1,
-          "observedAt": "2026-10-04T03:01:26.000Z",
-          "health": "ok",
-          "stateWrites": 5,
-          "globalsEvents": 5,
-          "hostEchoEvents": 5,
-          "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
-        },
-        "after": {
-          "frameCount": 347,
-          "displayPosition": {
-            "latitude": 41.94283086896593,
-            "longitude": -87.7831943328909,
-            "extrapolatedSeconds": 7.488,
-            "stopped": false
-          },
-          "raf": {
-            "scheduled": 348,
-            "fired": 347,
-            "cancelled": 0,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 2
-          },
-          "ageTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 6
-          },
-          "hostAgeTimers": {
-            "scheduled": 7,
-            "fired": 6,
-            "cancelled": 6,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollScheduled": true,
-          "refreshInFlight": false,
-          "refreshCalls": 5,
-          "paused": false,
-          "documentHidden": false,
-          "pageInactive": false,
-          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
-          "requestedAreaId": "airport:KMDW",
-          "areaId": "airport:KMDW",
-          "collectionVersion": 1,
-          "observedAt": "2026-10-04T03:01:26.000Z",
-          "health": "ok",
-          "stateWrites": 5,
-          "globalsEvents": 5,
-          "hostEchoEvents": 5,
-          "hostContextEvents": 0,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
-        },
-        "frameDelta": 31
-      },
-      {
-        "label": "Host context changed",
-        "before": {
-          "frameCount": 347,
-          "displayPosition": {
-            "latitude": 41.94281933743846,
-            "longitude": -87.78319974498777,
-            "extrapolatedSeconds": 7.5,
-            "stopped": false
-          },
-          "raf": {
-            "scheduled": 348,
-            "fired": 347,
-            "cancelled": 0,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 2
-          },
-          "ageTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 6
-          },
-          "hostAgeTimers": {
-            "scheduled": 7,
-            "fired": 6,
-            "cancelled": 6,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollScheduled": true,
-          "refreshInFlight": false,
-          "refreshCalls": 5,
-          "paused": false,
-          "documentHidden": false,
-          "pageInactive": false,
-          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
-          "requestedAreaId": "airport:KMDW",
-          "areaId": "airport:KMDW",
-          "collectionVersion": 1,
-          "observedAt": "2026-10-04T03:01:26.000Z",
-          "health": "ok",
-          "stateWrites": 5,
-          "globalsEvents": 5,
-          "hostEchoEvents": 5,
-          "hostContextEvents": 2,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
-        },
-        "after": {
-          "frameCount": 379,
-          "displayPosition": {
-            "latitude": 41.94233885690135,
-            "longitude": -87.78342524728339,
-            "extrapolatedSeconds": 8,
-            "stopped": false
-          },
-          "raf": {
-            "scheduled": 380,
-            "fired": 379,
-            "cancelled": 0,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 2
+            "fired": 3
           },
           "ageTimers": {
             "pending": 1,
@@ -1330,15 +1067,121 @@
             "fired": 7
           },
           "hostAgeTimers": {
-            "scheduled": 7,
+            "scheduled": 8,
             "fired": 7,
-            "cancelled": 6,
+            "cancelled": 7,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 5,
+          "refreshCalls": 6,
+          "paused": false,
+          "documentHidden": false,
+          "pageInactive": false,
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+          "requestedAreaId": "airport:KMDW",
+          "areaId": "airport:KMDW",
+          "collectionVersion": 4,
+          "observedAt": "2026-10-04T03:01:06.000Z",
+          "health": "ok",
+          "stateWrites": 5,
+          "globalsEvents": 5,
+          "hostEchoEvents": 5,
+          "hostContextEvents": 0,
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
+        },
+        "after": {
+          "frameCount": 318,
+          "displayPosition": {
+            "latitude": 41.952656384682314,
+            "longitude": -87.77577208159164,
+            "extrapolatedSeconds": 16.992,
+            "stopped": false
+          },
+          "raf": {
+            "scheduled": 319,
+            "fired": 318,
+            "cancelled": 0,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 3
+          },
+          "ageTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 7
+          },
+          "hostAgeTimers": {
+            "scheduled": 8,
+            "fired": 7,
+            "cancelled": 7,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollScheduled": true,
+          "refreshInFlight": false,
+          "refreshCalls": 6,
+          "paused": false,
+          "documentHidden": false,
+          "pageInactive": false,
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+          "requestedAreaId": "airport:KMDW",
+          "areaId": "airport:KMDW",
+          "collectionVersion": 4,
+          "observedAt": "2026-10-04T03:01:06.000Z",
+          "health": "ok",
+          "stateWrites": 5,
+          "globalsEvents": 5,
+          "hostEchoEvents": 5,
+          "hostContextEvents": 0,
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
+        },
+        "frameDelta": 31
+      },
+      {
+        "label": "Cold-isolate T1/v1 accepted; older T0/v999 rejected",
+        "before": {
+          "frameCount": 318,
+          "displayPosition": {
+            "latitude": 41.95264825459215,
+            "longitude": -87.77577268965717,
+            "extrapolatedSeconds": 17,
+            "stopped": false
+          },
+          "raf": {
+            "scheduled": 319,
+            "fired": 318,
+            "cancelled": 0,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 3
+          },
+          "ageTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 7
+          },
+          "hostAgeTimers": {
+            "scheduled": 8,
+            "fired": 7,
+            "cancelled": 7,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollScheduled": true,
+          "refreshInFlight": false,
+          "refreshCalls": 6,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -1346,30 +1189,26 @@
           "requestedAreaId": "airport:KMDW",
           "areaId": "airport:KMDW",
           "collectionVersion": 1,
-          "observedAt": "2026-10-04T03:01:26.000Z",
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
           "stateWrites": 5,
           "globalsEvents": 5,
           "hostEchoEvents": 5,
-          "hostContextEvents": 2,
-          "nextPollAt": 1791082910000,
-          "pollScheduleEpoch": 9
+          "hostContextEvents": 0,
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
         },
-        "frameDelta": 32
-      },
-      {
-        "label": "New-area lifecycle survives late old-poll completion",
-        "before": {
-          "frameCount": 411,
+        "after": {
+          "frameCount": 349,
           "displayPosition": {
-            "latitude": 41.92826747383929,
-            "longitude": -87.79589719615637,
-            "extrapolatedSeconds": 4.496,
+            "latitude": 41.952140123950954,
+            "longitude": -87.77581069344353,
+            "extrapolatedSeconds": 17.5,
             "stopped": false
           },
           "raf": {
-            "scheduled": 412,
-            "fired": 411,
+            "scheduled": 350,
+            "fired": 349,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -1393,34 +1232,38 @@
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 7,
+          "refreshCalls": 6,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
           "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
-          "requestedAreaId": "airport:KORD",
-          "areaId": "airport:KORD",
-          "collectionVersion": 5,
-          "observedAt": "2026-10-04T03:01:46.000Z",
+          "requestedAreaId": "airport:KMDW",
+          "areaId": "airport:KMDW",
+          "collectionVersion": 1,
+          "observedAt": "2026-10-04T03:01:06.000Z",
           "health": "ok",
-          "stateWrites": 6,
-          "globalsEvents": 6,
-          "hostEchoEvents": 6,
-          "hostContextEvents": 2,
-          "nextPollAt": 1791082930000,
-          "pollScheduleEpoch": 11
+          "stateWrites": 5,
+          "globalsEvents": 5,
+          "hostEchoEvents": 5,
+          "hostContextEvents": 0,
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
         },
-        "after": {
-          "frameCount": 442,
+        "frameDelta": 31
+      },
+      {
+        "label": "Host context changed",
+        "before": {
+          "frameCount": 349,
           "displayPosition": {
-            "latitude": 41.92784883156964,
-            "longitude": -87.79629568628604,
-            "extrapolatedSeconds": 5,
+            "latitude": 41.952140123950954,
+            "longitude": -87.77581069344353,
+            "extrapolatedSeconds": 17.5,
             "stopped": false
           },
           "raf": {
-            "scheduled": 443,
-            "fired": 442,
+            "scheduled": 350,
+            "fired": 349,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -1429,6 +1272,112 @@
             "pending": 1,
             "maxPending": 1,
             "fired": 3
+          },
+          "ageTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 8
+          },
+          "hostAgeTimers": {
+            "scheduled": 8,
+            "fired": 8,
+            "cancelled": 7,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollScheduled": true,
+          "refreshInFlight": false,
+          "refreshCalls": 6,
+          "paused": false,
+          "documentHidden": false,
+          "pageInactive": false,
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+          "requestedAreaId": "airport:KMDW",
+          "areaId": "airport:KMDW",
+          "collectionVersion": 1,
+          "observedAt": "2026-10-04T03:01:06.000Z",
+          "health": "ok",
+          "stateWrites": 5,
+          "globalsEvents": 5,
+          "hostEchoEvents": 5,
+          "hostContextEvents": 2,
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
+        },
+        "after": {
+          "frameCount": 381,
+          "displayPosition": {
+            "latitude": 41.951631993297234,
+            "longitude": -87.77584869662405,
+            "extrapolatedSeconds": 18,
+            "stopped": false
+          },
+          "raf": {
+            "scheduled": 382,
+            "fired": 381,
+            "cancelled": 0,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 3
+          },
+          "ageTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 8
+          },
+          "hostAgeTimers": {
+            "scheduled": 8,
+            "fired": 8,
+            "cancelled": 7,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollScheduled": true,
+          "refreshInFlight": false,
+          "refreshCalls": 6,
+          "paused": false,
+          "documentHidden": false,
+          "pageInactive": false,
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+          "requestedAreaId": "airport:KMDW",
+          "areaId": "airport:KMDW",
+          "collectionVersion": 1,
+          "observedAt": "2026-10-04T03:01:06.000Z",
+          "health": "ok",
+          "stateWrites": 5,
+          "globalsEvents": 5,
+          "hostEchoEvents": 5,
+          "hostContextEvents": 2,
+          "nextPollAt": 1791082898000,
+          "pollScheduleEpoch": 10
+        },
+        "frameDelta": 32
+      },
+      {
+        "label": "New-area lifecycle survives late old-poll completion",
+        "before": {
+          "frameCount": 413,
+          "displayPosition": {
+            "latitude": 41.93801835609153,
+            "longitude": -87.7854528112631,
+            "extrapolatedSeconds": 12.496,
+            "stopped": false
+          },
+          "raf": {
+            "scheduled": 414,
+            "fired": 413,
+            "cancelled": 0,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 4
           },
           "ageTimers": {
             "pending": 1,
@@ -1436,15 +1385,15 @@
             "fired": 9
           },
           "hostAgeTimers": {
-            "scheduled": 8,
+            "scheduled": 9,
             "fired": 9,
-            "cancelled": 7,
+            "cancelled": 8,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 7,
+          "refreshCalls": 8,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -1452,30 +1401,81 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 5,
-          "observedAt": "2026-10-04T03:01:46.000Z",
+          "observedAt": "2026-10-04T03:01:26.000Z",
           "health": "ok",
           "stateWrites": 6,
           "globalsEvents": 6,
           "hostEchoEvents": 6,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082930000,
-          "pollScheduleEpoch": 11
+          "nextPollAt": 1791082918000,
+          "pollScheduleEpoch": 12
+        },
+        "after": {
+          "frameCount": 444,
+          "displayPosition": {
+            "latitude": 41.937534027264945,
+            "longitude": -87.78568008333855,
+            "extrapolatedSeconds": 13,
+            "stopped": false
+          },
+          "raf": {
+            "scheduled": 445,
+            "fired": 444,
+            "cancelled": 0,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 4
+          },
+          "ageTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 10
+          },
+          "hostAgeTimers": {
+            "scheduled": 9,
+            "fired": 10,
+            "cancelled": 8,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollScheduled": true,
+          "refreshInFlight": false,
+          "refreshCalls": 8,
+          "paused": false,
+          "documentHidden": false,
+          "pageInactive": false,
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+          "requestedAreaId": "airport:KORD",
+          "areaId": "airport:KORD",
+          "collectionVersion": 5,
+          "observedAt": "2026-10-04T03:01:26.000Z",
+          "health": "ok",
+          "stateWrites": 6,
+          "globalsEvents": 6,
+          "hostEchoEvents": 6,
+          "hostContextEvents": 2,
+          "nextPollAt": 1791082918000,
+          "pollScheduleEpoch": 12
         },
         "frameDelta": 31
       },
       {
         "label": "New authoritative fix resumes motion after boundary race",
         "before": {
-          "frameCount": 475,
+          "frameCount": 477,
           "displayPosition": {
-            "latitude": 41.9143330481609,
-            "longitude": -87.81598950157343,
-            "extrapolatedSeconds": 4.6,
+            "latitude": 41.921535804939154,
+            "longitude": -87.80230403045238,
+            "extrapolatedSeconds": 12.6,
             "stopped": false
           },
           "raf": {
-            "scheduled": 476,
-            "fired": 475,
+            "scheduled": 478,
+            "fired": 477,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -1483,23 +1483,23 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 10
+            "fired": 11
           },
           "hostAgeTimers": {
-            "scheduled": 10,
-            "fired": 10,
-            "cancelled": 9,
+            "scheduled": 12,
+            "fired": 11,
+            "cancelled": 11,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 9,
+          "refreshCalls": 10,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -1507,26 +1507,26 @@
           "requestedAreaId": "airport:KMDW",
           "areaId": "airport:KMDW",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 7,
           "globalsEvents": 7,
           "hostEchoEvents": 7,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082950600,
-          "pollScheduleEpoch": 14
+          "nextPollAt": 1791082938600,
+          "pollScheduleEpoch": 16
         },
         "after": {
-          "frameCount": 506,
+          "frameCount": 508,
           "displayPosition": {
-            "latitude": 41.91402293279164,
-            "longitude": -87.81651089998053,
-            "extrapolatedSeconds": 5.088,
+            "latitude": 41.921130431475696,
+            "longitude": -87.80268978877143,
+            "extrapolatedSeconds": 13.088,
             "stopped": false
           },
           "raf": {
-            "scheduled": 507,
-            "fired": 506,
+            "scheduled": 509,
+            "fired": 508,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -1534,23 +1534,23 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 10
+            "fired": 11
           },
           "hostAgeTimers": {
-            "scheduled": 10,
-            "fired": 10,
-            "cancelled": 9,
+            "scheduled": 12,
+            "fired": 11,
+            "cancelled": 11,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 9,
+          "refreshCalls": 10,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -1558,30 +1558,30 @@
           "requestedAreaId": "airport:KMDW",
           "areaId": "airport:KMDW",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 7,
           "globalsEvents": 7,
           "hostEchoEvents": 7,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082950600,
-          "pollScheduleEpoch": 14
+          "nextPollAt": 1791082938600,
+          "pollScheduleEpoch": 16
         },
         "frameDelta": 31
       },
       {
         "label": "New area survives late manual-refresh continuation",
         "before": {
-          "frameCount": 538,
+          "frameCount": 540,
           "displayPosition": {
-            "latitude": 41.91369756331137,
-            "longitude": -87.81705793548565,
-            "extrapolatedSeconds": 5.6,
+            "latitude": 41.920705120224476,
+            "longitude": -87.8030945135423,
+            "extrapolatedSeconds": 13.6,
             "stopped": false
           },
           "raf": {
-            "scheduled": 539,
-            "fired": 538,
+            "scheduled": 541,
+            "fired": 540,
             "cancelled": 0,
             "pending": 1,
             "maxPending": 1
@@ -1589,58 +1589,7 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 3
-          },
-          "ageTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 10
-          },
-          "hostAgeTimers": {
-            "scheduled": 11,
-            "fired": 10,
-            "cancelled": 10,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollScheduled": true,
-          "refreshInFlight": false,
-          "refreshCalls": 11,
-          "paused": false,
-          "documentHidden": false,
-          "pageInactive": false,
-          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
-          "requestedAreaId": "airport:KORD",
-          "areaId": "airport:KORD",
-          "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
-          "health": "ok",
-          "stateWrites": 8,
-          "globalsEvents": 8,
-          "hostEchoEvents": 8,
-          "hostContextEvents": 2,
-          "nextPollAt": 1791082950600,
-          "pollScheduleEpoch": 16
-        },
-        "after": {
-          "frameCount": 569,
-          "displayPosition": {
-            "latitude": 41.91337981717261,
-            "longitude": -87.81759214446345,
-            "extrapolatedSeconds": 6.1,
-            "stopped": false
-          },
-          "raf": {
-            "scheduled": 570,
-            "fired": 569,
-            "cancelled": 0,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 1,
@@ -1648,15 +1597,15 @@
             "fired": 11
           },
           "hostAgeTimers": {
-            "scheduled": 11,
+            "scheduled": 13,
             "fired": 11,
-            "cancelled": 10,
+            "cancelled": 12,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 11,
+          "refreshCalls": 12,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -1664,30 +1613,81 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 8,
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082950600,
-          "pollScheduleEpoch": 16
+          "nextPollAt": 1791082938600,
+          "pollScheduleEpoch": 18
+        },
+        "after": {
+          "frameCount": 571,
+          "displayPosition": {
+            "latitude": 41.92028977583411,
+            "longitude": -87.80348974736944,
+            "extrapolatedSeconds": 14.1,
+            "stopped": false
+          },
+          "raf": {
+            "scheduled": 572,
+            "fired": 571,
+            "cancelled": 0,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 4
+          },
+          "ageTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 12
+          },
+          "hostAgeTimers": {
+            "scheduled": 13,
+            "fired": 12,
+            "cancelled": 12,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollScheduled": true,
+          "refreshInFlight": false,
+          "refreshCalls": 12,
+          "paused": false,
+          "documentHidden": false,
+          "pageInactive": false,
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+          "requestedAreaId": "airport:KORD",
+          "areaId": "airport:KORD",
+          "collectionVersion": 6,
+          "observedAt": "2026-10-04T03:01:46.000Z",
+          "health": "ok",
+          "stateWrites": 8,
+          "globalsEvents": 8,
+          "hostEchoEvents": 8,
+          "hostContextEvents": 2,
+          "nextPollAt": 1791082938600,
+          "pollScheduleEpoch": 18
         },
         "frameDelta": 31
       },
       {
         "label": "Visibility hidden stops RAF and polling",
         "before": {
-          "frameCount": 569,
+          "frameCount": 571,
           "displayPosition": {
-            "latitude": 41.91337981717261,
-            "longitude": -87.81759214446345,
-            "extrapolatedSeconds": 6.1,
+            "latitude": 41.92028977583411,
+            "longitude": -87.80348974736944,
+            "extrapolatedSeconds": 14.1,
             "stopped": false
           },
           "raf": {
-            "scheduled": 570,
-            "fired": 569,
+            "scheduled": 572,
+            "fired": 571,
             "cancelled": 1,
             "pending": 0,
             "maxPending": 1
@@ -1695,23 +1695,23 @@
           "pollTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 11
+            "fired": 12
           },
           "hostAgeTimers": {
-            "scheduled": 11,
-            "fired": 11,
-            "cancelled": 11,
+            "scheduled": 13,
+            "fired": 12,
+            "cancelled": 13,
             "pending": 0,
             "maxPending": 1
           },
           "pollScheduled": false,
           "refreshInFlight": false,
-          "refreshCalls": 11,
+          "refreshCalls": 12,
           "paused": false,
           "documentHidden": true,
           "pageInactive": false,
@@ -1719,26 +1719,26 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 8,
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082950600,
-          "pollScheduleEpoch": 17
+          "nextPollAt": 1791082938600,
+          "pollScheduleEpoch": 19
         },
         "after": {
-          "frameCount": 569,
+          "frameCount": 571,
           "displayPosition": {
-            "latitude": 41.91337981717261,
-            "longitude": -87.81759214446345,
-            "extrapolatedSeconds": 6.1,
+            "latitude": 41.92028977583411,
+            "longitude": -87.80348974736944,
+            "extrapolatedSeconds": 14.1,
             "stopped": false
           },
           "raf": {
-            "scheduled": 570,
-            "fired": 569,
+            "scheduled": 572,
+            "fired": 571,
             "cancelled": 1,
             "pending": 0,
             "maxPending": 1
@@ -1746,23 +1746,23 @@
           "pollTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 11
+            "fired": 12
           },
           "hostAgeTimers": {
-            "scheduled": 11,
-            "fired": 11,
-            "cancelled": 11,
+            "scheduled": 13,
+            "fired": 12,
+            "cancelled": 13,
             "pending": 0,
             "maxPending": 1
           },
           "pollScheduled": false,
           "refreshInFlight": false,
-          "refreshCalls": 11,
+          "refreshCalls": 12,
           "paused": false,
           "documentHidden": true,
           "pageInactive": false,
@@ -1770,30 +1770,30 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 8,
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082950600,
-          "pollScheduleEpoch": 17
+          "nextPollAt": 1791082938600,
+          "pollScheduleEpoch": 19
         },
         "frameDelta": 0
       },
       {
         "label": "Visibility restored before held refresh completes",
         "before": {
-          "frameCount": 569,
+          "frameCount": 571,
           "displayPosition": {
-            "latitude": 41.913062068557906,
-            "longitude": -87.81812634812235,
-            "extrapolatedSeconds": 6.6,
+            "latitude": 41.91987443008844,
+            "longitude": -87.80388497605156,
+            "extrapolatedSeconds": 14.6,
             "stopped": false
           },
           "raf": {
-            "scheduled": 571,
-            "fired": 569,
+            "scheduled": 573,
+            "fired": 571,
             "cancelled": 1,
             "pending": 1,
             "maxPending": 1
@@ -1801,23 +1801,23 @@
           "pollTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 11
+            "fired": 12
           },
           "hostAgeTimers": {
-            "scheduled": 11,
-            "fired": 11,
-            "cancelled": 11,
+            "scheduled": 13,
+            "fired": 12,
+            "cancelled": 13,
             "pending": 0,
             "maxPending": 1
           },
           "pollScheduled": false,
           "refreshInFlight": true,
-          "refreshCalls": 11,
+          "refreshCalls": 12,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -1825,26 +1825,26 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 8,
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082950600,
-          "pollScheduleEpoch": 18
+          "nextPollAt": 1791082938600,
+          "pollScheduleEpoch": 20
         },
         "after": {
-          "frameCount": 600,
+          "frameCount": 602,
           "displayPosition": {
-            "latitude": 41.91275194352247,
-            "longitude": -87.81864772576466,
-            "extrapolatedSeconds": 7.088,
+            "latitude": 41.91946905133382,
+            "longitude": -87.80427071428414,
+            "extrapolatedSeconds": 15.088,
             "stopped": false
           },
           "raf": {
-            "scheduled": 602,
-            "fired": 600,
+            "scheduled": 604,
+            "fired": 602,
             "cancelled": 1,
             "pending": 1,
             "maxPending": 1
@@ -1852,23 +1852,23 @@
           "pollTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 11
+            "fired": 12
           },
           "hostAgeTimers": {
-            "scheduled": 11,
-            "fired": 11,
-            "cancelled": 11,
+            "scheduled": 13,
+            "fired": 12,
+            "cancelled": 13,
             "pending": 0,
             "maxPending": 1
           },
           "pollScheduled": false,
           "refreshInFlight": true,
-          "refreshCalls": 11,
+          "refreshCalls": 12,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -1876,30 +1876,30 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 8,
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082950600,
-          "pollScheduleEpoch": 18
+          "nextPollAt": 1791082938600,
+          "pollScheduleEpoch": 20
         },
         "frameDelta": 31
       },
       {
         "label": "Transient pagehide suspends without dismissal",
         "state": {
-          "frameCount": 600,
+          "frameCount": 602,
           "displayPosition": {
-            "latitude": 41.91274431746729,
-            "longitude": -87.81866054646252,
-            "extrapolatedSeconds": 7.1,
+            "latitude": 41.91945908298753,
+            "longitude": -87.80428019958873,
+            "extrapolatedSeconds": 15.1,
             "stopped": false
           },
           "raf": {
-            "scheduled": 602,
-            "fired": 600,
+            "scheduled": 604,
+            "fired": 602,
             "cancelled": 2,
             "pending": 0,
             "maxPending": 1
@@ -1907,23 +1907,23 @@
           "pollTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 11
+            "fired": 12
           },
           "hostAgeTimers": {
-            "scheduled": 12,
-            "fired": 11,
-            "cancelled": 12,
+            "scheduled": 14,
+            "fired": 12,
+            "cancelled": 14,
             "pending": 0,
             "maxPending": 1
           },
           "pollScheduled": false,
           "refreshInFlight": false,
-          "refreshCalls": 12,
+          "refreshCalls": 13,
           "paused": false,
           "documentHidden": false,
           "pageInactive": true,
@@ -1931,29 +1931,29 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 8,
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082953100,
-          "pollScheduleEpoch": 20
+          "nextPollAt": 1791082941100,
+          "pollScheduleEpoch": 22
         }
       },
       {
         "label": "Pageshow resumes before held refresh completes",
         "before": {
-          "frameCount": 600,
+          "frameCount": 602,
           "displayPosition": {
-            "latitude": 41.912426563900866,
-            "longitude": -87.81919473948403,
-            "extrapolatedSeconds": 7.6,
+            "latitude": 41.919043734531364,
+            "longitude": -87.80467541798112,
+            "extrapolatedSeconds": 15.6,
             "stopped": false
           },
           "raf": {
-            "scheduled": 603,
-            "fired": 600,
+            "scheduled": 605,
+            "fired": 602,
             "cancelled": 2,
             "pending": 1,
             "maxPending": 1
@@ -1961,23 +1961,23 @@
           "pollTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 11
+            "fired": 12
           },
           "hostAgeTimers": {
-            "scheduled": 12,
-            "fired": 11,
-            "cancelled": 12,
+            "scheduled": 14,
+            "fired": 12,
+            "cancelled": 14,
             "pending": 0,
             "maxPending": 1
           },
           "pollScheduled": false,
           "refreshInFlight": true,
-          "refreshCalls": 12,
+          "refreshCalls": 13,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -1985,26 +1985,26 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 8,
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082953100,
-          "pollScheduleEpoch": 20
+          "nextPollAt": 1791082941100,
+          "pollScheduleEpoch": 22
         },
         "after": {
-          "frameCount": 631,
+          "frameCount": 633,
           "displayPosition": {
-            "latitude": 41.91211134991682,
-            "longitude": -87.81972465370643,
-            "extrapolatedSeconds": 8.096,
+            "latitude": 41.9186317075239,
+            "longitude": -87.80506746954325,
+            "extrapolatedSeconds": 16.096,
             "stopped": false
           },
           "raf": {
-            "scheduled": 634,
-            "fired": 631,
+            "scheduled": 636,
+            "fired": 633,
             "cancelled": 2,
             "pending": 1,
             "maxPending": 1
@@ -2012,23 +2012,23 @@
           "pollTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 0,
             "maxPending": 1,
-            "fired": 11
+            "fired": 12
           },
           "hostAgeTimers": {
-            "scheduled": 12,
-            "fired": 11,
-            "cancelled": 12,
+            "scheduled": 14,
+            "fired": 12,
+            "cancelled": 14,
             "pending": 0,
             "maxPending": 1
           },
           "pollScheduled": false,
           "refreshInFlight": true,
-          "refreshCalls": 12,
+          "refreshCalls": 13,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -2036,30 +2036,30 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 8,
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082953100,
-          "pollScheduleEpoch": 20
+          "nextPollAt": 1791082941100,
+          "pollScheduleEpoch": 22
         },
         "frameDelta": 31
       },
       {
         "label": "Declined fullscreen response",
         "before": {
-          "frameCount": 693,
+          "frameCount": 695,
           "displayPosition": {
-            "latitude": 41.91147328834711,
-            "longitude": -87.82079728663723,
-            "extrapolatedSeconds": 9.1,
+            "latitude": 41.91779768103193,
+            "longitude": -87.80586104229064,
+            "extrapolatedSeconds": 17.1,
             "stopped": false
           },
           "raf": {
-            "scheduled": 696,
-            "fired": 693,
+            "scheduled": 698,
+            "fired": 695,
             "cancelled": 2,
             "pending": 1,
             "maxPending": 1
@@ -2067,164 +2067,7 @@
           "pollTimers": {
             "pending": 1,
             "maxPending": 1,
-            "fired": 3
-          },
-          "ageTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 12
-          },
-          "hostAgeTimers": {
-            "scheduled": 15,
-            "fired": 12,
-            "cancelled": 14,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollScheduled": true,
-          "refreshInFlight": false,
-          "refreshCalls": 15,
-          "paused": false,
-          "documentHidden": false,
-          "pageInactive": false,
-          "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
-          "requestedAreaId": "preset:chicago",
-          "areaId": "preset:chicago",
-          "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
-          "health": "ok",
-          "stateWrites": 13,
-          "globalsEvents": 12,
-          "hostEchoEvents": 12,
-          "hostContextEvents": 2,
-          "nextPollAt": 1791082954100,
-          "pollScheduleEpoch": 24
-        },
-        "after": {
-          "frameCount": 725,
-          "displayPosition": {
-            "latitude": 41.911155524877856,
-            "longitude": -87.82133145838475,
-            "extrapolatedSeconds": 9.6,
-            "stopped": false
-          },
-          "raf": {
-            "scheduled": 728,
-            "fired": 725,
-            "cancelled": 2,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 3
-          },
-          "ageTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 12
-          },
-          "hostAgeTimers": {
-            "scheduled": 15,
-            "fired": 12,
-            "cancelled": 14,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollScheduled": true,
-          "refreshInFlight": false,
-          "refreshCalls": 15,
-          "paused": false,
-          "documentHidden": false,
-          "pageInactive": false,
-          "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
-          "requestedAreaId": "preset:chicago",
-          "areaId": "preset:chicago",
-          "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
-          "health": "ok",
-          "stateWrites": 13,
-          "globalsEvents": 12,
-          "hostEchoEvents": 12,
-          "hostContextEvents": 2,
-          "nextPollAt": 1791082954100,
-          "pollScheduleEpoch": 24
-        },
-        "frameDelta": 32
-      },
-      {
-        "label": "Accepted fullscreen response",
-        "before": {
-          "frameCount": 725,
-          "displayPosition": {
-            "latitude": 41.911155524877856,
-            "longitude": -87.82133145838475,
-            "extrapolatedSeconds": 9.6,
-            "stopped": false
-          },
-          "raf": {
-            "scheduled": 728,
-            "fired": 725,
-            "cancelled": 2,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 3
-          },
-          "ageTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 12
-          },
-          "hostAgeTimers": {
-            "scheduled": 15,
-            "fired": 12,
-            "cancelled": 14,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollScheduled": true,
-          "refreshInFlight": false,
-          "refreshCalls": 15,
-          "paused": false,
-          "documentHidden": false,
-          "pageInactive": false,
-          "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
-          "requestedAreaId": "preset:chicago",
-          "areaId": "preset:chicago",
-          "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
-          "health": "ok",
-          "stateWrites": 13,
-          "globalsEvents": 12,
-          "hostEchoEvents": 12,
-          "hostContextEvents": 2,
-          "nextPollAt": 1791082954100,
-          "pollScheduleEpoch": 24
-        },
-        "after": {
-          "frameCount": 756,
-          "displayPosition": {
-            "latitude": 41.91083775893305,
-            "longitude": -87.82186562481394,
-            "extrapolatedSeconds": 10.1,
-            "stopped": false
-          },
-          "raf": {
-            "scheduled": 759,
-            "fired": 756,
-            "cancelled": 2,
-            "pending": 1,
-            "maxPending": 1
-          },
-          "pollTimers": {
-            "pending": 1,
-            "maxPending": 1,
-            "fired": 3
+            "fired": 4
           },
           "ageTimers": {
             "pending": 1,
@@ -2232,15 +2075,15 @@
             "fired": 13
           },
           "hostAgeTimers": {
-            "scheduled": 15,
+            "scheduled": 17,
             "fired": 13,
-            "cancelled": 14,
+            "cancelled": 16,
             "pending": 1,
             "maxPending": 1
           },
           "pollScheduled": true,
           "refreshInFlight": false,
-          "refreshCalls": 15,
+          "refreshCalls": 16,
           "paused": false,
           "documentHidden": false,
           "pageInactive": false,
@@ -2248,14 +2091,171 @@
           "requestedAreaId": "preset:chicago",
           "areaId": "preset:chicago",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 13,
           "globalsEvents": 12,
           "hostEchoEvents": 12,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082954100,
-          "pollScheduleEpoch": 24
+          "nextPollAt": 1791082942100,
+          "pollScheduleEpoch": 26
+        },
+        "after": {
+          "frameCount": 727,
+          "displayPosition": {
+            "latitude": 41.917382327155245,
+            "longitude": -87.80625624010509,
+            "extrapolatedSeconds": 17.6,
+            "stopped": false
+          },
+          "raf": {
+            "scheduled": 730,
+            "fired": 727,
+            "cancelled": 2,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 4
+          },
+          "ageTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 13
+          },
+          "hostAgeTimers": {
+            "scheduled": 17,
+            "fired": 13,
+            "cancelled": 16,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollScheduled": true,
+          "refreshInFlight": false,
+          "refreshCalls": 16,
+          "paused": false,
+          "documentHidden": false,
+          "pageInactive": false,
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+          "requestedAreaId": "preset:chicago",
+          "areaId": "preset:chicago",
+          "collectionVersion": 6,
+          "observedAt": "2026-10-04T03:01:46.000Z",
+          "health": "ok",
+          "stateWrites": 13,
+          "globalsEvents": 12,
+          "hostEchoEvents": 12,
+          "hostContextEvents": 2,
+          "nextPollAt": 1791082942100,
+          "pollScheduleEpoch": 26
+        },
+        "frameDelta": 32
+      },
+      {
+        "label": "Accepted fullscreen response",
+        "before": {
+          "frameCount": 727,
+          "displayPosition": {
+            "latitude": 41.917382327155245,
+            "longitude": -87.80625624010509,
+            "extrapolatedSeconds": 17.6,
+            "stopped": false
+          },
+          "raf": {
+            "scheduled": 730,
+            "fired": 727,
+            "cancelled": 2,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 4
+          },
+          "ageTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 13
+          },
+          "hostAgeTimers": {
+            "scheduled": 17,
+            "fired": 13,
+            "cancelled": 16,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollScheduled": true,
+          "refreshInFlight": false,
+          "refreshCalls": 16,
+          "paused": false,
+          "documentHidden": false,
+          "pageInactive": false,
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+          "requestedAreaId": "preset:chicago",
+          "areaId": "preset:chicago",
+          "collectionVersion": 6,
+          "observedAt": "2026-10-04T03:01:46.000Z",
+          "health": "ok",
+          "stateWrites": 13,
+          "globalsEvents": 12,
+          "hostEchoEvents": 12,
+          "hostContextEvents": 2,
+          "nextPollAt": 1791082942100,
+          "pollScheduleEpoch": 26
+        },
+        "after": {
+          "frameCount": 758,
+          "displayPosition": {
+            "latitude": 41.91696697192352,
+            "longitude": -87.80665143277531,
+            "extrapolatedSeconds": 18.1,
+            "stopped": false
+          },
+          "raf": {
+            "scheduled": 761,
+            "fired": 758,
+            "cancelled": 2,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 4
+          },
+          "ageTimers": {
+            "pending": 1,
+            "maxPending": 1,
+            "fired": 14
+          },
+          "hostAgeTimers": {
+            "scheduled": 17,
+            "fired": 14,
+            "cancelled": 16,
+            "pending": 1,
+            "maxPending": 1
+          },
+          "pollScheduled": true,
+          "refreshInFlight": false,
+          "refreshCalls": 16,
+          "paused": false,
+          "documentHidden": false,
+          "pageInactive": false,
+          "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+          "requestedAreaId": "preset:chicago",
+          "areaId": "preset:chicago",
+          "collectionVersion": 6,
+          "observedAt": "2026-10-04T03:01:46.000Z",
+          "health": "ok",
+          "stateWrites": 13,
+          "globalsEvents": 12,
+          "hostEchoEvents": 12,
+          "hostContextEvents": 2,
+          "nextPollAt": 1791082942100,
+          "pollScheduleEpoch": 26
         },
         "frameDelta": 31
       },
@@ -2264,9 +2264,9 @@
         "before": {
           "frameCount": 0,
           "displayPosition": {
-            "latitude": 41.91083775893305,
-            "longitude": -87.82186562481394,
-            "extrapolatedSeconds": 10.1,
+            "latitude": 41.91696697192352,
+            "longitude": -87.80665143277531,
+            "extrapolatedSeconds": 18.1,
             "stopped": false
           },
           "raf": {
@@ -2303,21 +2303,21 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 56,
           "globalsEvents": 0,
           "hostEchoEvents": 12,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082956100,
+          "nextPollAt": 1791082927100,
           "pollScheduleEpoch": 3
         },
         "after": {
           "frameCount": 31,
           "displayPosition": {
-            "latitude": 41.910525074826936,
-            "longitude": -87.82239123938899,
-            "extrapolatedSeconds": 10.592,
+            "latitude": 41.91655826105286,
+            "longitude": -87.80704029734153,
+            "extrapolatedSeconds": 18.592,
             "stopped": false
           },
           "raf": {
@@ -2354,13 +2354,13 @@
           "requestedAreaId": "airport:KORD",
           "areaId": "airport:KORD",
           "collectionVersion": 6,
-          "observedAt": "2026-10-04T03:02:06.000Z",
+          "observedAt": "2026-10-04T03:01:46.000Z",
           "health": "ok",
           "stateWrites": 56,
           "globalsEvents": 0,
           "hostEchoEvents": 12,
           "hostContextEvents": 0,
-          "nextPollAt": 1791082956100,
+          "nextPollAt": 1791082927100,
           "pollScheduleEpoch": 3
         },
         "frameDelta": 31
@@ -2369,9 +2369,9 @@
     "final": {
       "frameCount": 31,
       "displayPosition": {
-        "latitude": 41.910525074826936,
-        "longitude": -87.82239123938899,
-        "extrapolatedSeconds": 10.592,
+        "latitude": 41.91655826105286,
+        "longitude": -87.80704029734153,
+        "extrapolatedSeconds": 18.592,
         "stopped": false
       },
       "raf": {
@@ -2408,13 +2408,13 @@
       "requestedAreaId": "airport:KORD",
       "areaId": "airport:KORD",
       "collectionVersion": 6,
-      "observedAt": "2026-10-04T03:02:06.000Z",
+      "observedAt": "2026-10-04T03:01:46.000Z",
       "health": "ok",
       "stateWrites": 56,
       "globalsEvents": 0,
       "hostEchoEvents": 12,
       "hostContextEvents": 0,
-      "nextPollAt": 1791082956100,
+      "nextPollAt": 1791082927100,
       "pollScheduleEpoch": 3
     }
   },
@@ -2470,7 +2470,7 @@
         },
         "responses": [
           {
-            "id": 17,
+            "id": 18,
             "requested": "fullscreen",
             "granted": "inline"
           }
@@ -2502,7 +2502,7 @@
         },
         "responses": [
           {
-            "id": 17,
+            "id": 18,
             "requested": "fullscreen",
             "granted": "inline"
           }
@@ -2534,12 +2534,12 @@
         },
         "responses": [
           {
-            "id": 17,
+            "id": 18,
             "requested": "fullscreen",
             "granted": "inline"
           },
           {
-            "id": 18,
+            "id": 19,
             "requested": "fullscreen",
             "granted": "fullscreen"
           }
@@ -2798,58 +2798,58 @@
   "mobileLabels": [
     {
       "radarId": "00000000-0000-4000-8000-000000003e81",
-      "x": 197.84375,
-      "y": 420.46875,
+      "x": 200.375,
+      "y": 419.09375,
       "width": 74,
       "height": 32,
-      "top": 420.46875,
-      "right": 271.84375,
-      "bottom": 452.46875,
-      "left": 197.84375
+      "top": 419.09375,
+      "right": 274.375,
+      "bottom": 451.09375,
+      "left": 200.375
     },
     {
-      "radarId": "00000000-0000-4000-8000-000000003ea5",
-      "x": 41.90625,
-      "y": 395.8125,
+      "radarId": "00000000-0000-4000-8000-000000003e9e",
+      "x": 150.5625,
+      "y": 340.96875,
       "width": 74,
       "height": 32,
-      "top": 395.8125,
-      "right": 115.90625,
-      "bottom": 427.8125,
-      "left": 41.90625
-    },
-    {
-      "radarId": "00000000-0000-4000-8000-000000003ea2",
-      "x": 215.421875,
-      "y": 484.921875,
-      "width": 74,
-      "height": 32,
-      "top": 484.921875,
-      "right": 289.421875,
-      "bottom": 516.921875,
-      "left": 215.421875
+      "top": 340.96875,
+      "right": 224.5625,
+      "bottom": 372.96875,
+      "left": 150.5625
     },
     {
       "radarId": "00000000-0000-4000-8000-000000003ea4",
-      "x": 38.890625,
-      "y": 442,
+      "x": 39.859375,
+      "y": 445.203125,
       "width": 74,
       "height": 32,
-      "top": 442,
-      "right": 112.890625,
-      "bottom": 474,
-      "left": 38.890625
+      "top": 445.203125,
+      "right": 113.859375,
+      "bottom": 477.203125,
+      "left": 39.859375
     },
     {
-      "radarId": "00000000-0000-4000-8000-000000003e9f",
-      "x": 206.09375,
-      "y": 358.84375,
+      "radarId": "00000000-0000-4000-8000-000000003ea2",
+      "x": 218.15625,
+      "y": 484.34375,
       "width": 74,
       "height": 32,
-      "top": 358.84375,
-      "right": 280.09375,
-      "bottom": 390.84375,
-      "left": 206.09375
+      "top": 484.34375,
+      "right": 292.15625,
+      "bottom": 516.34375,
+      "left": 218.15625
+    },
+    {
+      "radarId": "00000000-0000-4000-8000-000000003ea5",
+      "x": 40.328125,
+      "y": 399.09375,
+      "width": 74,
+      "height": 32,
+      "top": 399.09375,
+      "right": 114.328125,
+      "bottom": 431.09375,
+      "left": 40.328125
     }
   ],
   "desktop": {
@@ -2892,475 +2892,475 @@
     "markers": [
       {
         "radarId": "00000000-0000-4000-8000-000000003e81",
-        "label": "SYN102, 6,331 ft, Descending, falling, track 231 degrees",
-        "x": 161.84375,
-        "y": 411.46875,
+        "label": "SYN102, 6,550 ft, Descending, falling, track 215 degrees",
+        "x": 164.375,
+        "y": 410.09375,
         "width": 44,
         "height": 44,
-        "top": 411.46875,
-        "right": 205.84375,
-        "bottom": 455.46875,
-        "left": 161.84375
+        "top": 410.09375,
+        "right": 208.375,
+        "bottom": 454.09375,
+        "left": 164.375
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e80",
-        "label": "SYN101, 9,269 ft, Climbing, rising, track 185 degrees",
-        "x": 168.890625,
-        "y": 401,
+        "label": "SYN101, 9,050 ft, Climbing, rising, track 170 degrees",
+        "x": 169.640625,
+        "y": 398.34375,
         "width": 44,
         "height": 44,
-        "top": 401,
-        "right": 212.890625,
-        "bottom": 445,
-        "left": 168.890625
+        "top": 398.34375,
+        "right": 213.640625,
+        "bottom": 442.34375,
+        "left": 169.640625
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e82",
-        "label": "SYN103, 9,269 ft, Climbing, rising, track 277 degrees",
-        "x": 148.96875,
-        "y": 413.75,
+        "label": "SYN103, 9,050 ft, Climbing, rising, track 261 degrees",
+        "x": 151.84375,
+        "y": 414.65625,
         "width": 44,
         "height": 44,
-        "top": 413.75,
-        "right": 192.96875,
-        "bottom": 457.75,
-        "left": 148.96875
+        "top": 414.65625,
+        "right": 195.84375,
+        "bottom": 458.65625,
+        "left": 151.84375
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e83",
-        "label": "SYN104, 9,269 ft, Climbing, rising, track 323 degrees",
-        "x": 137.984375,
-        "y": 405.828125,
+        "label": "SYN104, 9,050 ft, Climbing, rising, track 307 degrees",
+        "x": 139.421875,
+        "y": 408.640625,
         "width": 44,
         "height": 44,
-        "top": 405.828125,
-        "right": 181.984375,
-        "bottom": 449.828125,
-        "left": 137.984375
+        "top": 408.640625,
+        "right": 183.421875,
+        "bottom": 452.640625,
+        "left": 139.421875
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e8c",
-        "label": "SYN113, 17,469 ft, Climbing, rising, track 98 degrees",
-        "x": 177.84375,
-        "y": 427.8125,
+        "label": "SYN113, 17,250 ft, Climbing, rising, track 71 degrees",
+        "x": 174.34375,
+        "y": 426.359375,
         "width": 44,
         "height": 44,
-        "top": 427.8125,
-        "right": 221.84375,
-        "bottom": 471.8125,
-        "left": 177.84375
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003e87",
-        "label": "SYN108, 14,531 ft, Descending, falling, track 181 degrees",
-        "x": 170.890625,
-        "y": 401.203125,
-        "width": 44,
-        "height": 44,
-        "top": 401.203125,
-        "right": 214.890625,
-        "bottom": 445.203125,
-        "left": 170.890625
+        "top": 426.359375,
+        "right": 218.34375,
+        "bottom": 470.359375,
+        "left": 174.34375
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e8d",
-        "label": "SYN114, 14,531 ft, Descending, falling, track 162 degrees",
-        "x": 185.765625,
-        "y": 438.546875,
+        "label": "SYN114, 14,750 ft, Descending, falling, track 133 degrees",
+        "x": 185.625,
+        "y": 434.34375,
         "width": 44,
         "height": 44,
-        "top": 438.546875,
-        "right": 229.765625,
-        "bottom": 482.546875,
-        "left": 185.765625
+        "top": 434.34375,
+        "right": 229.625,
+        "bottom": 478.34375,
+        "left": 185.625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e87",
+        "label": "SYN108, 14,750 ft, Descending, falling, track 159 degrees",
+        "x": 172.0625,
+        "y": 396.765625,
+        "width": 44,
+        "height": 44,
+        "top": 396.765625,
+        "right": 216.0625,
+        "bottom": 440.765625,
+        "left": 172.0625
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e86",
-        "label": "SYN107, 17,469 ft, Climbing, rising, track 132 degrees",
-        "x": 167.203125,
-        "y": 386.890625,
+        "label": "SYN107, 17,250 ft, Climbing, rising, track 110 degrees",
+        "x": 164.75,
+        "y": 383.40625,
         "width": 44,
         "height": 44,
-        "top": 386.890625,
-        "right": 211.203125,
-        "bottom": 430.890625,
-        "left": 167.203125
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003e8a",
-        "label": "SYN111, 14,531 ft, Descending, falling, track 329 degrees",
-        "x": 162.078125,
-        "y": 443.53125,
-        "width": 44,
-        "height": 44,
-        "top": 443.53125,
-        "right": 206.078125,
-        "bottom": 487.53125,
-        "left": 162.078125
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003e93",
-        "label": "SYN120, 14,531 ft, Descending, falling, track 189 degrees",
-        "x": 198.265625,
-        "y": 421.859375,
-        "width": 44,
-        "height": 44,
-        "top": 421.859375,
-        "right": 242.265625,
-        "bottom": 465.859375,
-        "left": 198.265625
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003e90",
-        "label": "SYN117, 14,531 ft, Descending, falling, track 40 degrees",
-        "x": 140.984375,
-        "y": 390.78125,
-        "width": 44,
-        "height": 44,
-        "top": 390.78125,
-        "right": 184.984375,
-        "bottom": 434.78125,
-        "left": 140.984375
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003e95",
-        "label": "SYN122, 17,469 ft, Climbing, rising, track 289 degrees",
-        "x": 151.953125,
-        "y": 444.828125,
-        "width": 44,
-        "height": 44,
-        "top": 444.828125,
-        "right": 195.953125,
-        "bottom": 488.828125,
-        "left": 151.953125
+        "top": 383.40625,
+        "right": 208.75,
+        "bottom": 427.40625,
+        "left": 164.75
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e96",
-        "label": "SYN123, 14,531 ft, Descending, falling, track 338 degrees",
-        "x": 133.078125,
-        "y": 423.375,
+        "label": "SYN123, 14,750 ft, Descending, falling, track 327 degrees",
+        "x": 134.09375,
+        "y": 427.234375,
         "width": 44,
         "height": 44,
-        "top": 423.375,
-        "right": 177.078125,
-        "bottom": 467.375,
-        "left": 133.078125
+        "top": 427.234375,
+        "right": 178.09375,
+        "bottom": 471.234375,
+        "left": 134.09375
       },
       {
-        "radarId": "00000000-0000-4000-8000-000000003e92",
-        "label": "SYN119, 17,469 ft, Climbing, rising, track 140 degrees",
-        "x": 192.640625,
-        "y": 393.875,
+        "radarId": "00000000-0000-4000-8000-000000003e95",
+        "label": "SYN122, 17,250 ft, Climbing, rising, track 278 degrees",
+        "x": 155.28125,
+        "y": 446.390625,
         "width": 44,
         "height": 44,
-        "top": 393.875,
-        "right": 236.640625,
-        "bottom": 437.875,
-        "left": 192.640625
+        "top": 446.390625,
+        "right": 199.28125,
+        "bottom": 490.390625,
+        "left": 155.28125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e90",
+        "label": "SYN117, 14,750 ft, Descending, falling, track 34 degrees",
+        "x": 139.40625,
+        "y": 392.390625,
+        "width": 44,
+        "height": 44,
+        "top": 392.390625,
+        "right": 183.40625,
+        "bottom": 436.390625,
+        "left": 139.40625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e93",
+        "label": "SYN120, 14,750 ft, Descending, falling, track 181 degrees",
+        "x": 199.078125,
+        "y": 418.859375,
+        "width": 44,
+        "height": 44,
+        "top": 418.859375,
+        "right": 243.078125,
+        "bottom": 462.859375,
+        "left": 199.078125
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e8f",
-        "label": "SYN116, 17,469 ft, Climbing, rising, track 28 degrees",
-        "x": 137.375,
-        "y": 395.109375,
+        "label": "SYN116, 17,250 ft, Climbing, rising, track 16 degrees",
+        "x": 134.890625,
+        "y": 398.59375,
         "width": 44,
         "height": 44,
-        "top": 395.109375,
-        "right": 181.375,
-        "bottom": 439.109375,
-        "left": 137.375
+        "top": 398.59375,
+        "right": 178.890625,
+        "bottom": 442.59375,
+        "left": 134.890625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e92",
+        "label": "SYN119, 17,250 ft, Climbing, rising, track 132 degrees",
+        "x": 191.015625,
+        "y": 391.5625,
+        "width": 44,
+        "height": 44,
+        "top": 391.5625,
+        "right": 235.015625,
+        "bottom": 435.5625,
+        "left": 191.015625
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e84",
-        "label": "SYN105, 14,531 ft, Descending, falling, track 32 degrees",
-        "x": 141.609375,
-        "y": 386.625,
+        "label": "SYN105, 14,750 ft, Descending, falling, track 12 degrees",
+        "x": 139.078125,
+        "y": 389.234375,
         "width": 44,
         "height": 44,
-        "top": 386.625,
-        "right": 185.609375,
-        "bottom": 430.625,
-        "left": 141.609375
+        "top": 389.234375,
+        "right": 183.078125,
+        "bottom": 433.234375,
+        "left": 139.078125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e8a",
+        "label": "SYN111, 14,750 ft, Descending, falling, track 306 degrees",
+        "x": 163.03125,
+        "y": 446.453125,
+        "width": 44,
+        "height": 44,
+        "top": 446.453125,
+        "right": 207.03125,
+        "bottom": 490.453125,
+        "left": 163.03125
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e89",
-        "label": "SYN110, 17,469 ft, Climbing, rising, track 264 degrees",
-        "x": 172.625,
-        "y": 451.40625,
+        "label": "SYN110, 17,250 ft, Climbing, rising, track 244 degrees",
+        "x": 175.328125,
+        "y": 451.703125,
         "width": 44,
         "height": 44,
-        "top": 451.40625,
-        "right": 216.625,
-        "bottom": 495.40625,
-        "left": 172.625
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003e9b",
-        "label": "SYN128, 17,469 ft, Climbing, rising, track 306 degrees",
-        "x": 134.84375,
-        "y": 451.640625,
-        "width": 44,
-        "height": 44,
-        "top": 451.640625,
-        "right": 178.84375,
-        "bottom": 495.640625,
-        "left": 134.84375
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003e99",
-        "label": "SYN126, 14,531 ft, Descending, falling, track 210 degrees",
-        "x": 206.578125,
-        "y": 439.859375,
-        "width": 44,
-        "height": 44,
-        "top": 439.859375,
-        "right": 250.578125,
-        "bottom": 483.859375,
-        "left": 206.578125
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003e98",
-        "label": "SYN125, 17,469 ft, Climbing, rising, track 161 degrees",
-        "x": 212.203125,
-        "y": 400.296875,
-        "width": 44,
-        "height": 44,
-        "top": 400.296875,
-        "right": 256.203125,
-        "bottom": 444.296875,
-        "left": 212.203125
+        "top": 451.703125,
+        "right": 219.328125,
+        "bottom": 495.703125,
+        "left": 175.328125
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e9c",
-        "label": "SYN129, 14,531 ft, Descending, falling, track 354 degrees",
-        "x": 116.890625,
-        "y": 415.953125,
+        "label": "SYN129, 14,750 ft, Descending, falling, track 348 degrees",
+        "x": 116.984375,
+        "y": 419.3125,
         "width": 44,
         "height": 44,
-        "top": 415.953125,
-        "right": 160.890625,
-        "bottom": 459.953125,
-        "left": 116.890625
+        "top": 419.3125,
+        "right": 160.984375,
+        "bottom": 463.3125,
+        "left": 116.984375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e9b",
+        "label": "SYN128, 17,250 ft, Climbing, rising, track 300 degrees",
+        "x": 137.203125,
+        "y": 453.625,
+        "width": 44,
+        "height": 44,
+        "top": 453.625,
+        "right": 181.203125,
+        "bottom": 497.625,
+        "left": 137.203125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e99",
+        "label": "SYN126, 14,750 ft, Descending, falling, track 205 degrees",
+        "x": 207.96875,
+        "y": 437.734375,
+        "width": 44,
+        "height": 44,
+        "top": 437.734375,
+        "right": 251.96875,
+        "bottom": 481.734375,
+        "left": 207.96875
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e9e",
-        "label": "SYN131, 17,469 ft, Climbing, rising, track 91 degrees",
-        "x": 169.484375,
-        "y": 365.375,
+        "label": "SYN131, 17,250 ft, Climbing, rising, track 83 degrees",
+        "x": 165.5625,
+        "y": 364.96875,
         "width": 44,
         "height": 44,
-        "top": 365.375,
-        "right": 213.484375,
-        "bottom": 409.375,
-        "left": 169.484375
+        "top": 364.96875,
+        "right": 209.5625,
+        "bottom": 408.96875,
+        "left": 165.5625
       },
       {
-        "radarId": "00000000-0000-4000-8000-000000003ea5",
-        "label": "SYN138, 14,531 ft, Descending, falling, track 23 degrees",
-        "x": 107.90625,
-        "y": 386.8125,
+        "radarId": "00000000-0000-4000-8000-000000003e98",
+        "label": "SYN125, 17,250 ft, Climbing, rising, track 157 degrees",
+        "x": 211.59375,
+        "y": 398.125,
         "width": 44,
         "height": 44,
-        "top": 386.8125,
-        "right": 151.90625,
-        "bottom": 430.8125,
-        "left": 107.90625
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003ea2",
-        "label": "SYN135, 14,531 ft, Descending, falling, track 255 degrees",
-        "x": 179.421875,
-        "y": 475.921875,
-        "width": 44,
-        "height": 44,
-        "top": 475.921875,
-        "right": 223.421875,
-        "bottom": 519.921875,
-        "left": 179.421875
+        "top": 398.125,
+        "right": 255.59375,
+        "bottom": 442.125,
+        "left": 211.59375
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003ea4",
-        "label": "SYN137, 17,469 ft, Climbing, rising, track 340 degrees",
-        "x": 104.890625,
-        "y": 433,
+        "label": "SYN137, 17,250 ft, Climbing, rising, track 335 degrees",
+        "x": 105.859375,
+        "y": 436.203125,
         "width": 44,
         "height": 44,
-        "top": 433,
-        "right": 148.890625,
-        "bottom": 477,
-        "left": 104.890625
+        "top": 436.203125,
+        "right": 149.859375,
+        "bottom": 480.203125,
+        "left": 105.859375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003ea2",
+        "label": "SYN135, 14,750 ft, Descending, falling, track 251 degrees",
+        "x": 182.15625,
+        "y": 475.34375,
+        "width": 44,
+        "height": 44,
+        "top": 475.34375,
+        "right": 226.15625,
+        "bottom": 519.34375,
+        "left": 182.15625
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003ea1",
-        "label": "SYN134, 17,469 ft, Climbing, rising, track 213 degrees",
-        "x": 217.6875,
-        "y": 450.09375,
+        "label": "SYN134, 17,250 ft, Climbing, rising, track 209 degrees",
+        "x": 219.15625,
+        "y": 448.046875,
         "width": 44,
         "height": 44,
-        "top": 450.09375,
-        "right": 261.6875,
-        "bottom": 494.09375,
-        "left": 217.6875
+        "top": 448.046875,
+        "right": 263.15625,
+        "bottom": 492.046875,
+        "left": 219.15625
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003ea5",
+        "label": "SYN138, 14,750 ft, Descending, falling, track 17 degrees",
+        "x": 106.328125,
+        "y": 390.09375,
+        "width": 44,
+        "height": 44,
+        "top": 390.09375,
+        "right": 150.328125,
+        "bottom": 434.09375,
+        "left": 106.328125
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e9f",
-        "label": "SYN132, 14,531 ft, Descending, falling, track 148 degrees",
-        "x": 221.09375,
-        "y": 382.84375,
+        "label": "SYN132, 14,750 ft, Descending, falling, track 141 degrees",
+        "x": 219.125,
+        "y": 379.140625,
         "width": 44,
         "height": 44,
-        "top": 382.84375,
-        "right": 265.09375,
-        "bottom": 426.84375,
-        "left": 221.09375
+        "top": 379.140625,
+        "right": 263.125,
+        "bottom": 423.140625,
+        "left": 219.125
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e8b",
-        "label": "SYN112, 29,000 ft, In flight, level, track 33 degrees",
-        "x": 164.875,
-        "y": 430.609375,
+        "label": "SYN112, 29,000 ft, In flight, level, track 9 degrees",
+        "x": 162.359375,
+        "y": 432.9375,
         "width": 44,
         "height": 44,
-        "top": 430.609375,
-        "right": 208.875,
-        "bottom": 474.609375,
-        "left": 164.875
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003e94",
-        "label": "SYN121, 28,000 ft, In flight, level, track 239 degrees",
-        "x": 180.4375,
-        "y": 444.15625,
-        "width": 44,
-        "height": 44,
-        "top": 444.15625,
-        "right": 224.4375,
-        "bottom": 488.15625,
-        "left": 180.4375
-      },
-      {
-        "radarId": "00000000-0000-4000-8000-000000003e91",
-        "label": "SYN118, 30,000 ft, In flight, level, track 90 degrees",
-        "x": 167.53125,
-        "y": 380.265625,
-        "width": 44,
-        "height": 44,
-        "top": 380.265625,
-        "right": 211.53125,
-        "bottom": 424.265625,
-        "left": 167.53125
+        "top": 432.9375,
+        "right": 206.359375,
+        "bottom": 476.9375,
+        "left": 162.359375
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e88",
-        "label": "SYN109, 31,000 ft, In flight, level, track 199 degrees",
-        "x": 184.109375,
-        "y": 445.0625,
+        "label": "SYN109, 31,000 ft, In flight, level, track 182 degrees",
+        "x": 185.3125,
+        "y": 443,
         "width": 44,
         "height": 44,
-        "top": 445.0625,
-        "right": 228.109375,
-        "bottom": 489.0625,
-        "left": 184.109375
+        "top": 443,
+        "right": 229.3125,
+        "bottom": 487,
+        "left": 185.3125
       },
       {
-        "radarId": "00000000-0000-4000-8000-000000003e85",
-        "label": "SYN106, 28,000 ft, In flight, level, track 82 degrees",
-        "x": 154.21875,
-        "y": 380.734375,
+        "radarId": "00000000-0000-4000-8000-000000003e94",
+        "label": "SYN121, 28,000 ft, In flight, level, track 229 degrees",
+        "x": 183.53125,
+        "y": 442.71875,
         "width": 44,
         "height": 44,
-        "top": 380.734375,
-        "right": 198.21875,
-        "bottom": 424.734375,
-        "left": 154.21875
+        "top": 442.71875,
+        "right": 227.53125,
+        "bottom": 486.71875,
+        "left": 183.53125
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e91",
+        "label": "SYN118, 30,000 ft, In flight, level, track 83 degrees",
+        "x": 165,
+        "y": 380.0625,
+        "width": 44,
+        "height": 44,
+        "top": 380.0625,
+        "right": 209,
+        "bottom": 424.0625,
+        "left": 165
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e8e",
-        "label": "SYN115, 32,000 ft, In flight, level, track 227 degrees",
-        "x": 179.265625,
-        "y": 450.25,
+        "label": "SYN115, 32,000 ft, In flight, level, track 196 degrees",
+        "x": 183.375,
+        "y": 448.1875,
         "width": 44,
         "height": 44,
-        "top": 450.25,
-        "right": 223.265625,
-        "bottom": 494.25,
-        "left": 179.265625
+        "top": 448.1875,
+        "right": 227.375,
+        "bottom": 492.1875,
+        "left": 183.375
+      },
+      {
+        "radarId": "00000000-0000-4000-8000-000000003e85",
+        "label": "SYN106, 28,000 ft, In flight, level, track 61 degrees",
+        "x": 150.28125,
+        "y": 380.421875,
+        "width": 44,
+        "height": 44,
+        "top": 380.421875,
+        "right": 194.28125,
+        "bottom": 424.421875,
+        "left": 150.28125
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e9a",
-        "label": "SYN127, 29,000 ft, In flight, level, track 258 degrees",
-        "x": 173.34375,
-        "y": 461.890625,
+        "label": "SYN127, 29,000 ft, In flight, level, track 252 degrees",
+        "x": 176.109375,
+        "y": 461.484375,
         "width": 44,
         "height": 44,
-        "top": 461.890625,
-        "right": 217.34375,
-        "bottom": 505.890625,
-        "left": 173.34375
+        "top": 461.484375,
+        "right": 220.109375,
+        "bottom": 505.484375,
+        "left": 176.109375
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e97",
-        "label": "SYN124, 31,000 ft, In flight, level, track 139 degrees",
-        "x": 204.578125,
-        "y": 384.765625,
+        "label": "SYN124, 31,000 ft, In flight, level, track 131 degrees",
+        "x": 202.125,
+        "y": 381.3125,
         "width": 44,
         "height": 44,
-        "top": 384.765625,
-        "right": 248.578125,
-        "bottom": 428.765625,
-        "left": 204.578125
+        "top": 381.3125,
+        "right": 246.125,
+        "bottom": 425.3125,
+        "left": 202.125
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003e9d",
-        "label": "SYN130, 32,000 ft, In flight, level, track 43 degrees",
-        "x": 131.71875,
-        "y": 378.828125,
+        "label": "SYN130, 32,000 ft, In flight, level, track 36 degrees",
+        "x": 129.03125,
+        "y": 381.3125,
         "width": 44,
         "height": 44,
-        "top": 378.828125,
-        "right": 175.71875,
-        "bottom": 422.828125,
-        "left": 131.71875
+        "top": 381.3125,
+        "right": 173.03125,
+        "bottom": 425.3125,
+        "left": 129.03125
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003ea3",
-        "label": "SYN136, 28,000 ft, In flight, level, track 298 degrees",
-        "x": 133.859375,
-        "y": 469.015625,
+        "label": "SYN136, 28,000 ft, In flight, level, track 293 degrees",
+        "x": 136.5,
+        "y": 470.578125,
         "width": 44,
         "height": 44,
-        "top": 469.015625,
-        "right": 177.859375,
-        "bottom": 513.015625,
-        "left": 133.859375
+        "top": 470.578125,
+        "right": 180.5,
+        "bottom": 514.578125,
+        "left": 136.5
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003ea0",
-        "label": "SYN133, 30,000 ft, In flight, level, track 170 degrees",
-        "x": 228.46875,
-        "y": 405.109375,
+        "label": "SYN133, 30,000 ft, In flight, level, track 167 degrees",
+        "x": 228.1875,
+        "y": 402.875,
         "width": 44,
         "height": 44,
-        "top": 405.109375,
-        "right": 272.46875,
-        "bottom": 449.109375,
-        "left": 228.46875
+        "top": 402.875,
+        "right": 272.1875,
+        "bottom": 446.875,
+        "left": 228.1875
       },
       {
         "radarId": "00000000-0000-4000-8000-000000003ea6",
         "label": "SYN139, 31,000 ft, In flight, level, track unavailable",
-        "x": 138.59375,
-        "y": 356.328125,
+        "x": 132.84375,
+        "y": 359.359375,
         "width": 44,
         "height": 44,
-        "top": 356.328125,
-        "right": 182.59375,
-        "bottom": 400.328125,
-        "left": 138.59375
+        "top": 359.359375,
+        "right": 176.84375,
+        "bottom": 403.359375,
+        "left": 132.84375
       }
     ]
   },
   "externalRequests": 0,
   "errors": [],
-  "mcpRequests": 24
+  "mcpRequests": 25
 }

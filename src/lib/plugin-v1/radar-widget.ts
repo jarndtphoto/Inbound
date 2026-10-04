@@ -30,7 +30,8 @@ let timerToken: number | null = null, ageTimerToken: number | null = null, timer
 const pendingPollTimers = new Set<number>(), pendingAgeTimers = new Set<number>();
 let maxPendingPollTimers = 0, maxPendingAgeTimers = 0, pollTimerFires = 0, ageTimerFires = 0;
 let abort: AbortController | null = null, activeRequestGeneration: number | null = null, nextPollAt: number | null = null, pollScheduleEpoch = 0;
-let nextPollKind: "normal" | "short-retry" | null = null, shortRetryTrajectoryKey: string | null = null, shortRetrySchedules = 0, shortRetryFires = 0;
+let nextPollKind: "normal" | "short-retry" | null = null, motionRetryTrajectoryKey: string | null = null;
+let motionRetryCount = 0, lastMotionRetryAt: number | null = null, shortRetrySchedules = 0, shortRetryFires = 0;
 let mapKey = "", hostReady = false, hostOrigin: string | null = null, sequence = 0;
 let selectedTarget: PublicRadarTarget | null = null, selectedFeatured: PublicFeaturedFlight | null = null;
 let hostContext: HostContext = { displayMode: "inline", availableDisplayModes: [] };
@@ -45,14 +46,28 @@ const targetOrigin = () => hostOrigin && hostOrigin !== "null" ? hostOrigin : "*
 const displayMode = (): DisplayMode => ["inline", "fullscreen", "pip"].includes(hostContext.displayMode) ? hostContext.displayMode : "inline";
 const currentView = () => state.views[displayMode()];
 const liveAge = (observedAt: string) => Math.max(0, (Date.now() - Date.parse(observedAt)) / 1_000);
-const NORMAL_POLL_MS = 20_000, SHORT_RETRY_MS = 3_000, SHORT_RETRY_WINDOW_MS = 7_000, MOTION_BOUND_MS = 25_000;
+const NORMAL_POLL_MS = 20_000, FIRST_MOTION_RETRY_MS = 3_000, MOTION_RETRY_INTERVAL_MS = 4_000;
+const MOTION_RETRY_WINDOW_MS = 7_000, MAX_MOTION_RETRIES = 3, MOTION_BOUND_MS = 25_000;
 const trajectoryKey = (value: InboundNearbyResponse) => JSON.stringify([value.collectionVersion,
   Math.max(...value.radarTargets.map(target => Date.parse(target.observedAt)), Number.NEGATIVE_INFINITY)]);
-const nearMotionBound = () => {
-  if (board.health !== "ok" && board.health !== "partial") return false;
+const resetMotionRetryState = (key: string) => { motionRetryTrajectoryKey = key; motionRetryCount = 0; lastMotionRetryAt = null; };
+const syncMotionRetryState = () => {
+  const key = trajectoryKey(board); if (motionRetryTrajectoryKey !== key) resetMotionRetryState(key); return key;
+};
+const motionCapDeadline = () => {
+  if (board.health !== "ok" && board.health !== "partial") return null;
   const deadlines = board.radarTargets.flatMap(target => target.groundTrackDeg !== null && target.groundspeedKt !== null && target.groundspeedKt > 0
     ? [Date.parse(target.observedAt) + MOTION_BOUND_MS] : []);
-  return deadlines.length > 0 && Math.max(...deadlines) - Date.now() <= SHORT_RETRY_WINDOW_MS;
+  return deadlines.length > 0 ? Math.min(...deadlines) : null;
+};
+const nearMotionBound = () => {
+  const deadline = motionCapDeadline(); return deadline !== null && deadline - Date.now() <= MOTION_RETRY_WINDOW_MS;
+};
+const nextMotionRetryDeadline = () => {
+  syncMotionRetryState();
+  if (!nearMotionBound() || motionRetryCount >= MAX_MOTION_RETRIES) return null;
+  const now = Date.now();
+  return lastMotionRetryAt === null ? now + FIRST_MOTION_RETRY_MS : Math.max(now, lastMotionRetryAt + MOTION_RETRY_INTERVAL_MS);
 };
 const wanted = () => !dismissed && !pageInactive && !state.paused && !document.hidden;
 const animationWanted = () => !dismissed && !pageInactive && !document.hidden;
@@ -210,21 +225,32 @@ function schedule(resetDeadline = false) {
   if (resetDeadline || nextPollAt === null) { nextPollAt = Date.now() + NORMAL_POLL_MS; nextPollKind = "normal"; }
   const nextTimerToken = ++timerSequence; timerToken = nextTimerToken; pendingPollTimers.add(nextTimerToken); maxPendingPollTimers = Math.max(maxPendingPollTimers, pendingPollTimers.size);
   const scheduledKind = nextPollKind;
+  const scheduledTrajectoryKey = trajectoryKey(board);
   timer = setTimeout(async () => {
     pendingPollTimers.delete(nextTimerToken); pollTimerFires++;
     if (timerToken === nextTimerToken) { timer = null; timerToken = null; }
-    if (epoch !== pollScheduleEpoch) return; if (scheduledKind === "short-retry") shortRetryFires++;
-    nextPollKind = null; const generation = requestGeneration, outcome = await refresh();
-    if (outcome.started && generation === requestGeneration) scheduleAfterRefresh(outcome, "attempt");
+    if (epoch !== pollScheduleEpoch) return;
+    const retryAttemptAt = Date.now(); nextPollKind = null;
+    const generation = requestGeneration, outcome = await refresh();
+    if (outcome.started && generation === requestGeneration) {
+      if (scheduledKind === "short-retry") shortRetryFires++;
+      if (scheduledKind === "short-retry" && !outcome.trajectoryAdvanced && scheduledTrajectoryKey === trajectoryKey(board)) {
+        syncMotionRetryState(); motionRetryCount++; lastMotionRetryAt = retryAttemptAt;
+      }
+      scheduleAfterRefresh(outcome, "attempt");
+    }
   }, Math.max(0, nextPollAt - Date.now()));
 }
 function scheduleAt(deadline: number, kind: "normal" | "short-retry") { nextPollAt = deadline; nextPollKind = kind; schedule(); }
 function scheduleNormal() { scheduleAt(Date.now() + NORMAL_POLL_MS, "normal"); }
 function scheduleAfterRefresh(outcome: RefreshOutcome, mode: "reset" | "after" | "attempt") {
-  const key = trajectoryKey(board);
-  if (outcome.accepted && !outcome.trajectoryAdvanced && nearMotionBound() && shortRetryTrajectoryKey !== key) {
-    shortRetryTrajectoryKey = key; shortRetrySchedules++; scheduleAt(Date.now() + SHORT_RETRY_MS, "short-retry"); return;
+  syncMotionRetryState(); const now = Date.now(), retryDeadline = nextMotionRetryDeadline();
+  const preservedDeadline = mode === "after" && nextPollAt !== null && nextPollAt > now ? nextPollAt : null;
+  const preservedKind = preservedDeadline === null ? null : nextPollKind || "normal";
+  if (retryDeadline !== null && (preservedDeadline === null || retryDeadline < preservedDeadline)) {
+    shortRetrySchedules++; scheduleAt(retryDeadline, "short-retry"); return;
   }
+  if (preservedDeadline !== null) { scheduleAt(preservedDeadline, preservedKind!); return; }
   if (outcome.trajectoryAdvanced || mode !== "after" || nextPollAt === null || nextPollAt <= Date.now()) scheduleNormal();
   else schedule();
 }
@@ -245,7 +271,10 @@ function accept(result: unknown, options: { expectedArea?: WidgetState["areaId"]
   else if (candidate.collectionVersion !== null) latestAcceptedVersion = latestAcceptedVersion === null ? candidate.collectionVersion : Math.max(latestAcceptedVersion, candidate.collectionVersion);
   acceptedResults++;
   const trajectoryAdvanced = candidateTrajectoryKey !== previousTrajectoryKey;
-  if (trajectoryAdvanced) shortRetryTrajectoryKey = null;
+  if (trajectoryAdvanced) {
+    resetMotionRetryState(candidateTrajectoryKey);
+    if (nextPollKind === "short-retry") { nextPollAt = Date.now() + NORMAL_POLL_MS; nextPollKind = "normal"; schedule(); }
+  }
   updateSelection(); render(); ensureAnimationLoop(); return { accepted: true, trajectoryAdvanced };
 }
 async function refresh(): Promise<RefreshOutcome> {
@@ -334,7 +363,7 @@ window.addEventListener("message", event => {
 });
 new ResizeObserver(() => renderRadar()).observe(el("radar-surface"));
 window.inboundRadarProof = {
-  read: () => ({ selectedRadarId: state.selectedRadarId, selectedView: currentView(), views: { ...state.views }, requestedAreaId: state.areaId, areaId: board.area.id, collectionVersion: board.collectionVersion, generatedAt: board.generatedAt, health: board.health, positions: board.radarTargets.map(target => ({ radarId: target.radarId, latitude: target.latitude, longitude: target.longitude, observedAt: target.observedAt, altitudeFt: target.altitudeFt, groundspeedKt: target.groundspeedKt, groundTrackDeg: target.groundTrackDeg, positionKind: target.positionKind })), displayPositions: displayPositions.map(position => ({ ...position })), labelIds: [...labelIds], refreshCalls, refreshInFlight: activeRequestGeneration === requestGeneration, pollScheduled: timer !== null, ageScheduled: ageTimer !== null, pollTimers: { pending: pendingPollTimers.size, maxPending: maxPendingPollTimers, fired: pollTimerFires }, ageTimers: { pending: pendingAgeTimers.size, maxPending: maxPendingAgeTimers, fired: ageTimerFires }, nextPollAt, nextPollKind, shortRetryUsed: shortRetryTrajectoryKey === trajectoryKey(board), shortRetrySchedules, shortRetryFires, pollScheduleEpoch, requestGeneration, activeRequestGeneration, displayMode: displayMode(), hostReady, hostContext: { ...hostContext, availableDisplayModes: [...hostContext.availableDisplayModes] }, hostWidgetState: host()?.widgetState ? { ...host()!.widgetState, views: host()!.widgetState!.views ? { ...host()!.widgetState!.views } : undefined } : null, frameCount, animationScheduled: frame !== null, paused: state.paused, documentHidden: document.hidden, pageInactive, dismissed, acceptedResults, rejectedResults, lastRejectedReason, latestAcceptedVersion, latestAcceptedGeneratedAt, globalsEvents, hostContextEvents }),
+  read: () => ({ selectedRadarId: state.selectedRadarId, selectedView: currentView(), views: { ...state.views }, requestedAreaId: state.areaId, areaId: board.area.id, collectionVersion: board.collectionVersion, generatedAt: board.generatedAt, health: board.health, trajectoryKey: trajectoryKey(board), shortRetryTrajectoryKey: motionRetryTrajectoryKey, motionRetryCount, motionRetryBudgetRemaining: Math.max(0, MAX_MOTION_RETRIES - motionRetryCount), lastMotionRetryAt, motionCapDeadline: motionCapDeadline(), positions: board.radarTargets.map(target => ({ radarId: target.radarId, latitude: target.latitude, longitude: target.longitude, observedAt: target.observedAt, altitudeFt: target.altitudeFt, groundspeedKt: target.groundspeedKt, groundTrackDeg: target.groundTrackDeg, positionKind: target.positionKind })), displayPositions: displayPositions.map(position => ({ ...position })), labelIds: [...labelIds], refreshCalls, refreshInFlight: activeRequestGeneration === requestGeneration, pollScheduled: timer !== null, ageScheduled: ageTimer !== null, pollTimers: { pending: pendingPollTimers.size, maxPending: maxPendingPollTimers, fired: pollTimerFires }, ageTimers: { pending: pendingAgeTimers.size, maxPending: maxPendingAgeTimers, fired: ageTimerFires }, nextPollAt, nextPollKind, shortRetryUsed: motionRetryTrajectoryKey === trajectoryKey(board) && motionRetryCount > 0, shortRetrySchedules, shortRetryFires, pollScheduleEpoch, requestGeneration, activeRequestGeneration, displayMode: displayMode(), hostReady, hostContext: { ...hostContext, availableDisplayModes: [...hostContext.availableDisplayModes] }, hostWidgetState: host()?.widgetState ? { ...host()!.widgetState, views: host()!.widgetState!.views ? { ...host()!.widgetState!.views } : undefined } : null, frameCount, animationScheduled: frame !== null, paused: state.paused, documentHidden: document.hidden, pageInactive, dismissed, acceptedResults, rejectedResults, lastRejectedReason, latestAcceptedVersion, latestAcceptedGeneratedAt, globalsEvents, hostContextEvents }),
 };
 const restoredArea = state.areaId;
 accept(host()?.toolOutput || initial, { expectedArea: null }); state.areaId = restoredArea; render(); schedule(true); ensureAnimationLoop();
