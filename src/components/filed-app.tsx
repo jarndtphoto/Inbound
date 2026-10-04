@@ -28,7 +28,7 @@ import { getFlightStory } from "@/lib/story";
 import type { Chop, Comfort, FlightStory, PilotReportObservation, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
-import { flightPollingComplete } from "@/lib/flight-polling";
+import { flightPollingComplete, flightPollingInterval } from "@/lib/flight-polling";
 import { dismissWelcomeSummary, shouldOpenWelcomeSummary, welcomeLegKey, welcomeSummaryVersion } from "@/lib/flight-welcome-state";
 import { INITIAL_FLIGHT_SEARCH_MS, TEMPORARY_FLIGHT_RETRY_MS, flightStoryQueryKey, flightNotFound, flightSearchCanPoll, flightSearchShouldRetry, stopFlightSearch, flightStoryRequest } from "@/lib/flight-search";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
@@ -563,13 +563,9 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
       if (!flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount)) return false;
       if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
-      if (s && flightPollingComplete(s)) return 60_000;
       if (q.state.status === "error") return /HTTP 402\b/.test(String(q.state.error?.message ?? "")) ? 60_000 : 15_000;
       if (!s) return false; // The bounded retryer owns initial search attempts.
-      if (s.live || s.currentStage === "push" || s.currentStage === "taxi") return 3_000;
-      if (s.currentStage === "ride" || s.currentStage === "arrival" || s.currentStage === "final_approach" || s.currentStage === "taxi_in") return 4_000;
-      if (s.currentStage === "inbound") return 5_000;
-      return 8_000;
+      return flightPollingInterval(s);
     },
     staleTime: 2_500,
     gcTime: 10 * 60_000,
