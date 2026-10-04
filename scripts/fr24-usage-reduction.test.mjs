@@ -47,19 +47,19 @@ test("tracked-flight polling is phase-aware and cruise waits 20 seconds", () => 
     times: { takeoffUnix: now / 1000 - 60 * 60 },
     aircraft: { phase: "cruise" },
   };
-  assert.equal(flightPollingInterval(base, now), 20_000, "live cruise no longer inherits the old 3-second live override");
-  assert.equal(flightPollingInterval({ ...base, currentStage: "push", aircraft: { phase: "parked" } }, now), 3_000);
-  assert.equal(flightPollingInterval({ ...base, currentStage: "taxi", aircraft: { phase: "taxi" } }, now), 3_000);
-  assert.equal(flightPollingInterval({ ...base, currentStage: "takeoff_roll", aircraft: { phase: "taxi" } }, now), 4_000);
-  assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "climb" }, times: { takeoffUnix: now / 1000 - 5 * 60 } }, now), 6_000);
+  assert.equal(flightPollingInterval(base, now), 20_000, "cruise stays inexpensive");
+  assert.equal(flightPollingInterval({ ...base, currentStage: "push", aircraft: { phase: "parked" } }, now), 8_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "taxi", aircraft: { phase: "taxi" } }, now), 8_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "takeoff_roll", aircraft: { phase: "taxi" } }, now), 8_000);
+  assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "climb" }, times: { takeoffUnix: now / 1000 - 5 * 60 } }, now), 8_000);
   assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "climb" }, times: { takeoffUnix: now / 1000 - 20 * 60 } }, now), 10_000);
   assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "descent" } }, now), 10_000);
-  assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "approach" } }, now), 6_000);
-  assert.equal(flightPollingInterval({ ...base, currentStage: "final_approach", aircraft: { phase: "cruise" } }, now), 6_000);
-  assert.equal(flightPollingInterval({ ...base, currentStage: "taxi_in", aircraft: { phase: "taxi" } }, now), 3_000);
-  assert.equal(flightPollingInterval({ ...base, currentStage: "origin_gate", aircraft: { phase: "parked" } }, now), 3_000);
+  assert.equal(flightPollingInterval({ ...base, aircraft: { phase: "approach" } }, now), 8_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "final_approach", aircraft: { phase: "cruise" } }, now), 8_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "taxi_in", aircraft: { phase: "taxi" } }, now), 8_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "origin_gate", aircraft: { phase: "parked" } }, now), 8_000);
   assert.equal(flightPollingInterval({ ...base, currentStage: "origin_gate", live: false, aircraft: null }, now), 8_000);
-  assert.equal(flightPollingInterval({ ...base, currentStage: "inbound", live: false, aircraft: null }, now), 5_000);
+  assert.equal(flightPollingInterval({ ...base, currentStage: "inbound", live: false, aircraft: null }, now), 8_000);
   assert.equal(flightPollingInterval({ ...base, currentStage: "gate", aircraft: { phase: "parked" } }, now), 60_000);
 });
 
@@ -79,13 +79,12 @@ test("visibility and Map selection are wired through to the ground observer", as
   assert.match(hook, /removeEventListener\("visibilitychange", onChange\)/);
 });
 
-test("ground position uses one direct live FR24 identity probe per poll", async () => {
+test("departure ground map does not duplicate the tracked-flight FR24 stream", async () => {
   const source = await readFile(resolve("src/lib/ground-position.ts"), "utf8");
-  assert.match(source, /if \(resolvedRegistration\)[\s\S]*?else if \(data\.movementKind === "departure" && callsigns\[0\]\)/);
-  assert.match(source, /const byCallsign = await loadFr24Flight\(callsign\)/, "departure without registration uses the transponder callsign");
-  assert.match(source, /else if \(data\.flightNumber\)/, "arrival without registration retains the commercial flight-number path");
-  assert.doesNotMatch(source, /for \(const callsign of callsigns\)/, "one poll never cascades through multiple FR24 aliases");
-  assert.match(source, /loadFr24RecentArrivalIdentity/, "cached completed-leg identity recovery remains available for arrivals");
+  assert.match(source, /if \(data\.movementKind === "departure"\) \{[\s\S]*?diagnostic\("fr24-owned-by-story"\)/);
+  assert.match(source, /\} else \{[\s\S]*?loadFr24FlightByRegistration/, "arrival recovery retains FR24");
+  assert.match(source, /const aroundPacks = await fetchAround/, "departure map still refreshes from open ADS-B");
+  assert.match(source, /loadFr24RecentArrivalIdentity/, "completed-arrival identity recovery remains available");
 });
 
 test("matched FR24 registration skips failed route lookup, but wrong leg/missing/stale/expired matches fall back", async () => {
@@ -125,6 +124,17 @@ test("matched FR24 registration skips failed route lookup, but wrong leg/missing
     assert.deepEqual(calls, ["route", "callsign"]);
     now += 6000; calls = []; await api.loadOfficialFlightData("AAL2", operatingOptions);
     assert.deepEqual(calls, ["callsign"], "marketing flight remembers the successful operating lookup");
+
+    const surfaceCallsign = { fr24OriginIata: "ORD", fr24DestIata: "SEA", fr24OperatingCallsign: "AAL1", fr24SurfaceDeparture: true };
+    now += 30000; calls = [];
+    assert.ok((await api.loadOfficialFlightData("AAL1", surfaceCallsign)).fr24);
+    assert.deepEqual(calls, ["callsign"], "surface departure spends exactly one callsign probe");
+
+    const surfaceRegistration = { ...surfaceCallsign, fr24Registration: "NTEST" };
+    now += 30000; calls = [];
+    assert.ok((await api.loadOfficialFlightData("AAL1", surfaceRegistration)).fr24);
+    assert.deepEqual(calls, ["registration"], "known surface registration replaces the callsign without adding a second probe");
+
     now += 16 * 60000; calls = []; await api.loadOfficialFlightData("AAL1", options);
     assert.equal(calls[0], "route", "expired memory uses original cascade");
     now += 6000; calls = []; await api.loadOfficialFlightData("AAL1", { ...options, fr24DestIata: "DEN" });
