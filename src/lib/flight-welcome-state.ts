@@ -101,9 +101,17 @@ function sameSignal(left: string, right: string) {
   return a[2] === "stage" || Math.abs(Number(a[1]) - Number(b[1])) < 12 * 60_000;
 }
 
-/** Curated Briefing entries are the app's existing meaningful-update gate. */
+function isWelcomeAlert(entry: CompiledBrief["log"][number]) {
+  if (entry.kind === "weather" || entry.kind === "delay") return true;
+  if (entry.kind === "schedule") {
+    return /gate changed|(?:departure|arrival)(?: time)? (?:moved|now looks)/i.test(entry.text);
+  }
+  return false;
+}
+
+/** Only passenger alerts can reopen a dismissed Welcome; routine stages cannot. */
 export function welcomeSummarySignals(story: FlightStory, brief: CompiledBrief | null): WelcomeSignal[] {
-  const signals: WelcomeSignal[] = (brief?.log ?? []).map((entry) => ({
+  const signals: WelcomeSignal[] = (brief?.log ?? []).filter(isWelcomeAlert).map((entry) => ({
     key: `brief:${entry.at}:${entry.kind}:${entry.text}`,
     at: Number.isFinite(entry.at) ? entry.at : story.fetchedAt,
   }));
