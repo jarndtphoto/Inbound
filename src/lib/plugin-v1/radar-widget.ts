@@ -6,6 +6,8 @@ type DisplayMode = "inline" | "fullscreen" | "pip";
 type WidgetState = { version: 3; areaId: InboundNearbyResponse["area"]["id"]; selectedRadarId: string | null; views: Record<DisplayMode, View>; paused: boolean };
 type HostContext = { displayMode: DisplayMode; availableDisplayModes: string[] };
 type OpenAi = { widgetState?: Partial<WidgetState>; toolOutput?: unknown; setWidgetState?: (state: WidgetState) => void; callTool?: (name: string, args: object) => Promise<unknown>; requestClose?: () => void };
+type AcceptOutcome = { accepted: boolean; trajectoryAdvanced: boolean };
+type RefreshOutcome = AcceptOutcome & { started: boolean };
 declare global { interface Window { __INBOUND_RADAR_INITIAL__: InboundNearbyResponse; openai?: OpenAi; inboundRadarProof?: { read: () => object } } }
 
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => {
@@ -28,6 +30,7 @@ let timerToken: number | null = null, ageTimerToken: number | null = null, timer
 const pendingPollTimers = new Set<number>(), pendingAgeTimers = new Set<number>();
 let maxPendingPollTimers = 0, maxPendingAgeTimers = 0, pollTimerFires = 0, ageTimerFires = 0;
 let abort: AbortController | null = null, activeRequestGeneration: number | null = null, nextPollAt: number | null = null, pollScheduleEpoch = 0;
+let nextPollKind: "normal" | "short-retry" | null = null, shortRetryTrajectoryKey: string | null = null, shortRetrySchedules = 0, shortRetryFires = 0;
 let mapKey = "", hostReady = false, hostOrigin: string | null = null, sequence = 0;
 let selectedTarget: PublicRadarTarget | null = null, selectedFeatured: PublicFeaturedFlight | null = null;
 let hostContext: HostContext = { displayMode: "inline", availableDisplayModes: [] };
@@ -42,6 +45,15 @@ const targetOrigin = () => hostOrigin && hostOrigin !== "null" ? hostOrigin : "*
 const displayMode = (): DisplayMode => ["inline", "fullscreen", "pip"].includes(hostContext.displayMode) ? hostContext.displayMode : "inline";
 const currentView = () => state.views[displayMode()];
 const liveAge = (observedAt: string) => Math.max(0, (Date.now() - Date.parse(observedAt)) / 1_000);
+const NORMAL_POLL_MS = 20_000, SHORT_RETRY_MS = 3_000, SHORT_RETRY_WINDOW_MS = 7_000, MOTION_BOUND_MS = 25_000;
+const trajectoryKey = (value: InboundNearbyResponse) => JSON.stringify([value.collectionVersion,
+  Math.max(...value.radarTargets.map(target => Date.parse(target.observedAt)), Number.NEGATIVE_INFINITY)]);
+const nearMotionBound = () => {
+  if (board.health !== "ok" && board.health !== "partial") return false;
+  const deadlines = board.radarTargets.flatMap(target => target.groundTrackDeg !== null && target.groundspeedKt !== null && target.groundspeedKt > 0
+    ? [Date.parse(target.observedAt) + MOTION_BOUND_MS] : []);
+  return deadlines.length > 0 && Math.max(...deadlines) - Date.now() <= SHORT_RETRY_WINDOW_MS;
+};
 const wanted = () => !dismissed && !pageInactive && !state.paused && !document.hidden;
 const animationWanted = () => !dismissed && !pageInactive && !document.hidden;
 const liveFeaturedAge = (card: PublicFeaturedFlight) => { const fix = board.radarTargets.find(target => target.radarId === card.radarId); return fix ? liveAge(fix.observedAt) : card.freshness.ageSeconds + liveAge(board.generatedAt); };
@@ -195,35 +207,50 @@ function schedule(resetDeadline = false) {
   clearPollingTimers(); const epoch = pollScheduleEpoch; if (dismissed || pageInactive || document.hidden) return;
   const nextAgeToken = ++ageTimerSequence; ageTimerToken = nextAgeToken; pendingAgeTimers.add(nextAgeToken); maxPendingAgeTimers = Math.max(maxPendingAgeTimers, pendingAgeTimers.size);
   ageTimer = setInterval(() => { ageTimerFires++; render(); }, 1_000); if (!wanted()) return;
-  if (resetDeadline || nextPollAt === null) nextPollAt = Date.now() + 20_000;
+  if (resetDeadline || nextPollAt === null) { nextPollAt = Date.now() + NORMAL_POLL_MS; nextPollKind = "normal"; }
   const nextTimerToken = ++timerSequence; timerToken = nextTimerToken; pendingPollTimers.add(nextTimerToken); maxPendingPollTimers = Math.max(maxPendingPollTimers, pendingPollTimers.size);
+  const scheduledKind = nextPollKind;
   timer = setTimeout(async () => {
     pendingPollTimers.delete(nextTimerToken); pollTimerFires++;
     if (timerToken === nextTimerToken) { timer = null; timerToken = null; }
-    if (epoch !== pollScheduleEpoch) return; const generation = requestGeneration; nextPollAt = Date.now() + 20_000; const started = await refresh();
-    if (started && generation === requestGeneration) scheduleAfterRefresh();
+    if (epoch !== pollScheduleEpoch) return; if (scheduledKind === "short-retry") shortRetryFires++;
+    nextPollKind = null; const generation = requestGeneration, outcome = await refresh();
+    if (outcome.started && generation === requestGeneration) scheduleAfterRefresh(outcome, "attempt");
   }, Math.max(0, nextPollAt - Date.now()));
 }
-function scheduleAfterRefresh() { schedule(nextPollAt === null || nextPollAt <= Date.now()); }
-function accept(result: unknown, options: { expectedArea?: WidgetState["areaId"] | null } = {}) {
+function scheduleAt(deadline: number, kind: "normal" | "short-retry") { nextPollAt = deadline; nextPollKind = kind; schedule(); }
+function scheduleNormal() { scheduleAt(Date.now() + NORMAL_POLL_MS, "normal"); }
+function scheduleAfterRefresh(outcome: RefreshOutcome, mode: "reset" | "after" | "attempt") {
+  const key = trajectoryKey(board);
+  if (outcome.accepted && !outcome.trajectoryAdvanced && nearMotionBound() && shortRetryTrajectoryKey !== key) {
+    shortRetryTrajectoryKey = key; shortRetrySchedules++; scheduleAt(Date.now() + SHORT_RETRY_MS, "short-retry"); return;
+  }
+  if (outcome.trajectoryAdvanced || mode !== "after" || nextPollAt === null || nextPollAt <= Date.now()) scheduleNormal();
+  else schedule();
+}
+function accept(result: unknown, options: { expectedArea?: WidgetState["areaId"] | null } = {}): AcceptOutcome {
   const value = result && typeof result === "object" && "structuredContent" in result ? (result as { structuredContent: unknown }).structuredContent : result;
   const parsed = InboundNearbyResponseSchema.safeParse(value);
-  if (!parsed.success) { rejectedResults++; lastRejectedReason = `schema:${parsed.error.issues.map(issue => issue.message).join("|")}`; return false; }
+  if (!parsed.success) { rejectedResults++; lastRejectedReason = `schema:${parsed.error.issues.map(issue => issue.message).join("|")}`; return { accepted: false, trajectoryAdvanced: false }; }
   const candidate = parsed.data, expectedArea = options.expectedArea === undefined ? state.areaId : options.expectedArea;
   const candidateGeneratedAt = Date.parse(candidate.generatedAt);
-  if (expectedArea !== null && candidate.area.id !== expectedArea) { rejectedResults++; lastRejectedReason = `area:${candidate.area.id}->${expectedArea}`; return false; }
-  if (candidateGeneratedAt < latestAcceptedGeneratedAt) { rejectedResults++; lastRejectedReason = "generatedAt:older"; return false; }
+  if (expectedArea !== null && candidate.area.id !== expectedArea) { rejectedResults++; lastRejectedReason = `area:${candidate.area.id}->${expectedArea}`; return { accepted: false, trajectoryAdvanced: false }; }
+  if (candidateGeneratedAt < latestAcceptedGeneratedAt) { rejectedResults++; lastRejectedReason = "generatedAt:older"; return { accepted: false, trajectoryAdvanced: false }; }
   if (candidateGeneratedAt === latestAcceptedGeneratedAt && candidate.collectionVersion !== null && latestAcceptedVersion !== null && candidate.collectionVersion < latestAcceptedVersion) {
-    rejectedResults++; lastRejectedReason = "collectionVersion:older-at-same-generatedAt"; return false;
+    rejectedResults++; lastRejectedReason = "collectionVersion:older-at-same-generatedAt"; return { accepted: false, trajectoryAdvanced: false };
   }
+  const previousTrajectoryKey = trajectoryKey(board), candidateTrajectoryKey = trajectoryKey(candidate);
   board = candidate;
   if (candidateGeneratedAt > latestAcceptedGeneratedAt) { latestAcceptedGeneratedAt = candidateGeneratedAt; latestAcceptedVersion = candidate.collectionVersion; }
   else if (candidate.collectionVersion !== null) latestAcceptedVersion = latestAcceptedVersion === null ? candidate.collectionVersion : Math.max(latestAcceptedVersion, candidate.collectionVersion);
   acceptedResults++;
-  updateSelection(); render(); ensureAnimationLoop(); return true;
+  const trajectoryAdvanced = candidateTrajectoryKey !== previousTrajectoryKey;
+  if (trajectoryAdvanced) shortRetryTrajectoryKey = null;
+  updateSelection(); render(); ensureAnimationLoop(); return { accepted: true, trajectoryAdvanced };
 }
-async function refresh(): Promise<boolean> {
-  if (!wanted() || activeRequestGeneration === requestGeneration) return false; const generation = requestGeneration; activeRequestGeneration = generation; render();
+async function refresh(): Promise<RefreshOutcome> {
+  if (!wanted() || activeRequestGeneration === requestGeneration) return { started: false, accepted: false, trajectoryAdvanced: false };
+  const generation = requestGeneration; activeRequestGeneration = generation; render(); let accepted = false, trajectoryAdvanced = false;
   const area = state.areaId;
   let requestAbort: AbortController | null = null;
   try {
@@ -233,16 +260,16 @@ async function refresh(): Promise<boolean> {
     else if (window.parent === window) {
       requestAbort = new AbortController(); abort = requestAbort; const response = await fetch("/mcp", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, signal: requestAbort.signal, body: JSON.stringify({ jsonrpc: "2.0", id: ++sequence, method: "tools/call", params: { name: "get_nearby_flights", arguments: { area, limit: 4 } } }) });
       if (!response.ok) throw new Error("Nearby refresh unavailable"); result = (await response.json()).result;
-    } else { el("host-status").textContent = "No callable host bridge. Periodic refresh is unavailable; accepted positions remain bounded."; return true; }
-    refreshCalls++; if (generation === requestGeneration && wanted()) accept(result);
+    } else { el("host-status").textContent = "No callable host bridge. Periodic refresh is unavailable; accepted positions remain bounded."; return { started: true, accepted, trajectoryAdvanced }; }
+    refreshCalls++; if (generation === requestGeneration && wanted()) ({ accepted, trajectoryAdvanced } = accept(result));
   } catch { if (generation === requestGeneration && wanted()) el("board-notice").textContent = "Refresh temporarily unavailable. Last accepted positions remain bounded and continue to age."; }
   finally { if (activeRequestGeneration === generation) activeRequestGeneration = null; if (abort === requestAbort) abort = null; el<HTMLButtonElement>("refresh").disabled = dismissed || activeRequestGeneration === requestGeneration; }
-  return true;
+  return { started: true, accepted, trajectoryAdvanced };
 }
 async function refreshAndSchedule(mode: "reset" | "after") {
-  const generation = requestGeneration, started = await refresh();
-  if (!started || generation !== requestGeneration) return false;
-  if (mode === "reset") schedule(true); else scheduleAfterRefresh();
+  const generation = requestGeneration, outcome = await refresh();
+  if (!outcome.started || generation !== requestGeneration) return false;
+  scheduleAfterRefresh(outcome, mode);
   return true;
 }
 async function display(mode: DisplayMode) {
@@ -285,10 +312,12 @@ window.addEventListener("openai:set_globals", event => {
   }
   const areaChanged = state.areaId !== previousArea, pausedChanged = state.paused !== previousPaused;
   if (areaChanged || pausedChanged) stopPolling();
-  const acceptedToolOutput = globals?.toolOutput ? accept(globals.toolOutput) : false; render(); ensureAnimationLoop();
+  const acceptedToolOutput = globals?.toolOutput ? accept(globals.toolOutput) : { accepted: false, trajectoryAdvanced: false }; render(); ensureAnimationLoop();
   if (areaChanged || pausedChanged) {
-    const needsRefresh = pausedChanged && !state.paused || areaChanged && (!acceptedToolOutput || board.area.id !== state.areaId);
-    if (wanted() && needsRefresh) void refreshAndSchedule("after"); else schedule(true);
+    const needsRefresh = pausedChanged && !state.paused || areaChanged && (!acceptedToolOutput.accepted || board.area.id !== state.areaId);
+    if (wanted() && needsRefresh) void refreshAndSchedule(pausedChanged ? "reset" : "after");
+    else if (wanted() && areaChanged && acceptedToolOutput.accepted) scheduleAfterRefresh({ started: true, ...acceptedToolOutput }, "after");
+    else schedule();
   }
 });
 window.addEventListener("message", event => {
@@ -305,7 +334,7 @@ window.addEventListener("message", event => {
 });
 new ResizeObserver(() => renderRadar()).observe(el("radar-surface"));
 window.inboundRadarProof = {
-  read: () => ({ selectedRadarId: state.selectedRadarId, selectedView: currentView(), views: { ...state.views }, requestedAreaId: state.areaId, areaId: board.area.id, collectionVersion: board.collectionVersion, generatedAt: board.generatedAt, health: board.health, positions: board.radarTargets.map(target => ({ radarId: target.radarId, latitude: target.latitude, longitude: target.longitude, observedAt: target.observedAt, altitudeFt: target.altitudeFt, groundspeedKt: target.groundspeedKt, groundTrackDeg: target.groundTrackDeg, positionKind: target.positionKind })), displayPositions: displayPositions.map(position => ({ ...position })), labelIds: [...labelIds], refreshCalls, refreshInFlight: activeRequestGeneration === requestGeneration, pollScheduled: timer !== null, ageScheduled: ageTimer !== null, pollTimers: { pending: pendingPollTimers.size, maxPending: maxPendingPollTimers, fired: pollTimerFires }, ageTimers: { pending: pendingAgeTimers.size, maxPending: maxPendingAgeTimers, fired: ageTimerFires }, nextPollAt, pollScheduleEpoch, requestGeneration, activeRequestGeneration, displayMode: displayMode(), hostReady, hostContext: { ...hostContext, availableDisplayModes: [...hostContext.availableDisplayModes] }, hostWidgetState: host()?.widgetState ? { ...host()!.widgetState, views: host()!.widgetState!.views ? { ...host()!.widgetState!.views } : undefined } : null, frameCount, animationScheduled: frame !== null, paused: state.paused, documentHidden: document.hidden, pageInactive, dismissed, acceptedResults, rejectedResults, lastRejectedReason, latestAcceptedVersion, latestAcceptedGeneratedAt, globalsEvents, hostContextEvents }),
+  read: () => ({ selectedRadarId: state.selectedRadarId, selectedView: currentView(), views: { ...state.views }, requestedAreaId: state.areaId, areaId: board.area.id, collectionVersion: board.collectionVersion, generatedAt: board.generatedAt, health: board.health, positions: board.radarTargets.map(target => ({ radarId: target.radarId, latitude: target.latitude, longitude: target.longitude, observedAt: target.observedAt, altitudeFt: target.altitudeFt, groundspeedKt: target.groundspeedKt, groundTrackDeg: target.groundTrackDeg, positionKind: target.positionKind })), displayPositions: displayPositions.map(position => ({ ...position })), labelIds: [...labelIds], refreshCalls, refreshInFlight: activeRequestGeneration === requestGeneration, pollScheduled: timer !== null, ageScheduled: ageTimer !== null, pollTimers: { pending: pendingPollTimers.size, maxPending: maxPendingPollTimers, fired: pollTimerFires }, ageTimers: { pending: pendingAgeTimers.size, maxPending: maxPendingAgeTimers, fired: ageTimerFires }, nextPollAt, nextPollKind, shortRetryUsed: shortRetryTrajectoryKey === trajectoryKey(board), shortRetrySchedules, shortRetryFires, pollScheduleEpoch, requestGeneration, activeRequestGeneration, displayMode: displayMode(), hostReady, hostContext: { ...hostContext, availableDisplayModes: [...hostContext.availableDisplayModes] }, hostWidgetState: host()?.widgetState ? { ...host()!.widgetState, views: host()!.widgetState!.views ? { ...host()!.widgetState!.views } : undefined } : null, frameCount, animationScheduled: frame !== null, paused: state.paused, documentHidden: document.hidden, pageInactive, dismissed, acceptedResults, rejectedResults, lastRejectedReason, latestAcceptedVersion, latestAcceptedGeneratedAt, globalsEvents, hostContextEvents }),
 };
 const restoredArea = state.areaId;
 accept(host()?.toolOutput || initial, { expectedArea: null }); state.areaId = restoredArea; render(); schedule(true); ensureAnimationLoop();

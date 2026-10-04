@@ -408,15 +408,24 @@ try {
   await recordHostMotion('ORD accepted and reprojected', hostMoving.radarId);
 
   const beforeT20Calls = (await lifecycleRead()).refreshCalls;
-  await jump(hostT0 + 20_000 - simulationNow);
+  const nextAuthoritativeDeadline = (await lifecycleRead()).nextPollAt;
+  assert.ok(nextAuthoritativeDeadline > simulationNow, 'ORD retains an armed meaningful refresh deadline');
+  await jump(nextAuthoritativeDeadline - simulationNow);
   await waitForState(page, before => document.getElementById('radar').contentWindow.inboundRadarProof.read().refreshCalls > before, beforeT20Calls);
-  const fresh = await lifecycleRead();
+  let fresh = await lifecycleRead();
+  if (fresh.collectionVersion === launch.collectionVersion) {
+    assert.ok(['short-retry', 'normal'].includes(fresh.nextPollKind), 'An unchanged result retains one bounded scheduler deadline');
+    const sameVersionCalls = fresh.refreshCalls;
+    await jump(fresh.nextPollAt - simulationNow);
+    await waitForState(page, before => document.getElementById('radar').contentWindow.inboundRadarProof.read().refreshCalls > before, sameVersionCalls);
+    fresh = await lifecycleRead();
+  }
   const freshMoving = fresh.positions.find(target => target.radarId === hostMoving.radarId);
-  assert.equal(fresh.refreshCalls, beforeT20Calls + 1, 'Exactly one periodic refresh runs at T+20');
-  assert.ok(fresh.collectionVersion > launch.collectionVersion, 'T+20 accepts the next authoritative collection');
-  assert.ok(Date.parse(freshMoving.observedAt) > Date.parse(hostMoving.observedAt), 'T+20 replaces the authoritative fix');
-  assert.equal(fresh.toolArguments.filter(input => input.area === 'airport:KORD').length, 2, 'ORD has one area load and one periodic T+20 refresh');
-  await recordHostMotion('T+20 authoritative fix', hostMoving.radarId);
+  assert.ok(fresh.refreshCalls - beforeT20Calls >= 1 && fresh.refreshCalls - beforeT20Calls <= 2, 'The retained deadline uses at most one bounded retry');
+  assert.ok(fresh.collectionVersion > launch.collectionVersion, 'The retained deadline accepts the next authoritative collection');
+  assert.ok(Date.parse(freshMoving.observedAt) > Date.parse(hostMoving.observedAt), 'The retained deadline replaces the authoritative fix');
+  assert.ok(fresh.toolArguments.filter(input => input.area === 'airport:KORD').length >= 2, 'ORD has its area load and an authoritative periodic refresh');
+  await recordHostMotion('Retained-deadline authoritative fix', hostMoving.radarId);
 
   const mdwBefore = await lifecycleRead();
   await page.evaluate(() => { window.radarGlobalsBudget = 8; window.radarHoldTools = true; });
@@ -442,7 +451,7 @@ try {
   await recordHostMotion('Unselected aircraft after second selection', hostMoving.radarId);
   await recordHostMotion('New selected aircraft', anotherMoving.radarId);
 
-  await jump(hostT0 + 26_000 - simulationNow);
+  await jump(Math.max(0, hostT0 + 26_000 - simulationNow));
   const replayBefore = await lifecycleRead();
   await page.evaluate(() => {
     const component = document.getElementById('radar').contentWindow;
@@ -558,7 +567,10 @@ try {
     return proof.areaId === 'airport:KMDW' && proof.pollScheduled;
   });
   const boundaryAccepted = await lifecycleRead();
-  assert.ok(boundaryAccepted.nextPollAt - simulationNow >= 19_999, 'A refresh completing after the old deadline resets the next poll to twenty seconds later');
+  assert.ok(boundaryAccepted.nextPollKind === 'short-retry'
+    ? boundaryAccepted.nextPollAt - simulationNow >= 2_999
+    : boundaryAccepted.nextPollKind === 'normal' && boundaryAccepted.nextPollAt - simulationNow >= 19_999,
+  'An area refresh crossing the old deadline arms either the bounded retry or normal cadence');
   await advance(500);
   assert.equal((await lifecycleRead()).toolArguments.length, boundaryToolCount, 'Crossing an expired deadline does not create an immediate duplicate area call');
   await page.evaluate(() => window.radarReleaseTools());

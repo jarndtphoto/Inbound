@@ -10,6 +10,7 @@
     "plugin:proof": "node --experimental-strip-types --import ./scripts/test-imports.mjs scripts/plugin-v1-proof.mjs",
     "plugin:test": "node --experimental-strip-types --import ./scripts/test-imports.mjs --test 'src/lib/plugin-v1/*.test.ts'",
     "plugin:browser-proof": "node --experimental-strip-types --import ./scripts/test-imports.mjs scripts/plugin-v1-browser-proof.mjs",
+    "plugin:radar-transient-proof": "node --experimental-strip-types --import ./scripts/test-imports.mjs scripts/plugin-v1-radar-transient-proof.mjs",
     "dev": "node scripts/with-app-env.mjs vite dev --host 0.0.0.0 --port 8080",
     "build": "node scripts/with-app-env.mjs vite build && npm run db:migrate",
     "db:migrate": "node scripts/migrate.mjs",
