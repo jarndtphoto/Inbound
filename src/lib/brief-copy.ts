@@ -324,6 +324,18 @@ export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: R
     }
   }
 
+  if (prev.originNas !== next.originNas) {
+    if (next.originNas) {
+      const why = passengerDelay(next.originNas);
+      out.push({
+        kind: "delay",
+        text: why ? `Delay at the departure airport — ${why}` : "Delay at the departure airport",
+      });
+    } else if (prev.originNas) {
+      out.push({ kind: "delay", text: "The departure airport delay has lifted" });
+    }
+  }
+
   if (beforeTakeoff && prev.originGate && next.originGate && prev.originGate !== next.originGate) {
     out.push({ kind: "schedule", text: `Departure gate changed to ${next.originGate}` });
   }

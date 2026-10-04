@@ -16,7 +16,7 @@ const dir = await mkdtemp(resolve('node_modules/.polish-ui-'));
 after(() => rm(dir, { recursive: true, force: true }));
 await build({ configFile: false, logLevel: 'silent', resolve: { alias: { '@': resolve('src') } },
   plugins: [{ name: 'polish-test-exports', enforce: 'pre', transform(code, id) {
-    if (id === resolve('src/components/filed-app.tsx')) return code + '\nexport { FlightHead, TimesStrip, OverviewDetails, BreakdownCard, WeatherTimeline, FlightWelcome, RouteMap, TravelerCompanion, rideFacts, rememberOrigOnClient, readCachedStory, writeCachedStory };';
+    if (id === resolve('src/components/filed-app.tsx')) return code + '\nexport { FlightHead, TimesStrip, Freshness, OverviewDetails, BreakdownCard, WeatherTimeline, FlightWelcome, RouteMap, TravelerCompanion, rideFacts, rememberOrigOnClient, readCachedStory, writeCachedStory };';
   } }, react()], build: { ssr: resolve('src/components/filed-app.tsx'), outDir: dir,
     rollupOptions: { output: { entryFileNames: 'ui.mjs' } } } });
 const ui = await import(pathToFileURL(join(dir, 'ui.mjs')).href);
@@ -75,6 +75,38 @@ test('identical arrival clocks retain the same reported kind in header, timing, 
     assert.match(render(ui.TravelerCompanion, { story }), new RegExp(event));
     const brief = composeBrief(ui.rideFacts({ ...story, currentStage: 'arrival' }, 'UA219', 'arrival'));
     assert.match(brief.lead, new RegExp(event));
+  }
+});
+
+test('restored flight freshness shows truthful age until a fresh response succeeds', () => {
+  const now = Date.UTC(2026, 9, 4, 12);
+  const oldNow = Date.now;
+  Date.now = () => now;
+  try {
+    const props = { at: now - 6 * 60_000, fetching: true, refreshing: false, onRefresh() {} };
+    const restoring = render(ui.Freshness, { ...props, restored: true });
+    assert.match(restoring, /Updated 6 min ago · refreshing/);
+
+    const fresh = render(ui.Freshness, { ...props, at: now - 1000, restored: false, fetching: false });
+    assert.match(fresh, /Flight data just updated/);
+    assert.doesNotMatch(fresh, /· refreshing/);
+
+    const ordinaryPoll = render(ui.Freshness, { ...props, restored: false, fetching: true });
+    assert.match(ordinaryPoll, /Data from 6 min ago/);
+    assert.doesNotMatch(ordinaryPoll, /· refreshing/);
+
+    const failed = render(ui.Freshness, { ...props, restored: true, fetching: false, failed: true });
+    assert.match(failed, /Updated 6 min ago · refresh delayed/);
+    assert.doesNotMatch(failed, /just updated/);
+
+    const paused = render(ui.Freshness, { ...props, restored: true, fetching: false });
+    assert.match(paused, /Updated 6 min ago · waiting to refresh/);
+
+    const retrying = render(ui.Freshness, { ...props, restored: true, fetching: true, failed: true });
+    assert.match(retrying, /Updated 6 min ago · refreshing/);
+    assert.doesNotMatch(retrying, /refresh delayed/);
+  } finally {
+    Date.now = oldNow;
   }
 });
 

@@ -1,6 +1,6 @@
 import { keepRouteGeometry as keepRecentTrackGeometry } from "@/lib/route-continuity";
 import { applyTakeoffFloor } from "@/lib/confirmed-takeoff";
-import { displayStage, flightAirborne, liveFix, elapsedFlight, flownDistance, remainingFlight } from "@/lib/flight-presentation";
+import { displayStage, flightAirborne, liveFix, elapsedFlight, flownDistance, remainingFlight, type RemainingFlightPresentation } from "@/lib/flight-presentation";
 import { FLIGHT_STAGES as STAGES, stageStepId, statusProgressIndex } from "@/lib/flight-stage";
 import { AppearanceControl } from "@/components/appearance-control";
 import { inboundDiversionText } from "@/lib/inbound-diversion";
@@ -12,7 +12,7 @@ import { storyLegDate } from "@/lib/flight-story-date";
 import { isLanded, nextStep } from "@/lib/traveler";
 import { briefRide } from "@/lib/brief";
 import { briefLogLabel, briefLogText, briefingRefreshOutcome, composeBrief, logManualRefresh, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
-import { agoLabel, delayPhrase } from "@/lib/format";
+import { agoLabel, delayPhrase, updatedAgoLabel } from "@/lib/format";
 import { formatDuration, formatMiles, feetPretty, haversineNm } from "@/lib/geo";
 import { parseFlightQuery, storyMatchesQuery } from "@/lib/flight-parse";
 import { RESUME_MAX_AGE_MS, resumeFromStory, savedScheduleNote } from "@/lib/flight-resume";
@@ -29,6 +29,7 @@ import type { Chop, Comfort, FlightStory, PilotReportObservation, StageId } from
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
 import { flightPollingComplete } from "@/lib/flight-polling";
+import { dismissWelcomeSummary, shouldOpenWelcomeSummary, welcomeLegKey, welcomeSummaryVersion } from "@/lib/flight-welcome-state";
 import { INITIAL_FLIGHT_SEARCH_MS, TEMPORARY_FLIGHT_RETRY_MS, flightStoryQueryKey, flightNotFound, flightSearchCanPoll, flightSearchShouldRetry, stopFlightSearch, flightStoryRequest } from "@/lib/flight-search";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
 import { sampleWeather } from "@/lib/route-weather-segments";
@@ -467,7 +468,6 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   const stagePref = useFiled((s) => s.stage);
   const setStage = useFiled((s) => s.setStage);
   const [briefPopupOpen, setBriefPopupOpen] = useState(false);
-  const openedBriefings = useRef(new Set<string>());
   const [briefing, setBriefing] = useState<CompiledBrief | null>(null);
   const [briefingFor, setBriefingFor] = useState("");
   const [cacheOk, setCacheOk] = useState(false);
@@ -591,6 +591,8 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   });
 
   const story = storyForQuery(storyQ.data, query, linkedDate);
+  const remaining = story ? remainingFlight(story) : null;
+  const restoringSavedData = Boolean(story && storyQ.dataUpdatedAt === 0);
   useEffect(() => () => stopFlightSearch(queryClient, query, linkedDate), [queryClient, query, linkedDate]);
   useEffect(() => {
     if (!cacheOk || story || storyQ.isError || stillLooking) return;
@@ -636,17 +638,26 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
     if (storyQ.dataUpdatedAt > 0) setRefreshErr(null);
   }, [query, storyQ.dataUpdatedAt]);
 
-  useEffect(() => {
-    if (!story) return;
-    const key = normFlight(query);
-    if (!openedBriefings.current.has(key)) {
-      openedBriefings.current.add(key);
-      setBriefPopupOpen(true);
-    }
-  }, [query, story?.times.origPushUnix, story?.times.pushUnix, Boolean(story)]);
   const active = stageStepId(stagePref === "auto" ? (story ? displayStage(story) : "inbound") : stagePref);
   const shownBrief = briefing && briefingFor === flightKey ? briefing : null;
+  const welcomeKey = story ? welcomeLegKey(story, linkedDate) : "";
+  const welcomeVersion = story ? welcomeSummaryVersion(story, shownBrief) : "";
   briefingRef.current = shownBrief;
+
+  useEffect(() => {
+    if (story && shouldOpenWelcomeSummary(story, shownBrief, { legDate: linkedDate })) setBriefPopupOpen(true);
+    // Only a dated leg change or a curated briefing/diversion signal should
+    // reconsider a dismissal; routine poll objects must not reopen it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [welcomeKey, welcomeVersion]);
+
+  function closeWelcome() {
+    if (story) {
+      const currentBrief = composeBrief(rideFacts(story, query, active), shownBrief ?? savedBrief(story));
+      dismissWelcomeSummary(story, currentBrief, Date.now(), { legDate: linkedDate });
+    }
+    setBriefPopupOpen(false);
+  }
 
   const briefM = useMutation({
     mutationFn: async () => {
@@ -733,7 +744,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
 
   useEffect(() => {
     if (!story || !briefing || briefingFor !== flightKey) return;
-    const key = `${takeoffEstimateExpired(story)}|${story.weatherCoverage?.failedSources.join(",") ?? "unknown"}|${story.aircraft?.registration ?? ""}|${story.live}|${Math.round(story.route.etaMin)}|${Math.round(story.route.remainingNm / 10)}|${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}|${flightWeatherSummary(story)}`;
+    const key = `${takeoffEstimateExpired(story)}|${story.weatherCoverage?.failedSources.join(",") ?? "unknown"}|${story.aircraft?.registration ?? ""}|${story.live}|${Math.round(story.route.etaMin)}|${Math.round(story.route.remainingNm / 10)}|${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.pushKind ?? ""}|${story.times?.pushSource ?? ""}|${story.times?.takeoffKind ?? ""}|${story.times?.landKind ?? ""}|${story.times?.gateKind ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.origin.nas?.reason ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}|${flightWeatherSummary(story)}`;
     if (key === lastBriefKey.current) return;
     lastBriefKey.current = key;
     const next = composeBrief(rideFacts(story, query, active), briefing);
@@ -850,7 +861,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   return (
     <div className={cn("pwa-flight-shell", "inbound-redesign", "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg")} style={shellStyle}>
       <header className="journey-header"><div className="flex min-w-0 items-center gap-2"><button type="button" aria-label="Back to search" onClick={leaveFlight} className="flex size-11 shrink-0 items-center justify-center rounded-md text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><ChevronLeft className="size-6" aria-hidden="true" /></button>{story ? <p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p> : <p>{query || "Preparing your flight…"}</p>}</div><AppearanceControl /></header>
-      {story && <FlightWelcome open={briefPopupOpen} onClose={() => setBriefPopupOpen(false)} story={story} brief={shownBrief} />}
+      {story && <FlightWelcome open={briefPopupOpen} onClose={closeWelcome} story={story} brief={shownBrief} />}
       <ScreenErrorBoundary>
       <main
         ref={mainRef}
@@ -909,10 +920,10 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
 
         {story && (
           <div key={normFlight(query)} className={cn("journey-body min-w-0", flightTab === "Route" && "min-h-0 flex-1")}>
-            <div className="journey-map journey-map-expanded" hidden={flightTab !== "Route"}><RouteMap story={story} fixedViewport active={flightTab === "Route"} />{(story.route?.samples?.length ?? 0) < 2 && <p className="map-unavailable">Route map unavailable</p>}</div>
+            <div className="journey-map journey-map-expanded" hidden={flightTab !== "Route"}><RouteMap story={story} fixedViewport active={flightTab === "Route"} remaining={remaining ?? undefined} />{(story.route?.samples?.length ?? 0) < 2 && <p className="map-unavailable">Route map unavailable</p>}</div>
             <section className="journey-panel" id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
-              <FlightHead story={story} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
-              <OverviewDetails story={story} timing={<TimesStrip story={story} failed={storyQ.isError || Boolean(refreshErr)} />} />
+              <FlightHead story={story} remaining={remaining ?? undefined} restored={restoringSavedData} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
+              <OverviewDetails story={story} timing={<TimesStrip story={story} remaining={remaining ?? undefined} failed={storyQ.isError || Boolean(refreshErr)} />} />
               <TravelerCompanion story={story} failed={storyQ.isError || Boolean(refreshErr)} onTrackInbound={openFlight} />
             </section>
             <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
@@ -975,11 +986,11 @@ function stageHeadline(story: FlightStory) {
   return STAGES.find((s) => s.id === stage)?.label ?? stage;
 }
 
-function headStatus(story: FlightStory) {
+function headStatus(story: FlightStory, remaining = remainingFlight(story)) {
   const airline = story.airline;
   const air = flightAirborne(story);
   const live = liveFix(story);
-  const inAirLive = Boolean(live && story.aircraft && !story.aircraft.onGround && !remainingFlight(story).estimated);
+  const inAirLive = Boolean(live && story.aircraft && !story.aircraft.onGround && !remaining.estimated);
   if (story.currentStage === "gate") return airline ?? "Parked";
   if (story.currentStage === "taxi_in") return airline ? `Taxiing in · ${airline}` : "Taxiing in";
   if (wheelsDown(story)) return airline ? `Landed · ${airline}` : "Landed";
@@ -1044,14 +1055,18 @@ function StatusCard({
 
 function FlightHead({
   story,
+  remaining,
   fetching,
   refreshing,
+  restored = false,
   failed = false,
   onRefresh,
 }: {
   story: FlightStory;
+  remaining?: RemainingFlightPresentation;
   fetching: boolean;
   refreshing: boolean;
+  restored?: boolean;
   failed?: boolean;
   onRefresh: () => void;
 }) {
@@ -1062,7 +1077,7 @@ function FlightHead({
     <div className="flight-summary rounded-xl border border-border bg-surface p-4">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2">
         <div className="min-w-0">
-          <p className="summary-airline text-sm text-muted">{headStatus(story)}</p>
+          <p className="summary-airline text-sm text-muted">{headStatus(story, remaining)}</p>
           <h2 className="summary-stage font-display font-semibold leading-none">{displayStage(story) === "ride" ? "In flight" : stageHeadline(story)}</h2>
         </div>
         <div className="max-w-36 text-right">
@@ -1078,7 +1093,7 @@ function FlightHead({
         </p>
       </div>
       <FlightStatusProgress story={story} />
-      <Freshness failed={failed} partial={story.schedule?.status === "saved"} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
+      <Freshness failed={failed} partial={story.schedule?.status === "saved"} restored={restored} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
     </div>
   );
 }
@@ -1248,7 +1263,7 @@ function ClockCell({
   );
 }
 
-function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: boolean }) {
+function TimesStrip({ story, remaining = remainingFlight(story), failed = false }: { story: FlightStory; remaining?: RemainingFlightPresentation; failed?: boolean }) {
   const t = story.times;
   const down = wheelsDown(story);
   const shownStage = displayStage(story);
@@ -1257,7 +1272,6 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
   const showLiveFlight = Boolean(liveFix(story) && flightAirborne(story) && ac && !ac.onGround && (ac.altFt || ac.gsKt));
   const elapsed = airborne ? elapsedFlight(story) : null;
   const flown = airborne ? flownDistance(story) : null;
-  const remaining = remainingFlight(story);
   const parked = story.currentStage === "gate";
   const delay = t?.delayMin ?? null;
   const late = (delay ?? 0) >= 5;
@@ -1298,7 +1312,7 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
             <StatusCard
               prominent
               title="Remaining"
-              value={remaining.minutes != null ? formatDuration(remaining.minutes) : "Updating…"}
+              value={remaining.text ?? "Updating…"}
               detail={remaining.estimated ? [remaining.minutes != null ? "Estimated" : null, remaining.gapNote].filter(Boolean).join(" · ") : formatMiles(story.route.remainingNm)}
             />
             <StatusCard
@@ -1371,6 +1385,7 @@ function Freshness({
   at,
   fetching,
   refreshing,
+  restored = false,
   failed = false,
   partial = false,
   onRefresh,
@@ -1378,6 +1393,7 @@ function Freshness({
   at: number;
   fetching: boolean;
   refreshing: boolean;
+  restored?: boolean;
   failed?: boolean;
   partial?: boolean;
   onRefresh: () => void;
@@ -1399,7 +1415,15 @@ function Freshness({
         {refreshing ? "Updating…" : "Refresh"}
       </button>
       <p className="font-mono text-xs tracking-widest text-muted uppercase">
-        {refreshing ? "Updating…" : failed ? "Update delayed · showing saved data" : partial ? "Schedule delayed · " + (Date.now() - at < 8000 ? "other feeds just checked" : agoLabel(at, false)) : agoLabel(at, false)}
+        {restored
+          ? `${updatedAgoLabel(at)} · ${fetching || refreshing ? "refreshing" : failed ? "refresh delayed" : "waiting to refresh"}`
+          : refreshing
+            ? "Updating…"
+            : failed
+              ? `${updatedAgoLabel(at)} · update delayed`
+              : partial
+                ? "Schedule delayed · " + (Date.now() - at < 8000 ? "other feeds just checked" : agoLabel(at, false))
+                : agoLabel(at, false)}
       </p>
     </div>
   );
