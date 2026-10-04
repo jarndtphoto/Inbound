@@ -29,7 +29,7 @@ import type { Chop, Comfort, FlightStory, PilotReportObservation, StageId } from
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
 import { flightPollingInterval } from "@/lib/flight-polling";
-import { dismissWelcomeSummary, shouldOpenWelcomeSummary, welcomeLegKey, welcomeSummaryVersion } from "@/lib/flight-welcome-state";
+import { dismissWelcomeSummary, shouldOpenWelcomeSummary, welcomeLegKey } from "@/lib/flight-welcome-state";
 import { INITIAL_FLIGHT_SEARCH_MS, TEMPORARY_FLIGHT_RETRY_MS, flightStoryQueryKey, flightNotFound, flightSearchCanPoll, flightSearchShouldRetry, stopFlightSearch, flightStoryRequest } from "@/lib/flight-search";
 import { WeatherEventMarker } from "@/components/weather-event-marker";
 import { sampleWeather } from "@/lib/route-weather-segments";
@@ -643,15 +643,19 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   const active = stageStepId(stagePref === "auto" ? (story ? displayStage(story) : "inbound") : stagePref);
   const shownBrief = briefing && briefingFor === flightKey ? briefing : null;
   const welcomeKey = story ? welcomeLegKey(story, linkedDate) : "";
-  const welcomeVersion = story ? welcomeSummaryVersion(story, shownBrief) : "";
+  const welcomeSessionKeyRef = useRef("");
   briefingRef.current = shownBrief;
 
   useEffect(() => {
-    if (story && shouldOpenWelcomeSummary(story, shownBrief, { legDate: linkedDate })) setBriefPopupOpen(true);
-    // Only a dated leg change or a curated briefing/diversion signal should
-    // reconsider a dismissal; routine poll objects must not reopen it.
+    if (!story || !welcomeKey || welcomeSessionKeyRef.current === welcomeKey) return;
+    welcomeSessionKeyRef.current = welcomeKey;
+    const existingBrief = shownBrief ?? savedBrief(story);
+    if (shouldOpenWelcomeSummary(story, existingBrief, { legDate: linkedDate })) setBriefPopupOpen(true);
+    // Evaluate the welcome modal once per viewed flight. Briefing/weather can
+    // continue updating in-place, but asynchronous enrichment must not reopen
+    // a modal the passenger already dismissed 10–20 seconds earlier.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [welcomeKey, welcomeVersion]);
+  }, [welcomeKey]);
 
   function closeWelcome() {
     if (story) {
