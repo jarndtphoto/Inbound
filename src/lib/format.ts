@@ -48,3 +48,10 @@ export function agoLabel(at: number, fetching: boolean): string {
   const min = Math.round(sec / 60);
   return `Data from ${min} min ago`;
 }
+
+export function updatedAgoLabel(at: number, now = Date.now()): string {
+  const sec = Math.max(0, Math.round((now - at) / 1000));
+  if (sec < 8) return "Updated just now";
+  if (sec < 60) return `Updated ${sec}s ago`;
+  return `Updated ${Math.round(sec / 60)} min ago`;
+}

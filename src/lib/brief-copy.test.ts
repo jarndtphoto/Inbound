@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { briefLogLabel, briefLogText, briefingRefreshOutcome, composeBrief, diffBriefLog, logManualRefresh, type RideFacts } from "./brief-copy.ts";
+import { briefLogLabel, briefLogText, briefingRefreshOutcome, composeBrief, diffBriefLog, logManualRefresh, type BriefSnap, type RideFacts } from "./brief-copy.ts";
 
 function facts(over: Partial<RideFacts> = {}): RideFacts {
   return {
@@ -208,62 +208,29 @@ describe("briefing update log", () => {
   });
 
   it("maps airport delay programs into plain words", () => {
-    const lines = diffBriefLog(
-      {
-        stage: "push",
-        delay: 0,
-        arriveDelay: null,
-        taxiOut: 18,
-        taxiOutKind: "typical",
-        taxiIn: 12,
-        taxiInKind: "typical",
-        ride: "Smooth",
-        destNas: "",
-        originNas: "",
-        inbound: "complete",
-        land: "11:04 AM",
-        takeoff: "8:10 PM",
-        push: "7:52 PM",
-        destGate: "C18",
-        wx: "a",
-        worstChop: "smooth",
-        convective: false,
-        destCat: "VFR",
-        originCat: "VFR",
-        pushUnix: 1,
-        takeoffUnix: 2,
-        landUnix: 3,
-      },
-      {
-        stage: "push",
-        delay: 0,
-        arriveDelay: null,
-        taxiOut: 18,
-        taxiOutKind: "typical",
-        taxiIn: 12,
-        taxiInKind: "typical",
-        ride: "Smooth",
-        destNas: "GDP / Thunderstorms",
-        originNas: "",
-        inbound: "complete",
-        land: "11:04 AM",
-        takeoff: "8:10 PM",
-        push: "7:52 PM",
-        destGate: "C18",
-        wx: "a",
-        worstChop: "smooth",
-        convective: false,
-        destCat: "VFR",
-        originCat: "VFR",
-        pushUnix: 1,
-        takeoffUnix: 2,
-        landUnix: 3,
-      },
-    );
+    const baseline: BriefSnap = {
+      stage: "push", delay: 0, arriveDelay: null, taxiOut: 18, taxiOutKind: "typical",
+      taxiIn: 12, taxiInKind: "typical", ride: "Smooth", destNas: "", originNas: "",
+      inbound: "complete", land: "11:04 AM", takeoff: "8:10 PM", push: "7:52 PM",
+      destGate: "C18", wx: "a", worstChop: "smooth", convective: false,
+      destCat: "VFR", originCat: "VFR", pushUnix: 1, takeoffUnix: 2, landUnix: 3,
+    };
+    const lines = diffBriefLog(baseline, { ...baseline, destNas: "GDP / Thunderstorms" });
     assert.equal(lines.length, 1);
     assert.equal(lines[0].kind, "delay");
     assert.match(lines[0].text, /thunderstorms/i);
     assert.equal(JARGON.test(lines[0].text), false);
+
+    const departure = diffBriefLog(baseline, { ...baseline, originNas: "GDP / Wind" });
+    assert.equal(departure.length, 1);
+    assert.match(departure[0].text, /departure airport.*delay program/i);
+    const source = readFileSync(new URL("../components/filed-app.tsx", import.meta.url), "utf8");
+    const refresh = source.slice(source.indexOf("const key = `${takeoffEstimateExpired"), source.indexOf("if (key === lastBriefKey.current)"));
+    assert.match(refresh, /story\.origin\.nas\?\.reason/);
+    assert.match(refresh, /story\.dest\.nas\?\.reason/);
+    for (const field of ["pushKind", "pushSource", "takeoffKind", "landKind", "gateKind"]) {
+      assert.match(refresh, new RegExp(`story\\.times\\?\\.${field}`));
+    }
   });
 });
 

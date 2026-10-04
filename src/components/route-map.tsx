@@ -1,4 +1,5 @@
 import { lastKnownProgressLabel } from "@/lib/route-continuity";
+import { remainingFlight, type RemainingFlightPresentation } from "@/lib/flight-presentation";
 import { destPoint, formatDuration, formatMiles, haversineNm } from "@/lib/geo";
 import { ArrivalRunwayChip } from "./arrival-runway-chip";
 import { upcomingStorms } from "@/lib/route-hazards";
@@ -444,7 +445,7 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story, fixedViewport = false, weatherPreview }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { reported?: boolean; pilotReports?: PilotReportObservation[]; intensityBand?: string; intensity?: string; eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] } }) {
+export function RouteMap({ story, fixedViewport = false, weatherPreview, remaining }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { reported?: boolean; pilotReports?: PilotReportObservation[]; intensityBand?: string; intensity?: string; eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] }; remaining?: RemainingFlightPresentation }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const geometryRef = useRef<SVGGElement>(null);
   const [mapHeight, setMapHeight] = useState(800);
@@ -510,9 +511,16 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
   const ac = story.aircraft;
   const hasFix = Boolean(story.route.progressSource !== "last_known" && story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
   const lastKnownLabel = lastKnownProgressLabel(story);
+  const remainingView = remaining ?? remainingFlight(story);
+  const hasCredibleProgress = (hasFix && !remainingView.estimated) || story.route.progressSource === "last_known";
+  const remainingLabel = remainingView.text
+    ? `Remaining ${hasCredibleProgress && Number.isFinite(story.route.remainingNm) ? `${formatMiles(story.route.remainingNm)} · ` : ""}${remainingView.text}${remainingView.estimated ? " estimated" : ""}`
+    : "Updating remaining time…";
+  const progressLabel = lastKnownLabel ? `${lastKnownLabel} · ${remainingLabel}` : remainingLabel;
   const onField = Boolean(hasFix && ac?.onGround && haversineNm(ac, dest) < 8);
   const atGate = story.currentStage === "gate";
-  const landed = atGate || onField;
+  const landed = atGate || onField || story.route.progressSource === "landed"
+    || story.currentStage === "taxi_in" || story.arrivalStatus === "landed" || story.arrivalStatus === "taxi_in";
   const progress = landed ? 1 : story.route.progress;
   const ax = landed
     ? sx(dest.lon)
@@ -764,7 +772,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview }: { sto
           {!weatherPreview && story.route.arrivalProjectionStale ? <span className="block">Approach plan · stale</span> : null}
         </p>
         <p data-route-progress-source={story.route.progressSource} className="max-w-1/2 rounded-sm border border-border bg-bg/80 px-2 py-1 font-mono text-xs text-muted">
-          {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : lastKnownLabel ?? (Date.now() - story.fetchedAt > 15_000 || (story.providers?.chosenPositionAgeSec ?? Infinity) > 60 ? "Updating live position…" : `Remaining ${formatMiles(story.route.remainingNm)} · ${formatDuration(story.route.etaMin)}`)}
+          {weatherPreview ? `Route toward ${story.dest.iata}` : atGate ? "At the gate" : landed ? "Landed" : progressLabel}
         </p>
       </div>
       {weatherPreview && ticks[0] ? <WeatherPreviewLocation lat={ticks[0].lat} lon={ticks[0].lon} /> : null}

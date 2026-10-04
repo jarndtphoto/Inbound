@@ -17,7 +17,7 @@ before(async () => {
   directory = await mkdtemp(resolve('node_modules/.stage-timing-replay-'));
   await build({ configFile:false, logLevel:'silent', resolve:{alias:{'@':resolve('src')}},
     plugins:[{name:'test-stage-timing',enforce:'pre',transform(code,id){
-      if(id===resolve('src/components/filed-app.tsx')) return code+'\nexport {FlightHead, TimesStrip, FlightStatusProgress};\nexport {preserveDepartureProgress, preferFreshAirborneState} from "@/lib/story";';
+      if(id===resolve('src/components/filed-app.tsx')) return code+'\nexport {FlightHead, TimesStrip, FlightStatusProgress, RouteMap};\nexport {preserveDepartureProgress, preferFreshAirborneState} from "@/lib/story";';
     }},react()],build:{ssr:resolve('src/components/filed-app.tsx'),outDir:directory,rollupOptions:{output:{entryFileNames:'ui.mjs'}}} });
   ui=await import(pathToFileURL(join(directory,'ui.mjs')).href);
 });
@@ -40,9 +40,9 @@ test('observed airborne without a clock shows approximate elapsed and nonzero di
   assert.equal(elapsedFlight({...input,times:{...input.times,takeoffUnix:base.fetchedAt/1000-300,takeoffKind:'actual'}}).estimated,false);
 });
 after(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});
-function markup(Component, story) {
-  const realNow=Date.now;Date.now=()=>story.fetchedAt;
-  try{return renderToStaticMarkup(h(QueryClientProvider,{client:new QueryClient()},h(Component,{story})));}finally{Date.now=realNow;}
+function markup(Component, story, props = {}, now = story.fetchedAt) {
+  const realNow=Date.now;Date.now=()=>now;
+  try{return renderToStaticMarkup(h(QueryClientProvider,{client:new QueryClient()},h(Component,{story,...props})));}finally{Date.now=realNow;}
 }
 
 test('taxiing movement and a taxi hold use the same direct Taxiing out label',async()=>{
@@ -70,6 +70,52 @@ test('UA219 oceanic gap retains a provider ETA and labels it estimated, never a 
   assert.match(markup(ui.TimesStrip,server),/Estimated · No live position/);
   const unavailable={...server,providers:{},route:{...server.route,etaMin:NaN}};
   assert.equal(remainingFlight(unavailable,now).minutes,null);assert.match(markup(ui.TimesStrip,unavailable),/Updating…/);
+});
+
+test('Map and Overview render one shared remaining time with identical boundary rounding',()=>{
+  const base=polishStory();
+  const qa={...base,providers:{...base.providers,etaMin:441},route:{...base.route,etaMin:451}};
+  const shared=remainingFlight(qa,base.fetchedAt);
+  assert.equal(shared.text,'7h 21m');
+  const overview=markup(ui.TimesStrip,qa,{remaining:shared});
+  const map=markup(ui.RouteMap,qa,{fixedViewport:true,remaining:shared});
+  assert.match(overview,/>7h 21m</);assert.match(map,/Remaining [^<]* · 7h 21m/);
+  assert.doesNotMatch(map,/7h 31m/);
+
+  for(const [minutes,expected] of [[59.49,'59m'],[59.5,'1h'],[60.49,'1h'],[60.5,'1h 1m']]) {
+    const input={...base,providers:{...base.providers,etaMin:minutes},route:{...base.route,etaMin:minutes+10}};
+    const view=remainingFlight(input,base.fetchedAt);
+    assert.equal(view.text,expected);
+    assert.match(markup(ui.TimesStrip,input,{remaining:view}),new RegExp(`>${expected}<`));
+    assert.match(markup(ui.RouteMap,input,{fixedViewport:true,remaining:view}),new RegExp(`· ${expected}<`));
+  }
+
+  const crossing={...base,providers:{...base.providers,etaMin:60.99},route:{...base.route,etaMin:470}};
+  const afterThirtySeconds=remainingFlight(crossing,base.fetchedAt+30_000);
+  assert.equal(afterThirtySeconds.text,'1h');
+  assert.match(markup(ui.TimesStrip,crossing,{remaining:afterThirtySeconds},base.fetchedAt+30_000),/>1h</);
+  assert.match(markup(ui.RouteMap,crossing,{fixedViewport:true,remaining:afterThirtySeconds},base.fetchedAt+30_000),/· 1h</);
+});
+
+test('Map keeps the shared remaining time during a last-known gap and omits untrusted reset distance',()=>{
+  const base=polishStory(), shared={minutes:44,text:'44m',estimated:true,gapNote:'No live position'};
+  const gap={...base,live:false,aircraft:null,route:{...base.route,progressSource:'last_known',progressObservedAt:base.fetchedAt-10*60_000,remainingNm:3500}};
+  const lastKnown=markup(ui.RouteMap,gap,{fixedViewport:true,remaining:shared});
+  assert.match(lastKnown,/Last known progress · 10 min ago · Remaining [^<]* · 44m estimated/);
+
+  const unknown={...gap,route:{...gap.route,progressSource:'unknown'}};
+  const noProgress=markup(ui.RouteMap,unknown,{fixedViewport:true,remaining:shared});
+  assert.match(noProgress,/Remaining 44m estimated/);
+  assert.doesNotMatch(noProgress,/miles/);
+
+  const staleObserved={...base,live:true,aircraft:{...base.aircraft,seenSec:600},providers:{...base.providers,chosenPositionAgeSec:600},route:{...base.route,progressSource:'observed',remainingNm:3300}};
+  const staleView=remainingFlight(staleObserved,base.fetchedAt);
+  const staleMap=markup(ui.RouteMap,staleObserved,{fixedViewport:true,remaining:staleView});
+  assert.match(staleMap,new RegExp(`Remaining ${staleView.text} estimated`));
+  assert.doesNotMatch(staleMap,/miles/);
+
+  const taxiIn={...gap,currentStage:'taxi_in',arrivalStatus:'taxi_in',route:{...gap.route,progressSource:'landed',remainingNm:0}};
+  assert.match(markup(ui.RouteMap,taxiIn,{fixedViewport:true,remaining:{...shared,minutes:1,text:'1m'}}),/>Landed</);
 });
 
 test('DL4820 surface takeoff roll activates Taxi, then confirmed airborne activates Flight without a takeoff clock',()=>{

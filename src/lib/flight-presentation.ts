@@ -1,5 +1,5 @@
 import { readTakeoffDiagnostic, takeoffFloorStage } from "./confirmed-takeoff.ts";
-import { haversineNm } from "./geo.ts";
+import { formatDuration, haversineNm } from "./geo.ts";
 import { flightStageId } from "./flight-stage.ts";
 import type { FlightStory, StageId } from "./types.ts";
 
@@ -91,7 +91,15 @@ export function flownDistance(story: FlightStory): { nm: number; source: "track"
   return Number.isFinite(distance) && distance > 0 ? { nm: distance, source: "position" } : null;
 }
 
-export function remainingFlight(story: FlightStory, nowMs = Date.now()) {
+export type RemainingFlightPresentation = {
+  minutes: number | null;
+  text: string | null;
+  estimated: boolean;
+  gapNote: string | null;
+};
+
+/** One passenger-facing remaining-time model for every flight screen. */
+export function remainingFlight(story: FlightStory, nowMs = Date.now()): RemainingFlightPresentation {
   const now = nowMs / 1000, sinceFetch = Math.max(0, now - story.fetchedAt / 1000);
   const ages = [story.providers?.chosenPositionAgeSec, story.aircraft?.seenSec]
     .filter((age): age is number => typeof age === "number" && Number.isFinite(age) && age >= 0)
@@ -110,5 +118,5 @@ export function remainingFlight(story: FlightStory, nowMs = Date.now()) {
     ? serverEta - sinceFetch / 60 : null;
   const minutes = !fresh && providerEta != null ? (providerEta - now) / 60
     : serverRemaining != null && serverRemaining >= 0 ? serverRemaining : providerEta != null ? (providerEta - now) / 60 : null;
-  return { minutes, estimated: !fresh, gapNote };
+  return { minutes, text: minutes != null ? formatDuration(minutes) : null, estimated: !fresh, gapNote };
 }
