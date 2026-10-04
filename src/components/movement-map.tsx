@@ -15,7 +15,7 @@ const H = 800;
 const MIN_GROUND_ZOOM = 1.45;
 const MAX_GROUND_ZOOM = 64;
 const INITIAL_GROUND_ZOOM = 7;
-const MAX_SURFACE_RADIUS_NM = 7;
+const MAX_SURFACE_RADIUS_NM = 4;
 const SURFACE_CACHE_MS = 12 * 60 * 60_000;
 
 const overviewView = (): View => ({
@@ -399,7 +399,7 @@ function GroundMovementMap({
         ...feature,
         // Overpass can return the complete geometry for a way that only
         // intersects our airport query box. Ignore those remote tails so a
-        // bad/distant aeroway cannot pull the whole ground map off-center.
+        // bad/distant aeroway or nearby secondary airfield cannot pull the whole ground map off-center.
         points: feature.points.filter((point) => haversineNm(point, airport) <= MAX_SURFACE_RADIUS_NM),
       }))
       .filter((feature) => feature.points.length >= 2);
