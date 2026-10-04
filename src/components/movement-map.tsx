@@ -15,6 +15,9 @@ const H = 800;
 const MIN_GROUND_ZOOM = 1.45;
 const MAX_GROUND_ZOOM = 64;
 const INITIAL_GROUND_ZOOM = 7;
+const MAX_SURFACE_RADIUS_NM = 4;
+const RUNWAY_CORE_MIN_SPAN_NM = 0.7;
+const RUNWAY_CORE_PAD_NM = 1;
 const SURFACE_CACHE_MS = 12 * 60 * 60_000;
 
 const overviewView = (): View => ({
@@ -391,7 +394,52 @@ function GroundMovementMap({
     x: W / 2 + ((p.lon - airport.lon) / lonHalf) * (W / 2 - 28),
     y: H / 2 - ((p.lat - airport.lat) / latHalf) * (H / 2 - 28),
   });
-  const features = (surfaceQ.data as AirportSurface | undefined)?.features ?? [];
+  const features = useMemo(() => {
+    const source = (surfaceQ.data as AirportSurface | undefined)?.features ?? [];
+    const local = source
+      .map((feature) => ({
+        ...feature,
+        // Overpass can return the complete geometry for a way that only
+        // intersects our airport query box. Ignore remote tails first.
+        points: feature.points.filter((point) => haversineNm(point, airport) <= MAX_SURFACE_RADIUS_NM),
+      }))
+      .filter((feature) => feature.points.length >= 2);
+
+    const cosLat = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
+    const featureSpanNm = (feature: SurfaceFeature) => {
+      const lats = feature.points.map((point) => point.lat);
+      const lons = feature.points.map((point) => point.lon);
+      const latNm = (Math.max(...lats) - Math.min(...lats)) * 60;
+      const lonNm = (Math.max(...lons) - Math.min(...lons)) * 60 * cosLat;
+      return Math.hypot(latNm, lonNm);
+    };
+    const longRunways = local.filter((feature) =>
+      (feature.kind === "runway" || feature.kind === "runway_area")
+      && featureSpanNm(feature) >= RUNWAY_CORE_MIN_SPAN_NM
+    );
+    if (!longRunways.length) return local;
+
+    // Use only real-length runways to define the airport complex. This removes
+    // small isolated aeroway/helipad/secondary-field objects near PHX without
+    // clipping legitimate terminal/apron detail around the primary airport.
+    const runwayPoints = longRunways.flatMap((feature) => feature.points);
+    const minLat = Math.min(...runwayPoints.map((point) => point.lat));
+    const maxLat = Math.max(...runwayPoints.map((point) => point.lat));
+    const minLon = Math.min(...runwayPoints.map((point) => point.lon));
+    const maxLon = Math.max(...runwayPoints.map((point) => point.lon));
+    const latPad = RUNWAY_CORE_PAD_NM / 60;
+    const lonPad = RUNWAY_CORE_PAD_NM / (60 * cosLat);
+
+    return local
+      .map((feature) => ({
+        ...feature,
+        points: feature.points.filter((point) =>
+          point.lat >= minLat - latPad && point.lat <= maxLat + latPad
+          && point.lon >= minLon - lonPad && point.lon <= maxLon + lonPad
+        ),
+      }))
+      .filter((feature) => feature.points.length >= 2);
+  }, [surfaceQ.data, airport.lat, airport.lon]);
   const taxiwayLabels = useMemo(() => {
     const unique = new Map<string, SurfaceFeature>();
     for (const feature of features) {
@@ -403,16 +451,24 @@ function GroundMovementMap({
     return [...unique.entries()].slice(0, 120);
   }, [features]);
   const plane = displayAircraft ? project(displayAircraft) : null;
+  const fitFeatures = useMemo(() => {
+    // Runways define the airport's real footprint much more reliably than
+    // every nearby OSM aeroway. PHX in particular contains isolated surface
+    // objects inside the broad query radius that should render when visible
+    // but must not determine the initial zoom/centering.
+    const runways = features.filter((feature) => feature.kind === "runway" || feature.kind === "runway_area");
+    return runways.length ? runways : features;
+  }, [features]);
   const surfaceFitRef = useRef("");
   useEffect(() => {
-    if (!features.length) return;
+    if (!fitFeatures.length) return;
     const key = `${story.iata}:${airport.iata}:${mode.kind}`;
     if (surfaceFitRef.current === key) return;
-    const points = features.flatMap((feature) => feature.points.map(project));
+    const points = fitFeatures.flatMap((feature) => feature.points.map(project));
     if (points.length < 2) return;
     surfaceFitRef.current = key;
     zoom.fitPoints(points);
-  }, [story.iata, airport.iata, mode.kind, features]);
+  }, [story.iata, airport.iata, mode.kind, fitFeatures]);
 
   useEffect(() => {
     if (!plane || !displayAircraft) return;

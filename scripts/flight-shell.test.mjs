@@ -42,6 +42,14 @@ test('briefing uses the page scroller and the welcome dialog keeps symmetric saf
   assert.match(dialog,/safe-area-inset-bottom/);
 });
 
+test('welcome dialog does not reopen from asynchronous briefing enrichment in the same flight view',()=>{
+  assert.match(flightPages,/const welcomeSessionKeyRef = useRef\(""/);
+  assert.match(flightPages,/welcomeSessionKeyRef\.current === welcomeKey/);
+  assert.match(flightPages,/shownBrief \?\? savedBrief\(story\)/);
+  assert.match(flightPages,/\}, \[welcomeKey\]\);/);
+  assert.doesNotMatch(flightPages,/welcomeSummaryVersion|welcomeVersion/);
+});
+
 test('tracked-flight polling pauses while hidden and refreshes stale state on return',()=>{
   assert.match(flightPages,/document\.visibilityState !== "visible"\) return false/);
   assert.match(flightPages,/addEventListener\("visibilitychange", refreshWhenVisible\)/);

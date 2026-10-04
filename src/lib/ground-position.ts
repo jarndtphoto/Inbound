@@ -31,6 +31,18 @@ export const getGroundPosition = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     const airport = { lat: data.airportLat, lon: data.airportLon };
+    const diagnosticAirport = data.movementKind === "arrival" ? data.destIata : data.originIata;
+    const diagnosticEnabled = diagnosticAirport === "MCO" || diagnosticAirport === "TPA";
+    const diagnostic = (event: string, detail: Record<string, unknown> = {}) => {
+      if (!diagnosticEnabled) return;
+      console.info("[ground-coverage]", {
+        airport: diagnosticAirport,
+        movement: data.movementKind,
+        flight: data.flightNumber,
+        event,
+        ...detail,
+      });
+    };
 
     const usable = (flight: any) => {
       const p = flight?.position;
@@ -96,23 +108,40 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     // Registration is the strongest identity key. If it is unknown, FR24's
     // commercial flight-number filter is often more reliable on the surface
     // than the transponder callsign filter, especially at a large airport.
+    // Make only one direct live-FR24 identity probe per ground poll. A miss or
+    // throttle on the strongest key should fall through to open ADS-B instead
+    // of immediately spending more FR24 calls on weaker aliases in the same
+    // 3-second cycle.
     if (resolvedRegistration) {
       const byRegistration = await loadFr24FlightByRegistration(resolvedRegistration).catch(() => null);
       const position = usable(byRegistration);
-      if (position) return position;
-    }
-    if (data.flightNumber) {
+      if (position) {
+        diagnostic("fr24-registration-hit", { ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+        return position;
+      }
+      diagnostic("fr24-registration-miss", { registration: resolvedRegistration });
+    } else if (data.flightNumber) {
       const byFlightNumber = await loadFr24FlightByNumber(data.flightNumber, bounds).catch(() => null);
       const position = usable(byFlightNumber);
       if (position) {
         console.info("[ground-position]", { provider: "fr24-flight-number", flight: data.flightNumber, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+        diagnostic("fr24-flight-number-hit", { ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
         return position;
       }
-    }
-    for (const callsign of callsigns) {
-      const byCallsign = await loadFr24Flight(callsign).catch(() => null);
-      const position = usable(byCallsign);
-      if (position) return position;
+      diagnostic("fr24-flight-number-miss");
+    } else {
+      for (const callsign of callsigns) {
+        const byCallsign = await loadFr24Flight(callsign).catch(() => null);
+        const position = usable(byCallsign);
+        if (position) {
+          diagnostic("fr24-callsign-hit", { callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+          return position;
+        }
+        diagnostic("fr24-callsign-miss", { callsign });
+        // Callsigns is a tiny compatibility list (flight-id then story
+        // callsign); do not probe a second alias in the same poll.
+        break;
+      }
     }
 
     // Arrival flights can disappear from FR24's live flight-number index as
@@ -149,6 +178,9 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       return Boolean(cs && wantedCallsigns.has(cs));
     };
     const aroundPacks = await fetchAround(airport.lat, airport.lon, 20).catch(() => []);
+    diagnostic("adsb-around", {
+      providers: aroundPacks.map((pack) => ({ provider: pack.provider, count: pack.ac.length })),
+    });
     const around = fuseProviderLists(aroundPacks, { airside: true })
       .filter(matchesIdentity)
       .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
@@ -156,6 +188,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       const position = usableAdsb(candidate);
       if (position) {
         console.info("[ground-position]", { provider: "adsb-around", callsign: position.callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+        diagnostic("adsb-around-hit", { callsign: position.callsign, registration: position.registration, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
         return position;
       }
     }
@@ -165,12 +198,20 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       : callsigns[0]
         ? await fetchByCallsign(callsigns[0]).catch(() => [])
         : [];
+    diagnostic("adsb-exact", {
+      providers: exactPacks.map((pack) => ({ provider: pack.provider, count: pack.ac.length })),
+      key: resolvedRegistration ? "registration" : callsigns[0] ? "callsign" : "none",
+    });
     const exact = fuseProviderLists(exactPacks, { airside: true })
       .filter(matchesIdentity)
       .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
     for (const candidate of exact) {
       const position = usableAdsb(candidate);
-      if (position) return position;
+      if (position) {
+        diagnostic("adsb-exact-hit", { callsign: position.callsign, registration: position.registration, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+        return position;
+      }
     }
+    diagnostic("no-ground-fix", { registration: resolvedRegistration, callsigns });
     return null;
   });;
