@@ -56,6 +56,30 @@ function facts(over: Partial<RideFacts> = {}): RideFacts {
 
 const JARGON = /\b(SIGMET|AIRMET|PIREP|METAR|TAF|NAS|OOOI|FL\d{2,3}|IFR|LIFR|MVFR|VFR)\b/;
 
+describe("shared weather summary in Briefing", () => {
+  it("uses observed-report wording as its own sentence without a remaining-path forecast", () => {
+    const weatherSummary = "Smooth now · moderate bumps reported ahead";
+    const result = composeBrief(facts({ now: "ride", weatherSummary, rideLabel: "Moderate turbulence" }));
+    assert.ok(result.lead.includes(`${weatherSummary}.`));
+    assert.equal(result.lead.split(weatherSummary).length - 1, 1);
+    assert.doesNotMatch(result.lead, /on the remaining path|Moderate turbulence|whole flight/i);
+    assert.equal(result.log.length, 0, "an observation summary does not seed a forecast-change history entry");
+  });
+
+  it("preserves a supplied sentence and allows an intentionally empty weather summary", () => {
+    const sentence = "Smooth now · light bumps reported ahead.";
+    assert.ok(composeBrief(facts({ now: "ride", weatherSummary: sentence })).lead.includes(sentence));
+    const empty = composeBrief(facts({ now: "ride", weatherSummary: "", rideLabel: "Moderate turbulence" }));
+    assert.doesNotMatch(empty.lead, /moderate turbulence|remaining path|ride looks/i);
+  });
+
+  it("keeps legacy callers without a shared summary unchanged", () => {
+    const result = composeBrief(facts({ now: "ride", rideLabel: "Moderate turbulence" }));
+    assert.match(result.lead, /Moderate turbulence on the remaining path\./);
+    assert.match(composeBrief(facts({ now: "ride", rideLabel: "Smooth" })).lead, /Ride looks smooth\./);
+  });
+});
+
 describe("briefing update log", () => {
   it("does not seed the passenger timeline with audit-only entries", () => {
     const b = composeBrief(facts());

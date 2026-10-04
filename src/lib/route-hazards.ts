@@ -22,7 +22,9 @@ export function advisoryTiming(properties: Record<string, unknown> | null | unde
 export function distinctRouteHazards(hazards: Hazard[]): Hazard[] {
   const seen = new Set<string>();
   return hazards.filter((hazard) => {
-    const key = `${hazard.kind}:${hazard.label}:${hazard.chop}:${hazard.remaining}:${hazard.validity ?? ""}`;
+    const key = hazard.kind === "pirep"
+      ? JSON.stringify([hazard.kind, hazard.id, hazard.observedAt, hazard.lat, hazard.lon, hazard.remaining])
+      : `${hazard.kind}:${hazard.label}:${hazard.chop}:${hazard.remaining}:${hazard.validity ?? ""}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

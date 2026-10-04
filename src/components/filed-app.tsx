@@ -18,13 +18,12 @@ import { parseFlightQuery, storyMatchesQuery } from "@/lib/flight-parse";
 import { RESUME_MAX_AGE_MS, resumeFromStory, savedScheduleNote } from "@/lib/flight-resume";
 import { useFiled } from "@/lib/store";
 import { weatherEventNumber, type RouteWeatherEvent } from "@/lib/weather-events";
-import { passengerWeatherCopy } from "@/lib/weather-card-copy";
-import { upcomingWeatherEvents, eventWeatherCopy } from "@/lib/weather-presentation";
+import { upcomingWeatherEvents, eventWeatherCopy, eventWeatherSource, flightWeatherSummary, pilotReportTiming } from "@/lib/weather-presentation";
 import { scheduledTimes, type ScheduledTimes } from "@/lib/scheduled-times";
 import { formatClockTime, timeKindLabel } from "@/lib/presentation-time";
 import { passengerAirportWeather } from "@/lib/passenger-airport-weather";
 import { getFlightStory } from "@/lib/story";
-import type { Comfort, FlightStory, StageId } from "@/lib/types";
+import type { Chop, Comfort, FlightStory, PilotReportObservation, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
 import { flightPollingComplete } from "@/lib/flight-polling";
@@ -57,6 +56,10 @@ function readCachedStory(q: string): FlightStory | undefined {
     const entry = records[key] ?? (legacy && storyMatchesQuery(legacy.story ?? {}, q) ? legacy : undefined);
     if (!entry || !Number.isFinite(entry.at) || Date.now() - entry.at > RESUME_MAX_AGE_MS) return undefined;
     if (!entry.story?.iata || !storyMatchesQuery(entry.story, q)) return undefined;
+    // Untimed reports in an older cache were painted into forecast chop. A
+    // fresh story is needed to separate those observations from the forecast.
+    if (Array.isArray(entry.story.hazards) && entry.story.hazards.some((hazard: FlightStory["hazards"][number]) => hazard?.kind === "pirep"
+      && (typeof hazard.observedAt !== "number" || !Number.isFinite(hazard.observedAt)))) return undefined;
     // Older client caches may have promoted an estimate/actual into orig*.
     // Keep all flight evidence, but rebuild schedule presentation from stamps.
     if (entry.scheduledOnly !== true) return { ...entry.story, times: {
@@ -185,13 +188,7 @@ function storyForQuery(s: FlightStory | undefined, q: string): FlightStory | und
 }
 
 function rideLabelOf(story: FlightStory) {
-  const ahead = story.route.samples.filter((s) => s.frac >= story.route.progress);
-  if (ahead.some((s) => s.chop === "severe")) return "Severe turbulence";
-  if (ahead.some((s) => s.chop === "moderate")) return "Moderate turbulence";
-  if (ahead.some((s) => s.chop === "light")) return "Light turbulence";
-  if (!story.weatherCoverage) return "Weather coverage unavailable";
-  if (story.weatherCoverage.failedSources.length) return "Weather coverage incomplete";
-  return "Smooth";
+  return flightWeatherSummary(story);
 }
 
 function takeoffEstimateExpired(story: FlightStory) {
@@ -202,6 +199,11 @@ function takeoffEstimateExpired(story: FlightStory) {
 }
 
 function rideFacts(story: FlightStory, query: string, active: StageId): RideFacts {
+  const weatherSummary = rideLabelOf(story);
+  const chopRanks: Record<Chop, number> = { smooth: 0, light: 1, moderate: 2, severe: 3 };
+  const worstChop = story.wx?.live?.worstChop ?? story.route.samples
+    .filter((sample) => sample.frac >= story.route.progress)
+    .reduce((worst, sample) => chopRanks[sample.chop] > chopRanks[worst] ? sample.chop : worst, "smooth" as Chop);
   return {
     scheduleNote: story.schedule?.status === "saved" ? savedScheduleNote(story.schedule.confirmedAt) : undefined,
     q: query,
@@ -231,13 +233,14 @@ function rideFacts(story: FlightStory, query: string, active: StageId): RideFact
     wxHash: story.wx?.hash ?? "",
     wxDeltas: story.wx?.deltas ?? [],
     filedAt: story.wx?.filedAt ?? null,
-    worstChop: story.wx?.live?.worstChop ?? null,
+    worstChop,
     corridorWx: story.wx?.live?.corridor?.map((c) => `${c.iata} ${c.summary}`).join("; ") ?? null,
     inbound: `${story.inbound?.headline ?? ""}. ${story.inbound?.detail ?? ""}`.replace(/^\.\s*/, "").trim(),
     inboundHeadline: story.inbound?.headline ?? "",
     inboundDetail: story.inbound?.detail ?? "",
     inboundStatus: story.inbound?.status,
-    rideLabel: rideLabelOf(story),
+    rideLabel: weatherSummary,
+    weatherSummary,
     push: story.times?.push ?? null,
     pushKind: story.times?.pushKind ?? null,
     pushSource: story.times?.pushSource ?? null,
@@ -632,7 +635,7 @@ function FlightPages({ onHome }: { onHome: () => void }) {
 
   useEffect(() => {
     if (!story || !briefing || briefingFor !== flightKey) return;
-    const key = `${takeoffEstimateExpired(story)}|${story.weatherCoverage?.failedSources.join(",") ?? "unknown"}|${story.aircraft?.registration ?? ""}|${story.live}|${Math.round(story.route.etaMin)}|${Math.round(story.route.remainingNm / 10)}|${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}`;
+    const key = `${takeoffEstimateExpired(story)}|${story.weatherCoverage?.failedSources.join(",") ?? "unknown"}|${story.aircraft?.registration ?? ""}|${story.live}|${Math.round(story.route.etaMin)}|${Math.round(story.route.remainingNm / 10)}|${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}|${flightWeatherSummary(story)}`;
     if (key === lastBriefKey.current) return;
     lastBriefKey.current = key;
     const next = composeBrief(rideFacts(story, query, active), briefing);
@@ -1711,26 +1714,23 @@ function extraFor(story: FlightStory, stage: StageId) {
     if (story.currentStage === "arrival" || story.currentStage === "final_approach" || story.currentStage === "taxi_in" || story.currentStage === "gate" || story.route.remainingNm < 40) {
       return null;
     }
-    const ahead = story.route.samples.filter((s) => s.frac >= story.route.progress && s.etaMin > 2);
-    const chop = ahead.find((s) => s.chop !== "smooth" && !s.convective);
-    const storm = ahead.find((s) => s.convective);
-    const rows: { label: string; eta: number }[] = [];
-    if (chop) {
-      rows.push({
-        label: chop.chop === "light" ? "Light chop" : chop.chop === "moderate" ? "Moderate chop" : "Severe chop",
-        eta: chop.etaMin,
-      });
-    }
-    if (storm) rows.push({ label: "Storms", eta: storm.etaMin });
-    if (!rows.length) return null;
+    const now = Date.now();
+    const aheadEvents = upcomingWeatherEvents(story.route.samples, story.route.progress, now)
+      .filter((event) => event.startEtaMin > 2 && (event.key.startsWith("turbulence:") || event.key === "storms"));
+    const firstBumps = aheadEvents.find((event) => event.key.startsWith("turbulence:"));
+    const firstStorms = aheadEvents.find((event) => event.key === "storms");
+    const events = aheadEvents.filter((event) => event === firstBumps || event === firstStorms);
+    if (!events.length) return null;
     return (
       <ul className="mt-3 space-y-1.5">
-        {rows.map((r) => (
-          <li key={r.label} className="flex justify-between gap-3 text-sm text-muted">
-            <span>{r.label}</span>
-            <span className="shrink-0 font-mono text-xs">in {formatDuration(r.eta)}</span>
-          </li>
-        ))}
+        {events.map((event) => {
+          const copy = eventWeatherCopy(event, story.dest.city || story.dest.iata);
+          return <li key={`${event.source}:${event.key}:${event.startFrac}`} className="text-sm text-muted">
+            <div className="flex justify-between gap-3"><span>{copy.mapLabel}</span><span className="shrink-0 font-mono text-xs">{event.source === "observed" ? "Area in " : "in "}{formatDuration(event.startEtaMin)}</span></div>
+            <p className="mt-1 text-xs">{eventWeatherSource(event)}</p>
+            <PilotReports reports={event.pilotReports} now={now} showSource={event.source !== "observed"} />
+          </li>;
+        })}
       </ul>
     );
   }
@@ -1809,16 +1809,38 @@ function passengerWeatherSource(text: string | null | undefined, kind?: FlightSt
   return "Route weather forecast";
 }
 
+function PilotReports({ reports, now, showSource = true }: { reports?: PilotReportObservation[]; now: number; showSource?: boolean }) {
+  const timedReports = (reports ?? []).flatMap((report) => {
+    const timing = pilotReportTiming(report.observedAt, now);
+    return timing ? [{ report, timing }] : [];
+  });
+  if (!timedReports.length) return null;
+  return <ul className="mt-3 space-y-3 text-sm text-muted">
+    {timedReports.map(({ report, timing }) => <li key={`${report.id}:${report.observedAt}`}>
+      {showSource && <p className="font-medium text-fg">Reported by another aircraft</p>}
+      <p>{timing}</p>
+      <p className="mt-1">{report.detail}</p>
+    </li>)}
+  </ul>;
+}
+
 function WeatherTimeline({ story }: { story: FlightStory }) {
+  const now = Date.now();
   const airborne = story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach";
-  const landed = story.times.landKind === "actual" || story.currentStage === "gate";
+  const landed = isLanded(story);
   const takeoff = story.times.takeoffUnix;
   const landing = story.times.landUnix;
   const duration = takeoff && landing && landing > takeoff ? (landing - takeoff) / 60 : null;
   const samples = story.route.samples;
-  const visibleGroups = upcomingWeatherEvents(samples, story.route.progress);
+  const visibleGroups = upcomingWeatherEvents(samples, story.route.progress, now);
+  const displayedWeather = flightWeatherSummary(story, now);
+  const remainingHazards = story.hazards.filter((hazard) => hazard.remaining
+    && (hazard.kind !== "pirep" || Boolean(pilotReportTiming(hazard.observedAt, now))));
 
   const timeLabel = (group: RouteWeatherEvent) => {
+    if (group.source === "observed") return group.startEtaMin < 1
+      ? "You’re passing this reported area around now"
+      : `You’ll pass this area in about ${formatDuration(group.startEtaMin)}`;
     const from = airborne ? group.startEtaMin : duration == null ? null : group.startFrac * duration;
     const to = airborne ? group.endEtaMin : duration == null ? null : group.endFrac * duration;
     if (from == null || to == null) return "Timing unavailable";
@@ -1843,6 +1865,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
   </article>;
   return <div className="weather-timeline">
     <div className="weather-heading"><h2 className="text-xl font-semibold">Weather through your flight</h2></div>
+    {!landed && <p className="text-sm font-medium">{displayedWeather}</p>}
     {!landed && fieldCard(story.origin, "Takeoff · departure conditions")}
     {(!story.weatherCoverage || story.weatherCoverage.failedSources.length > 0) && <p role="status" className="weather-coverage text-sm text-muted"><Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>Weather coverage is incomplete. Missing feeds do not mean smooth conditions. {story.weatherCoverage?.failedSources.join(" · ")}</span></p>}
     <h3 className="weather-route-heading text-lg font-semibold">{landed ? "Route weather" : airborne ? "Ahead on your route" : "Along your planned route"}</h3>
@@ -1850,7 +1873,8 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
       {visibleGroups.map((g, i) => {
         const copy = eventWeatherCopy(g, story.dest.city || story.dest.iata);
         const title = copy.headline;
-        const source = passengerWeatherSource(g.note);
+        const source = eventWeatherSource(g);
+        const reported = g.source === "observed";
         const technical = technicalWeatherProducts(g.note);
         return <li key={i} className="weather-section">
           <div className="weather-event-heading">
@@ -1859,16 +1883,17 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
             </svg>
             <WeatherEventHeadline copy={copy} />
           </div>
-          {g.key.startsWith("turbulence:") && <p className="mt-1 text-sm"><WeatherIntensityLabel intensity={g.key.slice(11)} band={g.intensities.length === 1 && g.intensities[0] === "light-moderate" ? "light" : undefined} /> turbulence</p>}
+          {g.key.startsWith("turbulence:") && <p className="mt-1 text-sm"><WeatherIntensityLabel intensity={g.key.slice(11)} band={g.intensities.length === 1 && g.intensities[0] === "light-moderate" ? "light" : undefined} /> {reported ? "bumps reported" : "turbulence"}</p>}
           <p className="mt-2 flex items-center gap-2 text-sm font-medium"><Clock className="size-4 shrink-0" />{timeLabel(g)}</p>
           <WeatherEventBody copy={copy} />
-          {g.gaps && <p className="mt-2 text-sm text-muted">This may come and go briefly along the highlighted stretch.</p>}
-          <p className="mt-3 text-sm font-medium">{source}{technical ? <span className="ml-1 text-xs font-normal text-muted">· {technical}</span> : null}</p>
-          {(g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
+          {!reported && g.gaps && <p className="mt-2 text-sm text-muted">This may come and go briefly along the highlighted stretch.</p>}
+          {!reported && <p className="mt-3 text-sm font-medium">{source}{technical ? <span className="ml-1 text-xs font-normal text-muted">· {technical}</span> : null}</p>}
+          <PilotReports reports={g.pilotReports} now={now} showSource={!reported} />
+          {(reported || g.start.convective || g.start.chop !== "smooth" || g.start.cloud) && <figure className="mt-3">
             <div className="weather-event-map pointer-events-none h-80 overflow-hidden rounded-md" aria-label={title}>
-              <RouteMap story={story} fixedViewport weatherPreview={{ intensityBand: g.intensities.length === 1 && g.intensities[0] === "light-moderate" ? "light" : undefined, intensity: g.key.startsWith("turbulence:") ? g.key.slice(11) : undefined, eventNumber: weatherEventNumber(visibleGroups, g), label: copy.mapLabel, startFrac: g.startFrac, endFrac: g.endFrac, startEtaMin: g.startEtaMin, endEtaMin: g.endEtaMin, ranges: g.ranges }} />
+              <RouteMap story={story} fixedViewport weatherPreview={{ reported, pilotReports: g.pilotReports, intensityBand: g.intensities.length === 1 && g.intensities[0] === "light-moderate" ? "light" : undefined, intensity: g.key.startsWith("turbulence:") ? g.key.slice(11) : undefined, eventNumber: weatherEventNumber(visibleGroups, g), label: copy.mapLabel, startFrac: g.startFrac, endFrac: g.endFrac, startEtaMin: g.startEtaMin, endEtaMin: g.endEtaMin, ranges: g.ranges }} />
             </div>
-            <figcaption className="mt-2 text-xs text-muted">Highlighted: where these conditions overlap the route. Radar colors show recent precipitation; conditions may change before the flight reaches this area. {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
+            <figcaption className="mt-2 text-xs text-muted">{reported ? "Highlighted: the reported area along the route. A report describes another aircraft’s recent experience; conditions may change before this flight reaches the area." : "Highlighted: where these conditions overlap the route. Radar colors show recent precipitation; conditions may change before the flight reaches this area."} {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
           </figure>}
           {g.note && <details className="weather-disclosure mt-2 text-sm text-muted"><summary><span>Technical details</span><ChevronDown className="size-5 shrink-0 text-muted" aria-hidden="true" /></summary><p>{g.note}</p></details>}
         </li>;
@@ -1877,14 +1902,15 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
     {fieldCard(story.dest, "Landing · arrival conditions")}
     <details className="weather-disclosure weather-sources"><summary><span>Weather sources and timing</span><ChevronDown className="size-5 shrink-0 text-muted" aria-hidden="true" /></summary>
       <div className="mt-3 space-y-2 text-sm text-muted">
-        <p>Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters. Unflagged areas may have incomplete coverage.</p>
+        <p>Timing is approximate and changes with the route and speed. Advisories describe possible conditions, not guaranteed encounters. Aircraft reports describe recent observations, not forecasts. Unflagged areas may have incomplete coverage.</p>
         <p className="text-xs">Flight data fetched {formatClockTime(story.fetchedAt)}. Weather observation and advisory times are shown in their source details.</p>
       </div>
-      {story.hazards.filter(h => h.remaining).map(h => {
+      {remainingHazards.map(h => {
         const technical = technicalWeatherProducts(`${h.label} ${h.detail}`);
-        return <div key={h.id} className="mt-3 text-sm"><p className="font-semibold">{passengerWeatherSource(`${h.label} ${h.detail}`, h.kind)}</p>{technical && <p className="text-xs text-muted">{technical}</p>}<p className="text-muted">{h.validity || "Timing unavailable"}</p><p className="mt-1 text-muted">{h.detail}</p></div>;
+        const timing = h.kind === "pirep" ? pilotReportTiming(h.observedAt, now) : h.validity || "Timing unavailable";
+        return <div key={h.id} className="mt-3 text-sm"><p className="font-semibold">{passengerWeatherSource(`${h.label} ${h.detail}`, h.kind)}</p>{technical && <p className="text-xs text-muted">{technical}</p>}<p className="text-muted">{timing}</p><p className="mt-1 text-muted">{h.detail}</p></div>;
       })}
-      {!story.hazards.some(h => h.remaining) && <p className="mt-3 text-sm text-muted">No remaining advisories returned. This does not establish complete weather coverage.</p>}
+      {!remainingHazards.length && <p className="mt-3 text-sm text-muted">No remaining advisories or recent aircraft reports returned. This does not establish complete weather coverage.</p>}
     </details>
   </div>;
 }
@@ -1892,6 +1918,10 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
 
 function FlightWelcome({ open, onClose, story, brief }: { open: boolean; onClose: () => void; story: FlightStory; brief: CompiledBrief | null }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const displayedWeather = flightWeatherSummary(story);
+  const otherWeatherWarnings = [...new Set(story.hazards
+    .filter((hazard) => hazard.remaining && (hazard.kind === "ice" || hazard.kind === "llws" || hazard.kind === "ifr"))
+    .map((hazard) => hazard.label))];
   useEffect(() => {
     if (open && !ref.current?.open) ref.current?.showModal();
     if (!open && ref.current?.open) ref.current?.close();
@@ -1909,7 +1939,8 @@ function FlightWelcome({ open, onClose, story, brief }: { open: boolean; onClose
       <p>{story.diversion ? nextStep(story, story.fetchedAt).title + ". " + nextStep(story, story.fetchedAt).body : brief?.lead || "The briefing is being prepared. Current flight information is below."}</p>
       {(story.times.delayMin ?? 0) >= 5 && <p><strong>Departure delay:</strong> {story.times.delayMin} minutes.</p>}
       {(story.currentStage === "inbound" || story.currentStage === "push") && <p><strong>Inbound aircraft:</strong> {story.inbound.detail || story.inbound.headline}</p>}
-      {!isLanded(story) && story.hazards.some(h => h.remaining) && <p><strong>Route weather:</strong> {[...new Set(story.hazards.filter(h => h.remaining).map(h => h.label))].join(" · ")}</p>}
+      {!isLanded(story) && <p><strong>Route weather:</strong> {displayedWeather}</p>}
+      {!isLanded(story) && otherWeatherWarnings.length > 0 && <p><strong>Weather alerts:</strong> {otherWeatherWarnings.join(" · ")}</p>}
       {!isLanded(story) && story.origin.nas?.delayed && <p><strong>Departure airport:</strong> {story.origin.nas.reason}</p>}
       {story.dest.nas?.delayed && <p><strong>Arrival airport:</strong> {story.dest.nas.reason}</p>}
     </div>

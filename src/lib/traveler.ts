@@ -1,8 +1,9 @@
 import { createElement } from "react";
 import type { FlightStory } from "./types";
-import { upcomingWeatherEvents, weatherOutlook } from "./weather-presentation";
+import { currentRouteWeatherUnavailable, flightWeatherSummary, upcomingWeatherEvents, weatherOutlook } from "./weather-presentation";
 import { passengerNextEvent } from "./next-event";
 import { operationalDepartureUnix, storyLegDate } from "./flight-story-date.ts";
+import { orderedWeatherSamples } from "./route-weather-segments";
 
 export const isLanded = (s: FlightStory) => s.currentStage === "gate" || s.times.landKind === "actual" || (s.currentStage === "arrival" && s.aircraft?.onGround === true);
 export function journeyKey(s: FlightStory) {
@@ -11,23 +12,25 @@ export function journeyKey(s: FlightStory) {
 
 export function rideOutlook(s: FlightStory): string {
   const samples = s.route.samples;
-  if (!samples.length) return "The projected ride is currently unavailable. We’re waiting for route weather data.";
-  const current = samples.reduce((best, sample) =>
-    Math.abs(sample.frac - s.route.progress) < Math.abs(best.frac - s.route.progress) ? sample : best, samples[0]);
+  const summary = flightWeatherSummary(s);
+  if (!samples.length) return `${summary}. The projected ride is currently unavailable. We’re waiting for route weather data.`;
+  const ordered = orderedWeatherSamples(samples);
+  const current = ordered.filter(sample => sample.frac <= s.route.progress).at(-1) ?? ordered[0] ?? samples[0];
   const incomplete = !s.weatherCoverage || s.weatherCoverage.failedSources.length > 0;
-  let text = current.chop !== "smooth"
-    ? "Projected ride is currently choppy."
-    : current.convective
-      ? "Storms are possible near the current route; the ride may be unsettled."
-      : incomplete
-        ? "Weather coverage is incomplete, so the current ride is uncertain."
+  const currentWeatherUnavailable = currentRouteWeatherUnavailable(s.weatherCoverage);
+  let text = currentWeatherUnavailable
+    ? "Current weather along the route is unavailable right now."
+    : current.chop !== "smooth"
+      ? "Projected ride is currently choppy."
+      : current.convective
+        ? "Storms are possible near the current route; the ride may be unsettled."
         : "Projected ride is currently smooth, based on available forecasts.";
 
   const highlights = weatherOutlook(upcomingWeatherEvents(samples, s.route.progress), s.dest?.city || s.dest?.iata || "");
-  if (highlights.length) return [...highlights, text + (incomplete && (current.chop !== "smooth" || current.convective) ? " Weather coverage is incomplete." : "")].join("\n");
+  if (highlights.length) return [summary, ...highlights, text + (incomplete && (current.chop !== "smooth" || current.convective) ? " Weather coverage is incomplete." : "")].join("\n");
   if (!incomplete) text += " No significant conditions are currently flagged ahead.";
   if (incomplete && (current.chop !== "smooth" || current.convective)) text += " Weather coverage is incomplete.";
-  return text;
+  return `${summary}\n${text}`;
 }
 
 export function RideOutlookText({ story }: { story: FlightStory }) {

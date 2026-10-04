@@ -1091,15 +1091,16 @@ describe('AAL3197 weather entry rendering', () => {
     assert.match(html, />2<\/text>/);
   });
 
-  it('leads with the next weather event once and keeps its entry timing and shared map wording', () => {
+  it('uses the shared now/later summary and keeps the next event timing and map wording', () => {
     const story = {
       route: { progress: 0.50, samples },
       weatherCoverage: { failedSources: [] }
     };
     const text = rideOutlook(story);
     const html = renderToStaticMarkup(createElement(RideOutlookText, { story }));
-    assert.equal((text.match(/moderate bumps/gi) || []).length, 1);
-    assert.match(text, /^Light bumps possible around now\.\nModerate bumps later, about 47 min ahead\./);
+    assert.equal((text.match(/Light bumps possible now · moderate bumps possible later/g) || []).length, 1);
+    assert.match(text, /^Light bumps possible now · moderate bumps possible later\nLight bumps possible around now\.\nModerate bumps later, about 47 min ahead\./);
+    assert.equal((text.match(/Moderate bumps later, about 47 min ahead\./g) || []).length, 1);
     assert.match(text, /Projected ride is currently choppy\./);
     assert.match(html, /Moderate bumps later, about 47 min ahead\./);
   });
