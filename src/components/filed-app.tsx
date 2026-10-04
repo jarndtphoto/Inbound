@@ -1029,17 +1029,30 @@ function OverviewDisclosure({
 
 function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactNode }) {
   const storageKey = `inbound-overview-details:${origMemKey(story)}`;
-  const [open, setOpen] = useState<Record<OverviewDetailKey, boolean>>(CLOSED_OVERVIEW_DETAILS);
+  const baggageProminent = wheelsDown(story);
+  const arrivalOpenedAfterLanding = useRef(false);
+  const [open, setOpen] = useState<Record<OverviewDetailKey, boolean>>(() => ({ ...CLOSED_OVERVIEW_DETAILS, baggage: baggageProminent }));
   useEffect(() => {
-    setOpen(CLOSED_OVERVIEW_DETAILS);
+    let next = { ...CLOSED_OVERVIEW_DETAILS };
+    let openedAfterLanding = false;
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) || "null");
-      if (saved) setOpen({ flight: Boolean(saved.flight), aircraft: Boolean(saved.aircraft), airports: Boolean(saved.airports), baggage: Boolean(saved.baggage) });
+      if (saved) {
+        next = { flight: Boolean(saved.flight), aircraft: Boolean(saved.aircraft), airports: Boolean(saved.airports), baggage: Boolean(saved.baggage) };
+        openedAfterLanding = Boolean(saved.arrivalOpenedAfterLanding);
+      }
     } catch { /* Secondary detail state is optional. */ }
-  }, [storageKey]);
+    if (baggageProminent && !openedAfterLanding) {
+      next.baggage = true;
+      openedAfterLanding = true;
+      try { sessionStorage.setItem(storageKey, JSON.stringify({ ...next, arrivalOpenedAfterLanding: true })); } catch { /* Storage can be unavailable. */ }
+    }
+    arrivalOpenedAfterLanding.current = openedAfterLanding;
+    setOpen(next);
+  }, [storageKey, baggageProminent]);
   const toggle = (key: OverviewDetailKey) => setOpen((current) => {
     const next = { ...current, [key]: !current[key] };
-    try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Storage can be unavailable. */ }
+    try { sessionStorage.setItem(storageKey, JSON.stringify({ ...next, arrivalOpenedAfterLanding: arrivalOpenedAfterLanding.current })); } catch { /* Storage can be unavailable. */ }
     return next;
   });
   const ac = story.aircraft;
@@ -1047,7 +1060,11 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
   const originStop = [story.origin.iata, story.times.originGate ? `Gate ${story.times.originGate}` : null].filter(Boolean).join(" ");
   const destStop = [story.dest.iata, story.times.destGate ? `Gate ${story.times.destGate}` : null].filter(Boolean).join(" ");
   const baggage = useBaggageStatus({flight:story.iata.replace(/\s/g, ""),origin:story.origin.iata,destination:story.dest.iata,date:flightDepartureDate(story)});
-  const baggageProminent = wheelsDown(story);
+  const arrivalSummary = [
+    baggage.result?.terminal ? `Terminal ${baggage.result.terminal}` : null,
+    story.times.destGate ? `Gate ${story.times.destGate}` : "Gate not assigned",
+    baggage.result?.status === "posted" && baggage.result.carousel ? `Carousel ${baggage.result.carousel}` : "Baggage not assigned yet",
+  ].filter(Boolean).join(" · ");
   const schedule = clientSchedules(story);
   const scheduledPush = formatLocalUnix(schedule.pushUnix, story.origin.tz);
   const scheduledTakeoff = formatLocalUnix(schedule.takeoffUnix, story.origin.tz);
@@ -1057,7 +1074,10 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
   const takeoffActualLabel = story.times.takeoffKind !== "scheduled" ? timeKindLabel(story.times.takeoffKind) : null;
   return <section className="overview-details mt-4 rounded-xl border border-border bg-surface px-4" aria-label="More flight information">
     {timing}
-    <dl className="arrival-details"><div><dt>Terminal</dt><dd>{baggage.result?.terminal ?? "—"}</dd><p>{story.dest.city} ({story.dest.iata})</p></div><div><dt>Gate</dt><dd>{story.times.destGate ?? "—"}</dd><p>{story.times.destGate ? "Arrival gate" : "Not assigned"}</p></div><div><dt>Baggage</dt><dd>{baggage.result?.status === "posted" && baggage.result.carousel ? baggage.result.carousel : "—"}</dd><p>{baggageSummary(baggage.result)}</p></div></dl>
+    <OverviewDisclosure id="baggage" title="Arrival" summary={arrivalSummary} open={open.baggage} onToggle={toggle} prominent={baggageProminent}>
+      <dl className="arrival-details"><div><dt>Terminal</dt><dd>{baggage.result?.terminal ?? "—"}</dd><p>{story.dest.city} ({story.dest.iata})</p></div><div><dt>Gate</dt><dd>{story.times.destGate ?? "—"}</dd><p>{story.times.destGate ? "Arrival gate" : "Not assigned"}</p></div><div><dt>Baggage</dt><dd>{baggage.result?.status === "posted" && baggage.result.carousel ? baggage.result.carousel : "—"}</dd><p>{baggage.result?.status === "posted" && baggage.result.carousel ? "Assigned carousel" : baggageSummary(baggage.result)}</p></div></dl>
+      <BaggageStatus state={baggage} showAssignment={false} />
+    </OverviewDisclosure>
     <OverviewDisclosure id="flight" title="Flight details" summary={`${story.iata} · ${story.origin.iata} → ${story.dest.iata}`} open={open.flight} onToggle={toggle}>
       <dl>
         <DetailRow label="Airline" value={story.airline} />
@@ -1090,9 +1110,6 @@ function OverviewDetails({ story, timing }: { story: FlightStory; timing: ReactN
         <section aria-label="Departure airport details"><h3 className="font-semibold">Departure · {story.origin.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.originGate ?? "Not assigned"} /><DetailRow label="Pushback" value={story.times.push} /><DetailRow label="Weather" value={passengerAirportWeather(story.origin.decoded, story.origin.rawMetar)} /></dl></section>
         <section aria-label="Arrival airport details"><h3 className="font-semibold">Arrival · {story.dest.iata}</h3><dl className="mt-1"><DetailRow label="Gate" value={story.times.destGate ?? "Not assigned"} /><DetailRow label={timeKindLabel(story.times.gateKind, "gate arrival")} value={story.times.gate} /><DetailRow label="Weather" value={passengerAirportWeather(story.dest.decoded, story.dest.rawMetar)} /></dl></section>
       </div>
-    </OverviewDisclosure>
-    <OverviewDisclosure id="baggage" title="Baggage" summary={baggageSummary(baggage.result)} open={open.baggage} onToggle={toggle} prominent={baggageProminent}>
-      <BaggageStatus state={baggage} />
     </OverviewDisclosure>
   </section>;
 }
@@ -1233,10 +1250,10 @@ function TimesStrip({ story, failed = false }: { story: FlightStory; failed?: bo
         )}
 
         {showLiveFlight ? (
-          <p className="timing-position">
-            <span>Altitude {ac?.altFt ? feetPretty(ac.altFt) : "—"}</span>
-            {ac?.gsKt ? <><span aria-hidden="true"> · </span><span>{Math.round(ac.gsKt)} kt</span></> : null}
-          </p>
+          <div className="timing-values">
+            <StatusCard title="Altitude" value={ac?.altFt != null ? feetPretty(ac.altFt) : "—"} />
+            <StatusCard title="Speed" value={ac?.gsKt != null ? `${Math.round(ac.gsKt)} kt` : "—"} />
+          </div>
         ) : null}
 
       </div>

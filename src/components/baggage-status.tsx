@@ -37,13 +37,13 @@ export function useBaggageStatus({flight,origin,destination,date}:{flight:string
   return {result:value,supported,loading:supported&&!value};
 }
 
-export function BaggageStatus({state}:{state:BaggageStatusState}) {
+export function BaggageStatus({state,showAssignment=true}:{state:BaggageStatusState;showAssignment?:boolean}) {
   const {result:value,supported,loading}=state;
   const source = value?.sourceUrl && value.sourceName
     ? <><a className="underline" href={value.sourceUrl} target="_blank" rel="noopener noreferrer">{value.sourceName} ↗</a> · </>
     : value?.sourceName ? <>{value.sourceName} · </> : null;
   return <>
-    <p className="font-semibold">{value?.status==="posted"?`Carousel ${value.carousel}${value.terminal?` · Terminal ${value.terminal}`:""}`:loading?"Checking baggage claim…":"Baggage claim hasn't been assigned yet."}</p>
+    {showAssignment || loading ? <p className="font-semibold">{value?.status==="posted"?`Carousel ${value.carousel}${value.terminal?` · Terminal ${value.terminal}`:""}`:loading?"Checking baggage claim…":"Baggage claim hasn't been assigned yet."}</p> : null}
     {value && value.status!=="unavailable" ? <p className="mt-1 text-xs text-muted">{source}Checked {formatClockTime(value.checkedAt)}. Confirm on arrival; assignments can change.</p> : <p className="mt-1 text-xs text-muted">{supported?"Check airport displays after arrival if an assignment is not available here yet.":"Automatic baggage assignments aren’t available for this airport yet. Check airport displays after arrival."}</p>}
   </>;
 }

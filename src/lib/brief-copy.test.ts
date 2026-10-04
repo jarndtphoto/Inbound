@@ -387,19 +387,19 @@ describe("Overview record migration", () => {
     assert.doesNotMatch(source, /function RecordCard|function recordRows|<RecordCard/);
   });
 
-  it("keeps live timing and arrival facts visible while secondary facts stay in disclosures", () => {
+  it("keeps live timing visible while Arrival and secondary facts stay in disclosures", () => {
     const source = readFileSync(new URL("../components/filed-app.tsx", import.meta.url), "utf8");
     const overview = source.slice(source.indexOf('id="panel-Overview"'), source.indexOf('id="panel-Route"'));
     assert.ok(overview.indexOf("<FlightHead") < overview.indexOf("<OverviewDetails"));
     assert.ok(overview.indexOf("<OverviewDetails") < overview.indexOf("<TravelerCompanion"));
     assert.match(overview, /timing=\{<TimesStrip/);
-    for (const title of ["Flight details", "Aircraft", "Airport details", "Baggage"]) {
+    for (const title of ["Flight details", "Aircraft", "Airport details", "Arrival"]) {
       assert.match(source, new RegExp(`title="${title}"`));
     }
     assert.match(source, /summary={`\$\{story\.iata\} · \$\{story\.origin\.iata\} → \$\{story\.dest\.iata\}`}/);
     assert.match(source, /summary=\{aircraftSummary\}/);
     assert.match(source, /summary={`\$\{originStop\} → \$\{destStop\}`}/);
-    assert.match(source, /summary=\{baggageSummary\(baggage\.result\)\}/);
+    assert.match(source, /<OverviewDisclosure id="baggage" title="Arrival"/);
     const details = source.slice(source.indexOf("function OverviewDetails"), source.indexOf("function kindLabel"));
     assert.ok(details.indexOf("{timing}") < details.indexOf("<OverviewDisclosure"));
     assert.match(details, /className="arrival-details"/);
@@ -411,7 +411,8 @@ describe("Overview record migration", () => {
   it("keeps guarded live altitude and speed in the timing section and Refresh in the summary", () => {
     const source = readFileSync(new URL("../components/filed-app.tsx", import.meta.url), "utf8");
     const strip = source.slice(source.indexOf("function TimesStrip"), source.indexOf("function Freshness"));
-    assert.match(strip, /showLiveFlight \? \([\s\S]*className="timing-position"[\s\S]*Altitude[\s\S]*ac\?\.gsKt/);
+    assert.match(strip, /showLiveFlight \? \([\s\S]*title="Altitude"[\s\S]*title="Speed"/);
+    assert.doesNotMatch(strip, /className="timing-position"/);
     assert.doesNotMatch(strip, /<Freshness/);
     const head = source.slice(source.indexOf("function FlightHead"), source.indexOf("function DetailRow"));
     assert.match(head, /<Freshness/);
