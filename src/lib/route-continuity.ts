@@ -38,10 +38,18 @@ export function keepRouteGeometry(incoming: FlightStory, saved: FlightStory | un
   const remainingNm = along?.remainingNm ?? saved.route.remainingNm;
   const observedAt = observation?.seenAt ?? saved.route.progressObservedAt
     ?? (saved.providers?.chosenPositionSeenAt ? saved.providers.chosenPositionSeenAt * 1000 : null);
+  const elapsedMin = Math.max(0, (incoming.fetchedAt - saved.fetchedAt) / 60_000);
+  const savedEtaMin = Number.isFinite(saved.route.etaMin) ? saved.route.etaMin : null;
+  // When there is no new aircraft observation, progress and ETA must move
+  // forward together. Do not pair held near-runway progress with a weaker
+  // saved-schedule ETA from the fallback story.
+  const etaMin = !observation && savedEtaMin != null
+    ? Math.max(0, savedEtaMin - elapsedMin)
+    : incoming.route.etaMin;
   return { ...incoming, route: { ...incoming.route, source: saved.route.source, samples,
     filedFixes: saved.route.filedFixes, filedRouteFingerprint: saved.route.filedRouteFingerprint,
     filedRouteObservedAt: saved.route.filedRouteObservedAt,
-    progress, totalNm, remainingNm, flownNm: Math.max(0, totalNm - remainingNm),
+    progress, totalNm, remainingNm, etaMin, flownNm: Math.max(0, totalNm - remainingNm),
     observedFlownNm: Math.max(incoming.route.observedFlownNm ?? 0, saved.route.observedFlownNm ?? 0) || null,
     progressSource: observation ? "observed" : observedAt != null ? "last_known" : "unknown",
     progressObservedAt: observedAt,
