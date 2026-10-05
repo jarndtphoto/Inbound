@@ -82,7 +82,7 @@ test("visibility and Map selection are wired through to the ground observer", as
 
 test("departure ground map does not duplicate the tracked-flight FR24 stream", async () => {
   const source = await readFile(resolve("src/lib/ground-position.ts"), "utf8");
-  assert.match(source, /if \(data\.movementKind === "departure"\) \{[\s\S]*?diagnostic\("fr24-owned-by-story"\)/);
+  assert.match(source, /if \(data\.movementKind === "departure"\) \{[\s\S]*?fr24KeyType = "owned-by-story"/);
   assert.match(source, /\} else \{[\s\S]*?loadFr24FlightByRegistration/, "arrival recovery retains FR24");
   assert.match(source, /const aroundPacks = await fetchAround/, "departure map still refreshes from open ADS-B");
   assert.match(source, /wantedHex[\s\S]*?fetchByHex\(wantedHex\)/, "delayed broad fixes retry the strongest free exact hex identity");
@@ -98,10 +98,39 @@ test("surface providers are paced and expose throttling instead of silently look
   assert.match(story, /const primary = fusePacks\(await fetchByCallsign\(u\), false\)/);
   assert.match(story, /if \(primary\) return primary/);
   assert.match(story, /cached\(\`around8:\$\{key\}\`, 6000/);
-  assert.match(story, /departureClock - 2 \* 60 \* 60/);
-  assert.match(story, /departureClock \+ 4 \* 60 \* 60/);
+  assert.match(story, /fr24DepartureClock - 2 \* 60 \* 60/);
+  assert.match(story, /fr24DepartureClock \+ 4 \* 60 \* 60/);
   assert.match(fusion, /\[adsb-provider-fail\]/);
   assert.match(fusion, /\[adsb-provider-backoff\]/);
+});
+
+test("MCO/TPA ground diagnostics emit one compact poll summary and preserve reject reasons", async () => {
+  const ground = await readFile(resolve("src/lib/ground-position.ts"), "utf8");
+  const fr24 = await readFile(resolve("src/lib/fr24.server.ts"), "utf8");
+  const fusion = await readFile(resolve("src/lib/adsb-fusion.ts"), "utf8");
+
+  assert.match(ground, /console\.info\("\[ground-coverage\]", JSON\.stringify\(\{/);
+  for (const field of [
+    "pollId", "movement", "flight", "fr24KeyType", "fr24Upstream", "fr24RowsReturned",
+    "fr24Result", "rejectReason", "rawAgeSec", "rawDistanceNm", "rawOnGround", "rawAltFt",
+    "errorKind", "rateLimitedUntilActive", "registrationKnownAtPollStart", "adsbStatus",
+    "finalProvider", "finalAgeSec",
+  ]) assert.match(ground, new RegExp(`\\b${field}\\b`), `missing diagnostic field ${field}`);
+  for (const reason of [
+    "missing_position", "distance_gt_20nm", "airborne_gt_250ft", "age_gt_30s", "future_age",
+  ]) assert.match(ground, new RegExp(reason));
+  assert.doesNotMatch(ground, /diagnostic\("/, "old multi-line ground coverage diagnostics were removed");
+
+  assert.match(fr24, /event: "fr24_upstream_error"/);
+  assert.match(fr24, /statusCode/);
+  assert.match(fr24, /createFr24ProbeDiagnostics/);
+  assert.match(fr24, /probe\.upstream = "cached"/);
+  assert.match(fr24, /probe\.upstream = "fresh"/);
+  assert.match(fr24, /probe\.rowsReturned = rows\.length/);
+
+  assert.match(fusion, /ProviderFetchStatus = "ok" \| "429" \| "timeout" \| "error" \| "backoff"/);
+  assert.match(fusion, /status: "backoff"/);
+  assert.match(fusion, /status: "ok"/);
 });
 
 test("matched FR24 registration skips failed route lookup, but wrong leg/missing/stale/expired matches fall back", async () => {
