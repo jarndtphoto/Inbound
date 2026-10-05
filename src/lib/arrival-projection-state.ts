@@ -1,4 +1,4 @@
-import { arrivalPattern, canProjectArrival } from "./arrival-pattern.ts";
+import { arrivalPattern, canProjectArrival, showDetailedArrivalGeometry } from "./arrival-pattern.ts";
 import { haversineNm, polylineLengthNm, type Coord } from "./geo.ts";
 import { ARRIVAL_OFF_PATH_NM, arrivalPointBehind, projectArrivalPath } from "./arrival-path.ts";
 import { runwayCoordinates, type ExpectedArrivalRunway } from "./arrival-runway.ts";
@@ -8,6 +8,8 @@ export type ArrivalProjectionState = {
   runway: ExpectedArrivalRunway | null;
   side: number | null;
   startedAt: number | null;
+  /** First poll that actually qualified to display runway-specific geometry. */
+  detailedStartedAt: number | null;
   active: boolean;
   /** Planned future points only. Never prepend an observed fix here. */
   points: Coord[];
@@ -22,7 +24,7 @@ export type ArrivalProjectionState = {
   lastAltitudeFt: number | null;
   lastAltitudeAt: number;
 };
-export const emptyArrivalState = (): ArrivalProjectionState => ({ runway: null, side: null, startedAt: null, active: false, points: [], pointAlongNm: [], cursorNm: 0, cursorPoint: null, pathVersion: 2, kind: null, offPathStreak: 0, lastFixAt: 0, lastAltitudeFt: null, lastAltitudeAt: 0 });
+export const emptyArrivalState = (): ArrivalProjectionState => ({ runway: null, side: null, startedAt: null, detailedStartedAt: null, active: false, points: [], pointAlongNm: [], cursorNm: 0, cursorPoint: null, pathVersion: 2, kind: null, offPathStreak: 0, lastFixAt: 0, lastAltitudeFt: null, lastAltitudeAt: 0 });
 export type ArrivalProjectionInput = {
   live: ArrivalFix | null; dest: Coord & { elevationFt?: number | null }; landed: boolean;
   runway: ExpectedArrivalRunway | null; approachEvidence?: boolean; now: number;
@@ -89,6 +91,8 @@ export function updateArrivalProjection(previous: ArrivalProjectionState, input:
   const { live, landed, now } = input;
   let state = normalizeState(previous);
   const evidence = arrivalEntryEvidence(state, input);
+  const detailedEvidence = showDetailedArrivalGeometry(live, input.dest, input.approachEvidence);
+  if (state.active && detailedEvidence && state.detailedStartedAt == null) state.detailedStartedAt = now;
   if (evidence.fresh && Number.isFinite(live?.altFt) && evidence.fixAt > state.lastAltitudeAt) {
     state.lastAltitudeFt = live!.altFt!; state.lastAltitudeAt = evidence.fixAt;
   }
@@ -122,7 +126,8 @@ export function updateArrivalProjection(previous: ArrivalProjectionState, input:
   if (state.offPathStreak >= 2 && state.cursorPoint && projectArrivalPath(live, state.cursorPoint, state.points, state.pointAlongNm, state.cursorNm).distanceNm > ARRIVAL_OFF_PATH_NM) return result("off-path-rejected");
   if (!evidence.entryGate && !(wasActive && runwayChanged && evidence.fresh)) return result("entry-gate");
   const pattern = arrivalPattern(live, state.runway, state.side ?? undefined);
-  state = { ...state, active: true, startedAt: now, side: pattern.side, kind: pattern.kind, offPathStreak: 0, lastFixAt: evidence.fixAt };
+  state = { ...state, active: true, startedAt: now, detailedStartedAt: detailedEvidence ? now : state.detailedStartedAt,
+    side: pattern.side, kind: pattern.kind, offPathStreak: 0, lastFixAt: evidence.fixAt };
   installPlan(state, pattern.points, 0);
   consume(state, live);
   return result(runwayChanged && wasActive ? "runway-changed" : "started");
