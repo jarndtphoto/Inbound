@@ -1,3 +1,4 @@
+import { freezeTestClock } from './helpers/test-clock.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -9,17 +10,19 @@ import { canonicalLegIdentity } from '../src/lib/flight-identity.ts';
 
 test('fixture audit and FR24-only push/taxi survive actual cold story instances and schedule promotion', async () => {
   const directory = await mkdtemp(resolve('node_modules/.identity-replay-'));
-  const envKeys = ['FR24_API_TOKEN', 'FR24_ENABLE_TRACKS', 'FR24_ENABLE_SUMMARY', 'FLIGHTAWARE_AEROAPI_KEY'];
+  const envKeys = ['DATABASE_URL', 'FR24_API_TOKEN', 'FR24_ENABLE_TRACKS', 'FR24_ENABLE_SUMMARY', 'FLIGHTAWARE_AEROAPI_KEY'];
   const oldEnv = envKeys.map(key => process.env[key]);
-  const realFetch = globalThis.fetch, realNow = Date.now;
+  const realFetch = globalThis.fetch;
+  let restoreClock;
   const fixture = JSON.parse(readFileSync(new URL('./fixtures/ua219-provider-handoff.json', import.meta.url)));
   const fr24 = JSON.parse(readFileSync(new URL('./fixtures/ua219-fr24-only.json', import.meta.url)));
   let now = fr24.nowUnix * 1000, raw = structuredClone(fr24.data[0]), awareRecord = null, instance = 0;
   const requests = [];
   try {
+    delete process.env.DATABASE_URL;
     process.env.FR24_API_TOKEN = 'fixture-only-no-network';
     delete process.env.FR24_ENABLE_TRACKS; delete process.env.FR24_ENABLE_SUMMARY; delete process.env.FLIGHTAWARE_AEROAPI_KEY;
-    Date.now = () => now;
+    restoreClock = freezeTestClock(() => now);
     globalThis.fetch = async input => {
       const url = new URL(String(input)); requests.push(url.href);
       if (url.hostname === 'www.flightaware.com') return awareRecord
@@ -83,7 +86,7 @@ test('fixture audit and FR24-only push/taxi survive actual cold story instances 
     assert.equal((await pg.query('select * from flight_phase_state where land_key=$1', [fallbackKey])).rows.length, 1, 'fallback retained');
     assert.equal(requests.filter(url => url.includes('fr24api.flightradar24.com')).length, 5, 'one existing live lookup per story poll');
   } finally {
-    globalThis.fetch = realFetch; Date.now = realNow;
+    globalThis.fetch = realFetch; restoreClock?.();
     envKeys.forEach((key, i) => oldEnv[i] == null ? delete process.env[key] : process.env[key] = oldEnv[i]);
     await rm(directory, { recursive: true, force: true });
   }

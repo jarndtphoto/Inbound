@@ -1,3 +1,4 @@
+import { freezeTestClock } from './helpers/test-clock.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -15,8 +16,9 @@ import { composeBrief } from '../src/lib/brief-copy.ts';
 
 test('UA219 actual takeoff survives provider-ID to FlightStats fallback to provider-ID, cold start and >2h gap', async () => {
   const dir = await mkdtemp(resolve('node_modules/.takeoff-replay-'));
-  const realFetch = globalThis.fetch, realNow = Date.now;
-  const keys = ['FR24_API_TOKEN', 'FLIGHTAWARE_AEROAPI_KEY'];
+  const realFetch = globalThis.fetch;
+  let restoreClock;
+  const keys = ['DATABASE_URL', 'FR24_API_TOKEN', 'FLIGHTAWARE_AEROAPI_KEY'];
   const env = keys.map(k => process.env[k]);
   const fixture = JSON.parse(readFileSync(new URL('./fixtures/ua219-provider-handoff.json', import.meta.url)));
   let now = fixture.firstAtUnix * 1000, mode = 'aware', instance = 0, record = fixture.flightawareRecord, surface = null;
@@ -31,7 +33,7 @@ test('UA219 actual takeoff survives provider-ID to FlightStats fallback to provi
         rollupOptions: { output: { entryFileNames: 'ui.mjs' } } } });
     const ui = await import(pathToFileURL(join(uiDir, 'ui.mjs')).href);
 
-    Date.now = () => now;
+    restoreClock = freezeTestClock(() => now);
     globalThis.fetch = async input => {
       const url = new URL(String(input)); requests.push(url.href);
       if (url.hostname === 'www.flightaware.com') return mode === 'aware'
@@ -224,7 +226,7 @@ test('UA219 actual takeoff survives provider-ID to FlightStats fallback to provi
     assert(!requests.some(u => /fr24api|aeroapi/.test(u)));
 
   } finally {
-    globalThis.fetch = realFetch; Date.now = realNow;
+    globalThis.fetch = realFetch; restoreClock?.();
     keys.forEach((k, i) => env[i] == null ? delete process.env[k] : process.env[k] = env[i]);
     await rm(dir, { recursive: true, force: true });
   }
