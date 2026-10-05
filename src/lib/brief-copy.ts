@@ -20,6 +20,11 @@ export const BRIEF_LOG_LABEL: Record<BriefLogKind, string> = {
 const LOG_CAP = 24;
 const DELAY_JITTER_MIN = 5;
 const ARRIVAL_CHANGE_SEC = 15 * 60;
+const ACTUAL_EVENT_FUTURE_TOLERANCE_MS = 90_000;
+
+function actualPhysicalTimeReady(unix: number | null | undefined, nowMs = Date.now()) {
+  return unix == null || !Number.isFinite(unix) || unix * 1000 <= nowMs + ACTUAL_EVENT_FUTURE_TOLERANCE_MS;
+}
 
 const JARGON =
   /\b(SIGMET|AIRMET|PIREP|G-?AIRMET|METAR|TAF|NAS|OOOI|GDP|AFP|FL\d{2,3}|OUT\/OFF|IFR|LIFR|MVFR|VFR)\b/i;
@@ -127,6 +132,7 @@ export type BriefSnap = {
   pushUnix: number | null;
   takeoffUnix: number | null;
   landUnix: number | null;
+  gateUnix?: number | null;
 };
 
 export type CompiledBrief = {
@@ -236,6 +242,7 @@ function snapOf(d: RideFacts): BriefSnap {
     pushUnix: d.pushUnix ?? null,
     takeoffUnix: d.takeoffUnix ?? null,
     landUnix: d.landUnix ?? null,
+    gateUnix: d.gateUnix ?? null,
     landKind: d.landKind ?? null,
     gateKind: d.gateKind ?? null,
     gate: d.gate ?? null,
@@ -278,15 +285,15 @@ function stageLine(stage: string): string | null {
   return null;
 }
 
-export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: RideFacts): Omit<BriefLogEntry, "at">[] {
+export function diffBriefLog(prev: BriefSnap | undefined, next: BriefSnap, d?: RideFacts, nowMs = Date.now()): Omit<BriefLogEntry, "at">[] {
   if (!prev) return [];
   const out: Omit<BriefLogEntry, "at">[] = [];
 
   const pushConfirmed = Boolean(next.push && (next.pushSource || next.pushKind === "actual"));
-  const pushBecameActual = pushConfirmed && (!prev.pushSource || prev.push !== next.push);
-  const takeoffBecameActual = next.takeoffKind === "actual" && (prev.takeoffKind !== "actual" || prev.takeoff !== next.takeoff);
-  const landingBecameActual = next.landKind === "actual" && (prev.landKind !== "actual" || prev.land !== next.land);
-  const gateBecameActual = next.gateKind === "actual" && (prev.gateKind !== "actual" || prev.gate !== next.gate);
+  const pushBecameActual = pushConfirmed && actualPhysicalTimeReady(next.pushUnix, nowMs) && (!prev.pushSource || prev.push !== next.push);
+  const takeoffBecameActual = next.takeoffKind === "actual" && actualPhysicalTimeReady(next.takeoffUnix, nowMs) && (prev.takeoffKind !== "actual" || prev.takeoff !== next.takeoff);
+  const landingBecameActual = next.landKind === "actual" && actualPhysicalTimeReady(next.landUnix, nowMs) && (prev.landKind !== "actual" || prev.land !== next.land);
+  const gateBecameActual = next.gateKind === "actual" && actualPhysicalTimeReady(d?.gateUnix ?? next.gateUnix, nowMs) && (prev.gateKind !== "actual" || prev.gate !== next.gate);
 
   if (pushBecameActual) out.push({ kind: "stage", text: `Pushed back from ${d?.fromIata ?? "the gate"} at ${next.push}` });
   if (takeoffBecameActual && next.takeoff) out.push({ kind: "stage", text: `Took off from ${d?.fromIata ?? "the origin"} at ${next.takeoff}` });
@@ -458,11 +465,12 @@ function rideClause(d: RideFacts) {
 
 function destClause(d: RideFacts) {
   const delay = nasLine(d.destNas);
+  const actualLandingReady = d.landKind === "actual" && actualPhysicalTimeReady(d.landUnix);
   const land =
-    d.landKind === "actual" && d.land
+    actualLandingReady && d.land
       ? `Landed at ${d.land}`
       : d.land
-        ? `${timeKindLabel(d.landKind, "landing")} ${d.land}`
+        ? `${timeKindLabel(d.landKind === "actual" ? "estimated" : d.landKind, "landing")} ${d.land}`
         : `Into ${d.toCity}`;
   const gate =
     d.gate && (d.now === "ride" || d.now === "arrival" || (d.now === "gate" && d.gateKind === "actual"))
@@ -494,7 +502,7 @@ function composeLead(d: RideFacts) {
   }
 
   if (stage === "arrival" || stage === "final_approach") {
-    const landed = d.landKind === "actual";
+    const landed = d.landKind === "actual" && actualPhysicalTimeReady(d.landUnix);
     if (landed) {
       return joinSentences([
         open,
@@ -579,7 +587,7 @@ export function physicalEventKey(entry: Pick<BriefLogEntry, "kind" | "text">): "
   return null;
 }
 
-function curateBriefLog(log: BriefLogEntry[], next: BriefSnap): BriefLogEntry[] {
+function curateBriefLog(log: BriefLogEntry[], next: BriefSnap, nowMs = Date.now()): BriefLogEntry[] {
   const pushed = Boolean(next.pushSource || next.pushKind === "actual");
   const airborne = ["ride", "arrival", "final_approach", "taxi_in", "gate"].includes(next.stage);
   const landed = next.landKind === "actual" || ["taxi_in", "gate"].includes(next.stage);
@@ -588,6 +596,11 @@ function curateBriefLog(log: BriefLogEntry[], next: BriefSnap): BriefLogEntry[] 
     : entry).filter((entry) => {
     const text = entry.text;
     if (entry.kind === "update") return false;
+    const physical = physicalEventKey(entry);
+    if (physical === "pushback" && next.pushKind === "actual" && !actualPhysicalTimeReady(next.pushUnix, nowMs)) return false;
+    if (physical === "takeoff" && next.takeoffKind === "actual" && !actualPhysicalTimeReady(next.takeoffUnix, nowMs)) return false;
+    if (physical === "landing" && next.landKind === "actual" && !actualPhysicalTimeReady(next.landUnix, nowMs)) return false;
+    if (physical === "gate" && next.gateKind === "actual" && !actualPhysicalTimeReady(next.gateUnix, nowMs)) return false;
     if (entry.kind === "weather" && /^Light turbulence ahead$/i.test(text)) return false;
     if (/Estimated taxi (?:out|in) is now/i.test(text)) return false;
     if (pushed && /Departure time moved|estimated push|push time moved/i.test(text)) return false;
@@ -624,10 +637,10 @@ function curateBriefLog(log: BriefLogEntry[], next: BriefSnap): BriefLogEntry[] 
 function actualEventEntries(d: RideFacts, at: number): BriefLogEntry[] {
   const entries: BriefLogEntry[] = [];
   const add = (text: string, unix?: number | null) => entries.push({ at: unix != null ? unix * 1000 : at, kind: "stage", text });
-  if (d.push && (d.pushSource || d.pushKind === "actual")) add(`Pushed back from ${d.fromIata} at ${d.push}`, d.pushUnix);
-  if (d.takeoff && d.takeoffKind === "actual") add(`Took off from ${d.fromIata} at ${d.takeoff}`, d.takeoffUnix);
-  if (d.land && d.landKind === "actual") add(`Landed at ${d.toIata} at ${d.land}`, d.landUnix);
-  if (d.gate && d.gateKind === "actual") add(`Arrived at ${d.destGate ? `Gate ${d.destGate}` : "the gate"} at ${d.gate}`, d.gateUnix);
+  if (d.push && (d.pushSource || d.pushKind === "actual") && actualPhysicalTimeReady(d.pushUnix, at)) add(`Pushed back from ${d.fromIata} at ${d.push}`, d.pushUnix);
+  if (d.takeoff && d.takeoffKind === "actual" && actualPhysicalTimeReady(d.takeoffUnix, at)) add(`Took off from ${d.fromIata} at ${d.takeoff}`, d.takeoffUnix);
+  if (d.land && d.landKind === "actual" && actualPhysicalTimeReady(d.landUnix, at)) add(`Landed at ${d.toIata} at ${d.land}`, d.landUnix);
+  if (d.gate && d.gateKind === "actual" && actualPhysicalTimeReady(d.gateUnix, at)) add(`Arrived at ${d.destGate ? `Gate ${d.destGate}` : "the gate"} at ${d.gate}`, d.gateUnix);
   return entries;
 }
 
@@ -666,10 +679,10 @@ export function composeBrief(d: RideFacts, previous?: CompiledBrief | null): Com
   const ac = [d.typeName, d.registration].filter(Boolean).join(" · ") || null;
   const lead = joinSentences([composeLead(d), d.scheduleNote ?? ""]);
   const at = Date.now();
-  let seed = curateBriefLog(previous?.log ?? [], snap);
+  let seed = curateBriefLog(previous?.log ?? [], snap, at);
   seed = mergeCanonicalEvents(seed, actualEventEntries(d, at));
-  const added = previous?.snap ? diffBriefLog(previous.snap, snap, d) : [];
-  const log = curateBriefLog(appendLog(seed, added, at), snap);
+  const added = previous?.snap ? diffBriefLog(previous.snap, snap, d, at) : [];
+  const log = curateBriefLog(appendLog(seed, added, at), snap, at);
   if (previous && added.length === 0 && lead === previous.lead && ac === previous.aircraft
     && JSON.stringify(log) === JSON.stringify(previous.log)) return previous;
   const why = whyChanged(previous?.snap, snap, d);
