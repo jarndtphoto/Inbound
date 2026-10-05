@@ -51,11 +51,11 @@ test('welcome dialog does not reopen from asynchronous briefing enrichment in th
 });
 
 test('overdue departures without fresh position do not claim the aircraft is still at the gate',()=>{
-  assert.match(flightPages,/function departureUpdateDelayed/);
-  assert.match(flightPages,/nowMs \/ 1000 - pushAt >= 10 \* 60/);
-  assert.match(flightPages,/Departure update delayed/);
-  assert.match(flightPages,/Movement not confirmed/);
-  assert.match(flightPages,/\["Status", \.\.\.STATUS_PROGRESS\.slice\(1\)\]/);
+  assert.match(source,/function departureUpdateDelayed/);
+  assert.match(source,/nowMs \/ 1000 - pushAt >= 10 \* 60/);
+  assert.match(source,/Departure update delayed/);
+  assert.match(source,/Movement not confirmed/);
+  assert.match(source,/\["Status", \.\.\.STATUS_PROGRESS\.slice\(1\)\]/);
 });
 
 test('tracked-flight polling pauses while hidden and refreshes stale state on return',()=>{

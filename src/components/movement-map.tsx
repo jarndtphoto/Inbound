@@ -1,8 +1,9 @@
+import { advanceGroundMotion, type GroundMotionState } from "@/lib/ground-motion";
 import { phaseOf } from "@/lib/aircraft-phase";
 import { RouteMap } from "./route-map";
 import { getAirportSurfaceCached } from "@/lib/airport-surface";
 import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.server";
-import { haversineNm, initialBearing } from "@/lib/geo";
+import { haversineNm } from "@/lib/geo";
 import { flightPollingComplete, groundPollingEnabled } from "@/lib/flight-polling";
 import { usePageVisible } from "@/lib/use-page-visible";
 import { getGroundPosition } from "@/lib/ground-position";
@@ -51,9 +52,6 @@ type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
 type MapTab = "departure" | "flight" | "arrival";
 
-function bearingDelta(a: number, b: number) {
-  return Math.abs(((a - b + 540) % 360) - 180);
-}
 type AircraftSnapshot = NonNullable<FlightStory["aircraft"]>;
 
 type GroundMode = {
@@ -271,6 +269,21 @@ function SurfaceShape({ feature, project }: { feature: SurfaceFeature; project: 
   return null;
 }
 
+function GroundAircraftDirection({ displayAircraft, displayFrozen, plane, scale }: {
+  displayAircraft: AircraftSnapshot;
+  displayFrozen: boolean;
+  plane: { x: number; y: number };
+  scale: number;
+}) {
+  return !displayFrozen && Number.isFinite(displayAircraft.track) ? (
+    <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / scale}) rotate(${displayAircraft.track})`}>
+      <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
+    </g>
+  ) : (
+    <circle cx={plane.x} cy={plane.y} r={8 / scale} className="fill-accent" />
+  );
+}
+
 function GroundMovementMap({
   story,
   mode,
@@ -368,12 +381,7 @@ function GroundMovementMap({
   // those two streams; mixing them can manufacture a reciprocal heading.
   type MotionSource = "story" | "ground";
   type FastFix = NonNullable<typeof storyFast> | NonNullable<typeof queriedCandidate>;
-  type MotionPoint = { lat: number; lon: number; seenAt: number };
-  type MotionState = {
-    points: MotionPoint[];
-    confirmedTrack: number | null;
-  };
-  const motionTracksRef = useRef<{ key: string; story: MotionState | null; ground: MotionState | null }>({
+  const motionTracksRef = useRef<{ key: string; story: GroundMotionState | null; ground: GroundMotionState | null }>({
     key: identityKey,
     story: null,
     ground: null,
@@ -382,41 +390,7 @@ function GroundMovementMap({
     motionTracksRef.current = { key: identityKey, story: null, ground: null };
   }
   const updateMotionSource = (source: MotionSource, fix: FastFix | null) => {
-    if (!fix) return;
-    const previous = motionTracksRef.current[source];
-    const last = previous?.points.at(-1) ?? null;
-    if (last && fix.seenAt <= last.seenAt + 0.25) return;
-
-    const points = [...(previous?.points ?? []), { lat: fix.lat, lon: fix.lon, seenAt: fix.seenAt }]
-      .filter((point) => fix.seenAt - point.seenAt <= 45)
-      .slice(-10);
-
-    let confirmedTrack: number | null = null;
-    const latest = points.at(-1) ?? null;
-    if (latest && points.length >= 3) {
-      // Ground ADS-B can jitter by a few dozen feet between receivers. Use a
-      // multi-fix displacement window instead of a single hop so we only draw
-      // an arrow after meaningful, sustained movement.
-      const anchor = points.find((point) => {
-        const dt = latest.seenAt - point.seenAt;
-        return dt >= 6 && dt <= 35 && haversineNm(point, latest) >= 0.015;
-      }) ?? null;
-
-      if (anchor) {
-        const overall = initialBearing(anchor, latest);
-        const recent = points.slice(-3);
-        const recentAnchor = recent[0] ?? anchor;
-        const recentMoved = haversineNm(recentAnchor, latest);
-        const recentTrack = recentMoved >= 0.008 ? initialBearing(recentAnchor, latest) : overall;
-
-        // If the aircraft is actively turning, show a dot until the new
-        // direction settles instead of displaying either the old or reciprocal
-        // heading with false confidence.
-        if (bearingDelta(overall, recentTrack) <= 55) confirmedTrack = recentTrack;
-      }
-    }
-
-    motionTracksRef.current[source] = { points, confirmedTrack };
+    if (fix) motionTracksRef.current[source] = advanceGroundMotion(motionTracksRef.current[source], fix);
   };
   updateMotionSource("story", storyFast);
   updateMotionSource("ground", queriedCandidate);
@@ -462,7 +436,13 @@ function GroundMovementMap({
     callsign: fastFix.callsign ?? aircraft?.callsign ?? null,
     extrapolated: !fast,
     seenSec: fastAge,
-  } : hasEverFast ? null : aircraft;
+  } : hasEverFast ? null : aircraft ? {
+    ...aircraft,
+    // Story/saved fallbacks have no confirmed motion history. A provider
+    // heading never turns a surface position into a ground arrow.
+    track: aircraft.onGround || ((aircraft.altFt ?? Infinity) <= 250 && (aircraft.gsKt ?? Infinity) <= 80)
+      ? null : aircraft.track,
+  } : null;
   const zoom = useGroundZoom(`${story.iata}:${airport.iata}:${mode.kind}`);
   const autoFocusRef = useRef("");
   const cos = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
@@ -608,13 +588,7 @@ function GroundMovementMap({
             {plane && displayAircraft ? (
               <>
                 <circle cx={plane.x} cy={plane.y} r={27 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={4.5 / zoom.view.scale} />
-                {!displayFrozen && Number.isFinite(displayAircraft.track) ? (
-                  <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${displayAircraft.track})`}>
-                    <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
-                  </g>
-                ) : (
-                  <circle cx={plane.x} cy={plane.y} r={8 / zoom.view.scale} className="fill-accent" />
-                )}
+                <GroundAircraftDirection displayAircraft={displayAircraft} displayFrozen={displayFrozen} plane={plane} scale={zoom.view.scale} />
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale})`}>
                   <text x="38" y="-13" className="fill-fg" fontSize="32" fontWeight="900">{story.iata}</text>
                   <text x="38" y="17" className="fill-muted" fontSize="21" fontWeight="800">{displayFrozen ? "last known" : `${Math.round(displayAircraft.gsKt ?? 0)} kt`}</text>
