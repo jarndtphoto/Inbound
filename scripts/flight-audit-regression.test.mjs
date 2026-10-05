@@ -129,12 +129,13 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /fitFeatures\.flatMap/);
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
     assert.match(groundSource, /resetViewRef\.current = next/);
-    assert.match(groundSource, /movedNm >= 0\.004/);
     assert.match(groundSource, /updateMotionSource\("story", storyFast\)/);
     assert.match(groundSource, /updateMotionSource\("ground", queriedCandidate\)/);
-    assert.match(groundSource, /initialBearing\(previous\.point, fix\)/);
-    assert.match(groundSource, /bearingDelta\(pendingTrack, nextTrack\) <= 50/);
-    assert.match(groundSource, /confirmedTrack = null;[\s\S]*pendingTrack = nextTrack/);
+    assert.match(groundSource, /fix\.seenAt - point\.seenAt <= 45/);
+    assert.match(groundSource, /dt >= 6 && dt <= 35 && haversineNm\(point, latest\) >= 0\.015/);
+    assert.match(groundSource, /const overall = initialBearing\(anchor, latest\)/);
+    assert.match(groundSource, /recentMoved >= 0\.008 \? initialBearing\(recentAnchor, latest\) : overall/);
+    assert.match(groundSource, /bearingDelta\(overall, recentTrack\) <= 55/);
     assert.match(groundSource, /motionTracksRef\.current\[selectedFast\.source\]\?\.confirmedTrack/);
     assert.match(groundSource, /track: motionTrack/);
     assert.match(groundSource, /!displayFrozen && Number\.isFinite\(displayAircraft\.track\) \? \(/);
