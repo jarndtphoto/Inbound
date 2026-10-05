@@ -46,9 +46,9 @@ export function scheduleLowPrioritySurfacePrefetch(work: () => void) {
   if (typeof window === "undefined") return () => {};
   const idleWindow = window as IdleWindow;
   if (typeof idleWindow.requestIdleCallback === "function") {
-    const id = idleWindow.requestIdleCallback(work, { timeout: 1_500 });
+    const id = idleWindow.requestIdleCallback(work, { timeout: 750 });
     return () => idleWindow.cancelIdleCallback?.(id);
   }
-  const id = window.setTimeout(work, 250);
+  const id = window.setTimeout(work, 100);
   return () => window.clearTimeout(id);
 }
