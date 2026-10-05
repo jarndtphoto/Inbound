@@ -1,8 +1,8 @@
 {
   "ok": true,
-  "verifiedAt": "2026-10-05T01:06:31.078Z",
-  "root": "https://inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app",
-  "mcp": "https://inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app/mcp",
+  "verifiedAt": "2026-10-05T02:08:49.768Z",
+  "root": "https://inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app",
+  "mcp": "https://inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app/mcp",
   "totals": {
     "assertions": 13,
     "rpcRequests": 31,
@@ -34,7 +34,7 @@
     "expired": "SYN102"
   },
   "protection": {
-    "exactExceptionHostname": "inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app",
+    "exactExceptionHostname": "inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app",
     "globalRequireLogin": true,
     "globalMode": "Standard Protection"
   },
@@ -101,7 +101,7 @@
     {
       "method": "resources/read",
       "status": 200,
-      "bytes": 220472,
+      "bytes": 221579,
       "headers": {
         "cacheControl": "no-store",
         "fixtureOnly": "true",
@@ -113,7 +113,7 @@
     {
       "method": "tools/call",
       "status": 200,
-      "bytes": 26445,
+      "bytes": 26449,
       "headers": {
         "cacheControl": "no-store",
         "fixtureOnly": "true",
@@ -257,7 +257,7 @@
     {
       "method": "tools/call",
       "status": 200,
-      "bytes": 26448,
+      "bytes": 26450,
       "headers": {
         "cacheControl": "no-store",
         "fixtureOnly": "true",
@@ -269,7 +269,7 @@
     {
       "method": "tools/call",
       "status": 200,
-      "bytes": 26449,
+      "bytes": 26452,
       "headers": {
         "cacheControl": "no-store",
         "fixtureOnly": "true",
@@ -353,7 +353,7 @@
     {
       "method": "tools/call",
       "status": 200,
-      "bytes": 26452,
+      "bytes": 26445,
       "headers": {
         "cacheControl": "no-store",
         "fixtureOnly": "true",

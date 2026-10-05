@@ -1,36 +1,63 @@
 {
-  "verifiedAt": "2026-10-05T01:06:31.078Z",
+  "verifiedAt": "2026-10-05T02:08:49.768Z",
   "inboundRepository": "jarndtphoto/Inbound",
   "inboundBranch": "plugin-v1-flight-handoff",
-  "exactBaseSha": "fc16849f9eed685fd63dda1f8a8fa4ec9db50a57",
-  "deployedInboundSourceSha": "4eec3ecef91ee5cfe15d34a3278c78a06508ccde",
-  "deployedInboundTreeSha": "1a6900ce996c7bae964d608e5aecd3c3c6c80366",
+  "evidenceBaseSha": "184e94bac5b8773dfe9c2b158f250a53a90d3dce",
+  "deployedInboundSourceSha": "05a48b619568f1a3953f9f68a008141c2dc48ee8",
+  "deployedInboundTreeSha": "190c40ad5e33a3dd397e59676fa316a49c266cf9",
   "fixtureRepository": "jarndtphoto/inbound-live-fixture-dev",
-  "fixtureBranch": "part-3b4-flight-handoff-20261005",
-  "fixtureCommitSha": "dd76a0ac6b517e9e465b569683659a52e0605fdd",
-  "fixtureTreeSha": "366ce7d4850a4993560e4690518540c87f3d6bd5",
+  "fixtureBranch": "part-3b4-host-replay-fix-20261005",
+  "fixtureCommitSha": "43e1f4ea0296ecd32d0cee38b21e3888e00d1804",
+  "fixtureTreeSha": "488c9a841f2262b188a3a752445814f70ef319ab",
   "fixtureFiles": [
     "api/mcp.js",
     "package.json",
     "vercel.json"
   ],
-  "deploymentId": "dpl_GxXjUvWECRnRsyV8YRLgWEk8eTLS",
+  "compiledArtifact": {
+    "serverBytes": 399972,
+    "serverSha256": "d7277990585da323cb5e46993eacf21ff7ca9b9d02dc7f069baa3484e15a4de0",
+    "widgetBundleBytes": 176411,
+    "widgetBundleSha256": "ab42bb5b60a5612ec29290675b394048b647c7bbe7951791c5bb091c23705fea"
+  },
+  "deploymentId": "dpl_8bevb2jMsXrfG5iuQdjgYPKSEwQG",
   "deploymentState": "READY",
-  "previewHostname": "inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app",
-  "mcpUrl": "https://inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app/mcp",
+  "deploymentReadyAt": "2026-10-05T01:42:15.860Z",
+  "previewHostname": "inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app",
+  "mcpUrl": "https://inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app/mcp",
   "deploymentGitMetadata": {
     "repository": "jarndtphoto/inbound-live-fixture-dev",
-    "branch": "part-3b4-flight-handoff-20261005",
-    "sha": "dd76a0ac6b517e9e465b569683659a52e0605fdd"
+    "branch": "part-3b4-host-replay-fix-20261005",
+    "sha": "43e1f4ea0296ecd32d0cee38b21e3888e00d1804"
+  },
+  "deployedWidgetProof": {
+    "resourceStatus": 200,
+    "resourceBytes": 217306,
+    "resourceSha256": "ea71747ec78a98991a71a55ae4ae964413d2a3c2ca7c163f792fe37a078aad22",
+    "markers": {
+      "activeHandoffRequest": true,
+      "ignoredHandoffReplays": true,
+      "ignoredHandoffResponses": true,
+      "appliedHandoffResponses": true,
+      "canceledHandoffRequests": true,
+      "openaiSetGlobals": true,
+      "genericToolResult": true
+    }
   },
   "protection": {
-    "exactExceptionHostname": "inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app",
+    "exactExceptionHostname": "inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app",
     "requireLogin": true,
     "mode": "Standard Protection",
     "wildcardAdded": false,
     "projectWideBypassAdded": false,
     "productionExceptionAdded": false,
     "otherHostnameChanged": false
+  },
+  "publicVerification": {
+    "rpcRequests": 31,
+    "assertionGroups": 13,
+    "failures": 0,
+    "preliminaryTemporalRetry": "The first cold-window attempt reached the intentional stale 40-aircraft board before T+20; after proving that cause, the complete clean run passed."
   },
   "isolation": {
     "fakeAircraftOnly": true,
@@ -39,5 +66,10 @@
     "productionDbAccess": 0,
     "cacheControl": "no-store",
     "egress": "static-isolation"
+  },
+  "untouched": {
+    "main": true,
+    "production": true,
+    "oldPreviews": ["pdqumlqfx", "i51j9i7mu", "mwgaf6eqv", "d6eed", "rf27"]
   }
 }

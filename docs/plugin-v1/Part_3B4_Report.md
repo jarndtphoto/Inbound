@@ -1,106 +1,90 @@
-# Part 3B.4 — exact flight handoff
+# Part 3B.4 — host tool-result replay fix
 
-Part 3B.4 is complete and stopped. Nothing after Part 3B.4 was started.
+Part 3B.4 is fixed, deployed to a new isolated Preview, publicly verified, and stopped for a manual ChatGPT host retest. Nothing after Part 3B.4 was started.
 
-## Source and deployment identity
+## Proven cause
 
-- Repository: `jarndtphoto/Inbound`
-- Branch: `plugin-v1-flight-handoff`
-- Exact base: `fc16849f9eed685fd63dda1f8a8fa4ec9db50a57`
-- Core remote commit: `77ccd7c08e90e619531a17d5b9e10c59e77afe95`
-- Deployed Inbound source commit: `4eec3ecef91ee5cfe15d34a3278c78a06508ccde`
-- Deployed Inbound tree: `1a6900ce996c7bae964d608e5aecd3c3c6c80366`
-- Fixture repository/branch: `jarndtphoto/inbound-live-fixture-dev` / `part-3b4-flight-handoff-20261005`
-- Fixture commit: `dd76a0ac6b517e9e465b569683659a52e0605fdd`
-- Fixture tree: `366ce7d4850a4993560e4690518540c87f3d6bd5`
-- Deployment ID: `dpl_GxXjUvWECRnRsyV8YRLgWEk8eTLS`
-- Preview hostname: `inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app`
-- MCP URL: `https://inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app/mcp`
+The old widget treated any schema-valid `FlightResultV1` as current navigation intent. Both generic host paths called `applyHandoff()` without request correlation:
 
-Vercel deployment metadata identifies the fixture branch and commit above. That fixture commit contains exactly `api/mcp.js`, `package.json`, and `vercel.json`; those blobs came from the audited Inbound tree. The generated build audit records the compiled server SHA-256 as `ff420f30b7c411d80e7db87dce550f759b7b3378833e7fde3cd073fe3b59d773` and the widget SHA-256 as `e66b3647bddc40a3c1099d418d470bbb8ad40c30758e5bd84f9fb8a8e05ebd7a`.
+- `openai:set_globals` → `globals.toolOutput` → `applyHandoff()`
+- `ui/notifications/tool-result` → `message.params` → `applyHandoff()`
 
-## Implemented surface
+The pre-fix browser capture proved the exact failure. A retained SYN101 result changed Radar from `nearby` to `detail` without Track flight. Back to Radar changed the local mode to `nearby`, but replaying the same result through the generic notification changed it back to `detail`. RAF and Radar polling were not the cause.
 
-The MCP surface contains exactly three read-only tools:
+## Correlation design and behavior
 
-1. `get_nearby_flights`
-2. `resolve_nearby_flight`
-3. `get_flight`
+Every explicit handoff now creates one local `activeHandoffRequest` with a monotonic request ID, request type (`resolve`, `choice`, or `instance`), expected Radar ID, a non-exposed fingerprint of the selection/candidate/instance credential, and `startedAt`.
 
-Radar and Featured rows carry opaque 43-character selection handles. Callsigns cannot resolve a Nearby selection. SYN101 resolves directly to one dated occurrence. SYN105 returns two opaque dated candidates and never chooses automatically. Exact instance and candidate reads return the same strict `InboundFlightV1` envelope.
+Only the direct awaited response from that exact request may navigate. Acceptance requires the same request generation, request type, selected Radar ID, and private credential fingerprint. Applying a response consumes the request. Selection changes, Back to Radar, and superseding handoffs cancel the old request.
 
-The failure surface covers expired/invalid tokens, unconfirmed identity, identity change, unsupported aircraft/query, missing date, route unavailable, backend unavailable, and not found. No mutation tool exists.
+Generic `openai:set_globals` and `ui/notifications/tool-result` payloads may still feed Nearby results through the existing monotonic board rules, but a replayed `FlightResultV1` never changes selection, handoff mode, handoff result, or the current view. Late request A cannot override newer request B. Back to Radar preserves the accepted board, area, selection, tab, RAF, poll timer, age timer, and motion-watchdog state.
 
-## Persistence and concurrency
+Explicit behavior remains intact:
 
-Incremental migration `0008_flight_handoff.sql` follows only 0006 and 0007. It adds four current-state tables:
+- Selecting SYN101 stays on Radar; Track flight opens its exact detail once.
+- Back remains on Radar despite duplicate SYN101 globals and notification replays.
+- A later Track flight creates a new request and may open detail again.
+- Selecting SYN105 stays on Radar; Track flight opens its two-choice ambiguity UI.
+- Only the correlated candidate response opens detail; old ambiguity/candidate results cannot reopen it.
 
-- `occurrence_registry`
-- `selection_handle`
-- `candidate_choice`
-- `detail_snapshot`
+## Browser and regression proof
 
-Public token values are never stored; only SHA-256 hashes are stored. Selection/candidate lifetime is bounded to 90 seconds and cannot exceed 120 seconds after the observation. Occurrence/detail retention is capped at 14 days. Resolution and detail work use leases, fencing generations, backoff, cleanup, and a maximum of three attempts.
+The replay proof passed from both source and compiled artifact: 5 assertion groups each, 0 failures, and 0 browser errors. It covered stale SYN101 on initialization, duplicate replay after detail, duplicate replay after Back, stale SYN105 ambiguity, stale candidate detail, and request-A/request-B out-of-order completion.
 
-PGlite applied 0006→0007→0008 and found exactly eight plugin tables. Application/store tests proved one resolver under 100 contenders and one detail builder under 100 contenders. A fresh schema-only Neon branch independently proved exactly one selection-lease winner across 29 simultaneous real PostgreSQL backends, stale-writer fencing, and zero claims after attempt three. The production Neon branch was untouched.
+The source and compiled host-like lifecycle proofs each passed 20 assertion groups over 90.5 simulated seconds with 40 invented aircraft, 0 external requests, and 0 browser errors. They covered Chicago→ORD→MDW, selection immediately after MDW, multiple selections, Radar→Flights→Radar, explicit handoff flows, and automatic T+90 motion recovery.
+
+Part 3B.3 remained intact: 25-second extrapolation bound, at most 3 short retries per authoritative trajectory, at most 1 RAF, 1 poll timer, and 1 age timer. Fresh trajectories clear retry state; a genuine non-advancing backend exhausts the bounded budget and leaves aircraft safely stopped.
 
 ## Test and build totals
 
-- Focused Part 3B.4/plugin tests: 145 total, 145 passed, 0 failed.
-- Full `npm run check`: 967 tests, 966 passed, 0 failed, 1 pre-existing held/todo test.
-- `npm run build` with `DATABASE_URL` and `NEARBY_VERIFY_DATABASE_URL` unset: passed; migration correctly skipped.
-- Generated fixture: 3 files; server 398,866 bytes; widget 175,305 bytes.
-- Build isolation: provider calls 0; production API calls 0; production DB access 0.
+- Focused plugin tests: 145/145 passed.
+- Full `npm run check`: 967 tests across 92 suites; 966 passed, 0 failed, 1 pre-existing held/todo.
+- `npm run build` with database URL variants unset: passed; migration skipped because `DATABASE_URL` was unset.
+- Isolated artifact: exactly 3 files; server 399,972 bytes; widget bundle 176,411 bytes.
+- Provider calls: 0. Production API calls: 0. Production DB access: 0.
+
+## Source and deployment identity
+
+- Inbound source SHA: `05a48b619568f1a3953f9f68a008141c2dc48ee8`
+- Inbound tree SHA: `190c40ad5e33a3dd397e59676fa316a49c266cf9`
+- Fixture commit: `43e1f4ea0296ecd32d0cee38b21e3888e00d1804`
+- Fixture tree: `488c9a841f2262b188a3a752445814f70ef319ab`
+- Deployment ID: `dpl_8bevb2jMsXrfG5iuQdjgYPKSEwQG`
+- Preview hostname: `inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app`
+- MCP URL: `https://inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app/mcp`
+
+Vercel reports the deployment READY from the fixture commit above. The fixture tree contains only `api/mcp.js`, `package.json`, and `vercel.json`. The compiled server SHA-256 is `d7277990585da323cb5e46993eacf21ff7ca9b9d02dc7f069baa3484e15a4de0`. Public resource retrieval confirmed the deployed widget contains the active-request, ignored-replay, ignored-response, applied-response, canceled-request, `openai:set_globals`, and generic tool-result code paths.
 
 ## Deployment protection
 
 One exception was added for exactly:
 
-`inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app`
+`inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app`
 
-The final Vercel settings audit shows Require Log In still checked and Standard Protection still selected. No wildcard, project-wide bypass, production-domain exception, or other hostname change was made. Existing exceptions and old previews were left untouched.
+The final settings audit shows Require Log In checked and Standard Protection selected globally. No wildcard, project-wide bypass, production-domain exception, or other hostname change was made. `pdqumlqfx`, `i51j9i7mu`, `mwgaf6eqv`, `d6eed`, and `rf27` remain untouched.
 
-## Public verification
+## Public MCP verification
 
-Public MCP verification made 31 requests across 13 assertion groups with 0 failures. It passed:
+The final run passed 31 requests across 13 assertion groups with 0 failures. It verified initialize, the exact three read-only tools, resource/widget retrieval, Chicago/ORD/MDW, SYN101 direct handoff, SYN105 two-choice ambiguity, exact candidate and instance retrieval, bounded Radar/Featured lists, closed inputs/origins, no mutation or production-like tools, expired/invalid token rejection, and fixture-only/no-store/static-isolation headers.
 
-- initialize with protocol `2025-11-25`
-- exact three-tool listing and read-only annotations
-- resource listing and self-contained widget retrieval
-- Chicago, ORD, and MDW Nearby responses
-- the public fixture's 40→39 retirement sequence
-- Radar ≤100, Featured ≤5, and full Nearby payload ≤64 KiB
-- SYN101 direct resolution and exact-instance reread
-- SYN105 two-choice ambiguity and explicit choice detail
-- unconfirmed, identity-changed, unsupported, backend-unavailable, missing-date, unsupported-query, invalid-token, and expired-token behavior
-- callsign-only resolve rejection
-- mutation/unknown-method rejection
-- hostile-origin rejection and `https://chatgpt.com` acceptance
-- `X-Inbound-Fixture-Only: true`, `Cache-Control: no-store`, and `X-Inbound-Egress: static-isolation`
+The first preliminary cold-window attempt reached the intentionally stale 40-aircraft board before its scheduled T+20 retirement and stopped on the verifier's narrow three-second warm-up assertion. Inspection proved this was the designed 40→39 lifecycle rather than a deployment failure. The complete clean run then passed and observed the 39-aircraft post-retirement board before and after another authoritative T+20 refresh.
 
-Totals: provider calls 0; production API calls 0; production DB access 0.
+Provider calls: 0. Production API calls: 0. Production DB access: 0.
 
-## Public browser proof
+## Exact ChatGPT host retest
 
-The public widget was exercised for 96.432 seconds without pressing manual Refresh. It covered Chicago→ORD→MDW, selection immediately after MDW, multiple selections, Radar→Flights→Radar, direct SYN101 detail, SYN105 ambiguity/choice/detail, and Back to Radar.
+1. Open **Settings → Apps & Connectors → Advanced settings** and enable **Developer mode**.
+2. Create a brand-new app/connector; do not reuse the old cached connection.
+3. Name it `Inbound Live Part 3B.4 Replay Fix`.
+4. Set the MCP URL to `https://inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app/mcp`.
+5. Choose **No authentication**, save, and connect.
+6. Start a new chat, select the new connector, and ask: `Open the invented Inbound Live Radar near Chicago.`
+7. Confirm Radar stays visible on initialization. Select SYN101 and wait: selection alone must not open detail.
+8. Press **Track flight**. SYN101 detail may open once. Press **Back to Radar**, wait, and confirm retained/replayed results do not reopen detail.
+9. Select SYN101 again and wait: it must remain Radar until **Track flight** is pressed again.
+10. Select SYN105 and wait: it must remain Radar. Press **Track flight**, confirm two dated choices, choose one, then return to Radar. The old chooser/detail must not reappear.
+11. Around T+30 switch Chicago→ORD→MDW and immediately select an aircraft. Switch Radar→Flights→Radar and make several more selections.
+12. Wait through 20, 40, 60, and 90 seconds without manual Refresh. Confirm no persistent collective freeze and that automatic bounded recovery occurs during healthy fixture operation.
+13. For the outage safety control, stop authoritative advancement and confirm motion stops at the unchanged 25-second bound; the bounded retry budget must exhaust without endless polling or drift.
 
-At T+51.849 the accepted anchors truthfully reached their 25-second bound and the widget reported that bounded motion had stopped. Without user action, the automatic watchdog accepted the next trajectory by T+64.202 and visible marker positions continued changing through T+96.409. Manual Refresh was not required. Browser errors: 0.
-
-## ChatGPT host retest
-
-1. In ChatGPT, open **Settings → Apps & Connectors → Advanced settings** and enable **Developer mode**.
-2. Choose **Create app** (or **Create connector** in older UI).
-3. Name it `Inbound Live Part 3B.4`.
-4. Set the MCP server URL to `https://inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app/mcp`.
-5. Select **No authentication**, save, and connect.
-6. Start a new chat and select `Inbound Live Part 3B.4` from the tools/apps menu.
-7. Ask: `Open the invented Inbound Live Radar near Chicago.`
-8. Confirm aircraft move; select several aircraft without pressing Refresh.
-9. Select SYN101, choose **Track flight**, confirm one exact detail, then choose **Back to Radar**.
-10. Select SYN105, choose **Track flight**, confirm two dated choices, choose one, confirm detail, then return.
-11. Switch Chicago→ORD, then ORD→MDW around 30 seconds; immediately select an aircraft.
-12. Switch Radar→Flights→Radar and make more selections.
-13. Wait through 20, 40, 60, and 90 seconds. Do not use manual Refresh. Confirm any bounded stop recovers automatically during healthy fixture operation and there is no persistent collective freeze.
-14. Use Pause only as the safety control: moving targets must stop at the unchanged 25-second extrapolation bound rather than drift indefinitely.
-
-Stop after this host test and report the result. Do not start work after Part 3B.4.
+Stop after this host test and report the result. Do not start anything after Part 3B.4.
