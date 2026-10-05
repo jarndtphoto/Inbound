@@ -124,6 +124,8 @@ test("MCO/TPA ground diagnostics emit one compact poll summary and preserve reje
 
   assert.match(fr24, /event: "fr24_upstream_error"/);
   assert.match(fr24, /statusCode/);
+  assert.match(fr24, /statusCode: res\.status/);
+  assert.match(fr24, /errorKind: "429"/);
   assert.match(fr24, /createFr24ProbeDiagnostics/);
   assert.match(fr24, /probe\.upstream = "cached"/);
   assert.match(fr24, /probe\.upstream = "fresh"/);
