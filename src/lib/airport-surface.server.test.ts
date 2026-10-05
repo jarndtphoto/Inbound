@@ -55,7 +55,12 @@ test("exact airport surface query targets the requested aerodrome before any bro
   assert.match(query, /"iata"="SAN"/);
   assert.match(query, /map_to_area/);
   assert.match(query, /area\.airportArea/);
-  assert.doesNotMatch(query, /32\.7/);
+  assert.match(query, /natural"="coastline"/);
+  assert.match(query, /natural"="water"/);
+  assert.match(query, /water"~"\^\(lake\|lagoon\|reservoir\|bay\)\$"/);
+  assert.match(query, /32\.658800/);
+  assert.match(query, /\.waterRelations out body/);
+  assert.match(query, /waterMembers out geom/);
 });
 
 test("boxed airport surface query remains available as a bounded fallback", () => {
@@ -64,6 +69,9 @@ test("boxed airport surface query remains available as a bounded fallback", () =
   assert.match(query, /32\.658800/);
   assert.match(query, /32\.808800/);
   assert.match(query, /aeroway"="aerodrome"/);
+  assert.match(query, /natural"="coastline"/);
+  assert.match(query, /natural"="water"/);
+  assert.match(query, /\.waterRelations out body/);
 });
 
 test("airport surface parses multipolygon inland water in the same payload", () => {
@@ -75,10 +83,12 @@ test("airport surface parses multipolygon inland water in the same payload", () 
       type: "relation" as const,
       tags: { natural: "water", water: "lake", name: "Lake Example" },
       members: [
-        { type: "way" as const, role: "outer", geometry: [{ lat: 0.03, lon: 0.03 }, { lat: 0.03, lon: 0.05 }, { lat: 0.05, lon: 0.05 }] },
-        { type: "way" as const, role: "outer", geometry: [{ lat: 0.05, lon: 0.05 }, { lat: 0.05, lon: 0.03 }, { lat: 0.03, lon: 0.03 }] },
+        { type: "way" as const, role: "outer", ref: 901 },
+        { type: "way" as const, role: "outer", ref: 902 },
       ],
     },
+    line(901, [{ lat: 0.03, lon: 0.03 }, { lat: 0.03, lon: 0.05 }, { lat: 0.05, lon: 0.05 }], {}),
+    line(902, [{ lat: 0.05, lon: 0.05 }, { lat: 0.05, lon: 0.03 }, { lat: 0.03, lon: 0.03 }], {}),
   ], "KORD", 123, { lat: 0, lon: 0 });
 
   assert.equal(parsed.hydrography?.fallback, false);
