@@ -426,7 +426,10 @@ function GroundMovementMap({
       const providerTrack = typeof fastFix.track === "number" && Number.isFinite(fastFix.track) ? fastFix.track : null;
       const movementTrack = motionTrack ?? trailTrack;
       if (movementTrack != null && (providerTrack == null || headingDelta(providerTrack, movementTrack) >= 70)) return movementTrack;
-      return providerTrack ?? movementTrack ?? aircraft?.track ?? null;
+      // Do not borrow an older story heading when this ground fix has no
+      // trustworthy direction. That stale fallback is what made southbound
+      // taxiing aircraft render as a north-facing arrow.
+      return providerTrack ?? movementTrack ?? null;
     })(),
     vertFpm: aircraft?.vertFpm ?? null,
     onGround: fastFix.onGround,
@@ -580,9 +583,13 @@ function GroundMovementMap({
             {plane && displayAircraft ? (
               <>
                 <circle cx={plane.x} cy={plane.y} r={27 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={4.5 / zoom.view.scale} />
-                <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${Number.isFinite(displayAircraft.track) ? displayAircraft.track : 0})`}>
-                  <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
-                </g>
+                {Number.isFinite(displayAircraft.track) ? (
+                  <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${displayAircraft.track})`}>
+                    <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
+                  </g>
+                ) : (
+                  <circle cx={plane.x} cy={plane.y} r={8 / zoom.view.scale} className="fill-accent" />
+                )}
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale})`}>
                   <text x="38" y="-13" className="fill-fg" fontSize="32" fontWeight="900">{story.iata}</text>
                   <text x="38" y="17" className="fill-muted" fontSize="21" fontWeight="800">{displayFrozen ? "last known" : `${Math.round(displayAircraft.gsKt ?? 0)} kt`}</text>
