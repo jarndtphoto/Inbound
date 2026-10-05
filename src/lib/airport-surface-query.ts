@@ -9,6 +9,7 @@ export function airportSurfaceQueryOptions(airport: { icao: string; lat: number;
     staleTime: 12 * 60 * 60_000,
     gcTime: 12 * 60 * 60_000,
     retry: false,
+    retryOnMount: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   };
