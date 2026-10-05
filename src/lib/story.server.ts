@@ -2913,6 +2913,76 @@ function awareFromResume(resume, scope) {
 		typicalTaxiOutMin: null, typicalTaxiInMin: null, filedTaxiOutMin: null, filedTaxiInMin: null,
 	};
 }
+function awareFromFreshAdsbRoute(raw, route, parsed) {
+	if (!raw || !route || !parsed) return null;
+	const live = toLive(raw);
+	const origin = fieldFromAdsbdb(route?.origin);
+	const dest = fieldFromAdsbdb(route?.destination);
+	if (!live || !origin || !dest || origin.iata === dest.iata) return null;
+	if (!rawMatchesQuery(raw, parsed, null)) return null;
+	if (live.extrapolated || (live.seenSec ?? 999) > 15) return null;
+
+	const routeIcao = String(route?.callsign_icao ?? "").replace(/\s/g, "").toUpperCase();
+	const routeIata = String(route?.callsign_iata ?? "").replace(/\s/g, "").toUpperCase();
+	const requestedIcao = String(parsed.callsign ?? "").replace(/\s/g, "").toUpperCase();
+	const requestedIata = String(parsed.iata ?? "").replace(/\s/g, "").toUpperCase();
+	if ((routeIcao || routeIata) && routeIcao !== requestedIcao && routeIata !== requestedIata) return null;
+
+	const originNm = haversineNm(live, origin);
+	const nearDeparture = live.onGround === true
+		|| (((live.altFt ?? 0) <= 10_000) && ((live.gsKt ?? 0) <= 250));
+	if (!nearDeparture || originNm > 18) return null;
+
+	const none = { scheduled: null, estimated: null, actual: null };
+	return {
+		ident: requestedIcao,
+		iataIdent: requestedIata || null,
+		status: live.onGround ? "active" : "departed",
+		flightId: null,
+		confirmedAt: Date.now(),
+		originIata: origin.iata,
+		originIcao: origin.icao,
+		originName: origin.name,
+		originCity: origin.city,
+		originLat: origin.lat,
+		originLon: origin.lon,
+		originGate: null,
+		originTz: origin.tz ?? null,
+		destIata: dest.iata,
+		destIcao: dest.icao,
+		destName: dest.name,
+		destCity: dest.city,
+		destLat: dest.lat,
+		destLon: dest.lon,
+		destGate: null,
+		destTz: dest.tz ?? null,
+		gateOut: { ...none },
+		takeoff: { ...none },
+		landing: { ...none },
+		gateIn: { ...none },
+		inboundIdent: null,
+		inbound: null,
+		inboundFlightId: null,
+		waypoints: [],
+		type: live.type ?? null,
+		tail: live.registration ?? null,
+		hex: live.hex ?? null,
+		atcIdent: live.callsign ?? requestedIcao,
+		cancelled: false,
+		averageDelaySec: { departure: null, arrival: null },
+		typicalTaxiOutMin: null,
+		typicalTaxiInMin: null,
+		filedTaxiOutMin: null,
+		filedTaxiInMin: null,
+		gsKt: live.gsKt ?? null,
+		heading: live.track ?? null,
+		altFt: live.altFt ?? null,
+		faTrack: [],
+		_scheduleSource: "adsb_live_route",
+		_liveRouteBootstrap: true,
+	};
+}
+
 async function buildStory(query, resumed = null, progressResume = null) {
 	const parsed = parseFlightQuery(query);
 	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
@@ -2957,10 +3027,23 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			destination: fr24Aware.destIata ?? fr24Aware.destIcao,
 		}));
 	}
-	const currentLegAware = publicAware ?? fr24Aware;
+	const adsbRouteAware = !publicAware && !fr24Aware
+		? awareFromFreshAdsbRoute(rawAc0, route, parsed)
+		: null;
+	if (adsbRouteAware) {
+		console.info(JSON.stringify({
+			event: "adsb_live_route_fallback",
+			requested: parsed.callsign,
+			registration: adsbRouteAware.tail,
+			hex: adsbRouteAware.hex,
+			origin: adsbRouteAware.originIata,
+			destination: adsbRouteAware.destIata,
+		}));
+	}
+	const currentLegAware = publicAware ?? fr24Aware ?? adsbRouteAware;
 	const scheduleSource = resumed ? "saved_resume" : publicAware
 		? publicAware._scheduleSource ?? (publicAware._publicScheduleDate ? "flightstats_public" : "flightaware_public")
-		: fr24Aware ? "fr24_live" : "unavailable";
+		: fr24Aware ? "fr24_live" : adsbRouteAware ? "adsb_live_route" : "unavailable";
 	noteStorySchedule(scheduleSource);
 	const flightawareOfficial = officialAwareCompatible(currentLegAware, official.flightaware) ? official.flightaware : null;
 	if (official.flightaware && !flightawareOfficial) {
@@ -2974,8 +3057,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	}
 	const aware = mergeOfficialAware(currentLegAware, flightawareOfficial);
 	// Flight-number route databases retain old assignments after a number moves
-	// to a different city pair. Require either a current schedule record or a
-	// fresh FR24 live record that identifies both ends of this exact active leg.
+	// to a different city pair. Accept one only when a fresh exact ADS-B aircraft
+	// is physically at that route's origin; otherwise require a current schedule
+	// or FR24 live record that identifies both ends of the active leg.
 	if (!parsed.registration && (!(aware?.originIata || aware?.originIcao) || !(aware?.destIata || aware?.destIcao))) {
 		if (flightNotFound(scheduleError)) throw scheduleError;
 		throw new Error("Current flight route unavailable. Try again when the flight feed responds.");
