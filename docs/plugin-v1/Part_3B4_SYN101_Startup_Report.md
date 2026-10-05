@@ -44,6 +44,28 @@ explicit dated choice, and Back to Radar retain request correlation.
   zero provider calls, production API calls, or production database access.
 - Mobile Radar and desktop detail screenshots visually inspected.
 
-Deployment and actual ChatGPT host verification remain pending. Keep the
-existing `evm5eupb3` preview and its protection exception unchanged. Stop after
-preparing the corrected preview and receiving the manual host retest result.
+## Corrected deployment
+
+- Source branch: `plugin-v1-syn101-freeze`.
+- Source SHA: `3a20e1b13549d125fdd0ff85d9d393442bb7bb17`.
+- Fixture branch: `part-3b4-syn101-startup-20261005`.
+- Fixture commit: `4202436783dfcb4ce5b7684b3f635d7403464036`.
+- Fixture tree: `3630e9cf727b32019356f3beb64d334960a6959d`.
+- Deployment: `dpl_EtX8PXtHdHpQ3pss9S8LXn7uMvUA`, READY, Preview.
+- MCP URL: `https://inbound-live-fixture-ngc64c094-jarndtphoto.vercel.app/mcp`.
+
+The remote fixture tree was checked: exactly the same three permitted files;
+the server blob is `d076a19d864c1e8a1fb6f7df36123f7662caa03d`, matching the
+locally tested build. Public unauthenticated access returned HTTP 302 and
+`Protected by Vercel Authentication`. Public MCP verification and the actual
+ChatGPT host retest remain pending.
+
+No protection settings were changed. The connector can read this deployment
+but lacks an exact-host exception action. Browser fallback permission is needed
+before adding an exception only for
+`inbound-live-fixture-ngc64c094-jarndtphoto.vercel.app` in the isolated project,
+while retaining global Standard Protection / Require Log In. The existing
+`evm5eupb3` preview and all previous exceptions remain unchanged.
+
+Do not proceed beyond Part 3B.4. After that one hostname exception is authorized
+and confirmed, verify the public MCP and obtain the manual ChatGPT host retest.
