@@ -17,9 +17,13 @@ test("filed-only and track holds keep geometry, last known progress and age toge
     saved.flightId = "provider-old"; incoming.flightId = "provider-new";
     incoming.route.filedRouteFingerprint = null; incoming.route.filedRouteObservedAt = null;
     incoming.route.remainingNm = 3880;
+    incoming.route.etaMin = 11;
+    incoming.fetchedAt = saved.fetchedAt + 30_000;
+    saved.route.etaMin = 2;
     const held = keepRouteGeometry(incoming, saved);
     assert.equal(held.route.source, source); assert.deepEqual(held.route.samples, saved.route.samples);
     assert.equal(held.route.progress, .65); assert.equal(held.route.remainingNm, 1400);
+    assert.equal(held.route.etaMin, 1.5, "held progress carries the prior live ETA forward instead of fallback ETA");
     assert.equal(held.route.progressSource, "last_known"); assert.equal(held.route.progressObservedAt, saved.route.progressObservedAt);
     assert.equal(lastKnownProgressLabel(held, now), "Last known progress · 3 min ago");
   }
