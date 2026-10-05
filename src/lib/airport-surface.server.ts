@@ -339,7 +339,7 @@ function samePoint(a: SurfacePoint | undefined, b: SurfacePoint | undefined) {
 function validGeometry(points: OverpassGeometryPoint[] | undefined): SurfacePoint[] {
   if (!Array.isArray(points)) return [];
   return points
-    .filter((p) => validCoord(p.lat, -90, 90) && validCoord(p.lon, -180, 180))
+    .filter((p) => p != null && validCoord(p.lat, -90, 90) && validCoord(p.lon, -180, 180))
     .map((p) => ({ lat: p.lat, lon: p.lon }));
 }
 
@@ -503,20 +503,9 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
 
 function hydroOverpassQuery(bounds: SurfaceBounds) {
   const bbox = surfaceBoundsString(bounds);
-  // Keep multipolygon relation bodies lightweight. Member way geometry is
-  // returned separately, clipped to the local airport box, and re-associated
-  // by member ref/role in waterPolygons(). This avoids downloading an entire
-  // Great Lake or coastal multipolygon just to draw one airport neighborhood.
-  return `
-    (way["natural"="coastline"](${bbox});)->.coast;
-    (way["natural"="water"](${bbox});way["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox});)->.waterWays;
-    (relation["natural"="water"](${bbox});relation["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox});)->.waterRelations;
-    .coast out geom(${bbox});
-    .waterWays out geom;
-    .waterRelations out body;
-    way(r.waterRelations)->.waterMembers;
-    .waterMembers out geom(${bbox});
-  `;
+  // Overpass clips each local coastline/water geometry to the airport box.
+  // This keeps large bays/lakes bounded without a second provider/request.
+  return `(way["natural"="coastline"](${bbox});way["natural"="water"](${bbox});way["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox});relation["natural"="water"](${bbox});relation["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox}););out geom(${bbox});`;
 }
 
 export function exactAirportSurfaceOverpassQuery(airport: string, input: { lat: number; lon: number }) {
