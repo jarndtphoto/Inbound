@@ -50,6 +50,10 @@ export function fitGroundSurfaceView(points: Array<{ x: number; y: number }>, pa
 type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
 type MapTab = "departure" | "flight" | "arrival";
+
+function bearingDelta(a: number, b: number) {
+  return Math.abs(((a - b + 540) % 360) - 180);
+}
 type AircraftSnapshot = NonNullable<FlightStory["aircraft"]>;
 
 type GroundMode = {
@@ -365,7 +369,8 @@ function GroundMovementMap({
   type MotionSource = "story" | "ground";
   type MotionState = {
     point: { lat: number; lon: number; seenAt: number };
-    derivedTrack: number | null;
+    pendingTrack: number | null;
+    confirmedTrack: number | null;
   };
   const motionTracksRef = useRef<{ key: string; story: MotionState | null; ground: MotionState | null }>({
     key: identityKey,
@@ -378,18 +383,37 @@ function GroundMovementMap({
   const updateMotionSource = (source: MotionSource, fix: NonNullable<typeof storyFast> | null) => {
     if (!fix) return;
     const previous = motionTracksRef.current[source];
-    let derivedTrack = previous?.derivedTrack ?? null;
+    let pendingTrack = previous?.pendingTrack ?? null;
+    let confirmedTrack = previous?.confirmedTrack ?? null;
     if (previous && fix.seenAt > previous.point.seenAt + 0.25) {
       const dt = fix.seenAt - previous.point.seenAt;
       const movedNm = haversineNm(previous.point, fix);
       if (dt >= 0.5 && dt <= 60 && movedNm >= 0.004) {
-        derivedTrack = initialBearing(previous.point, fix);
+        const nextTrack = initialBearing(previous.point, fix);
+        if (confirmedTrack != null) {
+          if (bearingDelta(confirmedTrack, nextTrack) <= 50) {
+            confirmedTrack = nextTrack;
+            pendingTrack = null;
+          } else {
+            // A taxi turn needs a second agreeing vector before we draw a new
+            // arrow. Drop back to a dot instead of confidently showing the old
+            // direction through the turn.
+            confirmedTrack = null;
+            pendingTrack = nextTrack;
+          }
+        } else if (pendingTrack != null && bearingDelta(pendingTrack, nextTrack) <= 50) {
+          confirmedTrack = nextTrack;
+          pendingTrack = null;
+        } else {
+          pendingTrack = nextTrack;
+        }
       }
     }
     if (!previous || fix.seenAt > previous.point.seenAt + 0.25) {
       motionTracksRef.current[source] = {
         point: { lat: fix.lat, lon: fix.lon, seenAt: fix.seenAt },
-        derivedTrack,
+        pendingTrack,
+        confirmedTrack,
       };
     }
   };
@@ -406,7 +430,7 @@ function GroundMovementMap({
   const selectedFast = candidates[0] ?? null;
   const fast = selectedFast?.fix ?? null;
   const fastKey = identityKey;
-  const motionTrack = selectedFast ? motionTracksRef.current[selectedFast.source]?.derivedTrack ?? null : null;
+  const motionTrack = selectedFast ? motionTracksRef.current[selectedFast.source]?.confirmedTrack ?? null : null;
 
   const lastFastRef = useRef<{ key: string; fix: NonNullable<typeof fast> } | null>(null);
   if (fast) lastFastRef.current = { key: fastKey, fix: fast };
@@ -585,7 +609,7 @@ function GroundMovementMap({
               <>
                 <circle cx={plane.x} cy={plane.y} r={27 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={4.5 / zoom.view.scale} />
                 {!displayFrozen && Number.isFinite(displayAircraft.track) ? (
-                  <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${(displayAircraft.track + 180) % 360})`}>
+                  <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${displayAircraft.track})`}>
                     <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
                   </g>
                 ) : (
