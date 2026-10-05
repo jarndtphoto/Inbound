@@ -416,7 +416,9 @@ function applyHandoff(request: ActiveHandoffRequest, value: unknown) {
   activeHandoffRequest = null; handoffResult = parsed.data; appliedHandoffResponses++;
   if (parsed.data.status === "resolved") {
     handoffMode = "detail";
-    if (parsed.data.flightInstanceId) resolvedInstances.set(request.expectedRadarId, parsed.data.flightInstanceId);
+    // A dated ambiguity choice is valid for this detail view only. Do not let it
+    // silently become the aircraft's default occurrence on the next Track action.
+    if (parsed.data.flightInstanceId && request.type !== "choice") resolvedInstances.set(request.expectedRadarId, parsed.data.flightInstanceId);
   } else handoffMode = parsed.data.status === "ambiguous" ? "ambiguous" : "error";
   render(); ensureAnimationLoop(); return true;
 }
@@ -443,6 +445,9 @@ async function trackSelected() {
 async function chooseCandidate(candidate: FlightCandidateV1) {
   if (handoffMode === "loading" || !state.selectedRadarId) return;
   lastUiAction = "dated-choice";
+  // If this aircraft ever had an exact cached occurrence, ambiguity takes
+  // precedence. Returning to Radar must require a fresh dated choice.
+  resolvedInstances.delete(state.selectedRadarId);
   const request = beginHandoff("choice", state.selectedRadarId, candidate.candidateToken);
   try { if (!applyHandoff(request, await invokeReadTool("get_flight", { target: { kind: "choice", candidateToken: candidate.candidateToken } })) && currentHandoff(request)) throw new Error("Invalid candidate response"); }
   catch { failHandoff(request); }
