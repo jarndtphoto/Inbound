@@ -17,6 +17,8 @@ test("every server/wrapper stage has an explicit progress and pager mapping", ()
     if (!["inbound", "origin_gate"].includes(value)) assert(statusProgressIndex(flightStageId(value)) > 0);
   }
   assert.equal(statusProgressIndex("takeoff_roll"), 2);
+  assert.equal(statusProgressIndex("taxi_in"), 4, "taxi in keeps Landing active until gate arrival is confirmed");
+  assert.equal(statusProgressIndex("gate"), 5, "only confirmed gate activates the final Gate step");
   assert.equal(stageStepId("takeoff_roll"), "taxi");
   assert.equal(flightStageId("Takeoff roll"), "takeoff_roll", "older device cache remains readable");
 });
