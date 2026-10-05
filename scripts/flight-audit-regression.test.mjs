@@ -133,11 +133,13 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /updateMotionSource\("story", storyFast\)/);
     assert.match(groundSource, /updateMotionSource\("ground", queriedCandidate\)/);
     assert.match(groundSource, /initialBearing\(previous\.point, fix\)/);
-    assert.match(groundSource, /motionTracksRef\.current\[selectedFast\.source\]/);
+    assert.match(groundSource, /bearingDelta\(pendingTrack, nextTrack\) <= 50/);
+    assert.match(groundSource, /confirmedTrack = null;[\s\S]*pendingTrack = nextTrack/);
+    assert.match(groundSource, /motionTracksRef\.current\[selectedFast\.source\]\?\.confirmedTrack/);
     assert.match(groundSource, /track: motionTrack/);
-    assert.doesNotMatch(groundSource, /providerTrack \?\? movementTrack/);
     assert.match(groundSource, /!displayFrozen && Number\.isFinite\(displayAircraft\.track\) \? \(/);
-    assert.match(groundSource, /rotate\(\$\{\(displayAircraft\.track \+ 180\) % 360\}\)/);
+    assert.match(groundSource, /rotate\(\$\{displayAircraft\.track\}\)/);
+    assert.doesNotMatch(groundSource, /displayAircraft\.track \+ 180/);
     assert.match(groundSource, /delayed \$\{providerLabel\} position/);
   });
 });
@@ -267,8 +269,14 @@ describe('post-landing passenger stage', () => {
     assert.notEqual(currentStageOf({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live }), 'gate');
   });
 
-  it('marks confirmed gate-in At gate', () => {
-    assert.equal(currentStageOf({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live: { ...surface, gsKt: 8 } }), 'gate');
+  it('does not let an early provider gate-in override fresh taxi movement', () => {
+    const live = { ...surface, gsKt: 8, phase: 'taxi' };
+    assert.equal(postLandingState({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live }), 'taxi_in');
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live }), 'taxi_in');
+  });
+
+  it('marks confirmed gate-in At gate once fresh taxi movement is gone', () => {
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live: { ...surface, gsKt: 0, phase: 'parked' } }), 'gate');
   });
 
   it('marks robust stationary/parked detection At gate', () => {
