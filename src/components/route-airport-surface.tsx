@@ -23,6 +23,7 @@ function BrowserAirportSurface({ airport, near, approachActive, widthMiles, inve
   const opacity = airportDetailOpacity(widthMiles);
   const query = useQuery({ ...airportSurfaceQueryOptions(airport), enabled: approachActive || (near && opacity > 0) });
   const surface = query.data as AirportSurface | undefined;
+  const hydro = surface?.hydrography;
   const features = useMemo(() => simplifyRouteAirportSurface(filterAirportSurfaceFeatures(surface?.features ?? [], airport)), [surface, airport.lat, airport.lon]);
   const shapes = useMemo(() => features.map(feature => ({
     feature, points: feature.points.map(p => `${sx(p.lon).toFixed(6)},${sy(p.lat).toFixed(6)}`).join(" "),
@@ -38,6 +39,34 @@ function BrowserAirportSurface({ airport, near, approachActive, widthMiles, inve
         : feature.kind === "apron" ? "var(--route-airport-apron)" : "var(--route-airport-taxiway)";
       return <polygon key={key} data-surface-kind={feature.kind} points={points} fill={fill} />;
     }), [shapes]);
+  const hydroDetail = useMemo(() => {
+    if (!hydro || (!hydro.fallback && hydro.coastlineWays === 0 && hydro.waterPolygons === 0)) return null;
+    const box = [
+      { lat: hydro.bounds.south, lon: hydro.bounds.west },
+      { lat: hydro.bounds.south, lon: hydro.bounds.east },
+      { lat: hydro.bounds.north, lon: hydro.bounds.east },
+      { lat: hydro.bounds.north, lon: hydro.bounds.west },
+    ];
+    const polygonPath = (polygon: { outer: Array<{ lat: number; lon: number }>; holes?: Array<Array<{ lat: number; lon: number }>> }) =>
+      [polygon.outer, ...(polygon.holes ?? [])].map((ring) =>
+        ring.map((point, index) => `${index ? "L" : "M"}${sx(point.lon).toFixed(6)} ${sy(point.lat).toFixed(6)}`).join(" ") + " Z",
+      ).join(" ");
+    const boxPoints = box.map((point) => `${sx(point.lon).toFixed(6)},${sy(point.lat).toFixed(6)}`).join(" ");
+    const baseFill = hydro.fallback || !hydro.ocean ? "var(--journey-land)" : "var(--journey-water)";
+    return (
+      <g data-route-airport-hydro={airport.icao} data-route-airport-hydro-fallback={hydro.fallback ? hydro.fallbackReason ?? "fallback" : undefined}>
+        <polygon points={boxPoints} fill={baseFill} stroke="none" />
+        {!hydro.fallback && hydro.land.map((polygon, index) => (
+          <path key={`land-${index}`} data-airport-detailed-land d={polygonPath(polygon)}
+            fill="var(--journey-land)" fillRule="evenodd" stroke="none" />
+        ))}
+        {!hydro.fallback && hydro.water.map((polygon, index) => (
+          <path key={`water-${index}`} data-airport-detailed-water d={polygonPath(polygon)}
+            fill="var(--journey-water)" fillRule="evenodd" stroke="none" />
+        ))}
+      </g>
+    );
+  }, [hydro, airport.icao, sx, sy]);
   if (!near || opacity <= 0) return null;
   if (showRouteAirportLoadingNote(widthMiles, query.isPending)) {
     return <g data-route-airport-loading={airport.icao}
@@ -48,6 +77,9 @@ function BrowserAirportSurface({ airport, near, approachActive, widthMiles, inve
         fontFamily="IBM Plex Mono, monospace">Loading airport map…</text>
     </g>;
   }
-  if (!shapes.length) return null;
-  return <g data-route-airport={airport.icao} opacity={opacity} pointerEvents="none" aria-hidden="true">{geometry}</g>;
+  if (!shapes.length && !hydroDetail) return null;
+  return <g data-route-airport={airport.icao} opacity={opacity} pointerEvents="none" aria-hidden="true">
+    {hydroDetail}
+    {geometry}
+  </g>;
 }
