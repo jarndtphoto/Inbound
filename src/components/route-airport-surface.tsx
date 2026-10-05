@@ -1,6 +1,6 @@
 import { airportSurfaceQueryOptions } from "@/lib/airport-surface-query";
 import type { AirportSurface } from "@/lib/airport-surface.server";
-import { airportDetailOpacity, ROUTE_AIRPORT_MIN_WIDTH_MILES, simplifyRouteAirportSurface } from "@/lib/route-airport-detail";
+import { airportDetailOpacity, showRouteAirportLoadingNote, simplifyRouteAirportSurface } from "@/lib/route-airport-detail";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 
@@ -37,8 +37,7 @@ function BrowserAirportSurface({ airport, near, approachActive, widthMiles, inve
       return <polygon key={key} data-surface-kind={feature.kind} points={points} fill={fill} />;
     }), [shapes]);
   if (!near || opacity <= 0) return null;
-  const atMaxZoom = widthMiles <= ROUTE_AIRPORT_MIN_WIDTH_MILES * 1.05;
-  if (query.isPending && atMaxZoom) {
+  if (showRouteAirportLoadingNote(widthMiles, query.isPending)) {
     return <g data-route-airport-loading={airport.icao}
       transform={`translate(${sx(airport.lon)} ${sy(airport.lat)}) scale(${inverseScale})`}
       pointerEvents="none" aria-hidden="true">
