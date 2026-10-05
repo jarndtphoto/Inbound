@@ -130,9 +130,12 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
     assert.match(groundSource, /resetViewRef\.current = next/);
     assert.match(groundSource, /movedNm >= 0\.004/);
-    assert.match(groundSource, /initialBearing\(previous\.point, fast\)/);
-    assert.match(groundSource, /headingDelta\(providerTrack, movementTrack\) >= 70/);
-    assert.match(groundSource, /return providerTrack \?\? movementTrack \?\? null/);
+    assert.match(groundSource, /updateMotionSource\("story", storyFast\)/);
+    assert.match(groundSource, /updateMotionSource\("ground", queriedCandidate\)/);
+    assert.match(groundSource, /initialBearing\(previous\.point, fix\)/);
+    assert.match(groundSource, /motionTracksRef\.current\[selectedFast\.source\]/);
+    assert.match(groundSource, /track: motionTrack/);
+    assert.doesNotMatch(groundSource, /providerTrack \?\? movementTrack/);
     assert.match(groundSource, /Number\.isFinite\(displayAircraft\.track\) \? \(/);
     assert.match(groundSource, /delayed \$\{providerLabel\} position/);
   });
