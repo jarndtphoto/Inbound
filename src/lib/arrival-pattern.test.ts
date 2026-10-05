@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { arrivalRunways, pickArrivalRunway, runwayThreshold, runwayBearing, type RunwayEnd } from "./arrival-runway.ts";
-import { arrivalPattern, canProjectArrival } from "./arrival-pattern.ts";
+import { arrivalPattern, canProjectArrival, showDetailedArrivalGeometry } from "./arrival-pattern.ts";
 import { destPoint, haversineNm } from "./geo.ts";
 import { passengerEtaMin } from "./flight-data.ts";
 const ends: RunwayEnd[] = [
@@ -54,6 +54,15 @@ for(const [name,bearing,track] of [['opposite side',90,90],['side',0,180]] as co
  const eta=passengerEtaMin({remainingNm:p.lengthNm,directToDestNm:12,gsKt:160,providerEtaMin:1});
  assert.ok(eta>12/160*60+1); // The final-approach ETA uses the pattern, not direct distance.
 });
+test('detailed runway geometry waits for actual approach while the filed route remains the en-route plan',()=>{
+ const approach={...destPoint(runway.threshold,270,20),seenSec:10,phase:'approach',onGround:false};
+ assert.equal(showDetailedArrivalGeometry(approach,runway.threshold,false),true);
+ assert.equal(showDetailedArrivalGeometry({...approach,phase:'descent'},runway.threshold,false),false);
+ assert.equal(showDetailedArrivalGeometry({...approach,...destPoint(runway.threshold,270,80),phase:'approach'},runway.threshold,false),false);
+ assert.equal(showDetailedArrivalGeometry({...approach,phase:'descent'},runway.threshold,true),true);
+ assert.equal(showDetailedArrivalGeometry({...approach,seenSec:90},runway.threshold,true),false);
+});
+
 test('patterns require a fresh descending/approach fix near destination, never ground or landed',()=>{
  const live={...destPoint(runway.threshold,90,12),seenSec:10,phase:'approach',onGround:false};
  assert.equal(canProjectArrival(live,runway.threshold,false),true);
