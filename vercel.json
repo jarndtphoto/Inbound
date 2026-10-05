@@ -1,0 +1,3 @@
+{
+  "buildCommand": "NODE_OPTIONS='--import=/vercel/path0/scripts/validation-freeze-clock.mjs' npm run check"
+}
