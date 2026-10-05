@@ -1,5 +1,10 @@
 # Part 3B.4 — host tool-result replay fix
 
+2026-10-05 follow-up: the user reported SYN101 froze immediately. A delayed
+resource launch reproduces an immediate bounded-motion stop in the deployed
+artifact. The startup refresh correction and its evidence are described in
+`Part_3B4_SYN101_Startup_Report.md`. Actual ChatGPT host approval remains pending.
+
 Part 3B.4 is fixed, deployed to a new isolated Preview, publicly verified, and stopped for a manual ChatGPT host retest. Nothing after Part 3B.4 was started.
 
 ## Proven cause

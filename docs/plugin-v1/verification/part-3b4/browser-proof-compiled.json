@@ -2098,7 +2098,7 @@
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082962160,
+          "nextPollAt": 1791082962192,
           "pollScheduleEpoch": 24
         }
       },
@@ -2152,7 +2152,7 @@
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082962160,
+          "nextPollAt": 1791082962192,
           "pollScheduleEpoch": 24
         },
         "after": {
@@ -2203,7 +2203,7 @@
           "globalsEvents": 8,
           "hostEchoEvents": 8,
           "hostContextEvents": 2,
-          "nextPollAt": 1791082962160,
+          "nextPollAt": 1791082962192,
           "pollScheduleEpoch": 24
         },
         "frameDelta": 31

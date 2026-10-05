@@ -1,0 +1,55 @@
+{
+  "ok": true,
+  "compiled": false,
+  "before": false,
+  "scope": "Simulated delayed-resource host only",
+  "actualChatGptVerified": false,
+  "errors": [],
+  "timeline": [
+    {
+      "ageSeconds": 0,
+      "refreshCalls": 0,
+      "nextPollAt": 1791082826000,
+      "generatedAt": "2026-10-04T03:00:06.000Z",
+      "syn101": {
+        "radarId": "00000000-0000-4000-8000-000000003e80",
+        "latitude": 42.04395282719455,
+        "longitude": -87.87168601364993,
+        "altitudeFt": 7800,
+        "extrapolatedSeconds": 0.24,
+        "stopped": false
+      },
+      "handoffMode": "nearby"
+    },
+    {
+      "ageSeconds": 30,
+      "refreshCalls": 1,
+      "nextPollAt": 1791082856000,
+      "generatedAt": "2026-10-04T03:00:36.000Z",
+      "syn101": {
+        "radarId": "00000000-0000-4000-8000-000000003e80",
+        "latitude": 42.038539027085776,
+        "longitude": -87.8332861284116,
+        "altitudeFt": 8061,
+        "extrapolatedSeconds": 10.242,
+        "stopped": false
+      },
+      "handoffMode": "nearby"
+    },
+    {
+      "ageSeconds": 130,
+      "refreshCalls": 1,
+      "nextPollAt": 1791082956000,
+      "generatedAt": "2026-10-04T03:02:16.000Z",
+      "syn101": {
+        "radarId": "00000000-0000-4000-8000-000000003e80",
+        "latitude": 41.95735877335224,
+        "longitude": -87.77963072087687,
+        "altitudeFt": 9269,
+        "extrapolatedSeconds": 10.244,
+        "stopped": false
+      },
+      "handoffMode": "nearby"
+    }
+  ]
+}

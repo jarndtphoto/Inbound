@@ -425,6 +425,19 @@ async function refreshAndSchedule(mode: "reset" | "after") {
   scheduleAfterRefresh(outcome, mode);
   return true;
 }
+function startNearbyUpdates() {
+  // A host can retain the resource HTML longer than its embedded observations.
+  // Resume from a real Nearby read instead of waiting another full poll interval
+  // with every moving aircraft already at its extrapolation limit.
+  if (activeRequestGeneration === requestGeneration) return;
+  const newestMotionFix = Math.max(...board.radarTargets.filter(target => target.groundTrackDeg !== null
+    && target.groundspeedKt !== null && target.groundspeedKt > 0).map(target => Date.parse(target.observedAt)));
+  const needsRefresh = state.areaId !== board.area.id || board.health === "stale" || board.health === "unavailable"
+    || Date.now() - Date.parse(board.generatedAt) >= NORMAL_POLL_MS
+    || Number.isFinite(newestMotionFix) && newestMotionFix + MOTION_BOUND_MS - Date.now() <= MOTION_RETRY_WINDOW_MS;
+  if (wanted() && needsRefresh) { clearPollingTimers(); void refreshAndSchedule("reset"); }
+  else schedule();
+}
 async function display(mode: DisplayMode) {
   if (!hostReady || !hostContext.availableDisplayModes.includes(mode)) return;
   try { const result = await rpc("ui/request-display-mode", { mode }) as { mode?: DisplayMode }; if (result?.mode && ["inline", "fullscreen", "pip"].includes(result.mode)) hostContext.displayMode = result.mode; render(); ensureAnimationLoop(); }
@@ -497,6 +510,6 @@ acceptHostToolOutput(host()?.toolOutput || initial, { expectedArea: null }); sta
 if (window.parent !== window) void rpc("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "Inbound invented flight handoff proof", version: "0.4.0" }, appCapabilities: { availableDisplayModes: ["inline", "pip", "fullscreen"] } }).then(value => {
   if (dismissed) return;
   const result = value as { hostContext?: Partial<HostContext> }; hostReady = true; hostContext = { ...hostContext, ...result.hostContext }; notify("ui/notifications/initialized"); render(); ensureAnimationLoop();
-  if (state.areaId !== board.area.id && wanted()) { stopPolling(); void refreshAndSchedule("after"); } else schedule();
+  startNearbyUpdates();
 }).catch(() => { if (!dismissed) hostControls(); });
-if (window.parent === window && state.areaId !== board.area.id) { stopPolling(); void refreshAndSchedule("after"); }
+if (window.parent === window || host()?.callTool) startNearbyUpdates();
