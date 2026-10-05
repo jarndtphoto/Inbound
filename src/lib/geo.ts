@@ -42,7 +42,7 @@ export function initialBearing(a: Coord, b: Coord): number {
   const y = Math.sin(dLon) * Math.cos(lat2);
   const x =
     Math.cos(lat1) * Math.sin(lat2) -
-    Math.sin(lat1) * Math.sin(lat2) * Math.cos(dLon);
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
   return wrap360(Math.atan2(y, x) * DEG);
 }
 
