@@ -131,7 +131,10 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /resetViewRef\.current = next/);
     assert.match(groundSource, /movedNm >= 0\.004/);
     assert.match(groundSource, /initialBearing\(previous\.point, fast\)/);
-    assert.match(groundSource, /\? fastFix\.track : null\) \?\? motionTrack/);
+    assert.match(groundSource, /headingDelta\(providerTrack, movementTrack\) >= 70/);
+    assert.match(groundSource, /return providerTrack \?\? movementTrack \?\? null/);
+    assert.match(groundSource, /Number\.isFinite\(displayAircraft\.track\) \? \(/);
+    assert.match(groundSource, /delayed \$\{providerLabel\} position/);
   });
 });
 
