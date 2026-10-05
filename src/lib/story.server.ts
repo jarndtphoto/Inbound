@@ -1578,7 +1578,18 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 	};
 }
 export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() / 1000) {
-	const usable = (records ?? []).filter(Boolean);
+	const MAX_FUTURE_SEC = 18 * 3600;
+	const MAX_PAST_SEC = 18 * 3600;
+	const usable = (records ?? []).filter(Boolean).filter((record) => {
+		const depart = bestUnix(record.gateOut);
+		const arrive = bestUnix(record.gateIn);
+		if (depart != null && arrive != null && arrive > depart && nowSec >= depart && nowSec <= arrive) return true;
+		if (depart != null && depart > nowSec) return depart - nowSec <= MAX_FUTURE_SEC;
+		if (arrive != null && arrive < nowSec) return nowSec - arrive <= MAX_PAST_SEC;
+		if (depart != null && depart <= nowSec && arrive == null) return nowSec - depart <= MAX_PAST_SEC;
+		if (arrive != null && arrive >= nowSec && depart == null) return arrive - nowSec <= MAX_FUTURE_SEC;
+		return depart == null && arrive == null;
+	});
 	if (!usable.length) return null;
 	const score = (record) => {
 		const depart = bestUnix(record.gateOut);
@@ -1624,9 +1635,20 @@ async function loadFlightStatsPublic(callsign) {
 		let candidates = directRecords.slice();
 		const bestDirect = chooseFlightStatsScheduleCandidate(directRecords);
 		const bestPage = bestDirect ? pages.find((page) => page.direct === bestDirect) : null;
-		if (bestPage) {
-			const detailUrls = flightStatsDetailUrls(bestPage.html, m[1], m[2], bestPage.date);
-			const details = await Promise.all(detailUrls.map(async (url) => {
+		const detailPages = bestPage ? [bestPage] : pages;
+		const detailRequests = [];
+		const seenDetailUrls = new Set();
+		for (const page of detailPages) {
+			for (const url of flightStatsDetailUrls(page.html, m[1], m[2], page.date)) {
+				if (seenDetailUrls.has(url)) continue;
+				seenDetailUrls.add(url);
+				detailRequests.push({ url, dateKey: page.date.key });
+				if (detailRequests.length >= 12) break;
+			}
+			if (detailRequests.length >= 12) break;
+		}
+		if (detailRequests.length) {
+			const details = await Promise.all(detailRequests.map(async ({ url, dateKey }) => {
 				try {
 					const res = await fetch(url, {
 						headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": UA },
@@ -1635,7 +1657,7 @@ async function loadFlightStatsPublic(callsign) {
 					if (!res.ok) return null;
 					const html = await res.text();
 					if (html.length > 4_000_000) return null;
-					return parseFlightStatsPublicSchedule(html, callsign, bestPage.date.key);
+					return parseFlightStatsPublicSchedule(html, callsign, dateKey);
 				} catch {
 					return null;
 				}
@@ -1661,9 +1683,16 @@ async function loadFlightStatsPublic(callsign) {
 	});
 }
 const awareRejections = new Map();
+let awarePublicBlockedUntil = 0;
 async function loadAware(callsign) {
 	const apiRecord = await loadAeroFlight(callsign);
 	if (apiRecord) return { ...apiRecord, _scheduleSource: "flightaware_api" };
+	if (Date.now() < awarePublicBlockedUntil) {
+		const fallback = await loadFlightStatsPublic(callsign);
+		noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
+		if (fallback) return fallback;
+		throw new Error("Current flight route unavailable: public FlightAware schedule source is temporarily blocked.");
+	}
 	const rejected = awareRejections.get(callsign);
 	if (rejected && Date.now() < rejected.until) {
 		const fallback = await loadFlightStatsPublic(callsign);
@@ -1673,12 +1702,15 @@ async function loadAware(callsign) {
 	}
 	awareRejections.delete(callsign);
 	try {
-		return await cached(`aware:${callsign}`, 8e3, async () => {
-			const record = await fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true);
-			return record ? { ...record, confirmedAt: Date.now() } : null;
+		const record = await cached(`aware:${callsign}`, 8e3, async () => {
+			const result = await fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true);
+			return result ? { ...result, confirmedAt: Date.now() } : null;
 		});
+		if (record) awarePublicBlockedUntil = 0;
+		return record;
 	} catch (error) {
 		if (/HTTP 402\b/.test(error?.message ?? "")) {
+			awarePublicBlockedUntil = Math.max(awarePublicBlockedUntil, Date.now() + 60_000);
 			for (const [key, entry] of awareRejections) if (entry.until <= Date.now()) awareRejections.delete(key);
 			if (awareRejections.size >= 100) awareRejections.delete(awareRejections.keys().next().value);
 			awareRejections.set(callsign, { until: Date.now() + 60000, error });
