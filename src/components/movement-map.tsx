@@ -49,10 +49,6 @@ export function fitGroundSurfaceView(points: Array<{ x: number; y: number }>, pa
 
 type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
-
-function headingDelta(a: number, b: number) {
-  return Math.abs(((a - b + 540) % 360) - 180);
-}
 type MapTab = "departure" | "flight" | "arrival";
 type AircraftSnapshot = NonNullable<FlightStory["aircraft"]>;
 
@@ -362,47 +358,55 @@ function GroundMovementMap({
   if (queriedFast?.registration) groundIdentityRef.current.registration = queriedFast.registration;
   const queriedFastAge = queriedFast?.seenAt ? Math.max(0, Date.now() / 1000 - queriedFast.seenAt) : null;
   const queriedCandidate = queriedFast && (queriedFastAge ?? Infinity) <= 30 ? queriedFast : null;
-  // Prefer whichever surface source has the newer observation. The 3-second
-  // ground observer should not be hidden behind an older story position.
-  const fast = [storyFast, queriedCandidate]
-    .filter((candidate): candidate is NonNullable<typeof storyFast> => Boolean(candidate))
-    .sort((a, b) => b.seenAt - a.seenAt)[0] ?? null;
-  const fastKey = identityKey;
-  const motionTrackRef = useRef<{
-    key: string;
+
+  // Maintain heading history separately for story and map-ground feeds. MCO
+  // can report the same aircraft at slightly different timestamps/positions in
+  // those two streams; mixing them can manufacture a reciprocal heading.
+  type MotionSource = "story" | "ground";
+  type MotionState = {
     point: { lat: number; lon: number; seenAt: number };
     derivedTrack: number | null;
-  } | null>(null);
-  if (fast) {
-    const previous = motionTrackRef.current?.key === fastKey ? motionTrackRef.current : null;
+  };
+  const motionTracksRef = useRef<{ key: string; story: MotionState | null; ground: MotionState | null }>({
+    key: identityKey,
+    story: null,
+    ground: null,
+  });
+  if (motionTracksRef.current.key !== identityKey) {
+    motionTracksRef.current = { key: identityKey, story: null, ground: null };
+  }
+  const updateMotionSource = (source: MotionSource, fix: NonNullable<typeof storyFast> | null) => {
+    if (!fix) return;
+    const previous = motionTracksRef.current[source];
     let derivedTrack = previous?.derivedTrack ?? null;
-    if (previous && fast.seenAt > previous.point.seenAt + 0.25) {
-      const dt = fast.seenAt - previous.point.seenAt;
-      const movedNm = haversineNm(previous.point, fast);
-      if (dt >= 0.5 && dt <= 45 && movedNm >= 0.004) {
-        derivedTrack = initialBearing(previous.point, fast);
+    if (previous && fix.seenAt > previous.point.seenAt + 0.25) {
+      const dt = fix.seenAt - previous.point.seenAt;
+      const movedNm = haversineNm(previous.point, fix);
+      if (dt >= 0.5 && dt <= 60 && movedNm >= 0.004) {
+        derivedTrack = initialBearing(previous.point, fix);
       }
     }
-    if (!previous || fast.seenAt > previous.point.seenAt + 0.25) {
-      motionTrackRef.current = {
-        key: fastKey,
-        point: { lat: fast.lat, lon: fast.lon, seenAt: fast.seenAt },
+    if (!previous || fix.seenAt > previous.point.seenAt + 0.25) {
+      motionTracksRef.current[source] = {
+        point: { lat: fix.lat, lon: fix.lon, seenAt: fix.seenAt },
         derivedTrack,
       };
     }
-  }
-  const motionTrack = motionTrackRef.current?.key === fastKey ? motionTrackRef.current.derivedTrack : null;
+  };
+  updateMotionSource("story", storyFast);
+  updateMotionSource("ground", queriedCandidate);
 
-  const recentTrail = trail.filter((point) => haversineNm(point, airport) < 15).slice(-12);
-  let trailTrack: number | null = null;
-  for (let index = recentTrail.length - 1; index > 0; index -= 1) {
-    const current = recentTrail[index]!;
-    const previous = recentTrail[index - 1]!;
-    if (current.at - previous.at > 90_000) continue;
-    if (haversineNm(previous, current) < 0.004) continue;
-    trailTrack = initialBearing(previous, current);
-    break;
-  }
+  // Prefer whichever source has the newest observation for position, but use
+  // only that source's own motion history for orientation.
+  const candidates = [
+    storyFast ? { fix: storyFast, source: "story" as const } : null,
+    queriedCandidate ? { fix: queriedCandidate, source: "ground" as const } : null,
+  ].filter((candidate): candidate is { fix: NonNullable<typeof storyFast>; source: MotionSource } => Boolean(candidate));
+  candidates.sort((a, b) => b.fix.seenAt - a.fix.seenAt);
+  const selectedFast = candidates[0] ?? null;
+  const fast = selectedFast?.fix ?? null;
+  const fastKey = identityKey;
+  const motionTrack = selectedFast ? motionTracksRef.current[selectedFast.source]?.derivedTrack ?? null : null;
 
   const lastFastRef = useRef<{ key: string; fix: NonNullable<typeof fast> } | null>(null);
   if (fast) lastFastRef.current = { key: fastKey, fix: fast };
@@ -424,15 +428,10 @@ function GroundMovementMap({
     lon: fastFix.lon,
     altFt: fastFix.altFt ?? 0,
     gsKt: fastFix.gsKt ?? 0,
-    track: (() => {
-      const providerTrack = typeof fastFix.track === "number" && Number.isFinite(fastFix.track) ? fastFix.track : null;
-      const movementTrack = motionTrack ?? trailTrack;
-      if (movementTrack != null && (providerTrack == null || headingDelta(providerTrack, movementTrack) >= 70)) return movementTrack;
-      // Do not borrow an older story heading when this ground fix has no
-      // trustworthy direction. That stale fallback is what made southbound
-      // taxiing aircraft render as a north-facing arrow.
-      return providerTrack ?? movementTrack ?? null;
-    })(),
+    // On the airport surface, actual position-to-position motion is the
+    // authoritative orientation. Provider track can be missing, stale, or
+    // reciprocal at low speed, so never use it for the ground marker.
+    track: motionTrack,
     vertFpm: aircraft?.vertFpm ?? null,
     onGround: fastFix.onGround,
     phase: phaseOf({ ...fastFix, phaseVertFpm: aircraft?.phaseVertFpm }, { origin: story.origin, dest: story.dest, groundTaxiKt: 5 }),
