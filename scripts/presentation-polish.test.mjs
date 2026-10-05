@@ -65,17 +65,26 @@ test('actual-only Flight details hides all Scheduled rows and planned duration, 
   assert.match(details, /Actual landing/); assert.match(details, /Estimated gate arrival/);
 });
 
-test('identical arrival clocks retain the same reported kind in header, timing, Flight details, Arrival help, and Briefing', () => {
+test('identical arrival clocks retain the same reported kind in header, timing, Flight details, and Briefing', () => {
   for (const kind of ['scheduled', 'estimated', 'actual']) {
     const story = { ...actualOnlyStory(), times: { ...actualOnlyStory().times, gateKind: kind } };
     const label = timeKindLabel(kind), event = timeKindLabel(kind, 'gate arrival');
     assert.match(render(ui.FlightHead, { story, fetching: false, refreshing: false, onRefresh() {} }), new RegExp(`>${label}<`));
     assert.match(render(ui.TimesStrip, { story }), new RegExp(label));
     assert.match(render(ui.OverviewDetails, { story, timing: null }), new RegExp(event));
-    assert.match(render(ui.TravelerCompanion, { story }), new RegExp(event));
     const brief = composeBrief(ui.rideFacts({ ...story, currentStage: 'arrival' }, 'UA219', 'arrival'));
     assert.match(brief.lead, new RegExp(event));
   }
+});
+
+test('Overview removes duplicate next-step and arrival summary while keeping the airline-status action', () => {
+  const base = actualOnlyStory();
+  const story = { ...base, currentStage: 'final_approach',
+    dest: { ...base.dest, city: 'Orlando', iata: 'MCO', icao: 'KMCO' } };
+  const html = render(ui.TravelerCompanion, { story });
+  assert.doesNotMatch(html, /Landing is next|Arriving in Orlando|Arrival gate|Gate arrival|Recent position available|Landed; waiting for gate confirmation/);
+  assert.doesNotMatch(html, /aria-label="What happens next"|aria-label="Arrival help"/);
+  assert.match(html, /Check airline status|Search airline flight status|Check your airline app/);
 });
 
 test('restored flight freshness shows truthful age until a fresh response succeeds', () => {
@@ -150,13 +159,11 @@ test('overnight event clocks use each airport zone and mark the next local day a
   }
 });
 
-test('actual Overview weather, Weather timeline, and map alerts agree on light at 11 minutes and moderate at 228', async () => {
+test('Weather timeline and map alerts agree on light at 11 minutes and moderate at 228', async () => {
   const story = polishStory();
   const overview = render(ui.TravelerCompanion, { story });
   const weather = render(ui.WeatherTimeline, { story });
   const map = render(ui.RouteMap, { story, fixedViewport: true });
-  assert.ok(overview.indexOf('Light bumps') < overview.indexOf('Moderate bumps'));
-  assert.match(overview, /Light bumps possible in about 11 min/); assert.match(overview, /Moderate bumps later, about 3h 48m ahead/);
   assert.ok(weather.indexOf('Light bumps') < weather.indexOf('Moderate bumps'));
   assert.match(weather, /11 minutes ahead/); assert.match(weather, /3 hours 48 minutes ahead/);
   assert.ok(map.indexOf('Light bumps') < map.indexOf('Moderate bumps'));
