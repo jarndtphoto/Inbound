@@ -2557,17 +2557,25 @@ function baseCurrentStageOf(args) {
 }
 export function postLandingState(args) {
 	const { ourLanded, ourLandingActual, gateInActual, parkedAtGate, live, dest } = args;
-	if (gateInActual || parkedAtGate) return "gate";
-	if (!(ourLanded || ourLandingActual)) return "airborne";
-	const freshHighSpeedRollout = Boolean(
-		live && dest && live.onGround &&
+	const landedEvidence = Boolean(ourLanded || ourLandingActual || gateInActual || parkedAtGate);
+	if (!landedEvidence) return "airborne";
+	const freshDestinationSurface = Boolean(
+		live && dest && live.onGround && !live.extrapolated &&
 		(live.seenSec ?? 999) <= 60 &&
-		haversineNm(live, dest) < 10 &&
-		(live.gsKt ?? 0) >= 40
+		haversineNm(live, dest) < 10
 	);
+	const freshHighSpeedRollout = Boolean(freshDestinationSurface && (live.gsKt ?? 0) >= 40);
+	if (freshHighSpeedRollout) return "landed";
+	const freshTaxiing = Boolean(freshDestinationSurface
+		&& ((live.gsKt ?? 0) >= 3 || live.phase === "taxi"));
+	// Fresh physical movement beats a provider gate-in timestamp. Some schedule
+	// feeds stamp gate-in several minutes early while the aircraft is visibly
+	// still taxiing. Only settle at Gate once that contradiction disappears.
+	if (freshTaxiing) return "taxi_in";
+	if (gateInActual || parkedAtGate) return "gate";
 	// Once landing is latched, taxi-in is the durable intermediate state.
 	// Missing or stale surface ADS-B must not revert the passenger view to Landed.
-	return freshHighSpeedRollout ? "landed" : "taxi_in";
+	return "taxi_in";
 }
 async function hydrateField(base) {
 	const [{ metar }, nas, taf] = await Promise.all([loadMetar(base.icao), loadNas(base.iata), loadTaf(base.icao)]);
