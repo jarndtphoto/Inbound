@@ -6,9 +6,11 @@ test('free pan stops half a route screen beyond each edge', () => {
   assert.deepEqual(clampRouteMapView({s: 1, x: 9999, y: -9999}, 600, true), {s: 1, x: 400, y: -300});
   assert.deepEqual(clampRouteMapView({s: 1, x: -9999, y: 9999}, 600, true), {s: 1, x: -400, y: 300});
 });
-test('free map zoom cannot shrink below 0.75 or exceed 12', () => {
+test('free map zoom cannot shrink below 0.75 and honors the supplied distance limit', () => {
   assert.equal(clampRouteMapView({s: 0.01, x: 0, y: 0}, 800, true).s, 0.75);
   assert.equal(clampRouteMapView({s: 99, x: 0, y: 0}, 800, true).s, 12);
+  assert.equal(clampRouteMapView({s: 999, x: 0, y: 0}, 800, true, 430).s, 430);
+  assert.equal(clampRouteMapView({s: 40, x: 0, y: 0}, 800, true, 430).s, 40);
 });
 test('bounds contain the viewport within the route buffer at every scale and aspect', () => {
   for (const h of [320, 800, 1600]) for (const s of [0.75, 1, 1.4, 4, 12]) {

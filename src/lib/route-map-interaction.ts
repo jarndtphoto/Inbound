@@ -1,10 +1,9 @@
-export const MAX_ROUTE_ZOOM = 12;
 export const MIN_FREE_ROUTE_ZOOM = 0.75;
 const MAP_WIDTH = 800;
 const ROUTE_PAN_BUFFER = 0.5;
 
-export function clampRouteMapView(next: { s: number; x: number; y: number }, mapH = 800, freePan = false) {
-  const s = Math.min(MAX_ROUTE_ZOOM, Math.max(freePan ? MIN_FREE_ROUTE_ZOOM : 1, next.s));
+export function clampRouteMapView(next: { s: number; x: number; y: number }, mapH = 800, freePan = false, maxZoom = 12) {
+  const s = Math.min(maxZoom, Math.max(freePan ? MIN_FREE_ROUTE_ZOOM : 1, next.s));
   if (freePan) {
     // Keep the viewport within half a screen of the unscaled route area.
     return {
