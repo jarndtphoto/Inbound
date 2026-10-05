@@ -61,6 +61,7 @@ import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, valid
 import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
+import { showDetailedArrivalGeometry } from "./arrival-pattern.ts";
 import { loadOfficialFlightData } from "./official-flight-data.server.ts";
 import {
 	fetchAround,
