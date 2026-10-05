@@ -979,13 +979,33 @@ function wheelsDown(story: FlightStory) {
   return false;
 }
 
+function departureUpdateDelayed(story: FlightStory, nowMs = Date.now()) {
+  if (displayStage(story) !== "origin_gate") return false;
+  if (story.times?.pushKind === "actual") return false;
+  const pushAt = story.times?.pushUnix;
+  if (typeof pushAt !== "number" || !Number.isFinite(pushAt)) return false;
+  const ageSec = typeof story.providers?.chosenPositionAgeSec === "number"
+    ? story.providers.chosenPositionAgeSec
+    : typeof story.aircraft?.seenSec === "number"
+      ? story.aircraft.seenSec
+      : null;
+  const freshPosition = Boolean(
+    story.aircraft
+    && Number.isFinite(story.aircraft.lat)
+    && Number.isFinite(story.aircraft.lon)
+    && ageSec != null
+    && ageSec <= 45
+  );
+  return !freshPosition && nowMs / 1000 - pushAt >= 10 * 60;
+}
+
 function stageHeadline(story: FlightStory) {
   const stage = displayStage(story);
   if (stage === "gate") return "At the gate";
   if (stage === "taxi_in") return "Taxiing in";
   if (stage === "final_approach") return "Final approach";
   if (stage === "arrival" && wheelsDown(story)) return "Landed";
-  if (stage === "origin_gate") return "At the gate";
+  if (stage === "origin_gate") return departureUpdateDelayed(story) ? "Departure update delayed" : "At the gate";
   if (stage === "push") return "Pushback";
   if (stage === "taxi") return "Taxiing out";
   if (stage === "takeoff_roll") return "Takeoff roll";
@@ -1000,7 +1020,10 @@ function headStatus(story: FlightStory, remaining = remainingFlight(story)) {
   if (story.currentStage === "gate") return airline ?? "Parked";
   if (story.currentStage === "taxi_in") return airline ? `Taxiing in · ${airline}` : "Taxiing in";
   if (wheelsDown(story)) return airline ? `Landed · ${airline}` : "Landed";
-  if (story.currentStage === "origin_gate") return airline ? `At the gate · ${airline}` : "At the gate";
+  if (story.currentStage === "origin_gate") {
+    if (departureUpdateDelayed(story)) return airline ? `Movement not confirmed · ${airline}` : "Movement not confirmed";
+    return airline ? `At the gate · ${airline}` : "At the gate";
+  }
   if (story.currentStage === "push") return airline ? `Pushback · ${airline}` : "Pushback";
   if (story.currentStage === "taxi") return airline ? `Taxiing out · ${airline}` : "Taxiing out";
   if (story.currentStage === "takeoff_roll") return airline ? `Takeoff roll · ${airline}` : "Takeoff roll";
@@ -1014,10 +1037,13 @@ const STATUS_PROGRESS = ["Gate", "Pushback", "Taxi", "Flight", "Landing", "Gate"
 
 function FlightStatusProgress({ story }: { story: FlightStory }) {
   const active = statusProgressIndex(displayStage(story));
+  const labels = departureUpdateDelayed(story)
+    ? (["Status", ...STATUS_PROGRESS.slice(1)] as const)
+    : STATUS_PROGRESS;
   return (
-    <div className="flight-progress mt-4" aria-label={`Flight progress: ${STATUS_PROGRESS[active]}`}>
+    <div className="flight-progress mt-4" aria-label={`Flight progress: ${labels[active]}`}>
       <div className="grid grid-cols-6 gap-1">
-        {STATUS_PROGRESS.map((label, index) => {
+        {labels.map((label, index) => {
           const complete = index < active;
           const current = index === active;
           return (
