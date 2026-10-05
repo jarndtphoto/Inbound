@@ -21,4 +21,7 @@ export function stageStepId(value: string): StageStepId {
   const stage = flightStageId(value);
   return stage === "takeoff_roll" ? "taxi" : stage;
 }
-export const statusProgressIndex = (stage: StageId) => progress[flightStageId(stage)];
+export const statusProgressIndex = (stage: StageId) => {
+  const id = flightStageId(stage);
+  return id === "taxi_in" ? 4 : progress[id];
+};
