@@ -1,3 +1,4 @@
+import { airportSurfaceBounds, buildAirportHydrography, fallbackAirportHydrography, surfaceBoundsString, type AirportHydrography, type SurfaceBounds, type SurfacePolygon } from "./airport-coastline.ts";
 export type SurfacePoint = { lat: number; lon: number };
 export type SurfaceFeature = {
   id: number;
@@ -12,6 +13,8 @@ export type AirportSurface = {
   source: "FAA" | "OpenStreetMap";
   /** Target aerodrome boundary rings from the same surface request, when OSM exposes them. */
   boundary?: SurfacePoint[][];
+  /** Detailed shoreline/water from the same per-airport OSM request. */
+  hydrography?: AirportHydrography;
   features: SurfaceFeature[];
 };
 
@@ -340,9 +343,9 @@ function validGeometry(points: OverpassGeometryPoint[] | undefined): SurfacePoin
     .map((p) => ({ lat: p.lat, lon: p.lon }));
 }
 
-function relationOuterRings(element: OverpassElement): SurfacePoint[][] {
+function relationRings(element: OverpassElement, role: "outer" | "inner"): SurfacePoint[][] {
   const segments = (element.members ?? [])
-    .filter((member) => member.type === "way" && (member.role === "outer" || !member.role))
+    .filter((member) => member.type === "way" && (member.role === role || (role === "outer" && !member.role)))
     .map((member) => validGeometry(member.geometry))
     .filter((points) => points.length >= 2);
   const rings: SurfacePoint[][] = [];
@@ -370,9 +373,41 @@ function relationOuterRings(element: OverpassElement): SurfacePoint[][] {
         break;
       }
     }
-    if (ring.length >= 3) rings.push(ring);
+    if (ring.length >= 3) {
+      if (!samePoint(ring[0], ring.at(-1))) ring.push(ring[0]!);
+      rings.push(ring);
+    }
   }
   return rings;
+}
+
+function relationOuterRings(element: OverpassElement): SurfacePoint[][] {
+  return relationRings(element, "outer");
+}
+
+function waterElement(element: OverpassElement) {
+  const water = element.tags?.water;
+  return element.tags?.natural === "water" || water === "lake" || water === "lagoon" || water === "reservoir" || water === "bay";
+}
+
+function waterPolygons(elements: OverpassElement[]): SurfacePolygon[] {
+  const polygons: SurfacePolygon[] = [];
+  for (const element of elements) {
+    if (!waterElement(element)) continue;
+    if (element.type === "way") {
+      const outer = validGeometry(element.geometry);
+      if (outer.length >= 4 && samePoint(outer[0], outer.at(-1))) polygons.push({ outer });
+      continue;
+    }
+    if (element.type !== "relation") continue;
+    const outers = relationRings(element, "outer");
+    const inners = relationRings(element, "inner");
+    for (const outer of outers) {
+      const holes = inners.filter((inner) => inner[0] && pointInRing(inner[0], outer));
+      polygons.push(holes.length ? { outer, holes } : { outer });
+    }
+  }
+  return polygons;
 }
 
 export function parseAirportSurfaceElements(elements: OverpassElement[], airport: string, checkedAt: number, field?: SurfacePoint): AirportSurface {
@@ -415,16 +450,44 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
     pushFeature(element, kind, points);
     if (features.length >= 2_500) break;
   }
+  const bounds = airportSurfaceBounds(fieldPoint);
+  const coastlines = elements
+    .filter((element) => element.type === "way" && element.tags?.natural === "coastline")
+    .map((element) => ({ id: element.id, points: validGeometry(element.geometry) }))
+    .filter((way) => way.points.length >= 2);
+  const runwayChecks = features
+    .filter((feature) => feature.kind === "runway" || feature.kind === "runway_area")
+    .map((feature) => centroid(feature.points));
+  const hydrography = buildAirportHydrography({
+    bounds,
+    coastlines,
+    water: waterPolygons(elements),
+    runwayChecks: runwayChecks.length ? runwayChecks : [fieldPoint],
+  });
+  if (hydrography.fallback) {
+    console.warn("[airport-coastline-fallback]", {
+      airport,
+      reason: hydrography.fallbackReason,
+      waterFraction: Number(hydrography.waterFraction.toFixed(3)),
+    });
+  }
+
   return {
     airport,
     checkedAt,
     source: "OpenStreetMap",
     ...(target ? { boundary: target.rings } : {}),
+    hydrography,
     features,
   };
 }
 
-export function exactAirportSurfaceOverpassQuery(airport: string) {
+function hydroOverpassQuery(bounds: SurfaceBounds) {
+  const bbox = surfaceBoundsString(bounds);
+  return `(way["natural"="coastline"](${bbox});way["natural"="water"](${bbox});way["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox});relation["natural"="water"](${bbox});relation["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox}););out geom(${bbox});`;
+}
+
+export function exactAirportSurfaceOverpassQuery(airport: string, input: { lat: number; lon: number }) {
   const code = airport.toUpperCase();
   const aliases = airportCodeCandidates(code);
   const clauses: string[] = [];
@@ -436,17 +499,13 @@ export function exactAirportSurfaceOverpassQuery(airport: string) {
     clauses.push(`way["aeroway"="aerodrome"]["ref"="${value}"];`);
     clauses.push(`relation["aeroway"="aerodrome"]["ref"="${value}"];`);
   }
-  return `[out:json][timeout:7];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];);out geom;`;
+  const bounds = airportSurfaceBounds(input);\n  return `[out:json][timeout:8];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];);out geom;${hydroOverpassQuery(bounds)}`;
 }
 
 export function boxedAirportSurfaceOverpassQuery(input: { lat: number; lon: number }) {
-  const latPad = 0.075;
-  const lonPad = Math.min(0.12, 0.075 / Math.max(0.45, Math.cos(input.lat * Math.PI / 180)));
-  const south = (input.lat - latPad).toFixed(6);
-  const north = (input.lat + latPad).toFixed(6);
-  const west = (input.lon - lonPad).toFixed(6);
-  const east = (input.lon + lonPad).toFixed(6);
-  return `[out:json][timeout:8];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${south},${west},${north},${east});way["area:aeroway"="taxiway"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east});relation["area:aeroway"="taxiway"](${south},${west},${north},${east});way["aeroway"="aerodrome"](${south},${west},${north},${east});relation["aeroway"="aerodrome"](${south},${west},${north},${east}););out geom;`;
+  const bounds = airportSurfaceBounds(input);
+  const bbox = surfaceBoundsString(bounds);
+  return `[out:json][timeout:8];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${bbox});way["area:aeroway"="taxiway"](${bbox});relation["aeroway"~"^(apron|terminal)$"](${bbox});relation["area:aeroway"="taxiway"](${bbox});way["aeroway"="aerodrome"](${bbox});relation["aeroway"="aerodrome"](${bbox}););out geom;${hydroOverpassQuery(bounds)}`;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -481,6 +540,9 @@ async function loadOsmSurface(
     durationMs: Date.now() - startedAt,
     featureCount: osm.features.length,
     boundaryRings: osm.boundary?.length ?? 0,
+    coastlineWays: osm.hydrography?.coastlineWays ?? 0,
+    waterPolygons: osm.hydrography?.waterPolygons ?? 0,
+    coastlineFallback: osm.hydrography?.fallback ?? false,
   });
   return osm;
 }
@@ -510,7 +572,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   if (!/^[A-Z0-9]{3,4}$/.test(airport) || !validCoord(input.lat, -90, 90) || !validCoord(input.lon, -180, 180)) {
     throw new Error("Invalid airport surface request");
   }
-  const key = `${airport}:surface-v10:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
+  const key = `${airport}:surface-v11:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const existing = pending.get(key);
@@ -534,7 +596,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
       : Promise.resolve(null);
 
     try {
-      const exact = await loadOsmSurface(airport, input, "exact", exactAirportSurfaceOverpassQuery(airport), 5_000);
+      const exact = await loadOsmSurface(airport, input, "exact", exactAirportSurfaceOverpassQuery(airport, input), 6_000);
       settled = true;
       cache.set(key, { value: exact, at: Date.now() });
       return exact;
@@ -557,6 +619,10 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
         requireSurface(faaFallback, "FAA surface"),
       ]);
       settled = true;
+      if (!fallback.hydrography) {
+        fallback.hydrography = fallbackAirportHydrography(airportSurfaceBounds(input), "osm-natural-detail-unavailable");
+        console.warn("[airport-coastline-fallback]", { airport, reason: fallback.hydrography.fallbackReason, source: fallback.source });
+      }
       cache.set(key, { value: fallback, at: Date.now() });
       return fallback;
     } catch {
