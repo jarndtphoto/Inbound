@@ -3,8 +3,9 @@ import { phaseOf } from "@/lib/aircraft-phase";
 import { groundCoverageNotice } from "@/lib/ground-coverage";
 import { RouteMap } from "./route-map";
 import { airportSurfaceQueryOptions as surfaceQueryOptions } from "@/lib/airport-surface-query";
-import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.server";
+import type { AirportSurface, SurfaceFeature, SurfacePoint } from "@/lib/airport-surface.server";
 import { haversineNm } from "@/lib/geo";
+import { filterAirportSurfaceFeatures } from "@/lib/airport-surface-filter";
 import { flightPollingComplete, groundPollingEnabled } from "@/lib/flight-polling";
 import { usePageVisible } from "@/lib/use-page-visible";
 import { getGroundPosition } from "@/lib/ground-position";
@@ -17,9 +18,6 @@ const H = 800;
 const MIN_GROUND_ZOOM = 1.45;
 const MAX_GROUND_ZOOM = 64;
 const INITIAL_GROUND_ZOOM = 7;
-const MAX_SURFACE_RADIUS_NM = 4;
-const RUNWAY_CORE_MIN_SPAN_NM = 0.7;
-const RUNWAY_CORE_PAD_NM = 1;
 
 const overviewView = (): View => ({
   scale: MIN_GROUND_ZOOM,
@@ -226,6 +224,15 @@ function useMovementTrail(story: FlightStory) {
     });
   }, [flightKey, story.fetchedAt, story.aircraft?.lat, story.aircraft?.lon]);
   return trail;
+}
+
+function BoundaryShape({ ring, project }: { ring: SurfacePoint[]; project: (p: { lat: number; lon: number }) => { x: number; y: number } }) {
+  if (ring.length < 3) return null;
+  const d = ring.map((p, index) => {
+    const q = project(p);
+    return `${index ? "L" : "M"} ${q.x.toFixed(1)} ${q.y.toFixed(1)}`;
+  }).join(" ");
+  return <path d={`${d} Z`} fill="var(--route-airport-land)" stroke="none" pointerEvents="none" />;
 }
 
 function SurfaceShape({ feature, project }: { feature: SurfaceFeature; project: (p: { lat: number; lon: number }) => { x: number; y: number } }) {
@@ -442,52 +449,14 @@ function GroundMovementMap({
     x: W / 2 + ((p.lon - airport.lon) / lonHalf) * (W / 2 - 28),
     y: H / 2 - ((p.lat - airport.lat) / latHalf) * (H / 2 - 28),
   });
-  const features = useMemo(() => {
-    const source = (surfaceQ.data as AirportSurface | undefined)?.features ?? [];
-    const local = source
-      .map((feature) => ({
-        ...feature,
-        // Overpass can return the complete geometry for a way that only
-        // intersects our airport query box. Ignore remote tails first.
-        points: feature.points.filter((point) => haversineNm(point, airport) <= MAX_SURFACE_RADIUS_NM),
-      }))
-      .filter((feature) => feature.points.length >= 2);
-
-    const cosLat = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
-    const featureSpanNm = (feature: SurfaceFeature) => {
-      const lats = feature.points.map((point) => point.lat);
-      const lons = feature.points.map((point) => point.lon);
-      const latNm = (Math.max(...lats) - Math.min(...lats)) * 60;
-      const lonNm = (Math.max(...lons) - Math.min(...lons)) * 60 * cosLat;
-      return Math.hypot(latNm, lonNm);
-    };
-    const longRunways = local.filter((feature) =>
-      (feature.kind === "runway" || feature.kind === "runway_area")
-      && featureSpanNm(feature) >= RUNWAY_CORE_MIN_SPAN_NM
-    );
-    if (!longRunways.length) return local;
-
-    // Use only real-length runways to define the airport complex. This removes
-    // small isolated aeroway/helipad/secondary-field objects near PHX without
-    // clipping legitimate terminal/apron detail around the primary airport.
-    const runwayPoints = longRunways.flatMap((feature) => feature.points);
-    const minLat = Math.min(...runwayPoints.map((point) => point.lat));
-    const maxLat = Math.max(...runwayPoints.map((point) => point.lat));
-    const minLon = Math.min(...runwayPoints.map((point) => point.lon));
-    const maxLon = Math.max(...runwayPoints.map((point) => point.lon));
-    const latPad = RUNWAY_CORE_PAD_NM / 60;
-    const lonPad = RUNWAY_CORE_PAD_NM / (60 * cosLat);
-
-    return local
-      .map((feature) => ({
-        ...feature,
-        points: feature.points.filter((point) =>
-          point.lat >= minLat - latPad && point.lat <= maxLat + latPad
-          && point.lon >= minLon - lonPad && point.lon <= maxLon + lonPad
-        ),
-      }))
-      .filter((feature) => feature.points.length >= 2);
-  }, [surfaceQ.data, airport.lat, airport.lon]);
+  const surface = surfaceQ.data as AirportSurface | undefined;
+  const boundary = useMemo(() => surface?.boundary ?? [], [surface]);
+  const features = useMemo(() =>
+    filterAirportSurfaceFeatures(
+      surface?.features ?? [],
+      { lat: airport.lat, lon: airport.lon },
+    ),
+  [surface, airport.lat, airport.lon]);
   const taxiwayLabels = useMemo(() => {
     const unique = new Map<string, SurfaceFeature>();
     for (const feature of features) {
@@ -557,6 +526,7 @@ function GroundMovementMap({
         <svg data-ground-map viewBox={`0 0 ${W} ${H}`} className="block h-full w-full" role="img" aria-label={`${airport.iata} airport surface${displayAircraft ? " and aircraft position" : ""}`}>
           <rect width={W} height={H} className="fill-bg" />
           <g transform={`translate(${zoom.view.x} ${zoom.view.y}) scale(${zoom.view.scale})`}>
+            {boundary.map((ring, index) => <BoundaryShape key={`boundary-${index}`} ring={ring} project={project} />)}
             <g opacity="0.12">
               {Array.from({ length: 9 }, (_, i) => <line key={`v-${i}`} x1={i * 100} y1="0" x2={i * 100} y2={H} className="stroke-fg/15" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
               {Array.from({ length: 9 }, (_, i) => <line key={`h-${i}`} x1="0" y1={i * 100} x2={W} y2={i * 100} className="stroke-fg/15" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}

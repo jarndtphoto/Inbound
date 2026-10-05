@@ -48,10 +48,24 @@ export async function expectedArrivalRunway(icao: string, input: Omit<Parameters
   const atis = await loadArrivalAtis(icao, store);
   const arrivals = atis.filter(e => !["dep", "departure"].includes(e.type)).flatMap(e => arrivalRunways(e.datis));
   const reported = runways.find(r => normalizeRunway(r.ident) === normalizeRunway(input.providerRunway ?? ""));
-  // An explicitly reported runway supersedes an estimate. Missing ATIS or
-  // changing wind cannot revoke an already selected arrival runway.
-  if (reported) return pickArrivalRunway({ ...input, ends: runways, actualLanding: true });
-  if (input.previous && !arrivals.length) return input.previous;
-  if (input.previous && arrivals.includes(input.previous.runway)) return { ...input.previous, source: "ATIS", estimated: true };
-  return pickArrivalRunway({ ...input, ends: runways, atis });
+  // A confirmed actual landing runway supersedes an estimate. A non-actual
+  // provider runway remains a fallback so stale reciprocal hints cannot beat ATIS.
+  const selected = input.actualLanding && reported
+    ? pickArrivalRunway({ ...input, ends: runways, actualLanding: true })
+    : input.previous && !arrivals.length
+      ? input.previous
+      : input.previous && arrivals.includes(input.previous.runway)
+        ? { ...input.previous, source: "ATIS" as const, estimated: true }
+        : pickArrivalRunway({ ...input, ends: runways, atis });
+  if (selected) console.info("[arrival-runway-selection]", {
+    airport: icao,
+    atisArrivalRunways: arrivals,
+    providerRunway: input.providerRunway ?? null,
+    providerActualLanding: Boolean(input.actualLanding),
+    selectedRunway: selected.runway,
+    selectedSource: selected.source,
+    threshold: selected.threshold,
+    finalApproachCourse: selected.heading,
+  });
+  return selected;
 }

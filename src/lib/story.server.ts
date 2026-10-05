@@ -3540,8 +3540,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		approachEvidence: Boolean(live && isFinalApproach(live, dest)), now: Date.now()
 	};
 	const arrivalEntry = arrivalEntryEvidence(loadedArrival.state, arrivalInput).entryGate;
+	const arrivalDistanceNm = live && Number.isFinite(live.lat) && Number.isFinite(live.lon) ? haversineNm(live, end) : null;
+	const arrivalDescending = Boolean(live && ((live.vertFpm ?? 0) < -100 || live.phase === "descent" || live.phase === "approach"));
+	const arrivalRunwayWindow = Boolean(ourAirborne && !ourLanded && (arrivalDescending || (arrivalDistanceNm != null && arrivalDistanceNm <= 150)));
 	let selectedArrival = loadedArrival.state.runway;
-	if (arrivalEntry || loadedArrival.state.startedAt || ourLanded) {
+	if (arrivalRunwayWindow || arrivalEntry || loadedArrival.state.startedAt || ourLanded) {
 		selectedArrival = await expectedArrivalRunway(dest.icao, {
 			aircraft: live, providerRunway: official.fr24?.runway?.landing ?? flightawareOfficial?.runway?.landing ?? null,
 			actualLanding: Boolean(official.fr24?.landing?.actual || flightawareOfficial?.landing?.actual),
@@ -3557,10 +3560,12 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		arrivalPersistence = saved.status;
 	}
 	expectedArrival = arrivalState.runway;
-	const pattern = displayArrivalProjection(arrivalState, {
+	const showDetailedArrival = Boolean(arrivalState.startedAt
+		&& showDetailedArrivalGeometry(arrivalLive, end, arrivalInput.approachEvidence));
+	const pattern = showDetailedArrival ? displayArrivalProjection(arrivalState, {
 		observation: routeObservation && Date.now() - routeObservation.seenAt <= 60_000 ? routeObservation : null,
 		live, lastObserved: routeObservation ?? routeMemory?.lastObserved ?? null, landed: ourLanded
-	});
+	}) : null;
 	if (pattern) {
 		arrivalPatternKind = pattern.kind;
 		// Preserve observed history; only the future display path changes.
@@ -3582,7 +3587,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			remainingNm = routeRemainingNm = routeMemory.lastObserved.remainingNm;
 		}
 	}
-	if (arrivalEntry || loadedArrival.state.startedAt || ourLanded) console.info("[arrival-projection]", {
+	if (arrivalRunwayWindow || arrivalEntry || loadedArrival.state.startedAt || ourLanded) console.info("[arrival-projection]", {
 		flight: parsed.callsign, landKey, stateKey, instance: ARRIVAL_INSTANCE,
 		entryGate: arrivalEntry, reason: arrivalUpdate.reason, persistence: arrivalPersistence,
 		applied: Boolean(pattern), geometrySource: pattern?.geometrySource ?? null,
@@ -3594,6 +3599,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		verticalRateSource: arrivalUpdate.verticalRateSource, stageVertFpm: live?.vertFpm ?? null,
 		cursorNm: arrivalState.cursorNm, plannedPoints: arrivalState.points.length,
 		directToThresholdNm: live && expectedArrival ? haversineNm(live, expectedArrival.threshold) : null,
+		showDetailedArrival, arrivalRunwayWindow,
 		phase: live?.phase ?? null, extrapolated: live?.extrapolated ?? false, seenSec: live?.seenSec ?? null,
 		kind: arrivalPatternKind, remainingNm, stageRemainingNm
 	});

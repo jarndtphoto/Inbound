@@ -1,7 +1,7 @@
 // Actual RouteMap component, captured OSM ground geometry, and trusted phone input.
 // The only stub is the cached surface transport, so fetch counts are deterministic.
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, mkdir, symlink } from 'node:fs/promises';
 import { resolve, join, extname } from 'node:path';
 import { createServer } from 'node:http';
 import { build } from 'vite';
@@ -14,7 +14,8 @@ import { runwayThreshold } from '../src/lib/arrival-runway.ts';
 import { simplifyRouteAirportSurface } from '../src/lib/route-airport-detail.ts';
 
 const outputDir = process.env.MAP_SCREENSHOT_DIR || '/workspace/screenshots/route-airport-detail';
-const temp = await mkdtemp(resolve('node_modules/.route-airport-qa-'));
+const temp = await mkdtemp(process.env.ROUTE_AIRPORT_QA_TMP || resolve('node_modules/.route-airport-qa-'));
+await symlink(resolve('node_modules'), join(temp, 'node_modules'), 'dir').catch(() => {});
 let browser, server;
 try {
   await mkdir(outputDir, { recursive: true });

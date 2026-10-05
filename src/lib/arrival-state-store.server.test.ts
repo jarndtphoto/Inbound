@@ -45,7 +45,7 @@ test("durable runway/side across cold instances, optimistic race, ATIS last-good
     const noAtis = await expectedArrivalRunway("KORD", { previous: state.runway, windDir:270,windKt:10 }, store());
     assert.equal(noAtis!.runway, "10R");
     const provider = await expectedArrivalRunway("KORD", { previous: state.runway, providerRunway:"10C" }, store());
-    assert.equal(provider!.runway, "10C"); assert.equal(provider!.source, "provider");
+    assert.equal(provider!.runway, "10R"); assert.equal(provider!.source, "ATIS");
     await store().saveAtis("KORD", [{ ...atis[0], datis: `ATIS ${hhmm}Z. LDG RWY 9L.` }]);
     clearArrivalAtisMemoryCache();
     const changed = await expectedArrivalRunway("KORD", { previous: state.runway }, store());

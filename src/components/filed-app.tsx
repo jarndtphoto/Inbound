@@ -24,6 +24,7 @@ import { formatClockTime, timeKindLabel } from "@/lib/presentation-time";
 import { formatStoryEventTime } from "@/lib/flight-event-time";
 import { FLIGHT_TABS, flightHref, parseFlightLocation, storyMatchesFlightLink, type FlightLocation, type FlightTab } from "@/lib/flight-url";
 import { passengerAirportWeather } from "@/lib/passenger-airport-weather";
+import { prefetchFlightAirportSurfacesOnce, scheduleLowPrioritySurfacePrefetch } from "@/lib/airport-surface-prefetch";
 import { getFlightStory } from "@/lib/story";
 import type { Chop, Comfort, FlightStory, PilotReportObservation, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -491,6 +492,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   const [briefFeedback, setBriefFeedback] = useState<"no_change" | "failed" | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const publishedLegDate = useRef<string | null>(null);
+  const surfacePrefetchRef = useRef<{ flightKey: string; airports: Set<string> }>({ flightKey: "", airports: new Set() });
   const flightKey = normFlight(query);
   const storyQueryKey = flightStoryQueryKey(query, linkedDate);
   const shellStyle = {
@@ -594,6 +596,20 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
 
   const story = storyForQuery(storyQ.data, query, linkedDate);
   const remaining = story ? remainingFlight(story) : null;
+
+  useEffect(() => {
+    if (!story) return;
+    const state = surfacePrefetchRef.current;
+    if (state.flightKey !== flightKey) {
+      state.flightKey = flightKey;
+      state.airports.clear();
+    }
+    const snapshot = story;
+    return scheduleLowPrioritySurfacePrefetch(() => {
+      void prefetchFlightAirportSurfacesOnce(queryClient, snapshot, state.airports);
+    });
+  }, [queryClient, flightKey, Boolean(story), story?.origin.icao, story?.origin.lat, story?.origin.lon,
+    story?.dest.icao, story?.dest.lat, story?.dest.lon]);
   const restoringSavedData = Boolean(story && storyQ.dataUpdatedAt === 0);
   useEffect(() => () => stopFlightSearch(queryClient, query, linkedDate), [queryClient, query, linkedDate]);
   useEffect(() => {

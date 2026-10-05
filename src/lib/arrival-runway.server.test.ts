@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clearArrivalAtisMemoryCache, loadArrivalAtis } from "./arrival-runway.server.ts";
+import { clearArrivalAtisMemoryCache, expectedArrivalRunway, loadArrivalAtis } from "./arrival-runway.server.ts";
 test('five-minute airport cache coalesces calls and rejects stale/failed bulletins',async()=>{
  const store={loadAtis:async()=>[],saveAtis:async()=>{}}; clearArrivalAtisMemoryCache();
  const load=(icao:string)=>loadArrivalAtis(icao,store);
@@ -17,4 +17,42 @@ test('five-minute airport cache coalesces calls and rejects stale/failed bulleti
   globalThis.fetch=async()=>{throw Error('offline');};assert.deepEqual(await load('KERR'),[]);
   assert.deepEqual(await load('../x'),[]);
  }finally{globalThis.fetch=saved;}
+});
+
+
+test("non-actual provider reciprocal cannot override ORD east-flow ATIS", async () => {
+  clearArrivalAtisMemoryCache();
+  const store = {
+    loadAtis: async () => [{ airport: "KORD", type: "combined", datis: "ARR EXP VECTORS ILS RWY 9L APCH, ILS RWY 10C APCH, VISUAL APCH RWY 10R.", time: "1728Z" }],
+    saveAtis: async () => {},
+  };
+  const selected = await expectedArrivalRunway("KORD", {
+    aircraft: { lat: 41.86, lon: -88.22 },
+    providerRunway: "27L",
+    actualLanding: false,
+    windDir: 270,
+    windKt: 8,
+  }, store);
+
+  assert.ok(selected);
+  assert.match(selected!.runway, /^(9|10)/);
+  assert.equal(selected!.heading, 90);
+  assert.ok(selected!.threshold.lon < -87.91, "east-flow arrivals use the west threshold");
+});
+
+test("confirmed actual provider runway can still override ATIS", async () => {
+  clearArrivalAtisMemoryCache();
+  const store = {
+    loadAtis: async () => [{ airport: "KORD", type: "combined", datis: "LDG RWY 10C.", time: "1728Z" }],
+    saveAtis: async () => {},
+  };
+  const selected = await expectedArrivalRunway("KORD", {
+    aircraft: { lat: 41.98, lon: -87.85 },
+    providerRunway: "27L",
+    actualLanding: true,
+  }, store);
+
+  assert.equal(selected?.runway, "27L");
+  assert.equal(selected?.source, "provider");
+  assert.equal(selected?.heading, 270);
 });

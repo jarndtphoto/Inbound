@@ -17,6 +17,10 @@ export function airportDetailOpacity(widthMiles: number) {
   return Math.max(0, Math.min(1, (ROUTE_AIRPORT_DETAIL_WIDTH_MILES - widthMiles) / 25));
 }
 
+export function showRouteAirportLoadingNote(widthMiles: number, pending: boolean) {
+  return pending && widthMiles <= ROUTE_AIRPORT_MIN_WIDTH_MILES * 1.05;
+}
+
 export function airportNearViewport(point: { x: number; y: number }, view: { s: number; x: number; y: number }, height: number, radiusPx: number) {
   const x = point.x * view.s + view.x, y = point.y * view.s + view.y;
   const margin = radiusPx * view.s;
@@ -56,4 +60,10 @@ export function simplifyRouteAirportSurface(features: SurfaceFeature[]) {
   return features.filter(f => allowed.has(f.kind) && f.points.length >= 2)
     .map(f => ({ ...f, points: simplify(f.points) }))
     .sort((a, b) => order[a.kind] - order[b.kind]);
+}
+
+export function simplifySurfaceRings(rings: SurfacePoint[][]) {
+  return rings
+    .map(ring => simplify(ring, 12))
+    .filter(ring => ring.length >= 3);
 }

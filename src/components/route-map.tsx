@@ -708,8 +708,8 @@ function RouteMapContent({ story, fixedViewport = false, weatherPreview, remaini
 
         {basemap}
 
-        <RouteAirportSurface airport={story.origin} near={originNear} approachActive={false} widthMiles={visibleWidthMiles} sx={sx} sy={sy} />
-        <RouteAirportSurface airport={story.dest} near={destNear} approachActive={!!story.route.expectedArrival && !!story.route.arrivalPatternKind && !weatherPreview} widthMiles={visibleWidthMiles} sx={sx} sy={sy} />
+        <RouteAirportSurface airport={story.origin} near={originNear} approachActive={false} widthMiles={visibleWidthMiles} inverseScale={1 / zoom.s} sx={sx} sy={sy} />
+        <RouteAirportSurface airport={story.dest} near={destNear} approachActive={!!story.route.expectedArrival && !!story.route.arrivalPatternKind && !weatherPreview} widthMiles={visibleWidthMiles} inverseScale={1 / zoom.s} sx={sx} sy={sy} />
         {(weatherOn || weatherPreview) && (
           <RadarLayer minLon={minLon} maxLon={maxLon} minLat={minLat} maxLat={maxLat} sx={sx} sy={sy} />
         )}

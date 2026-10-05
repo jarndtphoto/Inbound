@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { arrivalRunways, pickArrivalRunway, runwayThreshold, runwayBearing, type RunwayEnd } from "./arrival-runway.ts";
-import { arrivalPattern, canProjectArrival } from "./arrival-pattern.ts";
+import { arrivalPattern, canProjectArrival, showDetailedArrivalGeometry } from "./arrival-pattern.ts";
 import { destPoint, haversineNm } from "./geo.ts";
 import { passengerEtaMin } from "./flight-data.ts";
 const ends: RunwayEnd[] = [
@@ -54,6 +54,15 @@ for(const [name,bearing,track] of [['opposite side',90,90],['side',0,180]] as co
  const eta=passengerEtaMin({remainingNm:p.lengthNm,directToDestNm:12,gsKt:160,providerEtaMin:1});
  assert.ok(eta>12/160*60+1); // The final-approach ETA uses the pattern, not direct distance.
 });
+test('detailed runway geometry waits for actual approach while the filed route remains the en-route plan',()=>{
+ const approach={...destPoint(runway.threshold,270,20),seenSec:10,phase:'approach',onGround:false};
+ assert.equal(showDetailedArrivalGeometry(approach,runway.threshold,false),true);
+ assert.equal(showDetailedArrivalGeometry({...approach,phase:'descent'},runway.threshold,false),false);
+ assert.equal(showDetailedArrivalGeometry({...approach,...destPoint(runway.threshold,270,80),phase:'approach'},runway.threshold,false),false);
+ assert.equal(showDetailedArrivalGeometry({...approach,phase:'descent'},runway.threshold,true),true);
+ assert.equal(showDetailedArrivalGeometry({...approach,seenSec:90},runway.threshold,true),false);
+});
+
 test('patterns require a fresh descending/approach fix near destination, never ground or landed',()=>{
  const live={...destPoint(runway.threshold,90,12),seenSec:10,phase:'approach',onGround:false};
  assert.equal(canProjectArrival(live,runway.threshold,false),true);
@@ -65,4 +74,53 @@ test('patterns require a fresh descending/approach fix near destination, never g
 });
 test('displaced landing threshold is moved forward along the true runway heading',()=>{
  const end={...ends[1],displacedFt:6076.12};assert.ok(Math.abs(haversineNm(end,runwayThreshold(end))-1)<.001);
+});
+
+
+test("ORD east flow from the southwest finishes eastbound at the west threshold", () => {
+ const selected = pickArrivalRunway({
+  ends,
+  atis: atis("ARR EXP VECTORS ILS RWY 9L APCH, ILS RWY 10C APCH, VISUAL APCH RWY 10R."),
+  aircraft: { lat: 41.86, lon: -88.22 },
+  providerRunway: "27L",
+  actualLanding: false,
+ })!;
+ assert.match(selected.runway, /^(9|10)/);
+ assert.equal(selected.heading, 90);
+ assert.ok(selected.threshold.lon < -87.91);
+ const aircraft = { ...destPoint(selected.threshold, 250, 14), track: 90 };
+ const pattern = arrivalPattern(aircraft, selected);
+ assert.deepEqual(pattern.points.at(-1), selected.threshold);
+ assert.ok(pattern.points.at(-2)!.lon < selected.threshold.lon, "final segment starts west of the threshold");
+ assert.ok(Math.abs(runwayBearing(pattern.points.at(-2)!, pattern.points.at(-1)!)-90)<2);
+});
+
+test("ORD west flow finishes westbound at the east threshold", () => {
+ const selected = pickArrivalRunway({
+  ends,
+  atis: atis("LDG RWY 27L, 28C."),
+  aircraft: { lat: 41.98, lon: -87.6 },
+ })!;
+ assert.match(selected.runway, /^(27|28)/);
+ assert.equal(selected.heading, 270);
+ assert.ok(selected.threshold.lon > -87.91);
+ const aircraft = { ...destPoint(selected.threshold, 70, 14), track: 270 };
+ const pattern = arrivalPattern(aircraft, selected);
+ assert.deepEqual(pattern.points.at(-1), selected.threshold);
+ assert.ok(pattern.points.at(-2)!.lon > selected.threshold.lon, "final segment starts east of the threshold");
+ assert.ok(Math.abs(runwayBearing(pattern.points.at(-2)!, pattern.points.at(-1)!)-270)<2);
+});
+
+test("MCO south flow finishes on the north threshold without a reciprocal reversal", () => {
+ const mco = [
+  {ident:"18R",lat:28.448299407958984,lon:-81.3270034790039,heading:179},
+  {ident:"36L",lat:28.415300369262695,lon:-81.32659912109375,heading:359},
+ ];
+ const selected = pickArrivalRunway({ ends: mco, atis: atis("LDG RWY 18R."), aircraft: { lat: 28.7, lon: -81.38 } })!;
+ const aircraft = { ...destPoint(selected.threshold, 350, 16), track: 179 };
+ const pattern = arrivalPattern(aircraft, selected);
+ assert.equal(selected.runway, "18R");
+ assert.deepEqual(pattern.points.at(-1), selected.threshold);
+ assert.ok(pattern.points.at(-2)!.lat > selected.threshold.lat, "final segment starts north of the threshold");
+ assert.ok(Math.abs(runwayBearing(pattern.points.at(-2)!, pattern.points.at(-1)!)-179)<2);
 });

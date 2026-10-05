@@ -141,15 +141,10 @@ describe('zoom-stable route presentation', () => {
 
   it('fits and renders the ground map from the real airport runway complex', () => {
     assert.match(groundSource, /fitGroundSurfaceView/);
-    assert.match(groundSource, /MAX_SURFACE_RADIUS_NM = 4/);
-    assert.match(groundSource, /RUNWAY_CORE_MIN_SPAN_NM = 0\.7/);
-    assert.match(groundSource, /RUNWAY_CORE_PAD_NM = 1/);
-    assert.match(groundSource, /haversineNm\(point, airport\) <= MAX_SURFACE_RADIUS_NM/);
-    assert.match(groundSource, /featureSpanNm\(feature\) >= RUNWAY_CORE_MIN_SPAN_NM/);
-    assert.match(groundSource, /point\.lat >= minLat - latPad/);
-    assert.match(groundSource, /point\.lon >= minLon - lonPad/);
-    assert.match(groundSource, /feature\.kind === "runway" \|\| feature\.kind === "runway_area"/);
-    assert.match(groundSource, /return runways\.length \? runways : features/);
+    assert.match(groundSource, /filterAirportSurfaceFeatures/);
+    assert.match(groundSource, /const surface = surfaceQ\.data as AirportSurface \| undefined/);
+    assert.match(groundSource, /surface\?\.features \?\? \[\]/);
+    assert.match(groundSource, /BoundaryShape/);
     assert.match(groundSource, /fitFeatures\.flatMap/);
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
     assert.match(groundSource, /resetViewRef\.current = next/);
