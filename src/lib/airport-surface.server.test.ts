@@ -49,7 +49,7 @@ test("airport surface can choose a matching aerodrome boundary even when another
 
 
 test("exact airport surface query targets the requested aerodrome before any broad box", () => {
-  const query = exactAirportSurfaceOverpassQuery("KSAN");
+  const query = exactAirportSurfaceOverpassQuery("KSAN", { lat: 32.7338, lon: -117.1933 });
   assert.match(query, /aeroway"="aerodrome"/);
   assert.match(query, /"icao"="KSAN"/);
   assert.match(query, /"iata"="SAN"/);
@@ -64,4 +64,25 @@ test("boxed airport surface query remains available as a bounded fallback", () =
   assert.match(query, /32\.658800/);
   assert.match(query, /32\.808800/);
   assert.match(query, /aeroway"="aerodrome"/);
+});
+
+test("airport surface parses multipolygon inland water in the same payload", () => {
+  const parsed = parseAirportSurfaceElements([
+    square(1, -0.02, -0.02, 0.02, 0.02, { aeroway: "aerodrome", icao: "KORD" }),
+    line(10, [{ lat: 0, lon: -0.015 }, { lat: 0, lon: 0.015 }], { aeroway: "runway", ref: "10R/28L" }),
+    {
+      id: 90,
+      type: "relation" as const,
+      tags: { natural: "water", water: "lake", name: "Lake Example" },
+      members: [
+        { type: "way" as const, role: "outer", geometry: [{ lat: 0.03, lon: 0.03 }, { lat: 0.03, lon: 0.05 }, { lat: 0.05, lon: 0.05 }] },
+        { type: "way" as const, role: "outer", geometry: [{ lat: 0.05, lon: 0.05 }, { lat: 0.05, lon: 0.03 }, { lat: 0.03, lon: 0.03 }] },
+      ],
+    },
+  ], "KORD", 123, { lat: 0, lon: 0 });
+
+  assert.equal(parsed.hydrography?.fallback, false);
+  assert.equal(parsed.hydrography?.ocean, false);
+  assert.equal(parsed.hydrography?.waterPolygons, 1);
+  assert.equal(parsed.hydrography?.water.length, 1);
 });
