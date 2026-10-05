@@ -1,3 +1,4 @@
+import { freezeTestClock } from './helpers/test-clock.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -11,8 +12,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 test('UA219 durable filed/track geometry and oceanic progress survive provider handoff, cold instances, reroute and recovery', async () => {
   const dir = await mkdtemp(resolve('node_modules/.route-memory-replay-'));
-  const realFetch = globalThis.fetch, realNow = Date.now;
-  const keys = ['FR24_API_TOKEN', 'FLIGHTAWARE_AEROAPI_KEY'], env = keys.map(k => process.env[k]);
+  const realFetch = globalThis.fetch;
+  let restoreClock;
+  const keys = ['DATABASE_URL', 'FR24_API_TOKEN', 'FLIGHTAWARE_AEROAPI_KEY'], env = keys.map(k => process.env[k]);
   const fixture = JSON.parse(readFileSync(new URL('./fixtures/ua219-provider-handoff.json', import.meta.url)));
   let now = fixture.firstAtUnix * 1000, mode = 'aware', instance = 0;
   const record = structuredClone(fixture.flightawareRecord);
@@ -27,7 +29,7 @@ test('UA219 durable filed/track geometry and oceanic progress survive provider h
   }));
   const requests = [], evidence = [];
   try {
-    keys.forEach(k => delete process.env[k]); Date.now = () => now;
+    keys.forEach(k => delete process.env[k]); restoreClock = freezeTestClock(() => now);
     globalThis.fetch = async input => {
       const url = new URL(String(input)); requests.push(url.href);
       if (url.hostname === 'www.flightaware.com') return mode === 'aware'
@@ -132,7 +134,7 @@ test('UA219 durable filed/track geometry and oceanic progress survive provider h
     if (process.env.ROUTE_REPLAY_REPORT) await writeFile(process.env.ROUTE_REPLAY_REPORT,JSON.stringify({fixture:fixture.description,cases:evidence,requests:requests.length},null,2));
     if (process.env.ROUTE_REPLAY_STORIES) await writeFile(process.env.ROUTE_REPLAY_STORIES,JSON.stringify({first,gap,recovered,approach,approachGap},null,2));
   } finally {
-    globalThis.fetch=realFetch; Date.now=realNow;
+    globalThis.fetch=realFetch; restoreClock?.();
     keys.forEach((k,i)=>env[i]==null?delete process.env[k]:process.env[k]=env[i]);
     await rm(dir,{recursive:true,force:true});
   }
