@@ -103,14 +103,63 @@ branch/commit, and the exact hostname. Evidence:
 `verification/part-3b4/syn105-deployment-ready.jpg` and
 `verification/part-3b4/syn105-deployment.json`.
 
-The public unauthenticated MCP probe returned HTTP 302 / Protected by Vercel
-Authentication at 2026-10-05T14:21:10Z. Evidence:
+The initial unauthenticated probe returned HTTP 302 / Protected by Vercel
+Authentication at 2026-10-05T14:21:10Z. That historical result remains in
 `verification/part-3b4/syn105-public-access.json`.
-No new protection exception has been added. The user's previous exact-host
-approval covered `ngc64c094`, not this new hostname. The connector confirms
-SSO protection remains enabled with `all_except_custom_domains`; no global
-setting, old exception, production domain, or previous deployment was changed.
 
-Stop for approval of an exception only for the new exact hostname. After that
-exception, complete public MCP verification and request a brand-new connector
-and chat for the actual host retest. Do not start a subsequent stage.
+The user subsequently approved the exact new hostname exception with `yes`.
+Only `inbound-live-fixture-ra6kolsml-jarndtphoto.vercel.app` was added. The
+dashboard confirms all nine previous exceptions remain intact (ten total),
+Require Log In is checked, and Standard Protection remains selected. The
+connector independently confirms SSO enabled with `all_except_custom_domains`.
+No wildcard, project-wide automation bypass, production exception, global
+setting, previous hostname, or previous deployment was changed. Evidence:
+`verification/part-3b4/syn105-protection.json` and
+`verification/part-3b4/syn105-protection-exception.jpg`.
+
+The completed public MCP run passed at 2026-10-05T15:13:07Z: 29 RPC requests,
+13 assertion groups, zero final failures, plus the public GET check (405).
+Initialize, exactly three read-only tools, resource retrieval, Chicago/ORD/MDW,
+SYN101 direct and exact-instance resolution, SYN105 two dated choices and
+explicit choice, closed-input and hostile-origin rejection, authoritative
+refresh, and actual observation-handle expiry passed. Radar remained at 39
+after retirement; bounds are Radar <=100 and Featured <=5. Responses confirm
+`no-store`, fixture-only, and static-isolation headers. Provider calls,
+production API calls, and production DB access remain zero.
+
+One preliminary run failed its initial healthy-board assertion, consistent
+with the fixture's intentional stale pre-retirement interval. A follow-up confirmed the
+healthy 39-aircraft collection before the complete run passed. That preliminary
+result is retained in `verification/part-3b4/syn105-public-preliminary.json`;
+the completed run is `verification/part-3b4/syn105-public-verification.json`.
+The deployed widget script also exactly matches the tested compiled artifact:
+SHA-256 `7b737d25e3193ab7be2dac8db6691125e40080b4294e42ceac40b6047d55b73f`.
+Evidence: `verification/part-3b4/syn105-public-artifact.json`.
+
+## Required actual ChatGPT retest
+
+Public verification is complete; actual host approval is still pending.
+Create a brand-new connector named `Inbound Live Part 3B.4 SYN105 Return Fix`,
+using No authentication and the exact MCP URL above. Start a new chat, select
+that connector, and ask `Open the invented Inbound Live Radar near Chicago.`
+
+1. Initialization must remain on Radar. Select SYN101 and wait; it must stay
+   on Radar until Track flight is pressed.
+2. Track SYN101, return using Back to Radar, and wait. Detail must not reopen.
+   Select SYN101 again; navigation must require a fresh Track flight action.
+3. Select SYN105, wait, then press Track flight. Confirm two dated choices.
+   Choose the first option, press Back to Radar, and confirm the map returns.
+4. Repeat SYN105 with the second dated option. Back must return to the map,
+   and the old chooser/detail must not replay. Back must also work from an
+   unavailable-flight panel if one occurs.
+5. Around T+30, switch Chicago -> ORD -> MDW and immediately select an aircraft.
+   Exercise Radar -> Flights -> Radar and several selections.
+6. Wait through 20, 40, 60, and 90 seconds without manual Refresh. Healthy
+   operation must refresh automatically; a genuine outage must still stop
+   bounded motion at 25 seconds. Movement is subtle in the narrow 38-nm view.
+7. If a control fails, expand About this preview and capture the current view,
+   last UI action, and last UI error along with the visible failure.
+
+Stop for this manual host retest. Part 3B.4 is not host-approved, and no
+subsequent stage has started. The Inbound application, main, and production
+remain untouched.

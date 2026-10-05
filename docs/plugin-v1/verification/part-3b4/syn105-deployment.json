@@ -42,8 +42,11 @@
       "enabled": true,
       "deploymentType": "all_except_custom_domains"
     },
-    "newExceptionAdded": false,
-    "previousHostnamesChanged": false
+    "newExceptionAdded": true,
+    "previousHostnamesChanged": false,
+    "exactExceptionHostname": "inbound-live-fixture-ra6kolsml-jarndtphoto.vercel.app",
+    "verifiedAt": "2026-10-05T15:12:46.150Z",
+    "evidence": "syn105-protection.json"
   },
   "checks": {
     "total": 971,
@@ -58,6 +61,18 @@
     "productionApiCalls": 0,
     "productionDbAccess": 0
   },
-  "publicMcpVerified": false,
-  "actualChatGptHostApproved": false
+  "publicMcpVerified": true,
+  "actualChatGptHostApproved": false,
+  "publicVerification": {
+    "verifiedAt": "2026-10-05T15:13:07.759Z",
+    "rpcRequests": 29,
+    "assertionGroups": 13,
+    "failures": 0,
+    "evidence": "syn105-public-verification.json",
+    "exactMatchToTestedCompiledWidgetScript": true,
+    "widgetScriptSha256": [
+      "7b737d25e3193ab7be2dac8db6691125e40080b4294e42ceac40b6047d55b73f"
+    ]
+  },
+  "nextGate": "Manual ChatGPT retest with a brand-new connector and new chat; no subsequent stage"
 }
