@@ -2516,8 +2516,9 @@ export function currentStageOf(args) {
 	return takeoffFloorStage(baseCurrentStageOf(args), args.confirmedTakeoff);
 }
 function baseCurrentStageOf(args) {
-	const { live, remainingNm, dest, origin, ourTakeoffActual, ourLandingActual, ourLanded, inboundStatus, pushed, faAirborne, taxiHint, taxiOutLatched, distPark, parkedAtGate, gateInActual, currentFlightSurfaceConfirmed } = args;
-	const postLanding = postLandingState({ ourLanded, ourLandingActual, gateInActual, parkedAtGate, live, dest });
+	const { live, remainingNm, dest, origin, ourTakeoffActual, inboundStatus, pushed, faAirborne, taxiHint, taxiOutLatched, distPark, currentFlightSurfaceConfirmed } = args;
+	// Preserve provider strength and the caller's clock when applying gate-in grace.
+	const postLanding = postLandingState(args);
 	if (postLanding === "gate") return "gate";
 	if (postLanding === "taxi_in") return "taxi_in";
 	if (postLanding === "landed") return "arrival";

@@ -318,10 +318,17 @@ describe('post-landing passenger stage', () => {
 
   it('allows an uncorroborated FlightStats gate-in only after a conservative grace period', () => {
     const gateInActual = 10_000;
-    assert.equal(currentStageOf({
-      ourLanded: true, gateInActual, weakGateInActual: true, parkedAtGate: false,
-      dest, live: null, nowSec: gateInActual + 21 * 60,
-    }), 'gate');
+    for (const elapsed of [0, 11 * 60, 20 * 60 - 1, 20 * 60, 21 * 60]) {
+      const args = {
+        ourLanded: true, gateInActual, weakGateInActual: true, parkedAtGate: false,
+        dest, live: null, nowSec: gateInActual + elapsed,
+      };
+      const expected = elapsed < 20 * 60 ? 'taxi_in' : 'gate';
+      assert.equal(currentStageOf(args), expected, `passenger stage after ${elapsed} seconds`);
+      assert.equal(postLandingState(args), expected, 'stage and landing state share the same clock');
+    }
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual, weakGateInActual: false,
+      parkedAtGate: false, dest, live: null, nowSec: gateInActual }), 'gate', 'strong gate-in is immediate');
   });
 
   it('marks robust stationary/parked detection At gate', () => {
