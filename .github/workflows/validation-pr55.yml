@@ -1,0 +1,19 @@
+name: Temporary PR55 final validation
+on:
+  push:
+    branches:
+      - validation/pr55-final-20261005
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install
+      - run: npm run check
+      - run: npm run build
