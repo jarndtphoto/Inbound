@@ -120,6 +120,7 @@ test("MCO/TPA ground diagnostics emit one compact poll summary and preserve reje
     "missing_position", "distance_gt_20nm", "airborne_gt_250ft", "age_gt_30s", "future_age",
   ]) assert.match(ground, new RegExp(reason));
   assert.doesNotMatch(ground, /diagnostic\("/, "old multi-line ground coverage diagnostics were removed");
+  assert.equal((ground.match(/\[ground-coverage\]/g) ?? []).length, 1, "one compact ground-coverage logger remains");
 
   assert.match(fr24, /event: "fr24_upstream_error"/);
   assert.match(fr24, /statusCode/);
