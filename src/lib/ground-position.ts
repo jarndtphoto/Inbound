@@ -1,13 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { haversineNm } from "./geo";
 import { loadFr24Flight, loadFr24FlightByNumber, loadFr24FlightByRegistration, loadFr24RecentArrivalIdentity } from "./fr24.server";
-import { fetchAround, fetchByCallsign, fetchByReg, fuseProviderLists, type AdsbRaw } from "./adsb-fusion";
+import { fetchAround, fetchByCallsign, fetchByHex, fetchByReg, fuseProviderLists, type AdsbRaw } from "./adsb-fusion";
 
 type GroundPositionInput = {
   callsign?: string | null;
   flightId?: string | null;
   flightNumber?: string | null;
   registration?: string | null;
+  hex?: string | null;
   originIata?: string | null;
   destIata?: string | null;
   movementKind?: "departure" | "arrival" | null;
@@ -21,13 +22,14 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     const flightId = String(input?.flightId ?? "").trim().toUpperCase() || null;
     const flightNumber = String(input?.flightNumber ?? "").replace(/\s/g, "").trim().toUpperCase() || null;
     const registration = String(input?.registration ?? "").trim().toUpperCase() || null;
+    const hex = String(input?.hex ?? "").trim().toLowerCase().replace(/^~+/, "") || null;
     const originIata = String(input?.originIata ?? "").trim().toUpperCase() || null;
     const destIata = String(input?.destIata ?? "").trim().toUpperCase() || null;
     const movementKind = input?.movementKind === "arrival" || input?.movementKind === "departure" ? input.movementKind : null;
     const airportLat = Number(input?.airportLat);
     const airportLon = Number(input?.airportLon);
     if (!Number.isFinite(airportLat) || !Number.isFinite(airportLon)) throw new Error("Invalid airport position");
-    return { callsign, flightId, flightNumber, registration, originIata, destIata, movementKind, airportLat, airportLon };
+    return { callsign, flightId, flightNumber, registration, hex, originIata, destIata, movementKind, airportLat, airportLon };
   })
   .handler(async ({ data }) => {
     const airport = { lat: data.airportLat, lon: data.airportLon };
@@ -71,6 +73,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     const flightIdCallsign = data.flightId?.match(/^([A-Z]{2,4}\d{1,4}[A-Z]?)/)?.[1] ?? null;
     const callsigns = [...new Set([flightIdCallsign, data.callsign].filter(Boolean).map(normCallsign))].slice(0, 2);
     const wantedCallsigns = new Set(callsigns);
+    const wantedHex = String(data.hex ?? "").toLowerCase();
     let resolvedRegistration = data.registration;
     let wantedReg = normRegistration(resolvedRegistration);
     const latPad = 0.12;
@@ -167,6 +170,8 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     const matchesIdentity = (raw: AdsbRaw) => {
       const reg = normRegistration(raw.r);
       const cs = normCallsign(raw.flight);
+      const hex = String(raw.hex ?? "").toLowerCase();
+      if (wantedHex && hex === wantedHex) return true;
       if (wantedReg && reg === wantedReg) return true;
       return Boolean(cs && wantedCallsigns.has(cs));
     };
@@ -177,23 +182,40 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     const around = fuseProviderLists(aroundPacks, { airside: true })
       .filter(matchesIdentity)
       .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
+    let aroundFallback: ReturnType<typeof usableAdsb> = null;
     for (const candidate of around) {
       const position = usableAdsb(candidate);
-      if (position) {
-        console.info("[ground-position]", { provider: "adsb-around", callsign: position.callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-        diagnostic("adsb-around-hit", { callsign: position.callsign, registration: position.registration, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
+      if (!position) continue;
+      const ageSec = Math.round(Date.now() / 1000 - position.seenAt);
+      diagnostic("adsb-around-hit", {
+        callsign: position.callsign,
+        registration: position.registration,
+        ageSec,
+        track: position.track,
+        lat: position.lat,
+        lon: position.lon,
+      });
+      if (ageSec <= 8) {
+        console.info("[ground-position]", { provider: "adsb-around", callsign: position.callsign, ageSec });
         return position;
       }
+      aroundFallback = position;
+      break;
     }
 
-    const exactPacks = resolvedRegistration
-      ? await fetchByReg(resolvedRegistration).catch(() => [])
-      : callsigns[0]
-        ? await fetchByCallsign(callsigns[0]).catch(() => [])
-        : [];
+    // Exact hex is the strongest free lookup for ground traffic and can be
+    // materially fresher than an airport-radius response. Prefer it whenever
+    // the broad hit is delayed, then registration, then callsign.
+    const exactPacks = wantedHex
+      ? await fetchByHex(wantedHex).catch(() => [])
+      : resolvedRegistration
+        ? await fetchByReg(resolvedRegistration).catch(() => [])
+        : callsigns[0]
+          ? await fetchByCallsign(callsigns[0]).catch(() => [])
+          : [];
     diagnostic("adsb-exact", {
       providers: exactPacks.map((pack) => ({ provider: pack.provider, count: pack.ac.length })),
-      key: resolvedRegistration ? "registration" : callsigns[0] ? "callsign" : "none",
+      key: wantedHex ? "hex" : resolvedRegistration ? "registration" : callsigns[0] ? "callsign" : "none",
     });
     const exact = fuseProviderLists(exactPacks, { airside: true })
       .filter(matchesIdentity)
@@ -201,10 +223,26 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     for (const candidate of exact) {
       const position = usableAdsb(candidate);
       if (position) {
-        diagnostic("adsb-exact-hit", { callsign: position.callsign, registration: position.registration, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-        return position;
+        const ageSec = Math.round(Date.now() / 1000 - position.seenAt);
+        diagnostic("adsb-exact-hit", {
+          callsign: position.callsign,
+          registration: position.registration,
+          ageSec,
+          track: position.track,
+          lat: position.lat,
+          lon: position.lon,
+        });
+        if (!aroundFallback || position.seenAt > aroundFallback.seenAt) return position;
       }
     }
-    diagnostic("no-ground-fix", { registration: resolvedRegistration, callsigns });
+    if (aroundFallback) {
+      console.info("[ground-position]", {
+        provider: "adsb-around-delayed",
+        callsign: aroundFallback.callsign,
+        ageSec: Math.round(Date.now() / 1000 - aroundFallback.seenAt),
+      });
+      return aroundFallback;
+    }
+    diagnostic("no-ground-fix", { registration: resolvedRegistration, hex: wantedHex || null, callsigns });
     return null;
   });;
