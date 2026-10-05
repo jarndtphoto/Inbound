@@ -2569,7 +2569,8 @@ function baseCurrentStageOf(args) {
 	return "inbound";
 }
 export function postLandingState(args) {
-	const { ourLanded, ourLandingActual, gateInActual, parkedAtGate, live, dest } = args;
+	const { ourLanded, ourLandingActual, gateInActual, weakGateInActual = false, parkedAtGate, live, dest,
+		nowSec = Date.now() / 1000 } = args;
 	const landedEvidence = Boolean(ourLanded || ourLandingActual || gateInActual || parkedAtGate);
 	if (!landedEvidence) return "airborne";
 	const freshDestinationSurface = Boolean(
@@ -2585,7 +2586,15 @@ export function postLandingState(args) {
 	// feeds stamp gate-in several minutes early while the aircraft is visibly
 	// still taxiing. Only settle at Gate once that contradiction disappears.
 	if (freshTaxiing) return "taxi_in";
-	if (gateInActual || parkedAtGate) return "gate";
+	if (parkedAtGate) return "gate";
+	// FlightStats public is a schedule/status fallback, not physical ramp
+	// evidence. Its "Actual" arrival can lead the aircraft by many minutes.
+	// Give stronger providers immediate credit, but require a conservative
+	// grace period before an uncorroborated FlightStats gate-in can finish the
+	// passenger journey.
+	const weakGateMature = Boolean(weakGateInActual && gateInActual
+		&& Number.isFinite(nowSec) && nowSec - gateInActual >= 20 * 60);
+	if (gateInActual && (!weakGateInActual || weakGateMature)) return "gate";
 	// Once landing is latched, taxi-in is the durable intermediate state.
 	// Missing or stale surface ADS-B must not revert the passenger view to Landed.
 	return "taxi_in";
@@ -4150,6 +4159,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		distPark,
 		parkedAtGate,
 		gateInActual: aware?.gateIn?.actual ?? null,
+		weakGateInActual: scheduleSource === "flightstats_public",
+		nowSec,
 		currentFlightSurfaceConfirmed
 	};
 	const candidateStage = currentStageOf(stageArgs);
