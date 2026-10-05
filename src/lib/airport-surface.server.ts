@@ -35,6 +35,7 @@ type OverpassElement = {
 type CacheEntry = { value: AirportSurface; at: number };
 const cache = new Map<string, CacheEntry>();
 const pending = new Map<string, Promise<AirportSurface>>();
+const OVERPASS_TIMEOUT_MS = 14_000;
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -217,6 +218,11 @@ async function loadFaaAirportSurface(input: { airport: string; lat: number; lon:
 
 function validCoord(n: unknown, min: number, max: number): n is number {
   return typeof n === "number" && Number.isFinite(n) && n >= min && n <= max;
+}
+
+function compactError(error: unknown) {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  return String(error);
 }
 
 function normalizeKind(value: string | undefined, areaValue?: string | undefined): SurfaceFeature["kind"] | null {
@@ -440,12 +446,12 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
       const north = (input.lat + latPad).toFixed(6);
       const west = (input.lon - lonPad).toFixed(6);
       const east = (input.lon + lonPad).toFixed(6);
-      const query = `[out:json][timeout:10];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${south},${west},${north},${east});way["area:aeroway"="taxiway"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east});relation["area:aeroway"="taxiway"](${south},${west},${north},${east});way["aeroway"="aerodrome"](${south},${west},${north},${east});relation["aeroway"="aerodrome"](${south},${west},${north},${east}););out geom;`;
+      const query = `[out:json][timeout:16];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${south},${west},${north},${east});way["area:aeroway"="taxiway"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east});relation["area:aeroway"="taxiway"](${south},${west},${north},${east});way["aeroway"="aerodrome"](${south},${west},${north},${east});relation["aeroway"="aerodrome"](${south},${west},${north},${east}););out geom;`;
       const body = new URLSearchParams({ data: query }).toString();
       const json = await Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
         const response = await fetch(endpoint, {
           method: "POST",
-          signal: AbortSignal.timeout(6_000),
+          signal: AbortSignal.timeout(OVERPASS_TIMEOUT_MS),
           headers: {
             Accept: "application/json",
             "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
@@ -466,7 +472,9 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
       }
       console.warn("[airport-surface] OpenStreetMap returned too little geometry", airport, osm.features.length);
     } catch (error) {
-      console.warn("[airport-surface] OpenStreetMap load failed", airport, error instanceof Error ? error.message : String(error));
+      console.warn("[airport-surface] OpenStreetMap load failed", airport, error instanceof AggregateError
+        ? error.errors.map(compactError).join(" | ")
+        : compactError(error));
     }
 
     const faa = await loadFaaAirportSurface({ airport, lat: input.lat, lon: input.lon });
