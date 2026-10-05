@@ -400,11 +400,6 @@ export function buildAirportHydrography(input: {
   });
   const water = [...coastlineWater, ...clippedWater];
   const ocean = input.coastlines.length > 0 && (openOrIslandLand || !exteriorLandOnly);
-  if (input.coastlines.length > 0 && exteriorLandOnly && !openOrIslandLand) {
-    land.push({ outer: surfaceBoxRing(bounds), holes: coastlineWater.map(poly => poly.outer) });
-    coastlineWater.length = 0;
-  }
-
   const finalWater = [...coastlineWater, ...clippedWater];
   const waterFraction = sampleWaterFraction(bounds, ocean, land, finalWater);
   const runwayInWater = (input.runwayChecks ?? []).some(point => waterAt(point, ocean, land, finalWater));
