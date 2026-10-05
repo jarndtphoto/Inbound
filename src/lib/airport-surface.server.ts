@@ -484,7 +484,7 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
 
 function hydroOverpassQuery(bounds: SurfaceBounds) {
   const bbox = surfaceBoundsString(bounds);
-  return `(way["natural"="coastline"](${bbox});way["natural"="water"](${bbox});way["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox});relation["natural"="water"](${bbox});relation["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox}););out geom(${bbox});`;
+  return `(way["natural"="coastline"](${bbox});way["natural"="water"](${bbox});way["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox});relation["natural"="water"](${bbox});relation["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox}););out geom;`;
 }
 
 export function exactAirportSurfaceOverpassQuery(airport: string, input: { lat: number; lon: number }) {
