@@ -1,5 +1,6 @@
 import { advanceGroundMotion, type GroundMotionState } from "@/lib/ground-motion";
 import { phaseOf } from "@/lib/aircraft-phase";
+import { groundCoverageNotice } from "@/lib/ground-coverage";
 import { RouteMap } from "./route-map";
 import { getAirportSurfaceCached } from "@/lib/airport-surface";
 import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.server";
@@ -545,6 +546,11 @@ function GroundMovementMap({
   const fastStale = Boolean(!fast && fastFix);
   const delayedFast = Boolean(fast && (fastAge ?? Infinity) > 12);
   const displayFrozen = frozen && !(fast && (fastAge ?? Infinity) <= 30);
+  const coverageNotice = groundCoverageNotice({
+    kind: mode.kind,
+    airportIata: airport.iata,
+    hasReliableLiveGroundPosition: Boolean(fast),
+  });
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-surface">
@@ -601,6 +607,11 @@ function GroundMovementMap({
           <div className="pointer-events-none absolute left-4 right-4 top-4 rounded-xl border border-border bg-bg/95 px-4 py-4 text-center shadow-sm">
             <div className="font-display text-2xl font-bold tracking-tight">PLANE IS IN FLIGHT</div>
             <div className="mt-1 text-xs text-muted">{aircraft ? "Last known departure-ground position shown below." : "Departure ground tracking has ended for this flight."}</div>
+          </div>
+        ) : coverageNotice ? (
+          <div className="absolute top-3 left-3 right-3 max-w-sm rounded border border-border bg-bg/95 px-3 py-2 shadow-sm">
+            <div className="text-xs font-medium text-fg">{coverageNotice.headline}</div>
+            <div className="mt-1 text-[11px] leading-snug text-muted">{coverageNotice.detail}</div>
           </div>
         ) : !displayAircraft ? (
           <div className="absolute top-3 left-3 rounded bg-bg/90 px-3 py-2 text-xs text-muted">No ground position captured yet.</div>
