@@ -3012,14 +3012,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	]);
 	const operatingIdent = operatingIdentFromSchedule(publicAware, parsed.callsign);
 	const nowSec = Date.now() / 1000;
-	const departureClock = publicAware ? bestUnix(publicAware.gateOut) : null;
+	const fr24DepartureClock = publicAware ? bestUnix(publicAware.gateOut) : null;
 	const fr24SurfaceDeparture = Boolean(
 		publicAware &&
 		!publicAware?.takeoff?.actual &&
 		!publicAware?.landing?.actual &&
-		departureClock != null &&
-		nowSec >= departureClock - 2 * 60 * 60 &&
-		nowSec <= departureClock + 4 * 60 * 60
+		fr24DepartureClock != null &&
+		nowSec >= fr24DepartureClock - 2 * 60 * 60 &&
+		nowSec <= fr24DepartureClock + 4 * 60 * 60
 	);
 	const official = await loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
