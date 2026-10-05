@@ -3338,6 +3338,52 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		});
 	}
 	const snap = inboundSnapByFlight.get(snapKey) ?? null;
+
+	// When the current departure has not acquired a callsign/registration on the
+	// surface yet, reuse the exact aircraft identity from its assigned inbound
+	// turn after that inbound has reached the gate. This is identity evidence,
+	// not a stage guess: the candidate must be a fresh on-ground ADS-B fix at
+	// this origin and within the current departure window.
+	const departureClock = bestUnix(aware?.gateOut);
+	const turnTail = inboundAware?.tail ?? snap?.tail ?? null;
+	const turnHex = String(inboundAware?.hex ?? snap?.hex ?? "").toLowerCase() || null;
+	const inboundTurnComplete = Boolean(inboundAware?.gateIn?.actual || snap?.frozen);
+	const inDepartureWindow = Boolean(departureClock && nowUnix >= departureClock - 45 * 60 && nowUnix <= departureClock + 3 * 60 * 60);
+	const currentLiveAge = liveAgeSec(live) ?? Number.POSITIVE_INFINITY;
+	if (!ourAirborne && inboundTurnComplete && inDepartureWindow && (turnTail || turnHex)
+		&& (!live || live.extrapolated || currentLiveAge > 15)) {
+		const turnRaw = turnTail
+			? await safe(adsbByReg(turnTail), null)
+			: turnHex
+				? await safe(adsbByHex(turnHex), null)
+				: null;
+		const turnLive = turnRaw ? asOnGround(toLive(turnRaw), origin) : null;
+		const turnAge = liveAgeSec(turnLive) ?? Number.POSITIVE_INFINITY;
+		const turnAtOrigin = Boolean(turnLive && turnLive.onGround
+			&& haversineNm({ lat: turnLive.lat, lon: turnLive.lon }, origin) < 12);
+		const turnIdentityMatches = Boolean(turnLive && (
+			(turnTail && turnLive.registration
+				&& String(turnLive.registration).replace(/[-\s]/g, "").toUpperCase() === String(turnTail).replace(/[-\s]/g, "").toUpperCase())
+			|| (turnHex && String(turnLive.hex ?? "").toLowerCase() === turnHex)
+		));
+		if (turnAtOrigin && turnIdentityMatches && turnAge <= 30 && turnAge + 1 < currentLiveAge) {
+			live = turnLive;
+			if (turnLive.hex) {
+				knownHex = String(turnLive.hex).toLowerCase();
+				hexByIdent.set(stateIdent, knownHex);
+				hexRouteByIdent.set(stateIdent, routeKey);
+			}
+			console.info("[outbound-turn-recovery]", {
+				flight: parsed.iata,
+				inbound: inboundIdent,
+				registration: turnLive.registration ?? turnTail,
+				hex: turnLive.hex ?? turnHex,
+				ageSec: Math.round(turnAge),
+				gsKt: turnLive.gsKt ?? null,
+			});
+		}
+	}
+
 	const start = {
 		lat: origin.lat,
 		lon: origin.lon
