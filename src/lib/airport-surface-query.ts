@@ -8,7 +8,7 @@ export function airportSurfaceQueryOptions(airport: { icao: string; lat: number;
     queryFn: () => getAirportSurfaceCached(input),
     staleTime: 12 * 60 * 60_000,
     gcTime: 12 * 60 * 60_000,
-    retry: 1,
+    retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   };
