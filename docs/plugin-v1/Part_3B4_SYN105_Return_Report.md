@@ -82,13 +82,35 @@ replay/startup/lifecycle and build-audit evidence in the same directory.
 
 ## Deployment and next gate
 
-Source changes will be fast-forwarded on the existing
+Source changes were fast-forwarded on the existing
 `plugin-v1-flight-handoff` branch, whose automatic application deployment is
-already disabled. The startup correction and its evidence remain in the
-history. Only the private `inbound-live-fixture-dev` repository receives the
-three-file fixture deployment.
+already disabled. The startup correction and its evidence remain in history.
+Only the private `inbound-live-fixture-dev` repository received the three-file
+fixture deployment.
 
-The corrected Preview must be READY, its exact new hostname exception must be
-authorized, and public MCP verification must pass before requesting another
-manual ChatGPT retest. Global Standard Protection / Require Log In and all
-previous hostname exceptions remain unchanged. No subsequent stage is started.
+- Code/source SHA: `6e4d1fc8dde3164c15f913bb6aa6428237f83b3a`.
+- Fixture branch: `part-3b4-syn105-return-20261005`.
+- Fixture commit: `3c92ffee0c1070287003569843ed3ab9f6264b03`.
+- Fixture tree: `24c8aea7ab0de4f12fc618ecf1d7ccb9e43ea864`.
+- Server blob: `11fa1b808535cc44f06a07f5e94cf648d3e0c30b`, 409,053 bytes.
+- Deployment: `dpl_2UgGXdN3DxvvW3VZhb6iubd7SRar`, READY, Preview.
+- Exact hostname: `inbound-live-fixture-ra6kolsml-jarndtphoto.vercel.app`.
+- MCP: `https://inbound-live-fixture-ra6kolsml-jarndtphoto.vercel.app/mcp`.
+
+The remote tree contains exactly the three audited files with byte-identical
+blob SHAs. The dashboard independently shows READY, Preview, the expected
+branch/commit, and the exact hostname. Evidence:
+`verification/part-3b4/syn105-deployment-ready.jpg` and
+`verification/part-3b4/syn105-deployment.json`.
+
+The public unauthenticated MCP probe returned HTTP 302 / Protected by Vercel
+Authentication at 2026-10-05T14:21:10Z. Evidence:
+`verification/part-3b4/syn105-public-access.json`.
+No new protection exception has been added. The user's previous exact-host
+approval covered `ngc64c094`, not this new hostname. The connector confirms
+SSO protection remains enabled with `all_except_custom_domains`; no global
+setting, old exception, production domain, or previous deployment was changed.
+
+Stop for approval of an exception only for the new exact hostname. After that
+exception, complete public MCP verification and request a brand-new connector
+and chat for the actual host retest. Do not start a subsequent stage.
