@@ -9,18 +9,96 @@ const LIVE_POSITION_CACHE_MS = 5_000;
 let rateLimitedUntil = 0;
 const unix = (v: unknown) => typeof v === "number" ? v : typeof v === "string" ? Math.floor(new Date(v).getTime() / 1000) || null : null;
 
-async function get(path: string, ttlMs: number) {
+export type Fr24ProbeDiagnostics = {
+  upstream: "fresh" | "cached" | "none";
+  rowsReturned: number | null;
+  errorKind: "429" | "timeout" | "http" | "none";
+  statusCode: number | null;
+  rateLimitedUntilActive: boolean;
+  rawPosition: {
+    lat: number | null;
+    lon: number | null;
+    seenAt: number | null;
+    onGround: boolean | null;
+    altFt: number | null;
+  } | null;
+};
+
+export function createFr24ProbeDiagnostics(): Fr24ProbeDiagnostics {
+  return {
+    upstream: "none",
+    rowsReturned: null,
+    errorKind: "none",
+    statusCode: null,
+    rateLimitedUntilActive: false,
+    rawPosition: null,
+  };
+}
+
+function fr24ErrorKind(error: unknown): "429" | "timeout" | "http" {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/\b429\b/.test(message)) return "429";
+  if (/timeout|timed out|abort/i.test(message) || (error instanceof Error && /TimeoutError|AbortError/.test(error.name))) return "timeout";
+  return "http";
+}
+
+function logFr24Error(path: string, statusCode: number | null, errorKind: "429" | "timeout" | "http", activeAtStart: boolean) {
+  const params = new URLSearchParams(path.split("?")[1] ?? "");
+  console.warn(JSON.stringify({
+    event: "fr24_upstream_error",
+    timestamp: new Date().toISOString(),
+    endpoint: path.split("?")[0],
+    callsign: params.get("callsigns"),
+    registration: params.get("registrations"),
+    flight: params.get("flights"),
+    statusCode,
+    errorKind,
+    rateLimitedUntilActive: activeAtStart,
+  }));
+}
+
+async function get(path: string, ttlMs: number, probe?: Fr24ProbeDiagnostics) {
   const token = process.env.FR24_API_TOKEN?.trim();
-  if (!token) return null;
   const now = Date.now();
+  const activeAtStart = now < rateLimitedUntil;
+  if (probe) {
+    probe.upstream = "none";
+    probe.rowsReturned = null;
+    probe.errorKind = "none";
+    probe.statusCode = null;
+    probe.rateLimitedUntilActive = activeAtStart;
+    probe.rawPosition = null;
+  }
+  if (!token) return null;
   const hit = cache.get(path);
-  if (hit && now - hit.at < ttlMs) return hit.value;
-  if (now < rateLimitedUntil) {
+  if (hit && now - hit.at < ttlMs) {
+    if (probe) probe.upstream = "cached";
+    return hit.value;
+  }
+  if (activeAtStart) {
+    if (probe) {
+      probe.upstream = hit && now - hit.at <= LAST_GOOD_TTL_MS ? "cached" : "none";
+      probe.errorKind = "429";
+      probe.statusCode = 429;
+    }
     if (hit && now - hit.at <= LAST_GOOD_TTL_MS) return hit.value;
+    logFr24Error(path, 429, "429", true);
     throw new Error("FR24 API 429");
   }
   const existing = pending.get(path);
-  if (existing) return existing;
+  if (existing) {
+    if (probe) probe.upstream = "cached";
+    try {
+      return await existing;
+    } catch (error) {
+      if (probe) {
+        probe.errorKind = fr24ErrorKind(error);
+        probe.statusCode = probe.errorKind === "429" ? 429 : null;
+      }
+      throw error;
+    }
+  }
+  if (probe) probe.upstream = "fresh";
 
   const request = (async () => {
     const params = new URLSearchParams(path.split("?")[1] ?? "");
@@ -32,16 +110,43 @@ async function get(path: string, ttlMs: number) {
       endpoint: path.split("?")[0],
       cache: "miss",
     }));
-    const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, "Accept-Version": "v1", Accept: "application/json" }, signal: AbortSignal.timeout(5500) });
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, "Accept-Version": "v1", Accept: "application/json" }, signal: AbortSignal.timeout(5500) });
+    } catch (error) {
+      const errorKind = fr24ErrorKind(error);
+      if (probe) {
+        probe.errorKind = errorKind;
+        probe.statusCode = null;
+      }
+      logFr24Error(path, null, errorKind, activeAtStart);
+      throw error;
+    }
     if (!res.ok) {
       if (res.status === 429) {
         const retryAfter = Number(res.headers.get("retry-after"));
         const backoffMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(30_000, retryAfter * 1000) : 8_000;
         rateLimitedUntil = Math.max(rateLimitedUntil, Date.now() + backoffMs);
       }
+      const errorKind = res.status === 429 ? "429" : "http";
+      if (probe) {
+        probe.errorKind = errorKind;
+        probe.statusCode = res.status;
+      }
+      logFr24Error(path, res.status, errorKind, activeAtStart);
       throw new Error(`FR24 API ${res.status}`);
     }
-    const value = await res.json();
+    let value: unknown;
+    try {
+      value = await res.json();
+    } catch (error) {
+      if (probe) {
+        probe.errorKind = "http";
+        probe.statusCode = res.status;
+      }
+      logFr24Error(path, res.status, "http", activeAtStart);
+      throw error;
+    }
     cache.set(path, { at: Date.now(), value });
     return value;
   })().finally(() => pending.delete(path));
@@ -89,7 +194,7 @@ async function hydrateFr24Flight(f: any, fallbackIdent: string): Promise<Normali
   return flight;
 }
 
-async function loadFr24ByFilter(filter: "callsigns" | "registrations" | "flights", value: string, extraQuery = ""): Promise<NormalizedFlight | null> {
+async function loadFr24ByFilter(filter: "callsigns" | "registrations" | "flights", value: string, extraQuery = "", probe?: Fr24ProbeDiagnostics): Promise<NormalizedFlight | null> {
   if (!process.env.FR24_API_TOKEN?.trim()) return null;
   const normalizedValue = value.trim().toUpperCase();
   const stickyKey = `${filter}:${normalizedValue}${extraQuery ? `:${extraQuery}` : ""}`;
@@ -108,7 +213,7 @@ async function loadFr24ByFilter(filter: "callsigns" | "registrations" | "flights
 
   let data: any;
   try {
-    data = await get(`/live/flight-positions/full?${filter}=${encodeURIComponent(value)}${extraQuery}`, LIVE_POSITION_CACHE_MS);
+    data = await get(`/live/flight-positions/full?${filter}=${encodeURIComponent(value)}${extraQuery}`, LIVE_POSITION_CACHE_MS, probe);
   } catch (error) {
     const prior = previous();
     if (prior) return prior;
@@ -116,6 +221,17 @@ async function loadFr24ByFilter(filter: "callsigns" | "registrations" | "flights
   }
 
   const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+  if (probe) {
+    const raw = rows[0] ?? null;
+    probe.rowsReturned = rows.length;
+    probe.rawPosition = raw ? {
+      lat: Number.isFinite(raw.lat) ? raw.lat : null,
+      lon: Number.isFinite(raw.lon) ? raw.lon : null,
+      seenAt: unix(raw.timestamp),
+      onGround: typeof raw.on_ground === "boolean" ? raw.on_ground : Number.isFinite(raw.alt) ? raw.alt === 0 : null,
+      altFt: Number.isFinite(raw.alt) ? raw.alt : null,
+    } : null;
+  }
   const flight = await hydrateFr24Flight(rows[0], value);
   if (flight) {
     lastGood.set(stickyKey, { at: Date.now(), flight });
@@ -124,21 +240,21 @@ async function loadFr24ByFilter(filter: "callsigns" | "registrations" | "flights
   return previous();
 }
 
-export async function loadFr24Flight(ident: string): Promise<NormalizedFlight | null> {
-  return loadFr24ByFilter("callsigns", ident);
+export async function loadFr24Flight(ident: string, probe?: Fr24ProbeDiagnostics): Promise<NormalizedFlight | null> {
+  return loadFr24ByFilter("callsigns", ident, "", probe);
 }
 
-export async function loadFr24FlightByRegistration(registration: string): Promise<NormalizedFlight | null> {
+export async function loadFr24FlightByRegistration(registration: string, probe?: Fr24ProbeDiagnostics): Promise<NormalizedFlight | null> {
   const reg = registration.trim().toUpperCase();
   if (!reg) return null;
-  return loadFr24ByFilter("registrations", reg);
+  return loadFr24ByFilter("registrations", reg, "", probe);
 }
 
-export async function loadFr24FlightByNumber(flightNumber: string, bounds?: string): Promise<NormalizedFlight | null> {
+export async function loadFr24FlightByNumber(flightNumber: string, bounds?: string, probe?: Fr24ProbeDiagnostics): Promise<NormalizedFlight | null> {
   const flight = flightNumber.replace(/\s/g, "").trim().toUpperCase();
   if (!flight) return null;
   const extra = bounds ? `&bounds=${encodeURIComponent(bounds)}&limit=5` : "";
-  return loadFr24ByFilter("flights", flight, extra);
+  return loadFr24ByFilter("flights", flight, extra, probe);
 }
 
 export async function loadFr24FlightByNumberAndRoute(
