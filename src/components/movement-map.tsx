@@ -49,6 +49,10 @@ export function fitGroundSurfaceView(points: Array<{ x: number; y: number }>, pa
 
 type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
+
+function headingDelta(a: number, b: number) {
+  return Math.abs(((a - b + 540) % 360) - 180);
+}
 type MapTab = "departure" | "flight" | "arrival";
 type AircraftSnapshot = NonNullable<FlightStory["aircraft"]>;
 
@@ -355,35 +359,48 @@ function GroundMovementMap({
   const queriedFast = groundQ.data;
   if (queriedFast?.registration) groundIdentityRef.current.registration = queriedFast.registration;
   const queriedFastAge = queriedFast?.seenAt ? Math.max(0, Date.now() / 1000 - queriedFast.seenAt) : null;
-  const fast = storyFast ?? (queriedFast && (queriedFastAge ?? Infinity) <= 30 ? queriedFast : null);
+  const queriedCandidate = queriedFast && (queriedFastAge ?? Infinity) <= 30 ? queriedFast : null;
+  // Prefer whichever surface source has the newer observation. The 3-second
+  // ground observer should not be hidden behind an older story position.
+  const fast = [storyFast, queriedCandidate]
+    .filter((candidate): candidate is NonNullable<typeof storyFast> => Boolean(candidate))
+    .sort((a, b) => b.seenAt - a.seenAt)[0] ?? null;
   const fastKey = identityKey;
   const motionTrackRef = useRef<{
     key: string;
     point: { lat: number; lon: number; seenAt: number };
-    track: number | null;
+    derivedTrack: number | null;
   } | null>(null);
   if (fast) {
-    const providerTrack = typeof fast.track === "number" && Number.isFinite(fast.track) ? fast.track : null;
     const previous = motionTrackRef.current?.key === fastKey ? motionTrackRef.current : null;
-    let track = providerTrack ?? previous?.track ?? null;
-    if (providerTrack == null && previous) {
+    let derivedTrack = previous?.derivedTrack ?? null;
+    if (previous && fast.seenAt > previous.point.seenAt + 0.25) {
       const dt = fast.seenAt - previous.point.seenAt;
       const movedNm = haversineNm(previous.point, fast);
-      if (dt >= 0.5 && dt <= 20 && movedNm >= 0.004) {
-        track = initialBearing(previous.point, fast);
+      if (dt >= 0.5 && dt <= 45 && movedNm >= 0.004) {
+        derivedTrack = initialBearing(previous.point, fast);
       }
     }
     if (!previous || fast.seenAt > previous.point.seenAt + 0.25) {
       motionTrackRef.current = {
         key: fastKey,
         point: { lat: fast.lat, lon: fast.lon, seenAt: fast.seenAt },
-        track,
+        derivedTrack,
       };
-    } else if (providerTrack != null && previous.track !== providerTrack) {
-      motionTrackRef.current = { ...previous, track: providerTrack };
     }
   }
-  const motionTrack = motionTrackRef.current?.key === fastKey ? motionTrackRef.current.track : null;
+  const motionTrack = motionTrackRef.current?.key === fastKey ? motionTrackRef.current.derivedTrack : null;
+
+  const recentTrail = trail.filter((point) => haversineNm(point, airport) < 15).slice(-12);
+  let trailTrack: number | null = null;
+  for (let index = recentTrail.length - 1; index > 0; index -= 1) {
+    const current = recentTrail[index]!;
+    const previous = recentTrail[index - 1]!;
+    if (current.at - previous.at > 90_000) continue;
+    if (haversineNm(previous, current) < 0.004) continue;
+    trailTrack = initialBearing(previous, current);
+    break;
+  }
 
   const lastFastRef = useRef<{ key: string; fix: NonNullable<typeof fast> } | null>(null);
   if (fast) lastFastRef.current = { key: fastKey, fix: fast };
@@ -405,7 +422,12 @@ function GroundMovementMap({
     lon: fastFix.lon,
     altFt: fastFix.altFt ?? 0,
     gsKt: fastFix.gsKt ?? 0,
-    track: (typeof fastFix.track === "number" && Number.isFinite(fastFix.track) ? fastFix.track : null) ?? motionTrack ?? aircraft?.track ?? null,
+    track: (() => {
+      const providerTrack = typeof fastFix.track === "number" && Number.isFinite(fastFix.track) ? fastFix.track : null;
+      const movementTrack = motionTrack ?? trailTrack;
+      if (movementTrack != null && (providerTrack == null || headingDelta(providerTrack, movementTrack) >= 70)) return movementTrack;
+      return providerTrack ?? movementTrack ?? aircraft?.track ?? null;
+    })(),
     vertFpm: aircraft?.vertFpm ?? null,
     onGround: fastFix.onGround,
     phase: phaseOf({ ...fastFix, phaseVertFpm: aircraft?.phaseVertFpm }, { origin: story.origin, dest: story.dest, groundTaxiKt: 5 }),
@@ -513,6 +535,7 @@ function GroundMovementMap({
   const providerLabel = provider === "fr24" ? "FR24" : provider === "adsb" ? "ADS-B" : provider;
   const age = fastAge != null ? Math.max(0, Math.round(fastAge)) : typeof story.providers?.chosenPositionAgeSec === "number" ? Math.max(0, Math.round(story.providers.chosenPositionAgeSec)) : null;
   const fastStale = Boolean(!fast && fastFix);
+  const delayedFast = Boolean(fast && (fastAge ?? Infinity) > 12);
   const displayFrozen = frozen && !(fast && (fastAge ?? Infinity) <= 30);
 
   return (
@@ -520,11 +543,11 @@ function GroundMovementMap({
       <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-2">
         <div>
           <p className="font-mono text-[11px] tracking-widest text-subtle uppercase">{mode.kind === "departure" ? "Departure ground" : "Arrival ground"}</p>
-          <p className="font-display text-base font-semibold">{airport.iata} · {displayFrozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? `holding last ${providerLabel} fix` : displayAircraft ? "live movement" : "airport surface"}</p>
+          <p className="font-display text-base font-semibold">{airport.iata} · {displayFrozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? `holding last ${providerLabel} fix` : delayedFast ? `delayed ${providerLabel} position` : displayAircraft ? "live movement" : "airport surface"}</p>
         </div>
         <div className="text-right font-mono text-[10px] leading-tight text-muted">
           {inFlight ? <div>Plane in flight</div> : displayAircraft ? <div>{Math.round(displayAircraft.gsKt ?? 0)} kt · {displayFrozen ? "frozen" : displayAircraft.onGround ? "ground" : `${Math.round(displayAircraft.altFt ?? 0)} ft`}</div> : <div>Awaiting aircraft</div>}
-          <div>{displayFrozen ? "last known ground fix" : inFlight ? "departure complete" : `${providerLabel}${age != null ? ` · ${age}s` : ""}${fastStale ? " · held" : ""}`}</div>
+          <div>{displayFrozen ? "last known ground fix" : inFlight ? "departure complete" : `${providerLabel}${age != null ? ` · ${age}s` : ""}${fastStale ? " · held" : delayedFast ? " · delayed" : ""}`}</div>
         </div>
       </div>
       <div ref={zoom.boxRef} className="relative min-h-0 flex-1 overflow-hidden bg-bg" style={{ touchAction: "none" }}>
