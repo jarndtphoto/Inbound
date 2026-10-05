@@ -165,6 +165,31 @@ The deployed widget script also exactly matches the tested compiled artifact:
 SHA-256 `7b737d25e3193ab7be2dac8db6691125e40080b4294e42ceac40b6047d55b73f`.
 Evidence: `verification/part-3b4/syn105-public-artifact.json`.
 
+## Actual-host chooser re-entry correction deployment
+
+The host re-entry bug above is patched without touching the Inbound app,
+`main`, or production. Candidate-choice detail is no longer cached as the
+next default occurrence, and the return proof now contains the exact host
+regression sequence.
+
+- Source branch at deployment: `plugin-v1-flight-handoff`.
+- Source head at deployment: `a970e6cc9b1de978f8c7762cbbe077960cb095fe`.
+- Source deploy blob: `4dc7d3bdcc3c0cb521dcbb5c9ea25c91357d208d`.
+- Fixture branch: `part-3b4-syn105-return-20261005`.
+- Fixture commit: `0db4be2b342dbcb1316dfdc1f8969f054df887ac`.
+- Fixture tree: `7b91f772cff3eb06b8bf0a148234511ff7d57349`.
+- Fixture server blob: `4dc7d3bdcc3c0cb521dcbb5c9ea25c91357d208d`.
+- Deployment: `dpl_A6qfuUj1MLWbUG9uV3w9xjX1Mnnm`, READY, Preview.
+- Exact hostname: `inbound-live-fixture-eqhshvwuc-jarndtphoto.vercel.app`.
+- MCP: `https://inbound-live-fixture-eqhshvwuc-jarndtphoto.vercel.app/mcp`.
+
+The protected deployment responds correctly through authenticated Vercel
+access (GET `/mcp` -> 405 with `Allow: POST`, `no-store`, fixture-only and
+static-isolation headers). Project SSO / Require Log In remains enabled with
+`all_except_custom_domains`. No protection setting has been changed for this
+new deployment. A new exact-host exception is required before public MCP and
+actual ChatGPT host verification can resume.
+
 ## Required actual ChatGPT retest
 
 Public verification is complete; actual host approval is still pending.
