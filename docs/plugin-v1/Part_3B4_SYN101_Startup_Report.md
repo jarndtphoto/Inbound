@@ -56,16 +56,63 @@ explicit dated choice, and Back to Radar retain request correlation.
 
 The remote fixture tree was checked: exactly the same three permitted files;
 the server blob is `d076a19d864c1e8a1fb6f7df36123f7662caa03d`, matching the
-locally tested build. Public unauthenticated access returned HTTP 302 and
-`Protected by Vercel Authentication`. Public MCP verification and the actual
-ChatGPT host retest remain pending.
+locally tested build. An initial public request returned HTTP 302 and
+`Protected by Vercel Authentication`. The user then authorized the Vercel
+dashboard fallback and an exception for this exact hostname.
 
-No protection settings were changed. The connector can read this deployment
-but lacks an exact-host exception action. Browser fallback permission is needed
-before adding an exception only for
-`inbound-live-fixture-ngc64c094-jarndtphoto.vercel.app` in the isolated project,
-while retaining global Standard Protection / Require Log In. The existing
+## Public verification and protection
+
+The dashboard now lists only the new exact hostname in addition to the eight
+pre-existing exceptions. Require Log In is checked and Standard Protection
+remains selected. The connector independently confirms SSO protection is
+enabled with `all_except_custom_domains`. No wildcard, project-wide automation
+bypass, production exception, or other hostname change was made. The existing
 `evm5eupb3` preview and all previous exceptions remain unchanged.
 
-Do not proceed beyond Part 3B.4. After that one hostname exception is authorized
-and confirmed, verify the public MCP and obtain the manual ChatGPT host retest.
+Evidence: `verification/part-3b4/startup-protection-exception.jpg` and
+`verification/part-3b4/startup-protection-verification.json`.
+
+Public MCP verification completed at 2026-10-05T13:39:43Z:
+
+- 30 RPC requests; 13 assertion groups; zero failures.
+- Public unauthenticated MCP GET returns the expected 405, without an SSO
+  redirect. Initialization, exact three-tool listing, and widget retrieval pass.
+- Chicago, ORD, and MDW pass; Radar is bounded at 100 and Featured at five.
+  This run observed the healthy 39-aircraft post-retirement board and a later
+  authoritative collection refresh.
+- SYN101 resolves to one exact dated occurrence. SYN105 returns two dated
+  candidates and resolves only through an explicit opaque candidate choice.
+- Invalid and expired tokens, callsign-only resolution, mutation attempts,
+  unknown methods, unsupported inputs, and hostile origins are rejected.
+- `Cache-Control: no-store`, `X-Inbound-Fixture-Only: true`, and
+  `X-Inbound-Egress: static-isolation` pass. Provider calls, production API
+  calls, and production database access remain zero.
+
+Evidence: `verification/part-3b4/startup-public-verification.json`.
+The deployed widget script exactly matches the tested compiled widget script;
+SHA-256 `5d10191549e675f42f3fa62cf785bf8254a5bc41dbbc66870571c31943441487`.
+Evidence: `verification/part-3b4/startup-public-artifact.json`.
+
+## Manual ChatGPT host retest
+
+This correction is publicly verified, but is not yet host-approved. Stop
+within Part 3B.4 until the actual ChatGPT retest is reported.
+
+1. Create a brand-new connector named `Inbound Live Part 3B.4 Startup Fix`,
+   using the new MCP URL above and No authentication. Start a new chat with
+   that connector.
+2. Ask `Open the invented Inbound Live Radar near Chicago.` Initialization
+   must remain on Radar; SYN101 must resume motion automatically when the
+   embedded resource is aged.
+3. Select SYN101 and wait. Detail must open only after Track flight. Press
+   Back to Radar, wait, and reselect SYN101; old detail must not replay.
+4. Select SYN105, press Track flight, confirm two dated choices, choose one,
+   and return to Radar. Old chooser/detail must not replay.
+5. Around T+30 switch Chicago → ORD → MDW and immediately select an aircraft.
+   Exercise Radar → Flights → Radar and multiple selections.
+6. Wait through 20, 40, 60, and 90 seconds without manual Refresh. Healthy
+   operation must recover automatically, while a genuine outage still stops
+   motion at 25 seconds.
+
+Production, main, the Inbound app, and all previous deployments are untouched.
+No merge or subsequent stage has been started.

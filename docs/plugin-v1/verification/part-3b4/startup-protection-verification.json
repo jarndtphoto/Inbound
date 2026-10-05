@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "verifiedAt": "2026-10-05T13:41:14.198Z",
+  "project": "inbound-live-fixture-dev",
+  "projectId": "prj_J4TIKK2XniE63LqljmrGpU6ypvRd",
+  "deploymentId": "dpl_EtX8PXtHdHpQ3pss9S8LXn7uMvUA",
+  "addedExceptionHostname": "inbound-live-fixture-ngc64c094-jarndtphoto.vercel.app",
+  "dashboard": {
+    "requireLogInChecked": true,
+    "protectionMode": "Standard Protection",
+    "previousExceptionHostnames": [
+      "inbound-live-fixture-8lq158y26-jarndtphoto.vercel.app",
+      "inbound-live-fixture-qfln7wi7t-jarndtphoto.vercel.app",
+      "inbound-live-fixture-rf27hpb80-jarndtphoto.vercel.app",
+      "inbound-live-fixture-d6eedvyfd-jarndtphoto.vercel.app",
+      "inbound-live-fixture-mwgaf6eqv-jarndtphoto.vercel.app",
+      "inbound-live-fixture-i51j9i7mu-jarndtphoto.vercel.app",
+      "inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app",
+      "inbound-live-fixture-evm5eupb3-jarndtphoto.vercel.app"
+    ],
+    "exceptionCountBefore": 8,
+    "exceptionCountAfter": 9,
+    "screenshot": "startup-protection-exception.jpg"
+  },
+  "connector": {
+    "ssoProtection": {
+      "enabled": true,
+      "deploymentType": "all_except_custom_domains"
+    }
+  },
+  "wildcardAdded": false,
+  "projectWideBypassAdded": false,
+  "productionExceptionAdded": false,
+  "otherHostnamesChanged": false,
+  "actualChatGptHostApproved": false
+}
