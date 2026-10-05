@@ -109,6 +109,7 @@ const PROVIDER_ORDER: ProviderId[] = ["fi", "lol", "al"];
 
 type Health = { fails: number; until: number; lastOk: number };
 const health = new Map<ProviderId, Health>();
+const providerLogAt = new Map<string, number>();
 const observations = new Map<string, Observation[]>();
 const tracks = new Map<string, TrackState>();
 const lastAround = new Map<string, { at: number; ac: AdsbRaw[] }>();
@@ -430,13 +431,39 @@ async function fetchJson(url: string, ms: number): Promise<unknown> {
 }
 
 export async function fetchProvider(id: ProviderId, url: string, now = Date.now()): Promise<AdsbRaw[]> {
-  if (!providerHealthy(id, now)) return [];
+  if (!providerHealthy(id, now)) {
+    const h = health.get(id);
+    const key = `${id}:backoff`;
+    if (now - (providerLogAt.get(key) ?? 0) >= 5_000) {
+      providerLogAt.set(key, now);
+      console.warn("[adsb-provider-backoff]", {
+        provider: id,
+        remainingMs: Math.max(0, (h?.until ?? now) - now),
+        failures: h?.fails ?? 0,
+      });
+    }
+    return [];
+  }
   try {
     const json = await fetchJson(url, PROVIDERS[id].timeoutMs);
     markProviderOk(id, now);
     return acList(json);
-  } catch {
+  } catch (error) {
     markProviderFail(id, now);
+    const h = health.get(id);
+    const key = `${id}:fail`;
+    if (now - (providerLogAt.get(key) ?? 0) >= 5_000) {
+      providerLogAt.set(key, now);
+      let host = "";
+      try { host = new URL(url).hostname; } catch {}
+      console.warn("[adsb-provider-fail]", {
+        provider: id,
+        host,
+        error: error instanceof Error ? error.message : String(error),
+        backoffMs: Math.max(0, (h?.until ?? now) - now),
+        failures: h?.fails ?? 0,
+      });
+    }
     return [];
   }
 }
