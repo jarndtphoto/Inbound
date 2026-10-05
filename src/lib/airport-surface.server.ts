@@ -499,7 +499,8 @@ export function exactAirportSurfaceOverpassQuery(airport: string, input: { lat: 
     clauses.push(`way["aeroway"="aerodrome"]["ref"="${value}"];`);
     clauses.push(`relation["aeroway"="aerodrome"]["ref"="${value}"];`);
   }
-  const bounds = airportSurfaceBounds(input);\n  return `[out:json][timeout:8];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];);out geom;${hydroOverpassQuery(bounds)}`;
+  const bounds = airportSurfaceBounds(input);
+  return `[out:json][timeout:8];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];);out geom;${hydroOverpassQuery(bounds)}`;
 }
 
 export function boxedAirportSurfaceOverpassQuery(input: { lat: number; lon: number }) {
