@@ -24,6 +24,27 @@ the proven cause of the user's Back failure. The Vercel runtime-log request
 timed out without returning logs.
 Evidence: `verification/part-3b4/syn105-return-before.json`.
 
+### Actual host re-entry failure — 2026-10-05
+
+The next real ChatGPT host retest confirmed that Back itself now returns to
+Radar and SYN101 Track -> Back stays on Radar. Automatic Nearby refresh also
+continued without manual Refresh, with visible aircraft updates arriving at
+irregular intervals.
+
+SYN105 exposed a separate local-state regression. The first Track action showed
+two dated choices, the selected date opened correctly, and Back returned to
+Radar. After selecting SYN105 and pressing Track again, the widget skipped the
+two-date chooser and reopened the previously chosen exact occurrence. About
+this preview reported `Host bridge connected`, `Last action: track-flight`, and
+`Last UI error: none`, so this was not a host-bridge exception or retained
+host replay.
+
+Root cause: every resolved handoff was written into `resolvedInstances`,
+including a response produced by an explicit ambiguity `choice`. The next Track
+action therefore used `get_flight(kind: instance)` instead of resolving the
+Nearby selection again, silently promoting one dated choice into a sticky
+default for that aircraft.
+
 ## Correction
 
 Only the isolated Radar Preview uses the new fixture handoff service. It uses
@@ -51,6 +72,13 @@ validated, and dated-choice buttons stay mounted across age updates.
 The existing About-this-preview diagnostic now reports the current view,
 last UI action, and last UI error for the next actual-host test.
 
+Candidate-choice responses are now deliberately non-sticky. Choosing a SYN105
+date clears any stale exact-instance cache for that aircraft, and the resolved
+choice is used only for the current detail view. Only direct unambiguous
+resolution / exact-instance reads may populate `resolvedInstances`. Therefore,
+after Back to Radar, reselecting SYN105 and pressing Track must resolve the
+Nearby selection again and present both dated choices.
+
 The 25-second motion limit, maximum three short retries per trajectory, and
 singleton RAF/poll/age loops remain in place. A 38-nm narrow Radar view moves
 subtly at real-time fixture speeds; a stopped-motion notice is a failed or
@@ -61,10 +89,11 @@ delayed refresh, not an animation speed setting.
 - Independent-worker unit coverage: both SYN105 dated choices, SYN101 direct
   resolution, cold-worker exact instances, explicit date/route lookup,
   tampering, request-kind substitution, deployment isolation, and expiry.
-- New compiled return proof: three alternating independent workers; seven
-  assertion groups; zero browser errors. It covers stable candidate focus,
-  invalid-choice Back, malformed optional context, replay rejection, late
-  direct responses, Back from Flights, Radar tab exit, and automatic refresh.
+- The prior compiled return proof passed seven assertion groups with zero
+  browser errors. The proof script now adds the actual-host regression: after
+  choosing a SYN105 date and returning to Radar, a fresh Track action must show
+  both dated choices again rather than reuse the previous exact occurrence.
+  This updated proof must be rerun for the corrected deployment.
 - Existing compiled replay proof: five groups, zero failures/errors.
 - Existing compiled startup proof: fresh, 30-second-old, and 130-second-old
   resources recover correctly.
@@ -149,9 +178,10 @@ that connector, and ask `Open the invented Inbound Live Radar near Chicago.`
    Select SYN101 again; navigation must require a fresh Track flight action.
 3. Select SYN105, wait, then press Track flight. Confirm two dated choices.
    Choose the first option, press Back to Radar, and confirm the map returns.
-4. Repeat SYN105 with the second dated option. Back must return to the map,
-   and the old chooser/detail must not replay. Back must also work from an
-   unavailable-flight panel if one occurs.
+4. After Back, reselect SYN105 and press Track again. The two dated choices
+   must appear again; the previously chosen exact occurrence must not reopen
+   automatically. Choose the other date, then Back to Radar. Back must also
+   work from an unavailable-flight panel if one occurs.
 5. Around T+30, switch Chicago -> ORD -> MDW and immediately select an aircraft.
    Exercise Radar -> Flights -> Radar and several selections.
 6. Wait through 20, 40, 60, and 90 seconds without manual Refresh. Healthy
