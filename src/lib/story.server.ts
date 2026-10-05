@@ -928,12 +928,15 @@ function fusePacks(packs, airside) {
 async function adsbByCallsign(callsign) {
 	const u = String(callsign || "").replace(/\s/g, "").toUpperCase();
 	if (!u) return null;
-	return cached(`cs4:${u}`, 2000, async () => {
-		const iata = displayIata(u, null).replace(/\s/g, "");
-		const idents = [...new Set([u, iata])].filter(Boolean).slice(0, 2);
-		const packs = (await Promise.all(idents.map((v) => fetchByCallsign(v)))).flat();
+	return cached(`cs5:${u}`, 5000, async () => {
 		const variants = new Set(callsignVariants(u));
-		return fusePacks(packs, false).find((a) => variants.has(String(a.flight ?? "").replace(/\s/g, "").toUpperCase())) ?? null;
+		const primary = fusePacks(await fetchByCallsign(u), false)
+			.find((a) => variants.has(String(a.flight ?? "").replace(/\s/g, "").toUpperCase())) ?? null;
+		if (primary) return primary;
+		const iata = displayIata(u, null).replace(/\s/g, "");
+		if (!iata || iata === u) return null;
+		return fusePacks(await fetchByCallsign(iata), false)
+			.find((a) => variants.has(String(a.flight ?? "").replace(/\s/g, "").toUpperCase())) ?? null;
 	});
 }
 async function adsbByReg(reg) {
@@ -946,7 +949,7 @@ async function adsbByReg(reg) {
 }
 async function adsbAround(lat, lon, dist) {
 	const key = `around:${lat.toFixed(2)}:${lon.toFixed(2)}:${dist}`;
-	return cached(`around7:${key}`, 2000, async () => {
+	return cached(`around8:${key}`, 6000, async () => {
 		const packs = await fetchAround(lat, lon, dist);
 		let fused = fusePacks(packs, dist <= 24);
 		if (!fused.length) fused = lastGoodAround(key) ?? [];
@@ -3008,7 +3011,16 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		safe(loadRoute(parsed.callsign), null),
 	]);
 	const operatingIdent = operatingIdentFromSchedule(publicAware, parsed.callsign);
-	const fr24SurfaceDeparture = Boolean(publicAware?.gateOut?.actual && !publicAware?.takeoff?.actual && !publicAware?.landing?.actual);
+	const nowSec = Date.now() / 1000;
+	const departureClock = publicAware ? bestUnix(publicAware.gateOut) : null;
+	const fr24SurfaceDeparture = Boolean(
+		publicAware &&
+		!publicAware?.takeoff?.actual &&
+		!publicAware?.landing?.actual &&
+		departureClock != null &&
+		nowSec >= departureClock - 2 * 60 * 60 &&
+		nowSec <= departureClock + 4 * 60 * 60
+	);
 	const official = await loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
 		fr24OriginIata: publicAware?.originIata ?? null,
