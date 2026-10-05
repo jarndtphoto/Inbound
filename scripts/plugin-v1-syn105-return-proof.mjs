@@ -103,10 +103,28 @@ try {
     await frame.locator('#back-radar').click(); await page.evaluate(() => window.replay());
     assert.equal((await read()).handoffMode, 'nearby'); assert.ok(await frame.locator('#radar-panel').isVisible());
     assertions.push('SYN105 second dated choice resolves across alternating workers; Back ignores retained ambiguity/detail/error replays');
+
+    // Actual ChatGPT host regression: after Back, tracking SYN105 again must
+    // reopen the two dated choices instead of reusing the prior chosen instance.
+    await ambiguous();
+    assert.equal(await frame.locator('.candidate').count(), 2);
+    assertions.push('After Back, reselecting SYN105 and Track flight reopens both dated choices instead of the previous exact occurrence');
+    await frame.locator('.candidate').first().click();
+    await waitFor(page, () => document.getElementById('radar').contentWindow.inboundRadarProof.read().handoffMode === 'detail');
+    await frame.locator('#back-radar').click();
+
     await frame.locator('#view-flights').click(); await frame.locator('#track-flight').click();
+    await waitFor(page, () => document.getElementById('radar').contentWindow.inboundRadarProof.read().handoffMode === 'ambiguous');
+    assert.equal(await frame.locator('.candidate').count(), 2);
+    await frame.locator('.candidate').first().click();
     await waitFor(page, () => document.getElementById('radar').contentWindow.inboundRadarProof.read().handoffMode === 'detail');
     await frame.locator('#back-radar').click(); assert.equal((await read()).selectedView, 'radar');
     assertions.push('Back entered from Flights opens the Radar map and retains the selected aircraft');
+
+    const syn101 = '[data-radar-id="00000000-0000-4000-8000-000000003e80"]';
+    await frame.locator(syn101).press('Enter'); await frame.locator('#track-flight').click();
+    await waitFor(page, () => document.getElementById('radar').contentWindow.inboundRadarProof.read().handoffMode === 'detail');
+    await frame.locator('#back-radar').click();
     await page.evaluate(() => { window.hold = true; }); await frame.locator('#track-flight').click();
     await waitFor(page, () => window.held.length === 1); await frame.locator('#back-radar').click();
     await page.evaluate(() => { window.release(); window.hold = false; }); await delay(30);
