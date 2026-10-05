@@ -325,6 +325,7 @@ function GroundMovementMap({
   // Keep using the leg-specific resume tail/hex as an identity hint for the
   // arrival ground lookup; it is never used as a position by itself.
   const identityRegistration = aircraft?.registration ?? storyAircraft?.registration ?? story.resume?.tail ?? null;
+  const identityHex = (aircraft?.hex ?? storyAircraft?.hex ?? story.resume?.hex ?? null)?.replace(/^~+/, "").toLowerCase() || null;
   const identityCallsign = aircraft?.callsign ?? storyAircraft?.callsign ?? story.callsign;
   const identityKey = `${story.flightId ?? story.iata}:${airport.iata}:${mode.kind}`;
   const groundIdentityRef = useRef<{ key: string; registration: string | null }>({ key: identityKey, registration: identityRegistration });
@@ -334,19 +335,20 @@ function GroundMovementMap({
     groundIdentityRef.current.registration = identityRegistration;
   }
   const groundQ = useQuery({
-    queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, mode.kind, identityRegistration ?? "", identityCallsign],
+    queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, mode.kind, identityHex ?? "", identityRegistration ?? "", identityCallsign],
     queryFn: () => getGroundPosition({ data: {
       callsign: identityCallsign,
       flightId: story.flightId ?? null,
       flightNumber: story.iata ?? null,
       registration: groundIdentityRef.current.registration ?? identityRegistration,
+      hex: identityHex,
       originIata: story.origin.iata ?? null,
       destIata: story.dest.iata ?? null,
       movementKind: mode.kind,
       airportLat: airport.lat,
       airportLon: airport.lon,
     } }),
-    enabled: groundPollingEnabled(active, pageVisible, flightPollingComplete(story), inFlight, Boolean(storyFast), Boolean(identityRegistration || identityCallsign)),
+    enabled: groundPollingEnabled(active, pageVisible, flightPollingComplete(story), inFlight, Boolean(storyFast), Boolean(identityHex || identityRegistration || identityCallsign)),
     refetchInterval: () => active && document.visibilityState === "visible" && !flightPollingComplete(story) ? 3_000 : false,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
