@@ -1,6 +1,6 @@
 import { rolldown } from 'rolldown';
 import { readFile, mkdir, writeFile, cp } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { assertRadarApplication, assertRadarPayload, RADAR_PREVIEW_PACKAGE, RADAR_PREVIEW_CONFIG } from './plugin-v1-radar-isolation.mjs';
 
@@ -15,14 +15,17 @@ const shared = [
 const permitted = new Set([...shared,
   'src/lib/plugin-v1/radar-proof-preview.ts', 'src/lib/plugin-v1/radar-proof-server.ts',
   'src/lib/plugin-v1/radar-proof-engine.server.ts', 'src/lib/plugin-v1/radar-proof-store.ts',
+  'src/lib/plugin-v1/handoff-service.server.ts', 'src/lib/plugin-v1/handoff-store.server.ts',
   'src/lib/plugin-v1/radar-widget.ts', 'src/lib/plugin-v1/radar-renderer.ts',
   'src/lib/nearby-v1/engine.server.ts', 'src/lib/nearby-v1/collection.ts',
   'src/lib/nearby-v1/views.ts', 'src/lib/nearby-v1/route-enrichment.ts', 'src/lib/nearby-v1/route-hints.ts',
 ].map(path => resolve(path)));
 const acquisition = resolve('src/lib/nearby-v1/acquisition.server.ts');
 const sqlStore = resolve('src/lib/nearby-v1/store.server.ts');
+const handoffDb = resolve('src/lib/db.ts');
 const serverPath = resolve('src/lib/plugin-v1/radar-proof-server.ts');
 const isZod = id => id.includes('/node_modules/zod/');
+const diagnosticModule = id => isZod(id) ? `node_modules/zod/${id.split('/node_modules/zod/')[1]}` : relative(process.cwd(), id);
 const globals = 'const radarGlobals = { __zod_globalConfig: { jitless: true } };';
 const diagnostics = [];
 
@@ -34,6 +37,7 @@ async function bundle(input, platform, embedded) {
       // production constructors become explicit rejecting proof guards.
       if (id === acquisition) return 'export async function acquireNearbyChicago(){throw new Error("Only explicitly injected invented acquisition is permitted in this proof.");}';
       if (id === sqlStore) return 'export function createNearbyCollectionStore(){throw new Error("Only explicitly injected fake proof storage is permitted.");}';
+      if (id === handoffDb) return 'export const dbSource="unavailable";export function getSql(){throw new Error("Database access is absent from the isolated proof.");}';
       if (id === serverPath && embedded) {
         const source = await readFile(id, 'utf8');
         return source.replace('import { readFileSync } from "node:fs";\n', '')
@@ -51,7 +55,7 @@ async function bundle(input, platform, embedded) {
     if (output.length !== 1 || output[0].type !== 'chunk') throw new Error('Expected exactly one self-contained Radar chunk.');
     const chunk = output[0];
     const modules = Object.keys(chunk.modules);
-    if (modules.some(id => !isZod(id) && !permitted.has(id) && id !== acquisition && id !== sqlStore)) throw new Error('Unexpected Radar proof module.');
+    if (modules.some(id => !isZod(id) && !permitted.has(id) && id !== acquisition && id !== sqlStore && id !== handoffDb)) throw new Error('Unexpected Radar proof module.');
     if (chunk.imports.some(id => platform === 'browser' || id !== 'node:crypto')) throw new Error('Unexpected Radar proof external import.');
     try { assertRadarApplication(chunk.code, { widget: platform === 'browser' }); }
     catch (error) {
@@ -59,7 +63,8 @@ async function bundle(input, platform, embedded) {
       await writeFile(`artifacts/plugin-v1-radar-rejected-${platform}.js`, chunk.code);
       throw error;
     }
-    diagnostics.push({ input, platform, modules, externalImports: chunk.imports, bytes: Buffer.byteLength(chunk.code), sha256: createHash('sha256').update(chunk.code).digest('hex') });
+    diagnostics.push({ input, platform, modules: modules.map(diagnosticModule), externalImports: chunk.imports,
+      bytes: Buffer.byteLength(chunk.code), sha256: createHash('sha256').update(chunk.code).digest('hex') });
     return chunk.code;
   } finally { await build.close(); }
 }
@@ -77,6 +82,6 @@ await writeFile(`${directory}/vercel.json`, JSON.stringify(RADAR_PREVIEW_CONFIG,
 await assertRadarPayload(directory);
 await cp(directory, 'deploy/plugin-v1-radar-preview', { recursive: true });
 await assertRadarPayload('deploy/plugin-v1-radar-preview');
-await mkdir('docs/plugin-v1/verification/part-3b3', { recursive: true });
-await writeFile('docs/plugin-v1/verification/part-3b3/build-audit.json', JSON.stringify({ fakeAircraftOnly: true, productionSql: false, providerCalls: 0, productionApiCalls: 0, diagnostics, files: ['api/mcp.js', 'package.json', 'vercel.json'] }, null, 2)+'\n');
+await mkdir('docs/plugin-v1/verification/part-3b4', { recursive: true });
+await writeFile('docs/plugin-v1/verification/part-3b4/build-audit.json', JSON.stringify({ fakeAircraftOnly: true, productionSql: false, providerCalls: 0, productionApiCalls: 0, diagnostics, files: ['api/mcp.js', 'package.json', 'vercel.json'] }, null, 2)+'\n');
 console.log(JSON.stringify({ directory: 'deploy/plugin-v1-radar-preview', bytes: Buffer.byteLength(application), widgetBytes: Buffer.byteLength(widget), modules: diagnostics.map(entry => entry.modules.length), files: 3, providerCalls: 0 }));

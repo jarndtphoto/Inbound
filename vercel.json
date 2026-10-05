@@ -3,7 +3,8 @@
   "git": {
     "deploymentEnabled": {
       "plugin-v1-foundation": false,
-      "plugin-v1-radar-transport": false
+      "plugin-v1-radar-transport": false,
+      "plugin-v1-flight-handoff": false
     }
   }
 }

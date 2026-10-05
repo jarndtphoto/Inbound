@@ -46,7 +46,7 @@ test("Radar proof deploys exactly three audited files byte-identical to its sepa
   // preserve the existing foundation guard without changing global settings.
   assert.deepEqual(JSON.parse(await readFile("vercel.json", "utf8")), {
     $schema: "https://openapi.vercel.sh/vercel.json",
-    git: { deploymentEnabled: { "plugin-v1-foundation": false, "plugin-v1-radar-transport": false } },
+    git: { deploymentEnabled: { "plugin-v1-foundation": false, "plugin-v1-radar-transport": false, "plugin-v1-flight-handoff": false } },
   });
 });
 

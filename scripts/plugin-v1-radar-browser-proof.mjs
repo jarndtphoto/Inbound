@@ -12,8 +12,9 @@ import { installTestClock } from './test-clock.mjs';
 // Actual isolated engine/serializer/MCP/widget, with invented data. The parent
 // below SIMULATES host messages only: this does not certify a ChatGPT host or PiP.
 const compiled = process.argv.includes('--compiled');
+const handoff = process.argv.includes('--part-3b4');
 const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
-const evidence = resolve('docs/plugin-v1/verification/part-3b3');
+const evidence = resolve(`docs/plugin-v1/verification/${handoff ? 'part-3b4' : 'part-3b3'}`);
 const suffix = compiled ? '-compiled' : '';
 mkdirSync(evidence, { recursive: true });
 let simulationNow = Date.parse('2026-10-04T03:00:06Z');
@@ -162,8 +163,8 @@ try {
   assert.equal(await locate(page, neutral.radarId).getAttribute('data-track'), 'neutral');
   assert.equal(await locate(page, neutral.radarId).locator('.aircraft-glyph').evaluate(node => node.style.transform), '');
   assert.match(await locate(page, moving.radarId).locator('.aircraft-glyph').evaluate(node => node.style.transform), /rotate\(/);
-  assert.equal(await page.locator('#track-flight').isEnabled(), false);
-  assertions.push('Forty invented targets render directional accepted track and a neutral missing-track symbol; Track flight remains disabled');
+  assert.equal(await page.locator('#track-flight').isEnabled(), true);
+  assertions.push('Forty invented targets render directional accepted track and a neutral missing-track symbol; exact selectable SYN101 enables explicit Track flight');
 
   const beforeMotionCalls = stats.toolCalls;
   const motionSamples = [];
@@ -258,6 +259,28 @@ try {
   await page.reload(); await waitForState(page, () => Boolean(window.inboundRadarProof));
   assert.equal((await read()).selectedRadarId, moving.radarId);
   assertions.push('Standalone session storage restores the exact selected aircraft after reload');
+  if (handoff) {
+    const beforeTrack = await read(), trackDeadline = beforeTrack.nextPollAt;
+    await page.locator('#track-flight').click();
+    await waitForState(page, () => window.inboundRadarProof.read().handoffMode === 'detail');
+    const detail = await read();
+    assert.equal(detail.handoffStatus, 'resolved'); assert.equal(detail.nextPollAt, trackDeadline);
+    assert.equal(detail.pollTimers.maxPending, 1); assert.equal(detail.ageTimers.maxPending, 1);
+    assert.match(await page.locator('#detail-route').innerText(), /ORD.*BOS/);
+    await page.locator('#back-radar').click(); assert.equal((await read()).selectedRadarId, moving.radarId);
+    assert.equal((await read()).nextPollAt, trackDeadline);
+    await page.locator('.aircraft-marker[aria-label^="SYN105,"]').click({ force: true });
+    const ambiguityDeadline = (await read()).nextPollAt;
+    await page.locator('#track-flight').click();
+    await waitForState(page, () => window.inboundRadarProof.read().handoffMode === 'ambiguous');
+    assert.equal(await page.locator('.candidate').count(), 2); assert.equal((await read()).nextPollAt, ambiguityDeadline);
+    await page.locator('.candidate').first().click(); await waitForState(page, () => window.inboundRadarProof.read().handoffMode === 'detail');
+    assert.equal((await read()).handoffStatus, 'resolved'); assert.equal((await read()).nextPollAt, ambiguityDeadline);
+    await page.locator('#proof').screenshot({ path: resolve(evidence, `flight-detail${suffix}.png`) });
+    await page.locator('#back-radar').click();
+    assert.equal((await read()).areaId, 'preset:chicago'); assert.equal((await read()).selectedView, 'radar');
+    assertions.push('Explicit SYN101 Track resolves detail; SYN105 exposes two dated choices; Back preserves board/area/view/selection and handoff never resets the poll deadline');
+  }
 
   // Explicitly simulated host messages; no native host/PiP implementation is exercised.
   await page.addInitScript(() => {
@@ -664,11 +687,18 @@ try {
   await page.evaluate(() => window.radarReleaseTools());
   await waitForState(page, () => document.getElementById('radar').contentWindow.inboundRadarProof.read().pollScheduled);
   const lifecycleFinal = await lifecycleRead();
+  if (handoff && simulationNow < hostT0 + 90_000) {
+    await jump(hostT0 + 90_000 - simulationNow);
+    await recordHostMotion('T+90 handoff host motion remains live', lifecycleMovingRadarId);
+  }
+  const finalLifecycleState = await lifecycleRead();
   hostLifecycle = { hostT0, launchVersion: launch.collectionVersion, freshVersion: fresh.collectionVersion, movingRadarId: hostMoving.radarId, finalMovingRadarId: lifecycleMovingRadarId, selectedRadarId: anotherMoving.radarId, steps: lifecycleSteps,
-    final: { frameCount: lifecycleFinal.frameCount, raf: lifecycleFinal.raf, stateWrites: lifecycleFinal.stateWrites, globalsEvents: lifecycleFinal.globalsEvents,
-      hostEchoEvents: lifecycleFinal.hostEchoEvents, hostContextEvents: lifecycleFinal.hostContextEvents, rejectedResults: lifecycleFinal.rejectedResults,
-      refreshCalls: lifecycleFinal.refreshCalls, areaId: lifecycleFinal.areaId, requestedAreaId: lifecycleFinal.requestedAreaId, health: lifecycleFinal.health,
-      pollScheduled: lifecycleFinal.pollScheduled, nextPollAt: lifecycleFinal.nextPollAt, pollScheduleEpoch: lifecycleFinal.pollScheduleEpoch } };
+    durationMs: simulationNow - hostT0,
+    final: { frameCount: finalLifecycleState.frameCount, raf: finalLifecycleState.raf, stateWrites: finalLifecycleState.stateWrites, globalsEvents: finalLifecycleState.globalsEvents,
+      hostEchoEvents: finalLifecycleState.hostEchoEvents, hostContextEvents: finalLifecycleState.hostContextEvents, rejectedResults: finalLifecycleState.rejectedResults,
+      refreshCalls: finalLifecycleState.refreshCalls, areaId: finalLifecycleState.areaId, requestedAreaId: finalLifecycleState.requestedAreaId, health: finalLifecycleState.health,
+      pollScheduled: finalLifecycleState.pollScheduled, nextPollAt: finalLifecycleState.nextPollAt, pollScheduleEpoch: finalLifecycleState.pollScheduleEpoch } };
+  if (handoff) assert.ok(hostLifecycle.durationMs >= 90_000);
   assertions.push('MOCK ONLY: ChatGPT-like globals echo, selection, Chicago/ORD/MDW, T+20 fix, host context, visibility and page lifecycle preserve singleton moving RAF/poll loops without state feedback or stale replay');
 
   await frame.locator('#area').selectOption('preset:chicago');
@@ -754,7 +784,7 @@ try {
   const beforeDisabledPip = await page.evaluate(() => window.radarMessages.filter(method => method === 'ui/request-display-mode').length);
   await frame.locator('#pip').evaluate(node => node.click());
   assert.equal(await page.evaluate(() => window.radarMessages.filter(method => method === 'ui/request-display-mode').length), beforeDisabledPip);
-  assert.equal(await frame.locator('#track-flight').isEnabled(), false);
+  assert.equal(await frame.locator('#track-flight').isEnabled(), true);
   const desktop = await frame.locator('body').evaluate(() => ({ width: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth, radar: document.getElementById('radar-surface').getBoundingClientRect().toJSON(), summary: document.getElementById('selected').getBoundingClientRect().toJSON() }));
   assert.equal(desktop.overflow, false); assert.ok(desktop.radar.height >= 420);
   assert.ok(desktop.radar.width > desktop.summary.width * 2);

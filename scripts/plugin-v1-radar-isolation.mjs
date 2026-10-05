@@ -93,7 +93,7 @@ export function assertRadarApplication(code, { widget = false } = {}) {
       const bindings = node.importClause?.namedBindings;
       if (widget || !ts.isStringLiteral(node.moduleSpecifier) || node.moduleSpecifier.text !== 'node:crypto'
           || node.importClause?.name || !bindings || !ts.isNamedImports(bindings)
-          || bindings.elements.some(element => !['randomBytes', 'randomUUID'].includes((element.propertyName ?? element.name).text))) fail('forbidden module import');
+          || bindings.elements.some(element => !['createHash', 'randomBytes', 'randomUUID'].includes((element.propertyName ?? element.name).text))) fail('forbidden module import');
     }
     if (ts.isExportDeclaration(node) && node.moduleSpecifier) fail('external re-export');
     if (node.kind === ts.SyntaxKind.ImportKeyword) fail('dynamic import');
@@ -186,7 +186,7 @@ export async function assertRadarPayload(directory) {
   assertRadarApplication(await readFile(`${directory}/api/mcp.js`, 'utf8'));
   return {
     fakeAircraftOnly: true, files: paths,
-    externalImports: ['node:crypto (randomBytes/randomUUID only)'],
+    externalImports: ['node:crypto (createHash/randomBytes/randomUUID only)'],
     safety: 'static-isolation',
   };
 }
