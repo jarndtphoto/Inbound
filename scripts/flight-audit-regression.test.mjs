@@ -897,6 +897,33 @@ describe('public schedule fallback', () => {
     assert.equal(chooseFlightStatsScheduleCandidate([tomorrow, landed], now)?._publicScheduleDate, '2026-10-01');
   });
 
+  it('rejects an implausibly distant future FlightStats leg instead of assigning the wrong current route', () => {
+    const future = parseFlightStatsPublicSchedule(
+      `<html><body><h1>Flight Status</h1><div>WN 2144 Southwest Airlines LAS Las Vegas DEN Denver Scheduled</div><div>Flight Departure Times 06-Oct-2026 Scheduled 06:00 PDT</div><div>Flight Arrival Times 06-Oct-2026 Scheduled 08:55 MDT</div></body></html>`,
+      'SWA2144', '2026-10-06'
+    );
+    const now = Date.UTC(2026, 9, 5, 0, 51) / 1000;
+    assert.equal(chooseFlightStatsScheduleCandidate([future], now), null);
+  });
+
+  it('still allows a plausible upcoming flight within the search window', () => {
+    const upcoming = parseFlightStatsPublicSchedule(
+      `<html><body><h1>Flight Status</h1><div>WN 2144 Southwest Airlines LAS Las Vegas DEN Denver Scheduled</div><div>Flight Departure Times 05-Oct-2026 Scheduled 06:00 PDT</div><div>Flight Arrival Times 05-Oct-2026 Scheduled 08:55 MDT</div></body></html>`,
+      'SWA2144', '2026-10-05'
+    );
+    const now = Date.UTC(2026, 9, 5, 0, 51) / 1000;
+    assert.equal(chooseFlightStatsScheduleCandidate([upcoming], now)?._publicScheduleDate, '2026-10-05');
+  });
+
+  it('uses a global public-FlightAware breaker and searches detail pages when direct FlightStats candidates are implausible', () => {
+    const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(source, /let awarePublicBlockedUntil = 0/);
+    assert.match(source, /Date\.now\(\) < awarePublicBlockedUntil/);
+    assert.match(source, /awarePublicBlockedUntil = Math\.max\(awarePublicBlockedUntil, Date\.now\(\) \+ 60_000\)/);
+    assert.match(source, /const detailPages = bestPage \? \[bestPage\] : pages/);
+    assert.match(source, /detailRequests\.length >= 12/);
+  });
+
   it('fails closed when the page does not identify two known airports', () => {
     assert.equal(parseFlightStatsPublicSchedule('<html>Flight Status UA 3 Scheduled</html>', 'UAL3', '2026-10-01'), null);
   });
