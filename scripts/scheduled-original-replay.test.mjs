@@ -1,3 +1,4 @@
+import { freezeTestClock } from './helpers/test-clock.mjs';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -20,9 +21,12 @@ import { journeyKey } from '../src/lib/traveler.ts';
 const fr24 = JSON.parse(await readFile(new URL('./fixtures/ua219-fr24-only.json', import.meta.url)));
 const handoff = JSON.parse(await readFile(new URL('./fixtures/ua219-provider-handoff.json', import.meta.url)));
 const none = { scheduled: null, estimated: null, actual: null };
-let directory, core, ui, taxi;
+let directory, core, ui, taxi, restoreSuiteClock;
+const databaseUrl = process.env.DATABASE_URL;
 const evidence = { fixture: 'Synthetic UA219 FR24-only and provider-handoff fixtures; every fetch mocked', cases: [] };
 before(async () => {
+  delete process.env.DATABASE_URL;
+  restoreSuiteClock = freezeTestClock(() => fr24.nowUnix * 1000);
   directory = await mkdtemp(resolve('node_modules/.scheduled-original-replay-'));
   await build({ configFile: false, logLevel: 'silent', resolve: { alias: { '@': resolve('src') } },
     plugins: [{ name: 'test-original-ui', enforce: 'pre', transform(code, id) {
@@ -37,6 +41,8 @@ before(async () => {
   core = await import(pathToFileURL(join(directory, 'server/story.mjs')).href);
 });
 after(async () => {
+  restoreSuiteClock?.();
+  if (databaseUrl == null) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = databaseUrl;
   if (process.env.ORIG_REPLAY_EVIDENCE) await writeFile(process.env.ORIG_REPLAY_EVIDENCE, JSON.stringify(evidence, null, 2) + '\n');
   if (directory) await rm(directory, { recursive: true, force: true });
 });
@@ -56,7 +62,8 @@ function render(component, props) {
 }
 
 test('FR24-only no schedule: cold taxi stories have null originals and no Scheduled rows in all five views', async () => {
-  const realFetch = globalThis.fetch, RealDate = Date;
+  const realFetch = globalThis.fetch;
+  let restoreClock;
   const envKeys = ['FR24_API_TOKEN', 'FR24_ENABLE_TRACKS', 'FR24_ENABLE_SUMMARY', 'FLIGHTAWARE_AEROAPI_KEY'];
   const oldEnv = envKeys.map(key => process.env[key]);
   let now = fr24.nowUnix * 1000, raw = structuredClone(fr24.data[0]), mode = 'fr24';
@@ -66,10 +73,7 @@ test('FR24-only no schedule: cold taxi stories have null originals and no Schedu
   const requests = [];
   try {
     envKeys.forEach(key => delete process.env[key]); process.env.FR24_API_TOKEN = 'fixture-only-no-network';
-    globalThis.Date = class extends RealDate {
-      constructor(...args) { super(...(args.length ? args : [now])); }
-      static now() { return now; }
-    };
+    restoreClock = freezeTestClock(() => now);
     globalThis.fetch = async input => {
       const url = new URL(String(input)); requests.push(url.href);
       if (url.hostname === 'www.flightaware.com') return mode === 'aware'
@@ -132,7 +136,7 @@ test('FR24-only no schedule: cold taxi stories have null originals and no Schedu
     evidence.cases.push({ case: 'actual UA219 provider handoff', stages: [aware, fallback, back].map(story => story.currentStage),
       originalSchedules: [aware.times.origPushUnix, aware.times.origTakeoffUnix, aware.times.origLandUnix], stateKey: aware.stateKey, liveRequests: 7 });
   } finally {
-    globalThis.fetch = realFetch; globalThis.Date = RealDate;
+    globalThis.fetch = realFetch; restoreClock?.();
     envKeys.forEach((key, i) => oldEnv[i] == null ? delete process.env[key] : process.env[key] = oldEnv[i]);
   }
 });

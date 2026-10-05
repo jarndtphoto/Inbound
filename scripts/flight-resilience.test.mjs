@@ -1,3 +1,4 @@
+import { freezeTestClock } from './helpers/test-clock.mjs';
 import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -10,7 +11,8 @@ import { readFlightResume, resumeFromStory } from "../src/lib/flight-resume.ts";
 // No live provider traffic or deployment credentials are used by this suite.
 let directory, moduleNumber = 0, server, now, upstream, aircraft, requests;
 const realFetch = globalThis.fetch;
-const realNow = Date.now;
+const databaseUrl = process.env.DATABASE_URL;
+let restoreClock;
 const initialNow = Date.parse("2026-09-13T17:00:00Z");
 const stamp = (scheduled, actual = null) => ({ scheduled, estimated: null, actual });
 function resume() {
@@ -35,6 +37,8 @@ function page(context) {
   return new Response("trackpollBootstrap = " + JSON.stringify({ flights: { SWA1111: record } }) + ";", { status: 200 });
 }
 before(async () => {
+  delete process.env.DATABASE_URL;
+  restoreClock = freezeTestClock(() => now ?? initialNow);
   directory = await mkdtemp(resolve("node_modules/.inbound-feed-test-"));
   await build({ configFile: false, logLevel: "silent", build: {
     ssr: resolve("src/lib/story.server.ts"), outDir: directory,
@@ -47,7 +51,6 @@ beforeEach(async () => {
   requests = [];
   aircraft = { hex: "a12345", flight: "SWA1111", r: "N12345", t: "B738", lat: 41.787, lon: -87.752,
     gs: 0, alt_baro: "ground", track: 310, seen: 1, seen_pos: 1 };
-  Date.now = () => now;
   globalThis.fetch = async (input) => {
     const url = new URL(String(input));
     requests.push(url.href);
@@ -73,7 +76,8 @@ beforeEach(async () => {
 });
 after(async () => {
   globalThis.fetch = realFetch;
-  Date.now = realNow;
+  restoreClock?.();
+  if (databaseUrl == null) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = databaseUrl;
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
