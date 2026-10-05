@@ -1,0 +1,27 @@
+{
+  "ok": true,
+  "before": true,
+  "compiled": true,
+  "workerCount": 1,
+  "actualChatGptHostApproved": false,
+  "scope": "Simulated host; malformed-context case is fault injection, not a proven actual-host cause",
+  "assertions": [
+    "Old compiled artifact replaces the dated-choice button during an age tick and loses focus",
+    "Old compiled host-control render exception leaves the error panel visible after Back"
+  ],
+  "errors": [
+    "TypeError: Cannot read properties of null (reading 'includes')",
+    "TypeError: Cannot read properties of null (reading 'includes')"
+  ],
+  "timeline": [
+    {
+      "label": "Candidate focus across age render",
+      "retained": false
+    },
+    {
+      "label": "Back after invalid choice and malformed optional context",
+      "visible": false,
+      "mode": "proof read also fails on malformed context"
+    }
+  ]
+}

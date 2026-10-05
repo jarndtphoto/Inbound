@@ -1,5 +1,9 @@
 # Part 3B.4 — SYN101 startup motion correction
 
+The actual host retest subsequently failed on SYN105 choice/Back. See
+[the SYN105 follow-up](Part_3B4_SYN105_Return_Report.md). The startup deployment
+below remains a historical publicly verified checkpoint, not host-approved.
+
 Scope: plugin fixture only. No work after Part 3B.4, no merge, and no production
 or Inbound app source change.
 

@@ -39,10 +39,17 @@ let mapKey = "", hostReady = false, hostOrigin: string | null = null, sequence =
 let selectedTarget: PublicRadarTarget | null = null, selectedFeatured: PublicFeaturedFlight | null = null;
 let handoffMode: "nearby" | "loading" | "ambiguous" | "detail" | "error" = "nearby";
 let handoffResult: FlightResultV1 | null = null, handoffCalls = 0;
+let candidateRenderKey = "", lastUiAction = "startup", lastUiError: string | null = null;
 let activeHandoffRequest: ActiveHandoffRequest | null = null, handoffRequestSequence = 0;
 let ignoredHandoffReplays = 0, ignoredHandoffResponses = 0, appliedHandoffResponses = 0, canceledHandoffRequests = 0;
 const resolvedInstances = new Map<string, string>();
 let hostContext: HostContext = { displayMode: "inline", availableDisplayModes: [] };
+function updateHostContext(value: unknown) {
+  if (!value || typeof value !== "object") return;
+  const next = value as Partial<HostContext>;
+  if (["inline", "fullscreen", "pip"].includes(String(next.displayMode))) hostContext.displayMode = next.displayMode!;
+  if (Array.isArray(next.availableDisplayModes)) hostContext.availableDisplayModes = next.availableDisplayModes.filter(mode => ["inline", "fullscreen", "pip"].includes(mode));
+}
 let latestAcceptedVersion = initial.collectionVersion, latestAcceptedGeneratedAt = Date.parse(initial.generatedAt);
 let acceptedResults = 0, rejectedResults = 0, globalsEvents = 0, hostContextEvents = 0;
 let lastRejectedReason: string | null = null;
@@ -95,7 +102,21 @@ function updateSelection() {
   selectedTarget = selected.target; selectedFeatured = selected.featured;
 }
 function selectAircraft(radarId: string) { cancelActiveHandoff(); state.selectedRadarId = radarId; handoffMode = "nearby"; handoffResult = null; updateSelection(); save(); render(); ensureAnimationLoop(); }
-function setView(view: View) { if (dismissed) return; state.views[displayMode()] = view; save(); render(); ensureAnimationLoop(); }
+function returnToNearby(view: View, action: string) {
+  if (dismissed) return;
+  lastUiAction = action; cancelActiveHandoff(); handoffMode = "nearby"; handoffResult = null;
+  state.views[displayMode()] = view; save();
+  // Commit local navigation before unrelated host controls or board rendering.
+  // Back must remain usable even when one of those surfaces reports an error.
+  el("handoff-panel").hidden = true; el("content").hidden = false; el("selection-note").hidden = false;
+  for (const name of ["radar", "flights"] as const) {
+    el(`${name}-panel`).hidden = view !== name;
+    const tab = el<HTMLButtonElement>(`view-${name}`); tab.setAttribute("aria-selected", String(view === name)); tab.tabIndex = view === name ? 0 : -1;
+  }
+  try { render(); } catch (error) { lastUiError = error instanceof Error ? error.message : "Nearby render failed"; el("proof-status").textContent = `Navigation returned to ${view}. Render error: ${lastUiError}`; }
+  ensureAnimationLoop();
+}
+function setView(view: View) { returnToNearby(view, `tab:${view}`); }
 function svgElement(tag: string, attributes: Record<string, string | number> = {}, text = ""): SVGElement {
   const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
   for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value));
@@ -219,7 +240,9 @@ const eventValue = (event: InboundFlightV1["times"]["landing"]) => event.provide
 function renderHandoff() {
   const panel = el("handoff-panel"); panel.hidden = handoffMode === "nearby";
   el("content").hidden = handoffMode !== "nearby"; el("selection-note").hidden = handoffMode !== "nearby";
-  const candidates = el("candidate-list"); candidates.replaceChildren(); el("detail-grid").hidden = handoffMode !== "detail";
+  const candidates = el("candidate-list");
+  if (handoffMode !== "ambiguous") { candidates.replaceChildren(); candidateRenderKey = ""; }
+  el("detail-grid").hidden = handoffMode !== "detail";
   el("handoff-error").textContent = "";
   if (handoffMode === "nearby") return;
   if (handoffMode === "loading") { el("handoff-kicker").textContent = "Invented flight"; el("detail-ident").textContent = selectedTarget?.displayIdent ?? "Flight detail"; el("detail-route").textContent = "Resolving the exact selected occurrence…"; el("handoff-status").textContent = "One bounded read-only handoff is in progress."; return; }
@@ -227,6 +250,9 @@ function renderHandoff() {
   if (handoffResult.status === "ambiguous") {
     el("handoff-kicker").textContent = "Choose a dated occurrence"; el("detail-ident").textContent = selectedTarget?.displayIdent ?? "Ambiguous flight";
     el("detail-route").textContent = "The aircraft evidence matches more than one invented dated leg."; el("handoff-status").textContent = "No flight was chosen automatically.";
+    const key = JSON.stringify(handoffResult.candidates);
+    if (key === candidateRenderKey) return;
+    candidateRenderKey = key; candidates.replaceChildren();
     for (const candidate of handoffResult.candidates) {
       const button = document.createElement("button"); button.className = "candidate";
       const label = document.createElement("strong"), detail = document.createElement("span"); label.textContent = `${candidate.displayIdent} · ${candidate.originIata} → ${candidate.destinationIata}`;
@@ -262,7 +288,7 @@ function render() {
   el("view-count").textContent = `${current.length} aircraft · ${board.featuredFlights.length} Featured`;
   const message = { ok: "Available coverage · Invented aircraft", partial: "Some coverage is limited. Available aircraft remain visible.", stale: "Last accepted observations · Motion stopped while updates are delayed.", unavailable: "Current aircraft data is temporarily unavailable. This does not mean empty sky." }[board.health];
   el("board-notice").textContent = dismissed ? "Preview dismissed. Refresh stopped." : document.hidden || state.paused ? "Refresh paused. Accepted observations continue to age." : !current.length && board.health !== "unavailable" ? "Accepted observations have expired. Current coverage is unavailable." : board.warning || (board.health === "ok" && current.some(target => liveAge(target.observedAt) > 45) ? "Last accepted observations are aging. Bounded motion has stopped." : message);
-  el("proof-status").textContent = `Nearby refresh calls: ${refreshCalls}. Shared collection version: ${board.collectionVersion ?? "warming"}. This UI sends no chat messages or model requests.`;
+  el("proof-status").textContent = `Nearby refresh calls: ${refreshCalls}. Shared collection version: ${board.collectionVersion ?? "warming"}. View: ${handoffMode}/${view}. Last action: ${lastUiAction}. Last UI error: ${lastUiError ?? "none"}. This UI sends no chat messages or model requests.`;
   renderCards(); renderSelection(); renderRadar(); renderHandoff();
 }
 function clearPollingTimers() {
@@ -403,6 +429,7 @@ function failHandoff(request: ActiveHandoffRequest) {
 }
 async function trackSelected() {
   const target = selectedTarget; if (!target || handoffMode === "loading") return;
+  lastUiAction = "track-flight";
   const instance = resolvedInstances.get(target.radarId); const selection = target.selection;
   if (!instance && !selection.token) return;
   const request = beginHandoff(instance ? "instance" : "resolve", target.radarId, instance || selection.token!);
@@ -415,6 +442,7 @@ async function trackSelected() {
 }
 async function chooseCandidate(candidate: FlightCandidateV1) {
   if (handoffMode === "loading" || !state.selectedRadarId) return;
+  lastUiAction = "dated-choice";
   const request = beginHandoff("choice", state.selectedRadarId, candidate.candidateToken);
   try { if (!applyHandoff(request, await invokeReadTool("get_flight", { target: { kind: "choice", candidateToken: candidate.candidateToken } })) && currentHandoff(request)) throw new Error("Invalid candidate response"); }
   catch { failHandoff(request); }
@@ -453,7 +481,7 @@ for (const view of ["radar", "flights"] as const) el(`view-${view}`).onkeydown =
 };
 el("pip").onclick = () => { void display("pip"); }; el("fullscreen").onclick = () => { void display(displayMode() === "fullscreen" ? "inline" : "fullscreen"); };
 el("track-flight").onclick = () => { void trackSelected(); };
-el("back-radar").onclick = () => { cancelActiveHandoff(); handoffMode = "nearby"; handoffResult = null; render(); ensureAnimationLoop(); };
+el("back-radar").onclick = () => returnToNearby("radar", "back-to-radar");
 el("refresh").onclick = async () => { await refreshAndSchedule("reset"); ensureAnimationLoop(); };
 el("pause").onclick = async () => { state.paused = !state.paused; save(); stopPolling(); render(); ensureAnimationLoop(); if (!state.paused) await refreshAndSchedule("reset"); else schedule(); };
 el<HTMLSelectElement>("area").onchange = async () => { const area = el<HTMLSelectElement>("area").value; if (!validArea(area)) return; state.areaId = area; save(); stopPolling(); render(); ensureAnimationLoop(); await refreshAndSchedule("after"); };
@@ -499,8 +527,9 @@ window.addEventListener("message", event => {
   if (message.method === "ui/resource-teardown") { dismissed = true; stopPolling(); stopAnimationLoop(); render(); window.parent.postMessage({ jsonrpc: "2.0", id: message.id, result: {} }, targetOrigin()); return; }
   if (!hostReady) return;
   if (message.method === "ui/notifications/tool-result" && wanted()) acceptHostToolOutput(message.params);
-  if (message.method === "ui/notifications/host-context-changed") { hostContextEvents++; hostContext = { ...hostContext, ...message.params }; render(); ensureAnimationLoop(); }
+  if (message.method === "ui/notifications/host-context-changed") { hostContextEvents++; updateHostContext(message.params); render(); ensureAnimationLoop(); }
 });
+window.addEventListener("error", event => { lastUiError = event.message.slice(0, 160); el("proof-status").textContent = `Last action: ${lastUiAction}. UI error: ${lastUiError}`; });
 new ResizeObserver(() => renderRadar()).observe(el("radar-surface"));
 window.inboundRadarProof = {
   read: () => ({ selectedRadarId: state.selectedRadarId, selectedView: currentView(), views: { ...state.views }, requestedAreaId: state.areaId, areaId: board.area.id, collectionVersion: board.collectionVersion, generatedAt: board.generatedAt, health: board.health, handoffMode, handoffStatus: handoffResult?.status ?? null, handoffCalls, activeHandoffRequest: activeHandoffRequest ? { id: activeHandoffRequest.id, type: activeHandoffRequest.type, expectedRadarId: activeHandoffRequest.expectedRadarId, startedAt: activeHandoffRequest.startedAt } : null, ignoredHandoffReplays, ignoredHandoffResponses, appliedHandoffResponses, canceledHandoffRequests, selectedSelection: selectedTarget ? { ...selectedTarget.selection, ...(resolvedInstances.has(selectedTarget.radarId) ? { state: "resolved", flightInstanceId: resolvedInstances.get(selectedTarget.radarId) } : {}) } : null, trajectoryKey: trajectoryKey(board), shortRetryTrajectoryKey: motionRetryTrajectoryKey, motionRetryCount, motionRetryBudgetRemaining: Math.max(0, MAX_MOTION_RETRIES - motionRetryCount), lastMotionRetryAt, motionCapDeadline: motionCapDeadline(), positions: board.radarTargets.map(target => ({ radarId: target.radarId, latitude: target.latitude, longitude: target.longitude, observedAt: target.observedAt, altitudeFt: target.altitudeFt, groundspeedKt: target.groundspeedKt, groundTrackDeg: target.groundTrackDeg, positionKind: target.positionKind })), displayPositions: displayPositions.map(position => ({ ...position })), labelIds: [...labelIds], refreshCalls, refreshInFlight: activeRequestGeneration === requestGeneration, pollScheduled: timer !== null, ageScheduled: ageTimer !== null, pollTimers: { pending: pendingPollTimers.size, maxPending: maxPendingPollTimers, fired: pollTimerFires }, ageTimers: { pending: pendingAgeTimers.size, maxPending: maxPendingAgeTimers, fired: ageTimerFires }, nextPollAt, nextPollKind, shortRetryUsed: motionRetryTrajectoryKey === trajectoryKey(board) && motionRetryCount > 0, shortRetrySchedules, shortRetryFires, pollScheduleEpoch, requestGeneration, activeRequestGeneration, displayMode: displayMode(), hostReady, hostContext: { ...hostContext, availableDisplayModes: [...hostContext.availableDisplayModes] }, hostWidgetState: host()?.widgetState ? { ...host()!.widgetState, views: host()!.widgetState!.views ? { ...host()!.widgetState!.views } : undefined } : null, frameCount, animationScheduled: frame !== null, paused: state.paused, documentHidden: document.hidden, pageInactive, dismissed, acceptedResults, rejectedResults, lastRejectedReason, latestAcceptedVersion, latestAcceptedGeneratedAt, globalsEvents, hostContextEvents }),
@@ -509,7 +538,7 @@ const restoredArea = state.areaId;
 acceptHostToolOutput(host()?.toolOutput || initial, { expectedArea: null }); state.areaId = restoredArea; render(); schedule(true); ensureAnimationLoop();
 if (window.parent !== window) void rpc("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "Inbound invented flight handoff proof", version: "0.4.0" }, appCapabilities: { availableDisplayModes: ["inline", "pip", "fullscreen"] } }).then(value => {
   if (dismissed) return;
-  const result = value as { hostContext?: Partial<HostContext> }; hostReady = true; hostContext = { ...hostContext, ...result.hostContext }; notify("ui/notifications/initialized"); render(); ensureAnimationLoop();
+  const result = value as { hostContext?: Partial<HostContext> }; hostReady = true; updateHostContext(result.hostContext); notify("ui/notifications/initialized"); render(); ensureAnimationLoop();
   startNearbyUpdates();
 }).catch(() => { if (!dismissed) hostControls(); });
 if (window.parent === window || host()?.callTool) startNearbyUpdates();

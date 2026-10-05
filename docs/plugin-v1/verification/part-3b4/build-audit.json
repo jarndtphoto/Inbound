@@ -39,8 +39,8 @@
         "src/lib/plugin-v1/radar-widget.ts"
       ],
       "externalImports": [],
-      "bytes": 176718,
-      "sha256": "5d10191549e675f42f3fa62cf785bf8254a5bc41dbbc66870571c31943441487"
+      "bytes": 177804,
+      "sha256": "7b737d25e3193ab7be2dac8db6691125e40080b4294e42ceac40b6047d55b73f"
     },
     {
       "input": "src/lib/plugin-v1/radar-proof-preview.ts",
@@ -87,6 +87,7 @@
         "src/lib/nearby-v1/route-enrichment.ts",
         "src/lib/plugin-v1/radar-proof-store.ts",
         "src/lib/plugin-v1/radar-proof-engine.server.ts",
+        "src/lib/plugin-v1/radar-fixture-handoff.server.ts",
         "src/lib/plugin-v1/nearby-response.ts",
         "src/lib/plugin-v1/radar-proof-server.ts",
         "src/lib/plugin-v1/radar-proof-preview.ts"
@@ -94,8 +95,8 @@
       "externalImports": [
         "node:crypto"
       ],
-      "bytes": 400279,
-      "sha256": "7f9bd4798c12661397acd9737b3765669d357784698114b6ffa7f4377bf71e7e"
+      "bytes": 409053,
+      "sha256": "72f8b9d54214bb24f5121b8e3639190be65fbc3685d0a319b80b5a8019fc6d80"
     }
   ],
   "files": [

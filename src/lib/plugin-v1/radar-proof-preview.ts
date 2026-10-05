@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createRadarProofHandler } from "./radar-proof-server";
 
 export const RADAR_PREVIEW_EXPIRES_AT = "2026-10-11T23:59:59.000Z";
+const fixtureAuthority = "__RADAR_FIXTURE_HANDLE_AUTHORITY__";
 const forbiddenConfiguration = /DATABASE|POSTGRES|PGHOST|PGPASSWORD|NEON|FR24|FLIGHTRADAR|FLIGHTSTATS|ADSB|ADS_B|AIRPLANES|FLIGHTAWARE|CIRIUM|INBOUND.*(?:API|TOKEN|SECRET)/i;
 const handlers = new Map<string, Promise<Awaited<ReturnType<typeof createRadarProofHandler>>>>();
 
@@ -20,7 +21,7 @@ export default async function radarPreview(req: IncomingMessage, res: ServerResp
   }
   const host = process.env.VERCEL_URL;
   let proof = handlers.get(host);
-  if (!proof) { proof = createRadarProofHandler({ allowedHosts: [host] }); handlers.set(host, proof); }
+  if (!proof) { proof = createRadarProofHandler({ allowedHosts: [host], fixtureAuthority: { authority: fixtureAuthority, realm: host } }); handlers.set(host, proof); }
   // Rewrite preserves distinct /widget and /mcp public paths in req.url.
   if (req.url === "/api/mcp") req.url = "/mcp";
   await (await proof).handler(req, res);

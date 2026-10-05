@@ -23,7 +23,7 @@ type AreaId = (typeof AREA_IDS)[number];
  * Chicago reference. The same accepted geo helper drives the fake positions;
  * between fixes the renderer reuses the certified 25-second motion function.
  * SYN identifiers, private identities and UUIDs are entirely invented. */
-function inventedAcquisition(at: number, startedAt: number, partial: boolean): AcquisitionResult {
+export function inventedAcquisition(at: number, startedAt: number, partial: boolean): AcquisitionResult {
   const cycle = Math.max(0, Math.floor((at - startedAt) / NEARBY_POLICY.cadenceMs));
   const acceptedAt = startedAt + cycle * NEARBY_POLICY.cadenceMs;
   const elapsedSeconds = (acceptedAt - startedAt) / 1000;

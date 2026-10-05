@@ -1,7 +1,7 @@
 import { rolldown } from 'rolldown';
 import { readFile, mkdir, writeFile, cp } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { assertRadarApplication, assertRadarPayload, RADAR_PREVIEW_PACKAGE, RADAR_PREVIEW_CONFIG } from './plugin-v1-radar-isolation.mjs';
 
 const shared = [
@@ -16,6 +16,7 @@ const permitted = new Set([...shared,
   'src/lib/plugin-v1/radar-proof-preview.ts', 'src/lib/plugin-v1/radar-proof-server.ts',
   'src/lib/plugin-v1/radar-proof-engine.server.ts', 'src/lib/plugin-v1/radar-proof-store.ts',
   'src/lib/plugin-v1/handoff-service.server.ts', 'src/lib/plugin-v1/handoff-store.server.ts',
+  'src/lib/plugin-v1/radar-fixture-handoff.server.ts',
   'src/lib/plugin-v1/radar-widget.ts', 'src/lib/plugin-v1/radar-renderer.ts',
   'src/lib/nearby-v1/engine.server.ts', 'src/lib/nearby-v1/collection.ts',
   'src/lib/nearby-v1/views.ts', 'src/lib/nearby-v1/route-enrichment.ts', 'src/lib/nearby-v1/route-hints.ts',
@@ -24,6 +25,8 @@ const acquisition = resolve('src/lib/nearby-v1/acquisition.server.ts');
 const sqlStore = resolve('src/lib/nearby-v1/store.server.ts');
 const handoffDb = resolve('src/lib/db.ts');
 const serverPath = resolve('src/lib/plugin-v1/radar-proof-server.ts');
+const previewPath = resolve('src/lib/plugin-v1/radar-proof-preview.ts');
+const fixtureAuthority = randomBytes(32).toString('hex');
 const isZod = id => id.includes('/node_modules/zod/');
 const diagnosticModule = id => isZod(id) ? `node_modules/zod/${id.split('/node_modules/zod/')[1]}` : relative(process.cwd(), id);
 const globals = 'const radarGlobals = { __zod_globalConfig: { jitless: true } };';
@@ -38,6 +41,7 @@ async function bundle(input, platform, embedded) {
       if (id === acquisition) return 'export async function acquireNearbyChicago(){throw new Error("Only explicitly injected invented acquisition is permitted in this proof.");}';
       if (id === sqlStore) return 'export function createNearbyCollectionStore(){throw new Error("Only explicitly injected fake proof storage is permitted.");}';
       if (id === handoffDb) return 'export const dbSource="unavailable";export function getSql(){throw new Error("Database access is absent from the isolated proof.");}';
+      if (id === previewPath) return (await readFile(id, 'utf8')).replace('__RADAR_FIXTURE_HANDLE_AUTHORITY__', fixtureAuthority);
       if (id === serverPath && embedded) {
         const source = await readFile(id, 'utf8');
         return source.replace('import { readFileSync } from "node:fs";\n', '')

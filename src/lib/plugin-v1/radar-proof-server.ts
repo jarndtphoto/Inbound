@@ -6,6 +6,7 @@ import { areaDefinition } from "./areas";
 import { FlightResultV1Schema, GetFlightRequestV1Schema, ResolveNearbyRequestV1Schema, serializedBytes } from "./contracts";
 import { createInventedDetailBuilder, createInventedHandoffResolver, createFlightHandoffService } from "./handoff-service.server";
 import { createMemoryFlightHandoffStore } from "./handoff-store.server";
+import { createRadarFixtureHandoff } from "./radar-fixture-handoff.server";
 import { createFakeRadarProofService } from "./radar-proof-engine.server";
 import { InboundNearbyResponseSchema, NearbyTransportRequestSchema, PUBLIC_NEARBY_PAYLOAD_BYTES, serializeNearbyResponse } from "./nearby-response";
 
@@ -26,7 +27,7 @@ const template = () => readFileSync(new URL("../../../docs/plugin-v1/radar-proof
 const widgetScript = () => readFileSync(new URL("../../../artifacts/plugin-v1-radar-widget.js", import.meta.url), "utf8");
 const rpcError = (id: string | number | null, code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
 
-export type RadarProofOptions = { clock?: () => number; allowedHosts?: readonly string[] };
+export type RadarProofOptions = { clock?: () => number; allowedHosts?: readonly string[]; fixtureAuthority?: { authority: string; realm: string } };
 function allowed(req: IncomingMessage, hosts: readonly string[] = []) {
   let authority: URL;
   try { authority = new URL(`http://${req.headers.host}`); } catch { return false; }
@@ -49,7 +50,8 @@ export async function createRadarProofHandler(options: RadarProofOptions = {}) {
   const clock = options.clock ?? Date.now;
   const service = await createFakeRadarProofService({ clock });
   const handoffStore = createMemoryFlightHandoffStore();
-  const handoff = createFlightHandoffService({ store: handoffStore, environment: "fake_handoff_proof", clock,
+  const handoff = options.fixtureAuthority ? createRadarFixtureHandoff({ ...options.fixtureAuthority, clock, startedAt: Date.parse(service.diagnostics().startedAt) })
+    : createFlightHandoffService({ store: handoffStore, environment: "fake_handoff_proof", clock,
     resolver: createInventedHandoffResolver(), detailBuilder: createInventedDetailBuilder() });
   const stats = { requests: 0, toolCalls: 0, resourceReads: 0, aviationProviderCalls: 0, productionApiCalls: 0, productionDbAccess: 0 };
   async function nearby(input: unknown) {

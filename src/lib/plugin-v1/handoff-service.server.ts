@@ -169,7 +169,7 @@ export function createFlightHandoffService(options: {
   return { issueSelections, resolveNearby, getFlight, diagnostics: () => ({ ...stats }), cleanup: () => options.store.cleanup(clock()) };
 }
 
-function chicagoRelativeDate(nowMs: number, relative: "today" | "tomorrow" | "yesterday"): string {
+export function chicagoRelativeDate(nowMs: number, relative: "today" | "tomorrow" | "yesterday"): string {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(nowMs);
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   const base = Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day));
@@ -183,7 +183,7 @@ function nextServiceDate(serviceDate: string): string {
   const [year, month, day] = serviceDate.split("-").map(Number);
   return new Date(Date.UTC(year!, month! - 1, day! + 1)).toISOString().slice(0, 10);
 }
-function occurrenceSeed(input: { callsign: string; serviceDate: string; originIata: string; destinationIata: string;
+export function occurrenceSeed(input: { callsign: string; serviceDate: string; originIata: string; destinationIata: string;
   basis: OccurrenceSeed["identityEvidence"]["basis"]; selection?: StoredSelection }): OccurrenceSeed {
   const scheduledDepartureAt = `${input.serviceDate}T14:00:00.000Z`;
   return { operatingIdent: input.callsign, displayIdent: input.callsign, serviceDate: input.serviceDate,
