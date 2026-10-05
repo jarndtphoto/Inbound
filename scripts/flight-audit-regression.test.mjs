@@ -31,6 +31,22 @@ const { WeatherEventMarker } = await import('../src/components/weather-event-mar
 const { passengerWeatherCopy } = await import('../src/lib/weather-card-copy.ts');
 const { WeatherEventHeadline, WeatherEventBody, WeatherPreviewLabel } = await import('../src/components/weather-event-copy.ts');
 const { FLIGHT_STAGES } = await import('../src/lib/flight-stage.ts');
+const { initialBearing } = await import('../src/lib/geo.ts');
+
+describe('geographic bearing regression', () => {
+  const mco = { lat: 28.42, lon: -81.30 };
+  const closeTo = (actual, expected) => {
+    const delta = Math.abs(((actual - expected + 540) % 360) - 180);
+    assert.ok(delta < 1, `expected ${expected}°, got ${actual}°`);
+  };
+
+  it('returns cardinal bearings correctly at MCO latitude', () => {
+    closeTo(initialBearing(mco, { lat: 28.43, lon: -81.30 }), 0);
+    closeTo(initialBearing(mco, { lat: 28.42, lon: -81.29 }), 90);
+    closeTo(initialBearing(mco, { lat: 28.41, lon: -81.30 }), 180);
+    closeTo(initialBearing(mco, { lat: 28.42, lon: -81.31 }), 270);
+  });
+});
 
 describe('passenger weather presentation', () => {
   const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
