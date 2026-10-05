@@ -1,6 +1,6 @@
 import { airportSurfaceQueryOptions } from "@/lib/airport-surface-query";
 import type { AirportSurface } from "@/lib/airport-surface.server";
-import { airportDetailOpacity, simplifyRouteAirportSurface } from "@/lib/route-airport-detail";
+import { airportDetailOpacity, ROUTE_AIRPORT_MIN_WIDTH_MILES, simplifyRouteAirportSurface } from "@/lib/route-airport-detail";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 
@@ -14,9 +14,9 @@ export function RouteAirportSurface(props: Parameters<typeof BrowserAirportSurfa
   return browser ? <BrowserAirportSurface {...props} /> : null;
 }
 
-function BrowserAirportSurface({ airport, near, approachActive, widthMiles, sx, sy }: {
+function BrowserAirportSurface({ airport, near, approachActive, widthMiles, inverseScale, sx, sy }: {
   airport: { icao: string; lat: number; lon: number };
-  near: boolean; approachActive: boolean; widthMiles: number;
+  near: boolean; approachActive: boolean; widthMiles: number; inverseScale: number;
   sx: (lon: number) => number; sy: (lat: number) => number;
 }) {
   const opacity = airportDetailOpacity(widthMiles);
@@ -36,6 +36,17 @@ function BrowserAirportSurface({ airport, near, approachActive, widthMiles, sx, 
         : feature.kind === "apron" ? "var(--route-airport-apron)" : "var(--route-airport-taxiway)";
       return <polygon key={key} data-surface-kind={feature.kind} points={points} fill={fill} />;
     }), [shapes]);
-  if (!near || opacity <= 0 || !shapes.length) return null;
+  if (!near || opacity <= 0) return null;
+  const atMaxZoom = widthMiles <= ROUTE_AIRPORT_MIN_WIDTH_MILES * 1.05;
+  if (query.isPending && atMaxZoom) {
+    return <g data-route-airport-loading={airport.icao}
+      transform={`translate(${sx(airport.lon)} ${sy(airport.lat)}) scale(${inverseScale})`}
+      pointerEvents="none" aria-hidden="true">
+      <rect x="-67" y="-13" width="134" height="26" rx="5" className="fill-bg/90 stroke-border" strokeWidth="1" />
+      <text y="4" textAnchor="middle" className="fill-muted" fontSize="11"
+        fontFamily="IBM Plex Mono, monospace">Loading airport map…</text>
+    </g>;
+  }
+  if (!shapes.length) return null;
   return <g data-route-airport={airport.icao} opacity={opacity} pointerEvents="none" aria-hidden="true">{geometry}</g>;
 }
