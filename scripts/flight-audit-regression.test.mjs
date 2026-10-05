@@ -934,6 +934,19 @@ describe('public schedule fallback', () => {
   });
 });
 
+describe('outbound turn-aircraft recovery', () => {
+  it('reuses only a completed inbound aircraft identity near the departure window', () => {
+    const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(source, /const turnTail = inboundAware\?\.tail \?\? snap\?\.tail/);
+    assert.match(source, /const inboundTurnComplete = Boolean\(inboundAware\?\.gateIn\?\.actual \|\| snap\?\.frozen\)/);
+    assert.match(source, /departureClock - 45 \* 60/);
+    assert.match(source, /departureClock \+ 3 \* 60 \* 60/);
+    assert.match(source, /turnLive && turnLive\.onGround/);
+    assert.match(source, /turnAge <= 30/);
+    assert.match(source, /\[outbound-turn-recovery\]/);
+  });
+});
+
 describe('departure checkpoint survives provider handoff', () => {
   it('rebuilds a provider-actual push latch from the saved checkpoint', () => {
     assert.deepEqual(pushLatchFromResume({
