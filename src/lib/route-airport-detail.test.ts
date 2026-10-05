@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { airportDetailOpacity, airportNearViewport, maxRouteZoom, routeStrokeWidths, routeVisibleWidthMiles, simplifyRouteAirportSurface } from './route-airport-detail.ts';
+import { airportDetailOpacity, airportNearViewport, maxRouteZoom, routeStrokeWidths, routeVisibleWidthMiles, showRouteAirportLoadingNote, simplifyRouteAirportSurface } from './route-airport-detail.ts';
 import type { SurfaceFeature } from './airport-surface.server';
 
 test('distance zoom limit reaches six miles for short, continental, and transoceanic routes', () => {
@@ -24,6 +24,13 @@ test('airport detail is hidden at 60 miles and fades to full by 35 miles', () =>
   assert.equal(airportDetailOpacity(59), .04);
   assert.equal(airportDetailOpacity(47.5), .5);
   for (const width of [35, 6, 0]) assert.equal(airportDetailOpacity(width), 1);
+});
+
+test('airport loading note appears only while pending at deepest airport zoom', () => {
+  assert.equal(showRouteAirportLoadingNote(6, true), true);
+  assert.equal(showRouteAirportLoadingNote(6.3, true), true);
+  assert.equal(showRouteAirportLoadingNote(6.31, true), false);
+  assert.equal(showRouteAirportLoadingNote(6, false), false);
 });
 
 test('lazy surface proximity follows the translated viewport and its airport margin', () => {
