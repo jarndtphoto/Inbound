@@ -52,13 +52,15 @@ function views(story) {
   });
 }
 
-test('one-hour-old report stays an observation across Overview, Weather, Briefing, welcome and map, without a forecast duration', () => {
+test('one-hour-old report stays an observation across Weather, Briefing, welcome and map, without returning the removed Overview duplicate', () => {
   const story = pirepPresentationStory(), output = views(story);
   assert.equal(output.summary, 'Smooth now · moderate bumps reported ahead');
-  for (const value of [output.overview, output.weather, output.brief.lead, output.welcome]) {
+  for (const value of [output.weather, output.brief.lead, output.welcome]) {
     assert.match(value, /Smooth now/); assert.match(value, /moderate bumps reported ahead/);
     assert.doesNotMatch(value, /Moderate turbulence on the remaining path|Bumpy stretch ahead|Moderate bumps possible/);
   }
+  assert.match(output.overview, /Check airline status for UA203/);
+  assert.doesNotMatch(output.overview, /Smooth now|moderate bumps reported ahead|Next weather|Arrival details/);
   assert.match(output.weather, /Reported by another aircraft/);
   assert.match(output.weather, /moderate/i);
   assert.match(output.weather, /1 (?:hour|hr|h) ago|60 (?:minutes|min|m) ago/i);

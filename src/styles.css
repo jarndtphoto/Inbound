@@ -396,3 +396,17 @@ html[data-theme="sunset"] { color-scheme: dark; }
 .inbound-redesign .briefing-timeline li + li { border-top: 1px solid var(--color-border); }
 .inbound-redesign .briefing-panel .home-submit { height: auto; font-size: 16px; }
 @media (prefers-reduced-motion: reduce) { .inbound-redesign .weather-disclosure > summary svg { transition: none; } }
+
+/* Quiet ground-map palette for airport detail on the flight map. */
+:root {
+  --route-airport-runway: #687780;
+  --route-airport-terminal: #536773;
+  --route-airport-apron: #304854;
+  --route-airport-taxiway: #304c50;
+}
+html[data-theme="sunrise"] {
+  --route-airport-runway: #8a9498;
+  --route-airport-terminal: #bac3c4;
+  --route-airport-apron: #d3d9d3;
+  --route-airport-taxiway: #c1d3cd;
+}

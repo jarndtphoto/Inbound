@@ -1,3 +1,5 @@
+import { RouteAirportSurface } from "./route-airport-surface";
+import { airportNearViewport, maxRouteZoom, routeVisibleWidthMiles, routeStrokeWidths } from "@/lib/route-airport-detail";
 import { lastKnownProgressLabel } from "@/lib/route-continuity";
 import { remainingFlight, type RemainingFlightPresentation } from "@/lib/flight-presentation";
 import { destPoint, formatDuration, formatMiles, haversineNm } from "@/lib/geo";
@@ -17,9 +19,9 @@ import { WORLD_COUNTRY_RINGS } from "@/lib/world-country-lines";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { CloudRain } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, useId } from "react";
+import { useCallback, useEffect, useRef, useState, useId, useMemo } from "react";
 
-import { clampRouteMapView as clampView, isMapControl, MAX_ROUTE_ZOOM, MIN_FREE_ROUTE_ZOOM } from "@/lib/route-map-interaction";
+import { clampRouteMapView as clampView, isMapControl, MIN_FREE_ROUTE_ZOOM } from "@/lib/route-map-interaction";
 
 import { routeWeatherSegments, sampleWeather } from "@/lib/route-weather-segments";
 
@@ -67,6 +69,7 @@ function projectBox(minLon: number, maxLon: number, minLat: number, maxLat: numb
     maxLat: tileYToLat(y0, 0),
     sx: (lon: number) => PAD + (mercX(lon) - x0) * scale,
     sy: (lat: number) => PAD + (mercY(lat) - y0) * scale,
+    latitudeAtY: (y: number) => tileYToLat(y0 + (y - PAD) / scale, 0),
   };
 }
 
@@ -206,6 +209,7 @@ function RadarLayer({
 }
 
 function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
+  const maxZoomRef = useRef(12);
   const boxRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ s: 1, x: 0, y: 0 });
   const viewRef = useRef(view);
@@ -233,7 +237,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
   const zoomBy = useCallback((factor: number, anchor?: { x: number; y: number }) => {
     const { s, x, y } = viewRef.current;
     const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
-    const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, s * factor));
+    const ns = Math.min(maxZoomRef.current, Math.max(minScale, s * factor));
     const cx = anchor ? anchor.x * s + x : W / 2;
     const cy = anchor ? anchor.y * s + y : H / 2;
     setView(
@@ -241,7 +245,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
         s: ns,
         x: cx - ((cx - x) * ns) / s,
         y: cy - ((cy - y) * ns) / s,
-      }, H, freePan),
+      }, H, freePan, maxZoomRef.current),
     );
   }, [H, freePan]);
 
@@ -253,7 +257,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
     const el = boxRef.current;
     if (!el) return;
 
-    const apply = (next: { s: number; x: number; y: number }) => setView(clampView(next, H, freePan));
+    const apply = (next: { s: number; x: number; y: number }) => setView(clampView(next, H, freePan, maxZoomRef.current));
 
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
@@ -261,7 +265,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
       const { s, x, y } = viewRef.current;
       const factor = Math.exp(-e.deltaY * 0.0018);
       const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
-      const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, s * factor));
+      const ns = Math.min(maxZoomRef.current, Math.max(minScale, s * factor));
       const { mx, my } = toSvg(el, e.clientX, e.clientY);
       apply({
         s: ns,
@@ -309,7 +313,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
         const b = e.touches[1]!;
         const factor = dist(a, b) / p.d;
         const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
-        const ns = Math.min(MAX_ROUTE_ZOOM, Math.max(minScale, p.s * factor));
+        const ns = Math.min(maxZoomRef.current, Math.max(minScale, p.s * factor));
         const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
         apply({
           s: ns,
@@ -404,7 +408,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
     };
   }, [H, freePan]);
 
-  return { boxRef, s: view.s, x: view.x, y: view.y, reset, zoomBy };
+  return { boxRef, maxZoomRef, s: view.s, x: view.x, y: view.y, reset, zoomBy };
 }
 
 
@@ -445,7 +449,12 @@ function ringFillable(ring: [number, number][]) {
   return maxL - minL < 180;
 }
 
-export function RouteMap({ story, fixedViewport = false, weatherPreview, remaining }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { reported?: boolean; pilotReports?: PilotReportObservation[]; intensityBand?: string; intensity?: string; eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] }; remaining?: RemainingFlightPresentation }) {
+export function RouteMap(props: Parameters<typeof RouteMapContent>[0]) {
+  if ((props.story.route?.samples?.length ?? 0) < 2) return null;
+  return <RouteMapContent {...props} />;
+}
+
+function RouteMapContent({ story, fixedViewport = false, weatherPreview, remaining }: { story: FlightStory; fixedViewport?: boolean; weatherPreview?: { reported?: boolean; pilotReports?: PilotReportObservation[]; intensityBand?: string; intensity?: string; eventNumber: number; label: string; startFrac: number; endFrac: number; startEtaMin: number; endEtaMin: number; ranges?: {from: number; to: number}[] }; remaining?: RemainingFlightPresentation }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const geometryRef = useRef<SVGGElement>(null);
   const [mapHeight, setMapHeight] = useState(800);
@@ -469,7 +478,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview, remaini
   }, [zoom.boxRef]);
   const panelGroup = useId();
   const samples = story.route?.samples ?? [];
-  if (samples.length < 2) return null;
+
 
   // Forecast previews frame the affected segment, rather than the entire trip.
   const focusSamples = weatherPreview
@@ -487,7 +496,7 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview, remaini
     if (story.live && story.aircraft && Number.isFinite(story.aircraft.lat)) lats.push(story.aircraft.lat);
     if (story.live && story.aircraft && Number.isFinite(story.aircraft.lon)) lons.push(story.aircraft.lon);
   }
-  if (lats.length < 2 || lons.length < 2) return null;
+
   let minLat = Math.min(...lats);
   let maxLat = Math.max(...lats);
   let minLon = Math.min(...lons);
@@ -498,13 +507,20 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview, remaini
   maxLat += latPad;
   minLon -= lonPad;
   maxLon += lonPad;
-  const proj = projectBox(minLon, maxLon, minLat, maxLat, H);
+  const proj = useMemo(() => projectBox(minLon, maxLon, minLat, maxLat, H), [minLon, maxLon, minLat, maxLat, H]);
   minLat = proj.minLat;
   maxLat = proj.maxLat;
   minLon = proj.minLon;
   maxLon = proj.maxLon;
   const sx = proj.sx;
   const sy = proj.sy;
+  const centerLatitude = proj.latitudeAtY((H / 2 - zoom.y) / zoom.s);
+  const baseWidthMiles = routeVisibleWidthMiles(W / (sx(1) - sx(0)), centerLatitude);
+  const visibleWidthMiles = baseWidthMiles / zoom.s;
+  zoom.maxZoomRef.current = weatherPreview ? 12 : maxRouteZoom(baseWidthMiles);
+  const radiusPx = W * 5 / baseWidthMiles;
+  const originNear = airportNearViewport({ x: sx(story.origin.lon), y: sy(story.origin.lat) }, zoom, H, radiusPx);
+  const destNear = airportNearViewport({ x: sx(story.dest.lon), y: sy(story.dest.lat) }, zoom, H, radiusPx);
 
   const origin = { lat: story.origin.lat, lon: story.origin.lon };
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
@@ -580,10 +596,6 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview, remaini
   const filedStep = Math.max(1, Math.ceil(allFiledFixes.length / 24));
   const filedFixes = allFiledFixes.filter((_, index) => index % filedStep === 0);
   const runs = routeWeatherSegments(samples, progress).map(segment => ({ ...segment, pts: segment.points.map(s => ({ x: sx(s.lon), y: sy(s.lat) })) }));
-  const countries = freePan ? WORLD_COUNTRY_RINGS : WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
-  const admin1 = freePan ? ADMIN1_RINGS : ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
-  const hawaii = freePan ? HAWAII_COASTLINES : HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
-  const lakes = freePan ? GREAT_LAKES : GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
   const hazards = upcomingStorms(story.hazards ?? []);
   // Numbered weather-event markers already identify route weather. Do not draw
   // a second convective dot under the same marker; the overlap creates the
@@ -603,6 +615,75 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview, remaini
   // useful on short final. The rest of a long trip cannot qualify a tiny airport.
   const approachSamples = arrival ? samples.filter(sample => haversineNm(sample, arrival.threshold) <= 40) : [];
 
+  // Geographic paths only change when the projection changes, not on every drag.
+  const basemap = useMemo(() => {
+  const countries = freePan ? WORLD_COUNTRY_RINGS : WORLD_COUNTRY_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const admin1 = freePan ? ADMIN1_RINGS : ADMIN1_RINGS.filter((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat));
+  const hawaii = freePan ? HAWAII_COASTLINES : HAWAII_COASTLINES.filter((island) => ringHits(island.ring, minLon, maxLon, minLat, maxLat));
+  const lakes = freePan ? GREAT_LAKES : GREAT_LAKES.filter((lake) => lake.rings.some((ring) => ringHits(ring, minLon, maxLon, minLat, maxLat)));
+    return (<g>
+          {countries.map((ring, i) => {
+            if (!ringFillable(ring)) return null;
+            const points = ring.map(([lo, la]) => `${sx(lo).toFixed(6)},${sy(la).toFixed(6)}`).join(" ");
+            return <polygon key={`fill-${i}`} points={points} className="fill-fg/10 stroke-none" />;
+          })}
+          {admin1.map((ring, i) => {
+            const points = ring.map(([lo, la]) => `${sx(lo).toFixed(6)},${sy(la).toFixed(6)}`).join(" ");
+            return (
+              <polyline
+                key={`adm-${i}`}
+                points={points}
+                className="fill-none stroke-fg/20"
+                strokeWidth="0.9"
+                vectorEffect="non-scaling-stroke"
+              />
+            );
+          })}
+          {countries.map((ring, i) => {
+            const points = ring.map(([lo, la]) => `${sx(lo).toFixed(6)},${sy(la).toFixed(6)}`).join(" ");
+            return ringFillable(ring) ? (
+              <polygon
+                key={`c-${i}`}
+                points={points}
+                className="fill-none stroke-fg/35"
+                strokeWidth="1.25"
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : (
+              <polyline
+                key={`c-${i}`}
+                points={points}
+                className="fill-none stroke-fg/35"
+                strokeWidth="1.25"
+                vectorEffect="non-scaling-stroke"
+              />
+            );
+          })}
+          {lakes.map((lake) => (
+            <path
+              key={lake.name}
+              data-map-water="great-lake"
+              d={lake.rings.map((ring) => `${ring.map(([lo, la], i) => `${i ? "L" : "M"}${sx(lo).toFixed(6)} ${sy(la).toFixed(6)}`).join(" ")} Z`).join(" ")}
+              fillRule="evenodd"
+              className="stroke-fg/35"
+              style={{ fill: "var(--journey-water)" }}
+              strokeWidth="1.25"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+          {hawaii.map((island) => (
+            <polygon
+              key={`hawaii-${island.name}`}
+              data-hawaii-island={island.name}
+              points={island.ring.map(([lo, la]) => `${sx(lo).toFixed(6)},${sy(la).toFixed(6)}`).join(" ")}
+              className="fill-fg/10 stroke-fg/45"
+              strokeWidth="1.25"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        </g>);
+  }, [proj, freePan]);
+
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-surface", fixedViewport && "flex h-full flex-col items-center")}>
       <div
@@ -613,6 +694,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview, remaini
       >
       <svg
         data-route-map
+        data-visible-width-mi={visibleWidthMiles}
+        data-max-route-zoom={zoom.maxZoomRef.current}
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="xMidYMid meet"
         className={fixedViewport ? "block h-full w-full" : "block aspect-square h-auto w-full"}
@@ -623,64 +706,10 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview, remaini
         <g ref={geometryRef} transform={`translate(${zoom.x} ${zoom.y}) scale(${zoom.s})`} strokeLinejoin="round" strokeLinecap="round">
 
 
-        <g>
-          {countries.map((ring, i) => {
-            if (!ringFillable(ring)) return null;
-            const points = ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ");
-            return <polygon key={`fill-${i}`} points={points} className="fill-fg/10 stroke-none" />;
-          })}
-          {admin1.map((ring, i) => {
-            const points = ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ");
-            return (
-              <polyline
-                key={`adm-${i}`}
-                points={points}
-                className="fill-none stroke-fg/20"
-                strokeWidth="0.9"
-              />
-            );
-          })}
-          {countries.map((ring, i) => {
-            const points = ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ");
-            return ringFillable(ring) ? (
-              <polygon
-                key={`c-${i}`}
-                points={points}
-                className="fill-none stroke-fg/35"
-                strokeWidth="1.25"
-              />
-            ) : (
-              <polyline
-                key={`c-${i}`}
-                points={points}
-                className="fill-none stroke-fg/35"
-                strokeWidth="1.25"
-              />
-            );
-          })}
-          {lakes.map((lake) => (
-            <path
-              key={lake.name}
-              data-map-water="great-lake"
-              d={lake.rings.map((ring) => `${ring.map(([lo, la], i) => `${i ? "L" : "M"}${sx(lo).toFixed(1)} ${sy(la).toFixed(1)}`).join(" ")} Z`).join(" ")}
-              fillRule="evenodd"
-              className="stroke-fg/35"
-              style={{ fill: "var(--journey-water)" }}
-              strokeWidth="1.25"
-            />
-          ))}
-          {hawaii.map((island) => (
-            <polygon
-              key={`hawaii-${island.name}`}
-              data-hawaii-island={island.name}
-              points={island.ring.map(([lo, la]) => `${sx(lo).toFixed(1)},${sy(la).toFixed(1)}`).join(" ")}
-              className="fill-fg/10 stroke-fg/45"
-              strokeWidth="1.25"
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
-        </g>
+        {basemap}
 
+        <RouteAirportSurface airport={story.origin} near={originNear} approachActive={false} widthMiles={visibleWidthMiles} sx={sx} sy={sy} />
+        <RouteAirportSurface airport={story.dest} near={destNear} approachActive={!!story.route.expectedArrival && !!story.route.arrivalPatternKind && !weatherPreview} widthMiles={visibleWidthMiles} sx={sx} sy={sy} />
         {(weatherOn || weatherPreview) && (
           <RadarLayer minLon={minLon} maxLon={maxLon} minLat={minLat} maxLat={maxLat} sx={sx} sy={sy} />
         )}
@@ -699,11 +728,12 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview, remaini
         </g>
 
         {runs.map((run, i) => {
-          const d = run.pts.map((p, j) => `${j === 0 ? "M" : "L"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-          const w = run.past ? 3.2 : run.band === "smooth" ? 5.2 : 6.4;
+          const d = run.pts.map((p, j) => `${j === 0 ? "M" : "L"}${p.x.toFixed(6)} ${p.y.toFixed(6)}`).join(" ");
+          const widths = routeStrokeWidths(zoom.s, run.band, run.past);
+          const w = widths.line;
           return (
             <g key={`run-${i}`} data-weather-intensity={run.intensity} data-segment-start-frac={run.points[0].frac}>
-              <path d={d} data-route-stroke="outline" className="fill-none stroke-bg" strokeWidth={w + 5} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+              <path d={d} data-route-stroke="outline" className="fill-none stroke-bg" strokeWidth={widths.outline} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
               {run.pts.length === 1 && run.band !== "smooth" && <circle cx={run.pts[0].x} cy={run.pts[0].y} r={w / 2 / zoom.s} className={run.band === "light" ? "fill-turbulence-light" : "fill-turbulence-moderate"} />}
               <path d={d} data-route-stroke={run.past ? "flown" : "projected"} className={cn("fill-none", weatherStroke(run.band, run.past))} data-segment-start-lat={run.points[0].lat} data-segment-start-lon={run.points[0].lon} strokeWidth={w} strokeDasharray={!run.past && story.route.arrivalPatternKind ? "8 5" : undefined} opacity={!run.past && story.route.arrivalPatternKind ? 0.8 : 1} strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
             </g>
@@ -716,8 +746,8 @@ export function RouteMap({ story, fixedViewport = false, weatherPreview, remaini
             .sort((a, b) => a.frac - b.frac).map(sample => [sample.frac, sample])).values()];
           if (points.length < 2 || points.some((point, j) => j > 0 && Math.abs(point.lon - points[j - 1].lon) > 180)) return null;
           return <path key={`reported-${event.startFrac}-${i}`} data-pilot-report-area
-            d={points.map((point, j) => `${j ? "L" : "M"}${sx(point.lon).toFixed(1)} ${sy(point.lat).toFixed(1)}`).join(" ")}
-            className="fill-none stroke-muted" strokeWidth="3" strokeDasharray="3 5" vectorEffect="non-scaling-stroke" />;
+            d={points.map((point, j) => `${j ? "L" : "M"}${sx(point.lon).toFixed(6)} ${sy(point.lat).toFixed(6)}`).join(" ")}
+            className="fill-none stroke-muted" strokeWidth={routeStrokeWidths(zoom.s, "smooth").reported} strokeDasharray="3 5" vectorEffect="non-scaling-stroke" />;
         }))}
 
         <g data-map-obstacle transform={`translate(${sx(origin.lon)} ${sy(origin.lat)}) scale(${1 / zoom.s})`}>
