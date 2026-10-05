@@ -304,6 +304,26 @@ describe('post-landing passenger stage', () => {
     assert.equal(currentStageOf({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live: { ...surface, gsKt: 0, phase: 'parked' } }), 'gate');
   });
 
+  it('does not trust a recent FlightStats-only gate-in without parked-aircraft evidence', () => {
+    const gateInActual = 10_000;
+    assert.equal(postLandingState({
+      ourLanded: true, gateInActual, weakGateInActual: true, parkedAtGate: false,
+      dest, live: null, nowSec: gateInActual + 11 * 60,
+    }), 'taxi_in');
+    assert.equal(currentStageOf({
+      ourLanded: true, gateInActual, weakGateInActual: true, parkedAtGate: false,
+      dest, live: null, nowSec: gateInActual + 11 * 60,
+    }), 'taxi_in');
+  });
+
+  it('allows an uncorroborated FlightStats gate-in only after a conservative grace period', () => {
+    const gateInActual = 10_000;
+    assert.equal(currentStageOf({
+      ourLanded: true, gateInActual, weakGateInActual: true, parkedAtGate: false,
+      dest, live: null, nowSec: gateInActual + 21 * 60,
+    }), 'gate');
+  });
+
   it('marks robust stationary/parked detection At gate', () => {
     assert.equal(currentStageOf({ ourLanded: true, gateInActual: null, parkedAtGate: true, dest, live: { ...surface, gsKt: 0 } }), 'gate');
   });

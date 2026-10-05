@@ -113,10 +113,15 @@ export function remainingFlight(story: FlightStory, nowMs = Date.now()): Remaini
   const etas = [story.providers?.providerEta?.fr24, story.providers?.providerEta?.flightaware, story.resume?.landing.estimated,
     story.times.landKind === "estimated" ? story.times.landUnix : null];
   const providerEta = etas.find(validEta);
-  const serverEta = story.providers?.etaMin ?? story.route.etaMin;
+  const heldProgress = story.route.progressSource === "last_known";
+  const serverEta = heldProgress ? story.route.etaMin : story.providers?.etaMin ?? story.route.etaMin;
   const serverRemaining = typeof serverEta === "number" && Number.isFinite(serverEta) && serverEta >= 0
     ? serverEta - sinceFetch / 60 : null;
-  const minutes = !fresh && providerEta != null ? (providerEta - now) / 60
+  // A held observed-progress ETA is stronger than a fallback schedule ETA.
+  // This prevents a near-touchdown story from jumping backward to an older
+  // estimate when providers briefly fail.
+  const minutes = heldProgress && serverRemaining != null && serverRemaining >= 0 ? serverRemaining
+    : !fresh && providerEta != null ? (providerEta - now) / 60
     : serverRemaining != null && serverRemaining >= 0 ? serverRemaining : providerEta != null ? (providerEta - now) / 60 : null;
   return { minutes, text: minutes != null ? formatDuration(minutes) : null, estimated: !fresh, gapNote };
 }

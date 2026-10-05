@@ -72,6 +72,17 @@ test('UA219 oceanic gap retains a provider ETA and labels it estimated, never a 
   assert.equal(remainingFlight(unavailable,now).minutes,null);assert.match(markup(ui.TimesStrip,unavailable),/Updating…/);
 });
 
+test('held final-approach progress beats an older saved-resume landing ETA',()=>{
+  const base=polishStory(), now=base.fetchedAt;
+  const held={...base,live:false,currentStage:'final_approach',aircraft:null,
+    providers:{...base.providers,chosenPositionAgeSec:120,etaMin:11,providerEta:{flightaware:now/1000+11*60,fr24:null},scheduleSource:'saved_resume'},
+    route:{...base.route,progressSource:'last_known',progressObservedAt:now-30_000,remainingNm:.14,etaMin:1.5},
+    times:{...base.times,landKind:'estimated',landUnix:now/1000+11*60}};
+  const view=remainingFlight(held,now);
+  assert.equal(view.minutes,1.5);assert.equal(view.estimated,true);
+  assert.notEqual(view.minutes,11,'saved fallback ETA cannot replace held near-touchdown ETA');
+});
+
 test('Map and Overview render one shared remaining time with identical boundary rounding',()=>{
   const base=polishStory();
   const qa={...base,providers:{...base.providers,etaMin:441},route:{...base.route,etaMin:451}};
