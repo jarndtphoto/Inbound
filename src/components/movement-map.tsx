@@ -367,6 +367,7 @@ function GroundMovementMap({
   // can report the same aircraft at slightly different timestamps/positions in
   // those two streams; mixing them can manufacture a reciprocal heading.
   type MotionSource = "story" | "ground";
+  type FastFix = NonNullable<typeof storyFast> | NonNullable<typeof queriedCandidate>;
   type MotionPoint = { lat: number; lon: number; seenAt: number };
   type MotionState = {
     points: MotionPoint[];
@@ -380,7 +381,7 @@ function GroundMovementMap({
   if (motionTracksRef.current.key !== identityKey) {
     motionTracksRef.current = { key: identityKey, story: null, ground: null };
   }
-  const updateMotionSource = (source: MotionSource, fix: NonNullable<typeof storyFast> | null) => {
+  const updateMotionSource = (source: MotionSource, fix: FastFix | null) => {
     if (!fix) return;
     const previous = motionTracksRef.current[source];
     const last = previous?.points.at(-1) ?? null;
@@ -422,10 +423,9 @@ function GroundMovementMap({
 
   // Prefer whichever source has the newest observation for position, but use
   // only that source's own motion history for orientation.
-  const candidates = [
-    storyFast ? { fix: storyFast, source: "story" as const } : null,
-    queriedCandidate ? { fix: queriedCandidate, source: "ground" as const } : null,
-  ].filter((candidate): candidate is { fix: NonNullable<typeof storyFast>; source: MotionSource } => Boolean(candidate));
+  const candidates: Array<{ fix: FastFix; source: MotionSource }> = [];
+  if (storyFast) candidates.push({ fix: storyFast, source: "story" });
+  if (queriedCandidate) candidates.push({ fix: queriedCandidate, source: "ground" });
   candidates.sort((a, b) => b.fix.seenAt - a.fix.seenAt);
   const selectedFast = candidates[0] ?? null;
   const fast = selectedFast?.fix ?? null;
