@@ -167,6 +167,56 @@ describe("briefing update log", () => {
     assert.equal(/you're airborne/i.test(dark.lead), false);
   });
 
+  it("does not show a future provider landing as an actual landed event", () => {
+    const realNow = Date.now;
+    Date.now = () => 2_000_000_000_000;
+    try {
+      const future = 2_000_000_000 + 6 * 60;
+      let b = composeBrief(facts({
+        now: "arrival",
+        land: "12:34 PM",
+        landKind: "actual",
+        landUnix: future,
+      }));
+      assert.doesNotMatch(b.lead, /Landed at 12:34 PM/i);
+      assert.equal(b.log.some((entry) => /^Landed/.test(entry.text)), false);
+
+      b = composeBrief(facts({
+        now: "taxi_in",
+        land: "12:28 PM",
+        landKind: "actual",
+        landUnix: 2_000_000_000 - 30,
+      }), b);
+      const landing = b.log.find((entry) => /^Landed/.test(entry.text));
+      assert.ok(landing);
+      assert.match(landing.text, /12:28 PM/);
+      assert.equal(landing.at, (2_000_000_000 - 30) * 1000);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it("purges an already-saved future landing event until a plausible actual time arrives", () => {
+    const realNow = Date.now;
+    Date.now = () => 2_000_000_000_000;
+    try {
+      const bad = composeBrief(facts({ now: "arrival" }));
+      const previous = {
+        ...bad,
+        log: [{ at: (2_000_000_000 + 6 * 60) * 1000, kind: "stage" as const, text: "Landed at ORD at 12:34 PM" }],
+      };
+      const next = composeBrief(facts({
+        now: "taxi_in",
+        land: "12:34 PM",
+        landKind: "actual",
+        landUnix: 2_000_000_000 + 6 * 60,
+      }), previous);
+      assert.equal(next.log.some((entry) => /^Landed/.test(entry.text)), false);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   it("separates landed from at-the-gate in the arrival brief", () => {
     const b = composeBrief(
       facts({
