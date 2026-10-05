@@ -260,6 +260,9 @@ try {
   assert.equal((await read()).selectedRadarId, moving.radarId);
   assertions.push('Standalone session storage restores the exact selected aircraft after reload');
   if (handoff) {
+    await page.locator('.aircraft-marker[aria-label^="SYN101,"]').click({ force: true });
+    const syn101RadarId = (await read()).selectedRadarId;
+    assert.ok(syn101RadarId);
     const beforeTrack = await read(), trackDeadline = beforeTrack.nextPollAt;
     await page.locator('#track-flight').click();
     await waitForState(page, () => window.inboundRadarProof.read().handoffMode === 'detail');
@@ -267,7 +270,7 @@ try {
     assert.equal(detail.handoffStatus, 'resolved'); assert.equal(detail.nextPollAt, trackDeadline);
     assert.equal(detail.pollTimers.maxPending, 1); assert.equal(detail.ageTimers.maxPending, 1);
     assert.match(await page.locator('#detail-route').innerText(), /ORD.*BOS/);
-    await page.locator('#back-radar').click(); assert.equal((await read()).selectedRadarId, moving.radarId);
+    await page.locator('#back-radar').click(); assert.equal((await read()).selectedRadarId, syn101RadarId);
     assert.equal((await read()).nextPollAt, trackDeadline);
     await page.locator('.aircraft-marker[aria-label^="SYN105,"]').click({ force: true });
     const ambiguityDeadline = (await read()).nextPollAt;
@@ -688,8 +691,19 @@ try {
   await waitForState(page, () => document.getElementById('radar').contentWindow.inboundRadarProof.read().pollScheduled);
   const lifecycleFinal = await lifecycleRead();
   if (handoff && simulationNow < hostT0 + 90_000) {
-    await jump(hostT0 + 90_000 - simulationNow);
-    await recordHostMotion('T+90 handoff host motion remains live', lifecycleMovingRadarId);
+    await advance(hostT0 + 90_000 - simulationNow);
+    let atNinety = await lifecycleRead();
+    lifecycleSteps.push({ label: 'T+90 handoff bounded-motion checkpoint', state: lifecycleSnapshot(atNinety, lifecycleMovingRadarId) });
+    let recoveryAttempts = 0;
+    while (atNinety.displayPositions.find(position => position.radarId === lifecycleMovingRadarId)?.stopped && recoveryAttempts < 4) {
+      assert.ok(atNinety.nextPollAt !== null && atNinety.pollScheduled, 'A stopped T+90 target retains an automatic recovery deadline');
+      const refreshBefore = atNinety.refreshCalls;
+      await advance(Math.max(1, atNinety.nextPollAt - simulationNow));
+      await waitForState(page, before => document.getElementById('radar').contentWindow.inboundRadarProof.read().refreshCalls > before, refreshBefore);
+      atNinety = await lifecycleRead(); recoveryAttempts++;
+    }
+    assert.equal(atNinety.displayPositions.find(position => position.radarId === lifecycleMovingRadarId)?.stopped, false, 'Automatic polling resumes bounded motion after the T+90 checkpoint without manual Refresh');
+    await recordHostMotion('Post-T+90 automatic recovery remains live', lifecycleMovingRadarId);
   }
   const finalLifecycleState = await lifecycleRead();
   hostLifecycle = { hostT0, launchVersion: launch.collectionVersion, freshVersion: fresh.collectionVersion, movingRadarId: hostMoving.radarId, finalMovingRadarId: lifecycleMovingRadarId, selectedRadarId: anotherMoving.radarId, steps: lifecycleSteps,

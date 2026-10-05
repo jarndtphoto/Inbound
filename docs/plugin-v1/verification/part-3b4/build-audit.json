@@ -39,8 +39,8 @@
         "src/lib/plugin-v1/radar-widget.ts"
       ],
       "externalImports": [],
-      "bytes": 175305,
-      "sha256": "e66b3647bddc40a3c1099d418d470bbb8ad40c30758e5bd84f9fb8a8e05ebd7a"
+      "bytes": 176411,
+      "sha256": "ab42bb5b60a5612ec29290675b394048b647c7bbe7951791c5bb091c23705fea"
     },
     {
       "input": "src/lib/plugin-v1/radar-proof-preview.ts",
@@ -94,8 +94,8 @@
       "externalImports": [
         "node:crypto"
       ],
-      "bytes": 398866,
-      "sha256": "ff420f30b7c411d80e7db87dce550f759b7b3378833e7fde3cd073fe3b59d773"
+      "bytes": 399972,
+      "sha256": "d7277990585da323cb5e46993eacf21ff7ca9b9d02dc7f069baa3484e15a4de0"
     }
   ],
   "files": [
