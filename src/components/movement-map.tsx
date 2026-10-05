@@ -585,7 +585,7 @@ function GroundMovementMap({
               <>
                 <circle cx={plane.x} cy={plane.y} r={27 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={4.5 / zoom.view.scale} />
                 {Number.isFinite(displayAircraft.track) ? (
-                  <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${displayAircraft.track})`}>
+                  <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${(displayAircraft.track + 180) % 360})`}>
                     <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
                   </g>
                 ) : (
