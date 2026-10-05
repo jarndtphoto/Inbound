@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseAirportSurfaceElements } from "./airport-surface.server.ts";
+import { boxedAirportSurfaceOverpassQuery, exactAirportSurfaceOverpassQuery, parseAirportSurfaceElements } from "./airport-surface.server.ts";
 
 const square = (id: number, west: number, south: number, east: number, north: number, tags: Record<string, string>) => ({
   id,
@@ -45,4 +45,23 @@ test("airport surface can choose a matching aerodrome boundary even when another
 
   assert.equal(parsed.boundary?.[0]?.[1]?.lon, 0.02);
   assert.equal(parsed.features.length, 1);
+});
+
+
+test("exact airport surface query targets the requested aerodrome before any broad box", () => {
+  const query = exactAirportSurfaceOverpassQuery("KSAN");
+  assert.match(query, /aeroway"="aerodrome"/);
+  assert.match(query, /"icao"="KSAN"/);
+  assert.match(query, /"iata"="SAN"/);
+  assert.match(query, /map_to_area/);
+  assert.match(query, /area\.airportArea/);
+  assert.doesNotMatch(query, /32\.7/);
+});
+
+test("boxed airport surface query remains available as a bounded fallback", () => {
+  const query = boxedAirportSurfaceOverpassQuery({ lat: 32.7338, lon: -117.1933 });
+  assert.match(query, /\[timeout:8\]/);
+  assert.match(query, /32\.658800/);
+  assert.match(query, /32\.808800/);
+  assert.match(query, /aeroway"="aerodrome"/);
 });
