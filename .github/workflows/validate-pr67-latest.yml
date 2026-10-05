@@ -1,0 +1,22 @@
+name: Validate latest PR67 head
+on:
+  push:
+    branches:
+      - validation/main-check-20261005
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a8be27be4ae9c6b957a45d7da6dc74fe78624577
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install
+      - name: npm run check
+        run: npm run check
+      - name: npm run build
+        run: npm run build
