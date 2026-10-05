@@ -84,6 +84,9 @@ test("departure ground map does not duplicate the tracked-flight FR24 stream", a
   assert.match(source, /if \(data\.movementKind === "departure"\) \{[\s\S]*?diagnostic\("fr24-owned-by-story"\)/);
   assert.match(source, /\} else \{[\s\S]*?loadFr24FlightByRegistration/, "arrival recovery retains FR24");
   assert.match(source, /const aroundPacks = await fetchAround/, "departure map still refreshes from open ADS-B");
+  assert.match(source, /wantedHex[\s\S]*?fetchByHex\(wantedHex\)/, "delayed broad fixes retry the strongest free exact hex identity");
+  assert.match(source, /if \(ageSec <= 8\)/, "only genuinely fresh broad fixes bypass the exact lookup");
+  assert.match(source, /position\.seenAt > aroundFallback\.seenAt/, "the newer exact or broad observation wins");
   assert.match(source, /loadFr24RecentArrivalIdentity/, "completed-arrival identity recovery remains available");
 });
 
