@@ -40,6 +40,18 @@ export function arrivalPattern(aircraft: Coord & { track?: number | null }, runw
   return { points: dense, lengthNm: polylineLengthNm(dense), kind: aligned ? "straight-in" as const : "downwind-base" as const, side };
 }
 
+export function showDetailedArrivalGeometry(
+  live: (Coord & { onGround?: boolean; extrapolated?: boolean; seenSec?: number | null; phase?: string }) | null,
+  dest: Coord,
+  finalApproachEvidence = false,
+) {
+  if (!live || live.onGround || live.extrapolated || (live.seenSec ?? Infinity) > 60) return false;
+  const distanceNm = haversineNm(live, dest);
+  // Keep the filed route visible through cruise/descent. Runway-specific
+  // geometry takes over only once the aircraft is actually on approach.
+  return distanceNm <= 35 && (live.phase === "approach" || finalApproachEvidence);
+}
+
 export function canProjectArrival(live: (Coord & { onGround?: boolean; extrapolated?: boolean; seenSec?: number | null; phase?: string; vertFpm?: number | null; altFt?: number | null }) | null, dest: Coord & { elevationFt?: number | null }, landed: boolean, approachEvidence = false, derivedVertFpm: number | null = null) {
   const elevation = dest.elevationFt ?? 0;
   const altitudeCeiling = Math.max(12_000, elevation + 10_000);
