@@ -3560,11 +3560,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		arrivalPersistence = saved.status;
 	}
 	expectedArrival = arrivalState.runway;
-	const heldArrivalPoint = routeObservation ?? routeMemory?.lastObserved ?? arrivalState.cursorPoint;
-	const heldArrivalDistanceNm = heldArrivalPoint ? haversineNm(heldArrivalPoint, end) : null;
-	const showDetailedArrival = Boolean(arrivalState.startedAt && (arrivalDescending
-		|| (arrivalDistanceNm != null && arrivalDistanceNm <= 150)
-		|| (arrivalDistanceNm == null && heldArrivalDistanceNm != null && heldArrivalDistanceNm <= 150)));
+	const showDetailedArrival = Boolean(arrivalState.startedAt
+		&& showDetailedArrivalGeometry(arrivalLive, end, arrivalInput.approachEvidence));
 	const pattern = showDetailedArrival ? displayArrivalProjection(arrivalState, {
 		observation: routeObservation && Date.now() - routeObservation.seenAt <= 60_000 ? routeObservation : null,
 		live, lastObserved: routeObservation ?? routeMemory?.lastObserved ?? null, landed: ourLanded
@@ -3589,11 +3586,6 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			totalNm = routeMemory.lastObserved.totalNm;
 			remainingNm = routeRemainingNm = routeMemory.lastObserved.remainingNm;
 		}
-	} else if (selectedArrival && !ourLanded && path.length >= 2 && haversineNm(path.at(-1), end) < 8) {
-		// Before the detailed downwind/base/final is visible, end the projected
-		// route at the selected runway threshold instead of the airport dot.
-		path = [...path.slice(0, -1), selectedArrival.threshold];
-		totalNm = Math.max(1, polylineLengthNm(path));
 	}
 	if (arrivalRunwayWindow || arrivalEntry || loadedArrival.state.startedAt || ourLanded) console.info("[arrival-projection]", {
 		flight: parsed.callsign, landKey, stateKey, instance: ARRIVAL_INSTANCE,
