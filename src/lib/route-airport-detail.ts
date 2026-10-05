@@ -61,3 +61,9 @@ export function simplifyRouteAirportSurface(features: SurfaceFeature[]) {
     .map(f => ({ ...f, points: simplify(f.points) }))
     .sort((a, b) => order[a.kind] - order[b.kind]);
 }
+
+export function simplifySurfaceRings(rings: SurfacePoint[][]) {
+  return rings
+    .map(ring => simplify(ring, 12))
+    .filter(ring => ring.length >= 3);
+}

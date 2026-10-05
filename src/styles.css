@@ -403,10 +403,12 @@ html[data-theme="sunset"] { color-scheme: dark; }
   --route-airport-terminal: #536773;
   --route-airport-apron: #304854;
   --route-airport-taxiway: #304c50;
+  --route-airport-land: var(--color-bg);
 }
 html[data-theme="sunrise"] {
   --route-airport-runway: #8a9498;
   --route-airport-terminal: #bac3c4;
   --route-airport-apron: #d3d9d3;
   --route-airport-taxiway: #c1d3cd;
+  --route-airport-land: var(--color-bg);
 }

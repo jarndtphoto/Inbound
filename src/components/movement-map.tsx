@@ -3,7 +3,7 @@ import { phaseOf } from "@/lib/aircraft-phase";
 import { groundCoverageNotice } from "@/lib/ground-coverage";
 import { RouteMap } from "./route-map";
 import { airportSurfaceQueryOptions as surfaceQueryOptions } from "@/lib/airport-surface-query";
-import type { AirportSurface, SurfaceFeature } from "@/lib/airport-surface.server";
+import type { AirportSurface, SurfaceFeature, SurfacePoint } from "@/lib/airport-surface.server";
 import { haversineNm } from "@/lib/geo";
 import { filterAirportSurfaceFeatures } from "@/lib/airport-surface-filter";
 import { flightPollingComplete, groundPollingEnabled } from "@/lib/flight-polling";
@@ -226,6 +226,15 @@ function useMovementTrail(story: FlightStory) {
   return trail;
 }
 
+function BoundaryShape({ ring, project }: { ring: SurfacePoint[]; project: (p: { lat: number; lon: number }) => { x: number; y: number } }) {
+  if (ring.length < 3) return null;
+  const d = ring.map((p, index) => {
+    const q = project(p);
+    return `${index ? "L" : "M"} ${q.x.toFixed(1)} ${q.y.toFixed(1)}`;
+  }).join(" ");
+  return <path d={`${d} Z`} fill="var(--route-airport-land)" stroke="none" pointerEvents="none" />;
+}
+
 function SurfaceShape({ feature, project }: { feature: SurfaceFeature; project: (p: { lat: number; lon: number }) => { x: number; y: number } }) {
   if (feature.points.length < 2) return null;
   const points = feature.points.map((p) => {
@@ -440,12 +449,14 @@ function GroundMovementMap({
     x: W / 2 + ((p.lon - airport.lon) / lonHalf) * (W / 2 - 28),
     y: H / 2 - ((p.lat - airport.lat) / latHalf) * (H / 2 - 28),
   });
+  const surface = surfaceQ.data as AirportSurface | undefined;
+  const boundary = useMemo(() => surface?.boundary ?? [], [surface]);
   const features = useMemo(() =>
     filterAirportSurfaceFeatures(
-      (surfaceQ.data as AirportSurface | undefined)?.features ?? [],
+      surface?.features ?? [],
       { lat: airport.lat, lon: airport.lon },
     ),
-  [surfaceQ.data, airport.lat, airport.lon]);
+  [surface, airport.lat, airport.lon]);
   const taxiwayLabels = useMemo(() => {
     const unique = new Map<string, SurfaceFeature>();
     for (const feature of features) {
@@ -515,6 +526,7 @@ function GroundMovementMap({
         <svg data-ground-map viewBox={`0 0 ${W} ${H}`} className="block h-full w-full" role="img" aria-label={`${airport.iata} airport surface${displayAircraft ? " and aircraft position" : ""}`}>
           <rect width={W} height={H} className="fill-bg" />
           <g transform={`translate(${zoom.view.x} ${zoom.view.y}) scale(${zoom.view.scale})`}>
+            {boundary.map((ring, index) => <BoundaryShape key={`boundary-${index}`} ring={ring} project={project} />)}
             <g opacity="0.12">
               {Array.from({ length: 9 }, (_, i) => <line key={`v-${i}`} x1={i * 100} y1="0" x2={i * 100} y2={H} className="stroke-fg/15" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
               {Array.from({ length: 9 }, (_, i) => <line key={`h-${i}`} x1="0" y1={i * 100} x2={W} y2={i * 100} className="stroke-fg/15" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}

@@ -23,7 +23,7 @@ test("airport surface prefetch fires once per airport for one flight open and no
 
   await prefetchFlightAirportSurfacesOnce(client as never, first, prefetched);
   assert.equal(calls.length, 2);
-  assert.deepEqual(calls.map(call => call[0]), ["airport-surface-v6", "airport-surface-v6"]);
+  assert.deepEqual(calls.map(call => call[0]), ["airport-surface-v7", "airport-surface-v7"]);
   assert.deepEqual(calls.map(call => call[1]), ["KBWI", "KORD"]);
 
   // A routine story poll creates a new story object/fetchedAt, but must not

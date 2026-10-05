@@ -1,6 +1,6 @@
 import { airportSurfaceQueryOptions } from "@/lib/airport-surface-query";
 import type { AirportSurface } from "@/lib/airport-surface.server";
-import { airportDetailOpacity, showRouteAirportLoadingNote, simplifyRouteAirportSurface } from "@/lib/route-airport-detail";
+import { airportDetailOpacity, showRouteAirportLoadingNote, simplifyRouteAirportSurface, simplifySurfaceRings } from "@/lib/route-airport-detail";
 import { filterAirportSurfaceFeatures } from "@/lib/airport-surface-filter";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
@@ -22,7 +22,18 @@ function BrowserAirportSurface({ airport, near, approachActive, widthMiles, inve
 }) {
   const opacity = airportDetailOpacity(widthMiles);
   const query = useQuery({ ...airportSurfaceQueryOptions(airport), enabled: approachActive || (near && opacity > 0) });
-  const features = useMemo(() => simplifyRouteAirportSurface(filterAirportSurfaceFeatures((query.data as AirportSurface | undefined)?.features ?? [], airport)), [query.data, airport.lat, airport.lon]);
+  const surface = query.data as AirportSurface | undefined;
+  const boundary = useMemo(() => simplifySurfaceRings(surface?.boundary ?? []), [surface]);
+  const features = useMemo(() => simplifyRouteAirportSurface(filterAirportSurfaceFeatures(surface?.features ?? [], airport)), [surface, airport.lat, airport.lon]);
+  const boundaryShapes = useMemo(() => boundary.map((ring, index) => (
+    <polygon
+      key={`boundary-${index}`}
+      data-aerodrome-boundary
+      points={ring.map(p => `${sx(p.lon).toFixed(6)},${sy(p.lat).toFixed(6)}`).join(" ")}
+      fill="var(--route-airport-land)"
+      stroke="none"
+    />
+  )), [boundary, sx, sy]);
   const shapes = useMemo(() => features.map(feature => ({
     feature, points: feature.points.map(p => `${sx(p.lon).toFixed(6)},${sy(p.lat).toFixed(6)}`).join(" "),
     // OSM centerlines have no area: draw a quiet, geographic 45 m runway strip.
@@ -47,6 +58,6 @@ function BrowserAirportSurface({ airport, near, approachActive, widthMiles, inve
         fontFamily="IBM Plex Mono, monospace">Loading airport map…</text>
     </g>;
   }
-  if (!shapes.length) return null;
-  return <g data-route-airport={airport.icao} opacity={opacity} pointerEvents="none" aria-hidden="true">{geometry}</g>;
+  if (!shapes.length && !boundaryShapes.length) return null;
+  return <g data-route-airport={airport.icao} opacity={opacity} pointerEvents="none" aria-hidden="true">{boundaryShapes}{geometry}</g>;
 }
