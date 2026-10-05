@@ -389,6 +389,38 @@ describe('September 12 flight audit replay', () => {
     await assert.rejects(loadFlightStory('UA9087', {fresh: true}), /route unavailable/i);
   });
 
+  it('bootstraps a just-departing flight from a fresh exact ADS-B aircraft at the route origin', async (t) => {
+    const now = Date.UTC(2026, 9, 5, 2, 33) / 1000;
+    t.mock.method(Date, 'now', () => now * 1000);
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      const u = String(url);
+      if (u.startsWith('https://www.flightaware.com/live/flight/')) {
+        return new Response('', { status: 402 });
+      }
+      if (u.includes('flightstats.com/v2/flight-tracker/')) {
+        return new Response('<html><body>Flight Status unavailable</body></html>');
+      }
+      if (u.includes('api.adsbdb.com/v0/callsign/')) {
+        return new Response(JSON.stringify({ response: { flightroute: {
+          callsign_icao: 'SWA2724', callsign_iata: 'WN2724',
+          origin: { iata_code: 'MCO', icao_code: 'KMCO', latitude: 28.4312, longitude: -81.3081 },
+          destination: { iata_code: 'MDW', icao_code: 'KMDW', latitude: 41.7868, longitude: -87.7522 },
+        } } }), { headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ ac: [{
+        hex: 'a27240', flight: 'SWA2724', r: 'N2724S', t: 'B738',
+        lat: 28.4268, lon: -81.3020, alt_baro: 'ground', gs: 18,
+        seen: 1, seen_pos: 1,
+      }], features: [] }), { headers: { 'content-type': 'application/json' } });
+    });
+    const story = await loadFlightStory('WN2724', { fresh: true });
+    assert.equal(story.origin.iata, 'MCO');
+    assert.equal(story.dest.iata, 'MDW');
+    assert.equal(story.aircraft?.callsign, 'SWA2724');
+    assert.equal(story.aircraft?.onGround, true);
+    assert.notEqual(story.currentStage, 'inbound');
+  });
+
   it('does not use an old flight-number route when the current schedule feed is unavailable', async (t) => {
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) return new Response('unavailable', { status: 503 });
