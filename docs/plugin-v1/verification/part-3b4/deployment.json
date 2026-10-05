@@ -1,0 +1,43 @@
+{
+  "verifiedAt": "2026-10-05T01:06:31.078Z",
+  "inboundRepository": "jarndtphoto/Inbound",
+  "inboundBranch": "plugin-v1-flight-handoff",
+  "exactBaseSha": "fc16849f9eed685fd63dda1f8a8fa4ec9db50a57",
+  "deployedInboundSourceSha": "4eec3ecef91ee5cfe15d34a3278c78a06508ccde",
+  "deployedInboundTreeSha": "1a6900ce996c7bae964d608e5aecd3c3c6c80366",
+  "fixtureRepository": "jarndtphoto/inbound-live-fixture-dev",
+  "fixtureBranch": "part-3b4-flight-handoff-20261005",
+  "fixtureCommitSha": "dd76a0ac6b517e9e465b569683659a52e0605fdd",
+  "fixtureTreeSha": "366ce7d4850a4993560e4690518540c87f3d6bd5",
+  "fixtureFiles": [
+    "api/mcp.js",
+    "package.json",
+    "vercel.json"
+  ],
+  "deploymentId": "dpl_GxXjUvWECRnRsyV8YRLgWEk8eTLS",
+  "deploymentState": "READY",
+  "previewHostname": "inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app",
+  "mcpUrl": "https://inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app/mcp",
+  "deploymentGitMetadata": {
+    "repository": "jarndtphoto/inbound-live-fixture-dev",
+    "branch": "part-3b4-flight-handoff-20261005",
+    "sha": "dd76a0ac6b517e9e465b569683659a52e0605fdd"
+  },
+  "protection": {
+    "exactExceptionHostname": "inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app",
+    "requireLogin": true,
+    "mode": "Standard Protection",
+    "wildcardAdded": false,
+    "projectWideBypassAdded": false,
+    "productionExceptionAdded": false,
+    "otherHostnameChanged": false
+  },
+  "isolation": {
+    "fakeAircraftOnly": true,
+    "providerCalls": 0,
+    "productionApiCalls": 0,
+    "productionDbAccess": 0,
+    "cacheControl": "no-store",
+    "egress": "static-isolation"
+  }
+}
