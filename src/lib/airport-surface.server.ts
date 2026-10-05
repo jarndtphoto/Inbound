@@ -35,7 +35,7 @@ type OverpassElement = {
 type CacheEntry = { value: AirportSurface; at: number };
 const cache = new Map<string, CacheEntry>();
 const pending = new Map<string, Promise<AirportSurface>>();
-const OVERPASS_TIMEOUT_MS = 14_000;
+const OVERPASS_TIMEOUT_MS = 6_000;
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -112,7 +112,7 @@ async function faaFeatureServiceForAirport(airport: string): Promise<string | nu
   if (cached && Date.now() - cached.at < FAA_SEARCH_CACHE_MS) return cached.url;
 
   const q = encodeURIComponent(`${airport} Airport Diagram`);
-  const search = await fetchJsonWithTimeout(`${FAA_HUB_SEARCH}?limit=25&q=${q}`, 7_000) as {
+  const search = await fetchJsonWithTimeout(`${FAA_HUB_SEARCH}?limit=25&q=${q}`, 5_000) as {
     features?: Array<{ id?: string; properties?: Record<string, unknown>; links?: Array<{ href?: string; rel?: string }> }>;
     items?: Array<{ id?: string; properties?: Record<string, unknown>; links?: Array<{ href?: string; rel?: string }> }>;
   };
@@ -126,24 +126,24 @@ async function faaFeatureServiceForAirport(airport: string): Promise<string | nu
     })
     .filter((x) => x.score >= 4)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 10);
+    .slice(0, 5);
 
-  for (const candidate of ranked) {
+  // Candidate metadata is independent. Check it in parallel so a few stale
+  // catalog entries cannot turn one airport load into a long serial wait.
+  const serviceUrls = await Promise.all(ranked.map(async (candidate) => {
     const id = candidate.item.id ?? String(candidate.item.properties?.id ?? "");
-    if (!id) continue;
+    if (!id) return null;
     try {
-      const meta = await fetchJsonWithTimeout(`${ARCGIS_ITEM}/${encodeURIComponent(id)}?f=json`, 5_000) as { url?: string; type?: string; title?: string };
-      if (typeof meta.url === "string" && /FeatureServer/i.test(meta.url)) {
-        faaServiceByAirport.set(airport, { url: meta.url.replace(/\/$/, ""), at: Date.now() });
-        return meta.url.replace(/\/$/, "");
-      }
+      const meta = await fetchJsonWithTimeout(`${ARCGIS_ITEM}/${encodeURIComponent(id)}?f=json`, 3_500) as { url?: string; type?: string; title?: string };
+      return typeof meta.url === "string" && /FeatureServer/i.test(meta.url)
+        ? meta.url.replace(/\/$/, "") : null;
     } catch {
-      // Try the next matching FAA catalog item.
+      return null;
     }
-  }
-
-  faaServiceByAirport.set(airport, { url: null, at: Date.now() });
-  return null;
+  }));
+  const serviceUrl = serviceUrls.find((url): url is string => Boolean(url)) ?? null;
+  faaServiceByAirport.set(airport, { url: serviceUrl, at: Date.now() });
+  return serviceUrl;
 }
 
 async function loadFaaAirportSurface(input: { airport: string; lat: number; lon: number }): Promise<AirportSurface | null> {
@@ -158,7 +158,7 @@ async function loadFaaAirportSurface(input: { airport: string; lat: number; lon:
   if (!serviceUrl) return null;
 
   try {
-    const service = await fetchJsonWithTimeout(`${serviceUrl}?f=json`, 6_000) as { layers?: Array<{ id: number; name: string }> };
+    const service = await fetchJsonWithTimeout(`${serviceUrl}?f=json`, 5_000) as { layers?: Array<{ id: number; name: string }> };
     const useful = (service.layers ?? [])
       .map((layer) => ({ ...layer, kind: faaLayerKind(layer.name) }))
       .filter((layer): layer is { id: number; name: string; kind: SurfaceFeature["kind"] } => Boolean(layer.kind));
@@ -179,7 +179,7 @@ async function loadFaaAirportSurface(input: { airport: string; lat: number; lon:
         spatialRel: "esriSpatialRelIntersects",
         f: "geojson",
       });
-      const payload = await fetchJsonWithTimeout(`${serviceUrl}/${layer.id}/query?${params.toString()}`, 7_000) as { features?: GeoJsonFeature[] };
+      const payload = await fetchJsonWithTimeout(`${serviceUrl}/${layer.id}/query?${params.toString()}`, 5_000) as { features?: GeoJsonFeature[] };
       return { layer, features: payload.features ?? [] };
     }));
 
@@ -424,6 +424,51 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
   };
 }
 
+export function exactAirportSurfaceOverpassQuery(airport: string) {
+  const code = airport.toUpperCase();
+  const aliases = airportCodeCandidates(code);
+  const clauses: string[] = [];
+  for (const value of aliases) {
+    clauses.push(`way["aeroway"="aerodrome"]["icao"="${value}"];`);
+    clauses.push(`relation["aeroway"="aerodrome"]["icao"="${value}"];`);
+    clauses.push(`way["aeroway"="aerodrome"]["iata"="${value}"];`);
+    clauses.push(`relation["aeroway"="aerodrome"]["iata"="${value}"];`);
+    clauses.push(`way["aeroway"="aerodrome"]["ref"="${value}"];`);
+    clauses.push(`relation["aeroway"="aerodrome"]["ref"="${value}"];`);
+  }
+  return `[out:json][timeout:7];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];);out geom;`;
+}
+
+export function boxedAirportSurfaceOverpassQuery(input: { lat: number; lon: number }) {
+  const latPad = 0.075;
+  const lonPad = Math.min(0.12, 0.075 / Math.max(0.45, Math.cos(input.lat * Math.PI / 180)));
+  const south = (input.lat - latPad).toFixed(6);
+  const north = (input.lat + latPad).toFixed(6);
+  const west = (input.lon - lonPad).toFixed(6);
+  const east = (input.lon + lonPad).toFixed(6);
+  return `[out:json][timeout:8];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${south},${west},${north},${east});way["area:aeroway"="taxiway"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east});relation["area:aeroway"="taxiway"](${south},${west},${north},${east});way["aeroway"="aerodrome"](${south},${west},${north},${east});relation["aeroway"="aerodrome"](${south},${west},${north},${east}););out geom;`;
+}
+
+async function fetchOverpassElements(query: string, timeoutMs = OVERPASS_TIMEOUT_MS) {
+  const body = new URLSearchParams({ data: query }).toString();
+  return Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "User-Agent": "Inbound/1.0 airport-surface experiment",
+      },
+      body,
+    });
+    if (!response.ok) throw new Error(`Airport surface unavailable (${response.status})`);
+    const payload = await response.json() as { elements?: OverpassElement[] };
+    if (!Array.isArray(payload.elements)) throw new Error("Invalid airport surface response");
+    return payload.elements;
+  }));
+}
+
 export async function loadAirportSurface(input: { airport: string; lat: number; lon: number }): Promise<AirportSurface> {
   const airport = String(input.airport || "").toUpperCase();
   if (!/^[A-Z0-9]{3,4}$/.test(airport) || !validCoord(input.lat, -90, 90) || !validCoord(input.lon, -180, 180)) {
@@ -436,45 +481,33 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   if (existing) return existing;
 
   const request = (async () => {
-    // Use OpenStreetMap first: it is much faster for the line/polygon geometry
-    // this ground radar needs. The FAA catalog path can take many sequential
-    // lookups, so keep it as a fallback instead of blocking every first load.
-    try {
-      const latPad = 0.075;
-      const lonPad = Math.min(0.12, 0.075 / Math.max(0.45, Math.cos(input.lat * Math.PI / 180)));
-      const south = (input.lat - latPad).toFixed(6);
-      const north = (input.lat + latPad).toFixed(6);
-      const west = (input.lon - lonPad).toFixed(6);
-      const east = (input.lon + lonPad).toFixed(6);
-      const query = `[out:json][timeout:16];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${south},${west},${north},${east});way["area:aeroway"="taxiway"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east});relation["area:aeroway"="taxiway"](${south},${west},${north},${east});way["aeroway"="aerodrome"](${south},${west},${north},${east});relation["aeroway"="aerodrome"](${south},${west},${north},${east}););out geom;`;
-      const body = new URLSearchParams({ data: query }).toString();
-      const json = await Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          signal: AbortSignal.timeout(OVERPASS_TIMEOUT_MS),
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-            "User-Agent": "Inbound/1.0 airport-surface experiment",
-          },
-          body,
-        });
-        if (!response.ok) throw new Error(`Airport surface unavailable (${response.status})`);
-        const payload = await response.json() as { elements?: OverpassElement[] };
-        if (!Array.isArray(payload.elements)) throw new Error("Invalid airport surface response");
-        return payload;
-      }));
-      const osm = parseAirportSurfaceElements(json.elements ?? [], airport, Date.now(), { lat: input.lat, lon: input.lon });
-      if (osm.features.length >= 5) {
-        console.log("[airport-surface]", { airport, source: "OpenStreetMap", featureCount: osm.features.length, boundaryRings: osm.boundary?.length ?? 0 });
-        cache.set(key, { value: osm, at: Date.now() });
-        return osm;
+    // Prefer an exact aerodrome-area query. It returns far less geometry than
+    // the broad box at airport-dense cities and usually avoids nearby fields
+    // at the source. Keep the old box only as a compatibility fallback.
+    for (const [mode, query, timeoutMs] of [
+      ["exact", exactAirportSurfaceOverpassQuery(airport), 5_000],
+      ["boxed", boxedAirportSurfaceOverpassQuery(input), OVERPASS_TIMEOUT_MS],
+    ] as const) {
+      try {
+        const startedAt = Date.now();
+        const elements = await fetchOverpassElements(query, timeoutMs);
+        const osm = parseAirportSurfaceElements(elements, airport, Date.now(), { lat: input.lat, lon: input.lon });
+        if (osm.features.length >= 5) {
+          console.log("[airport-surface]", {
+            airport, source: "OpenStreetMap", mode,
+            durationMs: Date.now() - startedAt,
+            featureCount: osm.features.length,
+            boundaryRings: osm.boundary?.length ?? 0,
+          });
+          cache.set(key, { value: osm, at: Date.now() });
+          return osm;
+        }
+        console.warn("[airport-surface] OpenStreetMap returned too little geometry", airport, mode, osm.features.length);
+      } catch (error) {
+        console.warn("[airport-surface] OpenStreetMap load failed", airport, mode, error instanceof AggregateError
+          ? error.errors.map(compactError).join(" | ")
+          : compactError(error));
       }
-      console.warn("[airport-surface] OpenStreetMap returned too little geometry", airport, osm.features.length);
-    } catch (error) {
-      console.warn("[airport-surface] OpenStreetMap load failed", airport, error instanceof AggregateError
-        ? error.errors.map(compactError).join(" | ")
-        : compactError(error));
     }
 
     const faa = await loadFaaAirportSurface({ airport, lat: input.lat, lon: input.lon });
