@@ -137,6 +137,7 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /track: motionTrack/);
     assert.doesNotMatch(groundSource, /providerTrack \?\? movementTrack/);
     assert.match(groundSource, /Number\.isFinite\(displayAircraft\.track\) \? \(/);
+    assert.match(groundSource, /rotate\(\$\{\(displayAircraft\.track \+ 180\) % 360\}\)/);
     assert.match(groundSource, /delayed \$\{providerLabel\} position/);
   });
 });
