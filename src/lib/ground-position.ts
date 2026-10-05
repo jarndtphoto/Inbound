@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { haversineNm } from "./geo";
-import { loadFr24Flight, loadFr24FlightByNumber, loadFr24FlightByRegistration, loadFr24RecentArrivalIdentity } from "./fr24.server";
-import { fetchAround, fetchByCallsign, fetchByHex, fetchByReg, fuseProviderLists, type AdsbRaw } from "./adsb-fusion";
+import { createFr24ProbeDiagnostics, loadFr24Flight, loadFr24FlightByNumber, loadFr24FlightByRegistration, loadFr24RecentArrivalIdentity, type Fr24ProbeDiagnostics } from "./fr24.server";
+import { fetchAround, fetchByCallsign, fetchByHex, fetchByReg, fuseProviderLists, type AdsbRaw, type ProviderPack } from "./adsb-fusion";
 
 type GroundPositionInput = {
   callsign?: string | null;
@@ -35,25 +35,95 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     const airport = { lat: data.airportLat, lon: data.airportLon };
     const diagnosticAirport = data.movementKind === "arrival" ? data.destIata : data.originIata;
     const diagnosticEnabled = diagnosticAirport === "MCO" || diagnosticAirport === "TPA";
-    const diagnostic = (event: string, detail: Record<string, unknown> = {}) => {
-      if (!diagnosticEnabled) return;
-      console.info("[ground-coverage]", {
-        airport: diagnosticAirport,
-        movement: data.movementKind,
-        flight: data.flightNumber,
-        event,
-        ...detail,
-      });
+    const pollId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    type Fr24Result = "usable" | "no_row" | "rejected" | "error" | null;
+    type RejectReason = "missing_position" | "distance_gt_20nm" | "airborne_gt_250ft" | "age_gt_30s" | "future_age" | null;
+    type Fr24KeyType = "registration" | "flightNumber" | "callsign" | "owned-by-story";
+
+    let fr24KeyType: Fr24KeyType = data.movementKind === "departure"
+      ? "owned-by-story"
+      : data.registration
+        ? "registration"
+        : data.flightNumber
+          ? "flightNumber"
+          : "callsign";
+    let fr24Probe = createFr24ProbeDiagnostics();
+    let fr24Result: Fr24Result = null;
+    let rejectReason: RejectReason = null;
+    let rawAgeSec: number | null = null;
+    let rawDistanceNm: number | null = null;
+    let rawOnGround: boolean | null = null;
+    let rawAltFt: number | null = null;
+    const adsbStatus: Record<"fi" | "lol" | "al", string | null> = { fi: null, lol: null, al: null };
+
+    const noteAdsbPacks = (packs: ProviderPack[]) => {
+      for (const pack of packs) {
+        const next = pack.status && pack.status !== "ok" ? pack.status : `ok+${pack.ac.length}`;
+        const current = adsbStatus[pack.provider];
+        if (!current || !current.startsWith("ok+") || !next.startsWith("ok+")) {
+          adsbStatus[pack.provider] = next;
+        } else {
+          const currentCount = Number(current.slice(3)) || 0;
+          adsbStatus[pack.provider] = `ok+${Math.max(currentCount, pack.ac.length)}`;
+        }
+      }
     };
 
-    const usable = (flight: any) => {
+    const inspectFr24 = (flight: any, probe: Fr24ProbeDiagnostics) => {
+      fr24Probe = probe;
+      rejectReason = null;
       const p = flight?.position;
-      if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return null;
-      if (haversineNm(p, airport) > 20) return null;
-      if (p.onGround !== true && (p.altFt ?? 9999) > 250) return null;
+      const raw = probe.rawPosition;
+      const rawLat = raw?.lat ?? (Number.isFinite(p?.lat) ? p.lat : null);
+      const rawLon = raw?.lon ?? (Number.isFinite(p?.lon) ? p.lon : null);
+      const rawSeenAt = raw?.seenAt ?? (typeof p?.seenAt === "number" && Number.isFinite(p.seenAt) ? p.seenAt : null);
+      rawOnGround = raw?.onGround ?? (typeof p?.onGround === "boolean" ? p.onGround : null);
+      rawAltFt = raw?.altFt ?? (typeof p?.altFt === "number" && Number.isFinite(p.altFt) ? p.altFt : null);
+      rawAgeSec = rawSeenAt == null ? null : Date.now() / 1000 - rawSeenAt;
+      rawDistanceNm = rawLat == null || rawLon == null ? null : haversineNm({ lat: rawLat, lon: rawLon }, airport);
+
+      if (!flight) {
+        if (probe.errorKind !== "none") fr24Result = "error";
+        else if (probe.rowsReturned === 0) fr24Result = "no_row";
+        else {
+          fr24Result = "rejected";
+          rejectReason = "missing_position";
+        }
+        return null;
+      }
+      if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) {
+        fr24Result = "rejected";
+        rejectReason = "missing_position";
+        return null;
+      }
+      const distanceNm = haversineNm(p, airport);
+      rawDistanceNm = distanceNm;
+      if (distanceNm > 20) {
+        fr24Result = "rejected";
+        rejectReason = "distance_gt_20nm";
+        return null;
+      }
+      if (p.onGround !== true && (p.altFt ?? 9999) > 250) {
+        fr24Result = "rejected";
+        rejectReason = "airborne_gt_250ft";
+        return null;
+      }
       const seenAt = typeof p.seenAt === "number" && Number.isFinite(p.seenAt) ? p.seenAt : Date.now() / 1000;
       const ageSec = Date.now() / 1000 - seenAt;
-      if (ageSec > 30 || ageSec < -10) return null;
+      rawAgeSec = ageSec;
+      rawOnGround = p.onGround === true;
+      rawAltFt = p.altFt ?? null;
+      if (ageSec > 30) {
+        fr24Result = "rejected";
+        rejectReason = "age_gt_30s";
+        return null;
+      }
+      if (ageSec < -10) {
+        fr24Result = "rejected";
+        rejectReason = "future_age";
+        return null;
+      }
+      fr24Result = "usable";
       return {
         lat: p.lat,
         lon: p.lon,
@@ -66,6 +136,34 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         callsign: p.callsign ?? flight.callsign ?? null,
         provider: "fr24" as const,
       };
+    };
+
+    const finish = <T extends { provider?: string; seenAt?: number } | null>(position: T): T => {
+      if (diagnosticEnabled) {
+        const finalAgeSec = position?.seenAt == null ? null : Math.max(0, Date.now() / 1000 - position.seenAt);
+        console.info("[ground-coverage]", JSON.stringify({
+          pollId,
+          airport: diagnosticAirport,
+          movement: data.movementKind,
+          flight: data.flightNumber,
+          fr24KeyType,
+          fr24Upstream: fr24Probe.upstream,
+          fr24RowsReturned: fr24Probe.rowsReturned,
+          fr24Result,
+          rejectReason,
+          rawAgeSec: rawAgeSec == null ? null : Math.round(rawAgeSec * 10) / 10,
+          rawDistanceNm: rawDistanceNm == null ? null : Math.round(rawDistanceNm * 100) / 100,
+          rawOnGround,
+          rawAltFt,
+          errorKind: fr24Probe.errorKind,
+          rateLimitedUntilActive: fr24Probe.rateLimitedUntilActive,
+          registrationKnownAtPollStart: Boolean(data.registration),
+          adsbStatus,
+          finalProvider: position?.provider ?? "none",
+          finalAgeSec: finalAgeSec == null ? null : Math.round(finalAgeSec * 10) / 10,
+        }));
+      }
+      return position;
     };
 
     const normCallsign = (value: unknown) => String(value ?? "").replace(/\s/g, "").toUpperCase();
@@ -113,36 +211,33 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     // the Explorer plan's 10 queries/minute allowance. Departure ground-map
     // refreshes still use the open ADS-B feeds below between story updates.
     if (data.movementKind === "departure") {
-      diagnostic("fr24-owned-by-story");
+      fr24KeyType = "owned-by-story";
+      fr24Probe = createFr24ProbeDiagnostics();
     } else {
       // Arrivals retain the exact identity recovery path because the live
       // flight number can disappear immediately after landing.
       if (resolvedRegistration) {
-        const byRegistration = await loadFr24FlightByRegistration(resolvedRegistration).catch(() => null);
-        const position = usable(byRegistration);
-        if (position) {
-          diagnostic("fr24-registration-hit", { ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-          return position;
-        }
-        diagnostic("fr24-registration-miss", { registration: resolvedRegistration });
+        fr24KeyType = "registration";
+        const probe = createFr24ProbeDiagnostics();
+        const byRegistration = await loadFr24FlightByRegistration(resolvedRegistration, probe).catch(() => null);
+        const position = inspectFr24(byRegistration, probe);
+        if (position) return finish(position);
       } else if (data.flightNumber) {
-        const byFlightNumber = await loadFr24FlightByNumber(data.flightNumber, bounds).catch(() => null);
-        const position = usable(byFlightNumber);
+        fr24KeyType = "flightNumber";
+        const probe = createFr24ProbeDiagnostics();
+        const byFlightNumber = await loadFr24FlightByNumber(data.flightNumber, bounds, probe).catch(() => null);
+        const position = inspectFr24(byFlightNumber, probe);
         if (position) {
           console.info("[ground-position]", { provider: "fr24-flight-number", flight: data.flightNumber, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-          diagnostic("fr24-flight-number-hit", { ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-          return position;
+          return finish(position);
         }
-        diagnostic("fr24-flight-number-miss");
       } else if (callsigns[0]) {
+        fr24KeyType = "callsign";
         const callsign = callsigns[0];
-        const byCallsign = await loadFr24Flight(callsign).catch(() => null);
-        const position = usable(byCallsign);
-        if (position) {
-          diagnostic("fr24-callsign-hit", { callsign, ageSec: Math.round(Date.now() / 1000 - position.seenAt) });
-          return position;
-        }
-        diagnostic("fr24-callsign-miss", { callsign });
+        const probe = createFr24ProbeDiagnostics();
+        const byCallsign = await loadFr24Flight(callsign, probe).catch(() => null);
+        const position = inspectFr24(byCallsign, probe);
+        if (position) return finish(position);
       }
 
       if (data.movementKind === "arrival" && !resolvedRegistration && data.flightNumber && data.originIata && data.destIata) {
@@ -150,8 +245,10 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         if (recent?.registration) {
           resolvedRegistration = recent.registration;
           wantedReg = normRegistration(resolvedRegistration);
-          const byRegistration = await loadFr24FlightByRegistration(resolvedRegistration).catch(() => null);
-          const position = usable(byRegistration);
+          fr24KeyType = "registration";
+          const probe = createFr24ProbeDiagnostics();
+          const byRegistration = await loadFr24FlightByRegistration(resolvedRegistration, probe).catch(() => null);
+          const position = inspectFr24(byRegistration, probe);
           if (position) {
             console.info("[ground-position]", {
               provider: "fr24-summary-registration",
@@ -159,7 +256,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
               registration: resolvedRegistration,
               ageSec: Math.round(Date.now() / 1000 - position.seenAt),
             });
-            return position;
+            return finish(position);
           }
         }
       }
@@ -176,9 +273,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       return Boolean(cs && wantedCallsigns.has(cs));
     };
     const aroundPacks = await fetchAround(airport.lat, airport.lon, 20).catch(() => []);
-    diagnostic("adsb-around", {
-      providers: aroundPacks.map((pack) => ({ provider: pack.provider, count: pack.ac.length })),
-    });
+    noteAdsbPacks(aroundPacks);
     const around = fuseProviderLists(aroundPacks, { airside: true })
       .filter(matchesIdentity)
       .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
@@ -187,17 +282,9 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       const position = usableAdsb(candidate);
       if (!position) continue;
       const ageSec = Math.round(Date.now() / 1000 - position.seenAt);
-      diagnostic("adsb-around-hit", {
-        callsign: position.callsign,
-        registration: position.registration,
-        ageSec,
-        track: position.track,
-        lat: position.lat,
-        lon: position.lon,
-      });
       if (ageSec <= 8) {
         console.info("[ground-position]", { provider: "adsb-around", callsign: position.callsign, ageSec });
-        return position;
+        return finish(position);
       }
       aroundFallback = position;
       break;
@@ -213,26 +300,14 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         : callsigns[0]
           ? await fetchByCallsign(callsigns[0]).catch(() => [])
           : [];
-    diagnostic("adsb-exact", {
-      providers: exactPacks.map((pack) => ({ provider: pack.provider, count: pack.ac.length })),
-      key: wantedHex ? "hex" : resolvedRegistration ? "registration" : callsigns[0] ? "callsign" : "none",
-    });
+    noteAdsbPacks(exactPacks);
     const exact = fuseProviderLists(exactPacks, { airside: true })
       .filter(matchesIdentity)
       .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
     for (const candidate of exact) {
       const position = usableAdsb(candidate);
       if (position) {
-        const ageSec = Math.round(Date.now() / 1000 - position.seenAt);
-        diagnostic("adsb-exact-hit", {
-          callsign: position.callsign,
-          registration: position.registration,
-          ageSec,
-          track: position.track,
-          lat: position.lat,
-          lon: position.lon,
-        });
-        if (!aroundFallback || position.seenAt > aroundFallback.seenAt) return position;
+        if (!aroundFallback || position.seenAt > aroundFallback.seenAt) return finish(position);
       }
     }
     if (aroundFallback) {
@@ -241,8 +316,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         callsign: aroundFallback.callsign,
         ageSec: Math.round(Date.now() / 1000 - aroundFallback.seenAt),
       });
-      return aroundFallback;
+      return finish(aroundFallback);
     }
-    diagnostic("no-ground-fix", { registration: resolvedRegistration, hex: wantedHex || null, callsigns });
-    return null;
+    return finish(null);
   });;
