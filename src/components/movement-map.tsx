@@ -367,9 +367,9 @@ function GroundMovementMap({
   // can report the same aircraft at slightly different timestamps/positions in
   // those two streams; mixing them can manufacture a reciprocal heading.
   type MotionSource = "story" | "ground";
+  type MotionPoint = { lat: number; lon: number; seenAt: number };
   type MotionState = {
-    point: { lat: number; lon: number; seenAt: number };
-    pendingTrack: number | null;
+    points: MotionPoint[];
     confirmedTrack: number | null;
   };
   const motionTracksRef = useRef<{ key: string; story: MotionState | null; ground: MotionState | null }>({
@@ -383,39 +383,39 @@ function GroundMovementMap({
   const updateMotionSource = (source: MotionSource, fix: NonNullable<typeof storyFast> | null) => {
     if (!fix) return;
     const previous = motionTracksRef.current[source];
-    let pendingTrack = previous?.pendingTrack ?? null;
-    let confirmedTrack = previous?.confirmedTrack ?? null;
-    if (previous && fix.seenAt > previous.point.seenAt + 0.25) {
-      const dt = fix.seenAt - previous.point.seenAt;
-      const movedNm = haversineNm(previous.point, fix);
-      if (dt >= 0.5 && dt <= 60 && movedNm >= 0.004) {
-        const nextTrack = initialBearing(previous.point, fix);
-        if (confirmedTrack != null) {
-          if (bearingDelta(confirmedTrack, nextTrack) <= 50) {
-            confirmedTrack = nextTrack;
-            pendingTrack = null;
-          } else {
-            // A taxi turn needs a second agreeing vector before we draw a new
-            // arrow. Drop back to a dot instead of confidently showing the old
-            // direction through the turn.
-            confirmedTrack = null;
-            pendingTrack = nextTrack;
-          }
-        } else if (pendingTrack != null && bearingDelta(pendingTrack, nextTrack) <= 50) {
-          confirmedTrack = nextTrack;
-          pendingTrack = null;
-        } else {
-          pendingTrack = nextTrack;
-        }
+    const last = previous?.points.at(-1) ?? null;
+    if (last && fix.seenAt <= last.seenAt + 0.25) return;
+
+    const points = [...(previous?.points ?? []), { lat: fix.lat, lon: fix.lon, seenAt: fix.seenAt }]
+      .filter((point) => fix.seenAt - point.seenAt <= 45)
+      .slice(-10);
+
+    let confirmedTrack: number | null = null;
+    const latest = points.at(-1) ?? null;
+    if (latest && points.length >= 3) {
+      // Ground ADS-B can jitter by a few dozen feet between receivers. Use a
+      // multi-fix displacement window instead of a single hop so we only draw
+      // an arrow after meaningful, sustained movement.
+      const anchor = points.find((point) => {
+        const dt = latest.seenAt - point.seenAt;
+        return dt >= 6 && dt <= 35 && haversineNm(point, latest) >= 0.015;
+      }) ?? null;
+
+      if (anchor) {
+        const overall = initialBearing(anchor, latest);
+        const recent = points.slice(-3);
+        const recentAnchor = recent[0] ?? anchor;
+        const recentMoved = haversineNm(recentAnchor, latest);
+        const recentTrack = recentMoved >= 0.008 ? initialBearing(recentAnchor, latest) : overall;
+
+        // If the aircraft is actively turning, show a dot until the new
+        // direction settles instead of displaying either the old or reciprocal
+        // heading with false confidence.
+        if (bearingDelta(overall, recentTrack) <= 55) confirmedTrack = recentTrack;
       }
     }
-    if (!previous || fix.seenAt > previous.point.seenAt + 0.25) {
-      motionTracksRef.current[source] = {
-        point: { lat: fix.lat, lon: fix.lon, seenAt: fix.seenAt },
-        pendingTrack,
-        confirmedTrack,
-      };
-    }
+
+    motionTracksRef.current[source] = { points, confirmedTrack };
   };
   updateMotionSource("story", storyFast);
   updateMotionSource("ground", queriedCandidate);
