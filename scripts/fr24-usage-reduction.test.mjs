@@ -74,6 +74,7 @@ test("visibility and Map selection are wired through to the ground observer", as
   assert.match(movement, /enabled: groundPollingEnabled\(active, pageVisible/);
   assert.doesNotMatch(movement, /refetchIntervalInBackground:\s*true/);
   assert.match(movement, /document.visibilityState === "visible"/);
+  assert.match(movement, /\? 5_000 : false/, "ground ADS-B polling is paced to five seconds");
   const hook = await read("src/lib/use-page-visible.ts");
   assert.match(hook, /useSyncExternalStore/);
   assert.match(hook, /removeEventListener\("visibilitychange", onChange\)/);
@@ -88,6 +89,19 @@ test("departure ground map does not duplicate the tracked-flight FR24 stream", a
   assert.match(source, /if \(ageSec <= 8\)/, "only genuinely fresh broad fixes bypass the exact lookup");
   assert.match(source, /position\.seenAt > aroundFallback\.seenAt/, "the newer exact or broad observation wins");
   assert.match(source, /loadFr24RecentArrivalIdentity/, "completed-arrival identity recovery remains available");
+});
+
+test("surface providers are paced and expose throttling instead of silently looking empty", async () => {
+  const story = await readFile(resolve("src/lib/story.server.ts"), "utf8");
+  const fusion = await readFile(resolve("src/lib/adsb-fusion.ts"), "utf8");
+  assert.match(story, /cached\(\`cs5:\$\{u\}\`, 5000/);
+  assert.match(story, /const primary = fusePacks\(await fetchByCallsign\(u\), false\)/);
+  assert.match(story, /if \(primary\) return primary/);
+  assert.match(story, /cached\(\`around8:\$\{key\}\`, 6000/);
+  assert.match(story, /departureClock - 2 \* 60 \* 60/);
+  assert.match(story, /departureClock \+ 4 \* 60 \* 60/);
+  assert.match(fusion, /\[adsb-provider-fail\]/);
+  assert.match(fusion, /\[adsb-provider-backoff\]/);
 });
 
 test("matched FR24 registration skips failed route lookup, but wrong leg/missing/stale/expired matches fall back", async () => {
