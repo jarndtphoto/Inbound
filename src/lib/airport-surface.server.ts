@@ -343,10 +343,17 @@ function validGeometry(points: OverpassGeometryPoint[] | undefined): SurfacePoin
     .map((p) => ({ lat: p.lat, lon: p.lon }));
 }
 
-function relationRings(element: OverpassElement, role: "outer" | "inner"): SurfacePoint[][] {
+function relationRings(
+  element: OverpassElement,
+  role: "outer" | "inner",
+  wayGeometry?: Map<number, SurfacePoint[]>,
+): SurfacePoint[][] {
   const segments = (element.members ?? [])
     .filter((member) => member.type === "way" && (member.role === role || (role === "outer" && !member.role)))
-    .map((member) => validGeometry(member.geometry))
+    .map((member) => {
+      const inline = validGeometry(member.geometry);
+      return inline.length >= 2 ? inline : member.ref != null ? (wayGeometry?.get(member.ref) ?? []) : [];
+    })
     .filter((points) => points.length >= 2);
   const rings: SurfacePoint[][] = [];
 
@@ -392,16 +399,28 @@ function waterElement(element: OverpassElement) {
 
 function waterPolygons(elements: OverpassElement[]): SurfacePolygon[] {
   const polygons: SurfacePolygon[] = [];
+  const waterRelations = elements.filter((element) => element.type === "relation" && waterElement(element));
+  const relationMemberIds = new Set(waterRelations.flatMap((element) =>
+    (element.members ?? []).filter((member) => member.type === "way" && member.ref != null).map((member) => member.ref!),
+  ));
+  const wayGeometry = new Map<number, SurfacePoint[]>();
+  for (const element of elements) {
+    if (element.type !== "way") continue;
+    const geometry = validGeometry(element.geometry);
+    if (geometry.length >= 2) wayGeometry.set(element.id, geometry);
+  }
+
   for (const element of elements) {
     if (!waterElement(element)) continue;
     if (element.type === "way") {
+      if (relationMemberIds.has(element.id)) continue;
       const outer = validGeometry(element.geometry);
       if (outer.length >= 4 && samePoint(outer[0], outer.at(-1))) polygons.push({ outer });
       continue;
     }
     if (element.type !== "relation") continue;
-    const outers = relationRings(element, "outer");
-    const inners = relationRings(element, "inner");
+    const outers = relationRings(element, "outer", wayGeometry);
+    const inners = relationRings(element, "inner", wayGeometry);
     for (const outer of outers) {
       const holes = inners.filter((inner) => inner[0] && pointInRing(inner[0], outer));
       polygons.push(holes.length ? { outer, holes } : { outer });
@@ -484,7 +503,20 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
 
 function hydroOverpassQuery(bounds: SurfaceBounds) {
   const bbox = surfaceBoundsString(bounds);
-  return `(way["natural"="coastline"](${bbox});way["natural"="water"](${bbox});way["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox});relation["natural"="water"](${bbox});relation["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox}););out geom;`;
+  // Keep multipolygon relation bodies lightweight. Member way geometry is
+  // returned separately, clipped to the local airport box, and re-associated
+  // by member ref/role in waterPolygons(). This avoids downloading an entire
+  // Great Lake or coastal multipolygon just to draw one airport neighborhood.
+  return `
+    (way["natural"="coastline"](${bbox});)->.coast;
+    (way["natural"="water"](${bbox});way["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox});)->.waterWays;
+    (relation["natural"="water"](${bbox});relation["water"~"^(lake|lagoon|reservoir|bay)$"](${bbox});)->.waterRelations;
+    .coast out geom(${bbox});
+    .waterWays out geom;
+    .waterRelations out body;
+    way(r.waterRelations)->.waterMembers;
+    .waterMembers out geom(${bbox});
+  `;
 }
 
 export function exactAirportSurfaceOverpassQuery(airport: string, input: { lat: number; lon: number }) {
