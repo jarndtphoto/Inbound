@@ -109,6 +109,7 @@ const PROVIDER_ORDER: ProviderId[] = ["fi", "lol", "al"];
 
 type Health = { fails: number; until: number; lastOk: number };
 const health = new Map<ProviderId, Health>();
+const providerLogAt = new Map<string, number>();
 const observations = new Map<string, Observation[]>();
 const tracks = new Map<string, TrackState>();
 const lastAround = new Map<string, { at: number; ac: AdsbRaw[] }>();
@@ -358,7 +359,8 @@ export function chooseBest(
   return null;
 }
 
-export type ProviderPack = { provider: ProviderId; ac: AdsbRaw[] };
+export type ProviderFetchStatus = "ok" | "429" | "timeout" | "error" | "backoff";
+export type ProviderPack = { provider: ProviderId; ac: AdsbRaw[]; status?: ProviderFetchStatus };
 
 export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; airside?: boolean }): AdsbRaw[] {
   const now = opts?.now ?? Date.now();
@@ -429,37 +431,68 @@ async function fetchJson(url: string, ms: number): Promise<unknown> {
   return res.json();
 }
 
-export async function fetchProvider(id: ProviderId, url: string, now = Date.now()): Promise<AdsbRaw[]> {
-  if (!providerHealthy(id, now)) return [];
+function providerFetchStatus(error: unknown): ProviderFetchStatus {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/\b429\b/.test(message)) return "429";
+  if (/timeout|timed out|abort/i.test(message) || (error instanceof Error && /TimeoutError|AbortError/.test(error.name))) return "timeout";
+  return "error";
+}
+
+async function fetchProviderPack(id: ProviderId, url: string, now = Date.now()): Promise<ProviderPack> {
+  if (!providerHealthy(id, now)) {
+    const h = health.get(id);
+    const key = `${id}:backoff`;
+    if (now - (providerLogAt.get(key) ?? 0) >= 5_000) {
+      providerLogAt.set(key, now);
+      console.warn("[adsb-provider-backoff]", {
+        provider: id,
+        remainingMs: Math.max(0, (h?.until ?? now) - now),
+        failures: h?.fails ?? 0,
+      });
+    }
+    return { provider: id, ac: [], status: "backoff" };
+  }
   try {
     const json = await fetchJson(url, PROVIDERS[id].timeoutMs);
     markProviderOk(id, now);
-    return acList(json);
-  } catch {
+    return { provider: id, ac: acList(json), status: "ok" };
+  } catch (error) {
     markProviderFail(id, now);
-    return [];
+    const status = providerFetchStatus(error);
+    const h = health.get(id);
+    const key = `${id}:fail`;
+    if (now - (providerLogAt.get(key) ?? 0) >= 5_000) {
+      providerLogAt.set(key, now);
+      let host = "";
+      try { host = new URL(url).hostname; } catch {}
+      console.warn("[adsb-provider-fail]", {
+        provider: id,
+        host,
+        error: error instanceof Error ? error.message : String(error),
+        backoffMs: Math.max(0, (h?.until ?? now) - now),
+        failures: h?.fails ?? 0,
+      });
+    }
+    return { provider: id, ac: [], status };
   }
+}
+
+export async function fetchProvider(id: ProviderId, url: string, now = Date.now()): Promise<AdsbRaw[]> {
+  return (await fetchProviderPack(id, url, now)).ac;
 }
 
 export async function fetchAround(lat: number, lon: number, dist: number): Promise<ProviderPack[]> {
   const now = Date.now();
-  const packs = await Promise.all(
-    PROVIDER_ORDER.map(async (id) => ({
-      provider: id,
-      ac: await fetchProvider(id, PROVIDERS[id].around(lat, lon, dist), now),
-    })),
+  return Promise.all(
+    PROVIDER_ORDER.map((id) => fetchProviderPack(id, PROVIDERS[id].around(lat, lon, dist), now)),
   );
-  return packs;
 }
 
 export async function fetchByHex(hex: string): Promise<ProviderPack[]> {
   const id = hex.toLowerCase();
   const now = Date.now();
   return Promise.all(
-    PROVIDER_ORDER.map(async (p) => ({
-      provider: p,
-      ac: await fetchProvider(p, PROVIDERS[p].hex(id), now),
-    })),
+    PROVIDER_ORDER.map((p) => fetchProviderPack(p, PROVIDERS[p].hex(id), now)),
   );
 }
 
@@ -467,10 +500,7 @@ export async function fetchByCallsign(callsign: string): Promise<ProviderPack[]>
   const u = callsign.replace(/\s/g, "").toUpperCase();
   const now = Date.now();
   return Promise.all(
-    PROVIDER_ORDER.map(async (p) => ({
-      provider: p,
-      ac: await fetchProvider(p, PROVIDERS[p].callsign(u), now),
-    })),
+    PROVIDER_ORDER.map((p) => fetchProviderPack(p, PROVIDERS[p].callsign(u), now)),
   );
 }
 
@@ -478,10 +508,7 @@ export async function fetchByReg(reg: string): Promise<ProviderPack[]> {
   const u = reg.replace(/[-\s]/g, "").toUpperCase();
   const now = Date.now();
   return Promise.all(
-    PROVIDER_ORDER.map(async (p) => ({
-      provider: p,
-      ac: await fetchProvider(p, PROVIDERS[p].registration(u), now),
-    })),
+    PROVIDER_ORDER.map((p) => fetchProviderPack(p, PROVIDERS[p].registration(u), now)),
   );
 }
 

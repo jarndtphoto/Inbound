@@ -62,6 +62,10 @@ export async function loadOfficialFlightData(
     fr24DestIata?: string | null;
     fr24Registration?: string | null;
     fr24OperatingCallsign?: string | null;
+    // Surface departures must stay within the Explorer plan's 10-query/minute
+    // throttle. In this mode FR24 gets exactly one live identity probe: known
+    // registration first, otherwise the operating/transponder callsign.
+    fr24SurfaceDeparture?: boolean;
   },
 ) {
   const fa = await probe(aeroApiConfigured(), () => loadAeroApiFlight(ident));
@@ -69,7 +73,8 @@ export async function loadOfficialFlightData(
   const routeOrigin = options?.fr24OriginIata?.trim().toUpperCase() || null;
   const routeDestination = options?.fr24DestIata?.trim().toUpperCase() || null;
   const lookupKey = JSON.stringify([new Date(Date.now()).toISOString().slice(0, 10), ident.toUpperCase(), preferredFlightNumber,
-    routeOrigin, routeDestination, options?.fr24Registration?.trim().toUpperCase(), options?.fr24Bounds, options?.fr24OperatingCallsign?.trim().toUpperCase()]);
+    routeOrigin, routeDestination, options?.fr24Registration?.trim().toUpperCase(), options?.fr24Bounds, options?.fr24OperatingCallsign?.trim().toUpperCase(),
+    Boolean(options?.fr24SurfaceDeparture)]);
   const remembered = matchedLookups.get(lookupKey);
   if (remembered && Date.now() - remembered.at < MATCHED_LOOKUP_TTL_MS) {
     const recalled = await probe(fr24Configured(), () => {
@@ -92,34 +97,66 @@ export async function loadOfficialFlightData(
     }
   }
   matchedLookups.delete(lookupKey);
-  let matchedKind: MatchedLookup["kind"] = preferredFlightNumber ? routeOrigin && routeDestination ? "route" : "number" : "callsign";
-  let matchedValue = preferredFlightNumber ?? ident;
-  let fr = await probe(fr24Configured(), () =>
-    preferredFlightNumber && routeOrigin && routeDestination
-      ? loadFr24FlightByNumberAndRoute(preferredFlightNumber, routeOrigin, routeDestination)
-      : preferredFlightNumber
-        ? loadFr24FlightByNumber(preferredFlightNumber, options?.fr24Bounds ?? undefined)
-        : loadFr24Flight(ident)
-  );
-  if (fr.flight && preferredFlightNumber) {
-    console.info(JSON.stringify({
-      event: "fr24_flight_number_match",
-      requested: ident,
-      flightNumber: preferredFlightNumber,
-      flightId: fr.flight.flightId ?? null,
-      callsign: fr.flight.callsign ?? null,
-    }));
-  }
-
-  if (fr.state === "NO_MATCH" && preferredFlightNumber && !(routeOrigin && routeDestination)) {
-    fr = await probe(fr24Configured(), () => loadFr24Flight(ident));
-    matchedKind = "callsign";
-    matchedValue = ident;
-  }
-
   const publicRegistration = options?.fr24Registration?.trim().toUpperCase() || null;
+  const publicOperating = options?.fr24OperatingCallsign?.trim().toUpperCase() || null;
+  const surfaceDeparture = Boolean(options?.fr24SurfaceDeparture);
+
+  let matchedKind: MatchedLookup["kind"];
+  let matchedValue: string;
+  let fr: { flight: NormalizedFlight | null; state: ProviderState };
+
+  if (surfaceDeparture) {
+    matchedKind = publicRegistration ? "registration" : "callsign";
+    matchedValue = publicRegistration ?? publicOperating ?? ident.toUpperCase();
+    fr = await probe(fr24Configured(), () => publicRegistration
+      ? loadFr24FlightByRegistration(publicRegistration)
+      : loadFr24Flight(matchedValue));
+
+    const candidate = fr.flight;
+    const routeMatches = Boolean(candidate
+      && (!routeOrigin || candidate.origin?.iata?.trim().toUpperCase() === routeOrigin)
+      && (!routeDestination || candidate.destination?.iata?.trim().toUpperCase() === routeDestination));
+    if (candidate && !routeMatches) {
+      console.warn(JSON.stringify({
+        event: "fr24_surface_wrong_leg_rejected",
+        requested: ident,
+        lookupKind: matchedKind,
+        lookupValue: matchedValue,
+        routeOrigin,
+        routeDestination,
+        candidateOrigin: candidate.origin?.iata ?? candidate.origin?.icao ?? null,
+        candidateDestination: candidate.destination?.iata ?? candidate.destination?.icao ?? null,
+      }));
+      fr = { flight: null, state: "NO_MATCH" };
+    }
+  } else {
+    matchedKind = preferredFlightNumber ? routeOrigin && routeDestination ? "route" : "number" : "callsign";
+    matchedValue = preferredFlightNumber ?? ident;
+    fr = await probe(fr24Configured(), () =>
+      preferredFlightNumber && routeOrigin && routeDestination
+        ? loadFr24FlightByNumberAndRoute(preferredFlightNumber, routeOrigin, routeDestination)
+        : preferredFlightNumber
+          ? loadFr24FlightByNumber(preferredFlightNumber, options?.fr24Bounds ?? undefined)
+          : loadFr24Flight(ident)
+    );
+    if (fr.flight && preferredFlightNumber) {
+      console.info(JSON.stringify({
+        event: "fr24_flight_number_match",
+        requested: ident,
+        flightNumber: preferredFlightNumber,
+        flightId: fr.flight.flightId ?? null,
+        callsign: fr.flight.callsign ?? null,
+      }));
+    }
+
+    if (fr.state === "NO_MATCH" && preferredFlightNumber && !(routeOrigin && routeDestination)) {
+      fr = await probe(fr24Configured(), () => loadFr24Flight(ident));
+      matchedKind = "callsign";
+      matchedValue = ident;
+    }
+  }
   const currentAge = fr.flight?.position?.seenAt != null ? Math.max(0, Date.now() / 1000 - fr.flight.position.seenAt) : Number.POSITIVE_INFINITY;
-  if ((fr.state === "NO_MATCH" || (fr.state === "ACTIVE" && currentAge > 12)) && publicRegistration) {
+  if (!surfaceDeparture && (fr.state === "NO_MATCH" || (fr.state === "ACTIVE" && currentAge > 12)) && publicRegistration) {
     const registrationFr = await probe(fr24Configured(), () => loadFr24FlightByRegistration(publicRegistration));
     const candidate = registrationFr.flight;
     const candidateAge = candidate?.position?.seenAt != null ? Math.max(0, Date.now() / 1000 - candidate.position.seenAt) : Number.POSITIVE_INFINITY;
@@ -154,8 +191,7 @@ export async function loadOfficialFlightData(
     }
   }
 
-  const publicOperating = options?.fr24OperatingCallsign?.trim().toUpperCase();
-  if (fr.state === "NO_MATCH" && publicOperating && publicOperating !== ident.toUpperCase()) {
+  if (!surfaceDeparture && fr.state === "NO_MATCH" && publicOperating && publicOperating !== ident.toUpperCase()) {
     const operatingFr = await probe(fr24Configured(), () => loadFr24Flight(publicOperating));
     if (operatingFr.flight) {
       fr = operatingFr;
@@ -165,7 +201,7 @@ export async function loadOfficialFlightData(
     }
   }
 
-  if (fr.state === "NO_MATCH" && fa.flight) {
+  if (!surfaceDeparture && fr.state === "NO_MATCH" && fa.flight) {
     const operatingIdent = operatingIdentFromFlightAware(fa.flight);
     if (operatingIdent && operatingIdent !== ident.toUpperCase()) {
       const operatingFr = await probe(fr24Configured(), () => loadFr24Flight(operatingIdent));
@@ -183,7 +219,7 @@ export async function loadOfficialFlightData(
     }
   }
 
-  if (fr.state === "NO_MATCH" && fa.flight?.registration) {
+  if (!surfaceDeparture && fr.state === "NO_MATCH" && fa.flight?.registration) {
     const registration = fa.flight.registration.trim().toUpperCase();
     if (registration) {
       const registrationFr = await probe(fr24Configured(), () => loadFr24FlightByRegistration(registration));

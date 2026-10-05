@@ -1,4 +1,5 @@
-import { after, describe, it } from 'node:test';
+import { freezeTestClock } from './helpers/test-clock.mjs';
+import { after, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -22,7 +23,13 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { loadFlightStory, motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+let loadFlightStory;
+let storyInstance = 0;
+async function coldStoryFixture() {
+  ({ loadFlightStory } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href + '?fixture=' + ++storyInstance));
+}
+await coldStoryFixture();
 const { HAWAII_COASTLINES } = await import('../src/lib/hawaii-coastlines.ts');
 const { normalizeAeroApiRoute } = await import('../src/lib/flightaware-aeroapi.server.ts');
 const { routeWeatherEvents, weatherEventMarker } = await import('../src/lib/weather-events.ts');
@@ -31,6 +38,22 @@ const { WeatherEventMarker } = await import('../src/components/weather-event-mar
 const { passengerWeatherCopy } = await import('../src/lib/weather-card-copy.ts');
 const { WeatherEventHeadline, WeatherEventBody, WeatherPreviewLabel } = await import('../src/components/weather-event-copy.ts');
 const { FLIGHT_STAGES } = await import('../src/lib/flight-stage.ts');
+const { initialBearing } = await import('../src/lib/geo.ts');
+
+describe('geographic bearing regression', () => {
+  const mco = { lat: 28.42, lon: -81.30 };
+  const closeTo = (actual, expected) => {
+    const delta = Math.abs(((actual - expected + 540) % 360) - 180);
+    assert.ok(delta < 1, `expected ${expected}°, got ${actual}°`);
+  };
+
+  it('returns cardinal bearings correctly at MCO latitude', () => {
+    closeTo(initialBearing(mco, { lat: 28.43, lon: -81.30 }), 0);
+    closeTo(initialBearing(mco, { lat: 28.42, lon: -81.29 }), 90);
+    closeTo(initialBearing(mco, { lat: 28.41, lon: -81.30 }), 180);
+    closeTo(initialBearing(mco, { lat: 28.42, lon: -81.31 }), 270);
+  });
+});
 
 describe('passenger weather presentation', () => {
   const appSource = readFileSync(new URL('../src/components/filed-app.tsx', import.meta.url), 'utf8');
@@ -68,6 +91,7 @@ describe('passenger weather presentation', () => {
 describe('zoom-stable route presentation', () => {
   const source = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
   const groundSource = readFileSync(new URL('../src/components/movement-map.tsx', import.meta.url), 'utf8');
+  const motionSource = readFileSync(new URL('../src/lib/ground-motion.ts', import.meta.url), 'utf8');
   const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
   it('keeps every route, flown-track, projected, outline, and weather stroke screen-sized', () => {
@@ -129,6 +153,19 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /fitFeatures\.flatMap/);
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
     assert.match(groundSource, /resetViewRef\.current = next/);
+    assert.match(groundSource, /updateMotionSource\("story", storyFast\)/);
+    assert.match(groundSource, /updateMotionSource\("ground", queriedCandidate\)/);
+    assert.match(motionSource, /fix\.seenAt - point\.seenAt <= 45/);
+    assert.match(motionSource, /dt >= 6 && dt <= 35 && haversineNm\(point, latest\) >= 0\.015/);
+    assert.match(motionSource, /const overall = initialBearing\(anchor, latest\)/);
+    assert.match(motionSource, /recentMoved >= 0\.008 \? initialBearing\(recentAnchor, latest\) : overall/);
+    assert.match(motionSource, /bearingDelta\(overall, recentTrack\) <= 55/);
+    assert.match(groundSource, /motionTracksRef\.current\[selectedFast\.source\]\?\.confirmedTrack/);
+    assert.match(groundSource, /track: motionTrack/);
+    assert.match(groundSource, /!displayFrozen && Number\.isFinite\(displayAircraft\.track\) \? \(/);
+    assert.match(groundSource, /rotate\(\$\{displayAircraft\.track\}\)/);
+    assert.doesNotMatch(groundSource, /displayAircraft\.track \+ 180/);
+    assert.match(groundSource, /delayed \$\{providerLabel\} position/);
   });
 });
 
@@ -257,8 +294,14 @@ describe('post-landing passenger stage', () => {
     assert.notEqual(currentStageOf({ ourLanded: true, gateInActual: null, parkedAtGate: false, dest, live }), 'gate');
   });
 
-  it('marks confirmed gate-in At gate', () => {
-    assert.equal(currentStageOf({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live: { ...surface, gsKt: 8 } }), 'gate');
+  it('does not let an early provider gate-in override fresh taxi movement', () => {
+    const live = { ...surface, gsKt: 8, phase: 'taxi' };
+    assert.equal(postLandingState({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live }), 'taxi_in');
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live }), 'taxi_in');
+  });
+
+  it('marks confirmed gate-in At gate once fresh taxi movement is gone', () => {
+    assert.equal(currentStageOf({ ourLanded: true, gateInActual: 1_000, parkedAtGate: false, dest, live: { ...surface, gsKt: 0, phase: 'parked' } }), 'gate');
   });
 
   it('marks robust stationary/parked detection At gate', () => {
@@ -274,13 +317,15 @@ describe('post-landing passenger stage', () => {
 });
 
 describe('September 12 flight audit replay', () => {
+  // Independent upstream fixtures must not share a provider-wide circuit breaker.
+  beforeEach(coldStoryFixture);
   for (const [ident, query, destination, pushed] of [
     ['ual1532', 'UA1532', 'MSY', true],
     ['aal3008', 'AA3008', 'LAX', false],
   ]) {
     it(`${query}: preserves departure facts when no position is available`, async (t) => {
       const record = JSON.parse(readFileSync(new URL(`./fixtures/${ident}-2026-09-12.json`, import.meta.url), 'utf8'));
-      t.mock.method(Date, 'now', () => 1789231976000);
+      t.after(freezeTestClock(() => 1789231976000));
       const requests = [];
       t.mock.method(globalThis, 'fetch', async (url) => {
         const u = String(url); requests.push(u);
@@ -318,7 +363,7 @@ describe('September 12 flight audit replay', () => {
     let lon = -87.9048;
     let gs = 0;
     let traceRequests = 0;
-    t.mock.method(Date, 'now', () => now);
+    t.after(freezeTestClock(() => now));
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).includes('/data/traces/')) traceRequests += 1;
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
@@ -354,6 +399,33 @@ describe('September 12 flight audit replay', () => {
     await assert.rejects(loadFlightStory('UA9087', {fresh: true}), /route unavailable/i);
   });
 
+  it('rejects an undated ADS-B route even with a fresh exact aircraft at its origin', async (t) => {
+    const now = Date.UTC(2026, 9, 5, 2, 33) / 1000;
+    t.after(freezeTestClock(() => now * 1000));
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      const u = String(url);
+      if (u.startsWith('https://www.flightaware.com/live/flight/')) {
+        return new Response('', { status: 402 });
+      }
+      if (u.includes('flightstats.com/v2/flight-tracker/')) {
+        return new Response('<html><body>Flight Status unavailable</body></html>');
+      }
+      if (u.includes('api.adsbdb.com/v0/callsign/')) {
+        return new Response(JSON.stringify({ response: { flightroute: {
+          callsign_icao: 'SWA2724', callsign_iata: 'WN2724',
+          origin: { iata_code: 'MCO', icao_code: 'KMCO', latitude: 28.4312, longitude: -81.3081 },
+          destination: { iata_code: 'MDW', icao_code: 'KMDW', latitude: 41.7868, longitude: -87.7522 },
+        } } }), { headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ ac: [{
+        hex: 'a27240', flight: 'SWA2724', r: 'N2724S', t: 'B738',
+        lat: 28.4268, lon: -81.3020, alt_baro: 'ground', gs: 18,
+        seen: 1, seen_pos: 1,
+      }], features: [] }), { headers: { 'content-type': 'application/json' } });
+    });
+    await assert.rejects(loadFlightStory('WN2724', { fresh: true }), /Current flight route unavailable/);
+  });
+
   it('does not use an old flight-number route when the current schedule feed is unavailable', async (t) => {
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) return new Response('unavailable', { status: 503 });
@@ -376,7 +448,7 @@ describe('September 12 flight audit replay', () => {
     record.waypoints = []; record.track = null; record.coord = null;
     record.gateDepartureTimes = { scheduled: 1789239000, estimated: 1789240320, actual: 1789240320 };
     record.takeoffTimes = { scheduled: 1789240200, estimated: 1789241220, actual: 1789241220 };
-    t.mock.method(Date, 'now', () => 1789238100000); // 1:35 PM CDT
+    t.after(freezeTestClock(() => 1789238100000)); // 1:35 PM CDT
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
         return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
@@ -412,7 +484,7 @@ describe('September 12 flight audit replay', () => {
     record.landingTimes = { scheduled: 1789305600, estimated: 1789305600, actual: null };
     record.gateArrivalTimes = { scheduled: 1789306200, estimated: 1789306200, actual: null };
     record.inboundFlight = { flightId: 'UAL219-1789190000-airline-0001' };
-    t.mock.method(Date, 'now', () => 1789257600000);
+    t.after(freezeTestClock(() => 1789257600000));
     t.mock.method(globalThis, 'fetch', async (url) => {
       const u = String(url);
       if (u.includes('/live/flight/id/UAL219-')) {
@@ -440,6 +512,8 @@ describe('September 12 flight audit replay', () => {
 });
 
 describe('MDW departure surface-stage replays', () => {
+  // Independent upstream fixtures must not share a provider-wide circuit breaker.
+  beforeEach(coldStoryFixture);
   const now = 1789231976;
   for (const [flight, speed, status, gateActual, takeoffActual, expectedStage, expectedPush] of [
     ['WN363', 0, 'scheduled', now - 90, null, 'push', true],
@@ -467,7 +541,7 @@ describe('MDW departure surface-stage replays', () => {
         seen: 1, seen_pos: 1,
       };
       let groundTraceRequests = 0;
-      t.mock.method(Date, 'now', () => now * 1000);
+      t.after(freezeTestClock(() => now * 1000));
       t.mock.method(globalThis, 'fetch', async (url) => {
         if (String(url).includes('/trace_recent_')) groundTraceRequests++;
         if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
@@ -497,7 +571,7 @@ describe('MDW departure surface-stage replays', () => {
 describe('ground trace freshness', () => {
   it('accepts recent movement but rejects stale and future movement', (t) => {
     const now = 1789231976;
-    t.mock.method(Date, 'now', () => now * 1000);
+    t.after(freezeTestClock(() => now * 1000));
     const origin = { lat: 41.9786, lon: -87.9048 };
     const point = (age, offset) => ({ t: now - age, lat: origin.lat, lon: origin.lon + offset, gs: 9, alt: 0, ground: true });
     assert.equal(motionFromTrace([point(20, 0), point(2, .003)], origin).taxiing, true);
@@ -603,6 +677,8 @@ describe('first-class pushback and taxi-out stages', () => {
 });
 
 describe('on the move evidence', () => {
+  // Independent upstream fixtures must not share a provider-wide circuit breaker.
+  beforeEach(coldStoryFixture);
   it('UA219: keeps an overdue estimate non-actual, then records only observed/provider push', async (t) => {
     const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
     record.ident = 'UAL9219'; record.iataIdent = 'UA9219'; record.flightId = 'UAL9219-20260914-test';
@@ -612,7 +688,7 @@ describe('on the move evidence', () => {
     record.takeoffTimes = { scheduled: 1789231800, estimated: 1789232400, actual: null };
     let now = 1789230600000; // 9:30: estimate passed five minutes ago.
     let lat = 41.9786; let lon = -87.9048; let gs = 0;
-    t.mock.method(Date, 'now', () => now);
+    t.after(freezeTestClock(() => now));
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
         return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
@@ -698,7 +774,7 @@ describe('on the move evidence', () => {
     record.takeoffTimes = { scheduled: 1789232400, estimated: 1789233000, actual: null };
     let now = 1789230600000;
     let aircraft = { hex: 'a93600', flight: 'UAL9360', lat: 41.9786, lon: -87.9048, gs: 0, track: 90, alt_baro: 'ground', seen_pos: 0 };
-    t.mock.method(Date, 'now', () => now);
+    t.after(freezeTestClock(() => now));
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) {
         return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
@@ -746,7 +822,7 @@ describe('on the move evidence', () => {
     record.inboundFlight = null; record.flightStatus = 'scheduled';
     record.gateDepartureTimes = { scheduled: 1789230000, estimated: 1789230100, actual: null };
     record.takeoffTimes = { scheduled: 1789230600, estimated: 1789230700, actual: null };
-    t.mock.method(Date, 'now', () => 1789231976000);
+    t.after(freezeTestClock(() => 1789231976000));
     t.mock.method(globalThis, 'fetch', async (url) => {
       if (String(url).startsWith('https://www.flightaware.com/live/flight/')) return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
       return new Response(JSON.stringify({ ac: [{ hex: 'a99177', flight: 'AAL9917', lat: 41.99, lon: -87.91, gs: 0, alt_baro: 'ground', seen_pos: 0 }], features: [] }));
@@ -758,9 +834,10 @@ describe('on the move evidence', () => {
 });
 
 it('preserves missing weather feeds as unknown while the flight still loads', async (t) => {
+  await coldStoryFixture();
   const record = JSON.parse(readFileSync(new URL('./fixtures/ual1532-2026-09-12.json', import.meta.url), 'utf8'));
   record.ident = 'UAL1599'; record.iataIdent = 'UA1599';
-  t.mock.method(Date, 'now', () => 1789311976000);
+  t.after(freezeTestClock(() => 1789311976000));
   t.mock.method(globalThis, 'fetch', async (url) => {
     const u = String(url);
     if (u.startsWith('https://www.flightaware.com/live/flight/')) return new Response(`trackpollBootstrap = ${JSON.stringify({flights:{replay:record}})};`);
@@ -887,6 +964,33 @@ describe('public schedule fallback', () => {
     assert.equal(chooseFlightStatsScheduleCandidate([tomorrow, landed], now)?._publicScheduleDate, '2026-10-01');
   });
 
+  it('rejects an implausibly distant future FlightStats leg instead of assigning the wrong current route', () => {
+    const future = parseFlightStatsPublicSchedule(
+      `<html><body><h1>Flight Status</h1><div>WN 2144 Southwest Airlines LAS Las Vegas DEN Denver Scheduled</div><div>Flight Departure Times 06-Oct-2026 Scheduled 06:00 PDT</div><div>Flight Arrival Times 06-Oct-2026 Scheduled 08:55 MDT</div></body></html>`,
+      'SWA2144', '2026-10-06'
+    );
+    const now = Date.UTC(2026, 9, 5, 0, 51) / 1000;
+    assert.equal(chooseFlightStatsScheduleCandidate([future], now), null);
+  });
+
+  it('still allows a plausible upcoming flight within the search window', () => {
+    const upcoming = parseFlightStatsPublicSchedule(
+      `<html><body><h1>Flight Status</h1><div>WN 2144 Southwest Airlines LAS Las Vegas DEN Denver Scheduled</div><div>Flight Departure Times 05-Oct-2026 Scheduled 06:00 PDT</div><div>Flight Arrival Times 05-Oct-2026 Scheduled 08:55 MDT</div></body></html>`,
+      'SWA2144', '2026-10-05'
+    );
+    const now = Date.UTC(2026, 9, 5, 0, 51) / 1000;
+    assert.equal(chooseFlightStatsScheduleCandidate([upcoming], now)?._publicScheduleDate, '2026-10-05');
+  });
+
+  it('uses a global public-FlightAware breaker and searches detail pages when direct FlightStats candidates are implausible', () => {
+    const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(source, /let awarePublicBlockedUntil = 0/);
+    assert.match(source, /Date\.now\(\) < awarePublicBlockedUntil/);
+    assert.match(source, /awarePublicBlockedUntil = Math\.max\(awarePublicBlockedUntil, Date\.now\(\) \+ 60_000\)/);
+    assert.match(source, /const detailPages = bestPage \? \[bestPage\] : pages/);
+    assert.match(source, /detailRequests\.length >= 12/);
+  });
+
   it('fails closed when the page does not identify two known airports', () => {
     assert.equal(parseFlightStatsPublicSchedule('<html>Flight Status UA 3 Scheduled</html>', 'UAL3', '2026-10-01'), null);
   });
@@ -894,6 +998,19 @@ describe('public schedule fallback', () => {
   it('allows an exact FR24 leg up to 60 seconds old to establish origin-gate identity', () => {
     const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
     assert.match(source, /\(live\.seenSec \?\? 999\) <= \(exactFr24Leg \? 60 : 30\)/);
+  });
+});
+
+describe('outbound turn-aircraft recovery', () => {
+  it('reuses only a completed inbound aircraft identity near the departure window', () => {
+    const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(source, /const turnTail = inboundAware\?\.tail \?\? snap\?\.tail/);
+    assert.match(source, /const inboundTurnComplete = Boolean\(inboundAware\?\.gateIn\?\.actual \|\| snap\?\.frozen\)/);
+    assert.match(source, /departureClock - 45 \* 60/);
+    assert.match(source, /departureClock \+ 3 \* 60 \* 60/);
+    assert.match(source, /turnLive && turnLive\.onGround/);
+    assert.match(source, /turnAge <= 30/);
+    assert.match(source, /\[outbound-turn-recovery\]/);
   });
 });
 

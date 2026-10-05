@@ -928,12 +928,15 @@ function fusePacks(packs, airside) {
 async function adsbByCallsign(callsign) {
 	const u = String(callsign || "").replace(/\s/g, "").toUpperCase();
 	if (!u) return null;
-	return cached(`cs4:${u}`, 2000, async () => {
-		const iata = displayIata(u, null).replace(/\s/g, "");
-		const idents = [...new Set([u, iata])].filter(Boolean).slice(0, 2);
-		const packs = (await Promise.all(idents.map((v) => fetchByCallsign(v)))).flat();
+	return cached(`cs5:${u}`, 5000, async () => {
 		const variants = new Set(callsignVariants(u));
-		return fusePacks(packs, false).find((a) => variants.has(String(a.flight ?? "").replace(/\s/g, "").toUpperCase())) ?? null;
+		const primary = fusePacks(await fetchByCallsign(u), false)
+			.find((a) => variants.has(String(a.flight ?? "").replace(/\s/g, "").toUpperCase())) ?? null;
+		if (primary) return primary;
+		const iata = displayIata(u, null).replace(/\s/g, "");
+		if (!iata || iata === u) return null;
+		return fusePacks(await fetchByCallsign(iata), false)
+			.find((a) => variants.has(String(a.flight ?? "").replace(/\s/g, "").toUpperCase())) ?? null;
 	});
 }
 async function adsbByReg(reg) {
@@ -946,12 +949,22 @@ async function adsbByReg(reg) {
 }
 async function adsbAround(lat, lon, dist) {
 	const key = `around:${lat.toFixed(2)}:${lon.toFixed(2)}:${dist}`;
-	return cached(`around7:${key}`, 2000, async () => {
+	const snapshot = await cached(`around8:${key}`, 6000, async () => {
 		const packs = await fetchAround(lat, lon, dist);
 		let fused = fusePacks(packs, dist <= 24);
 		if (!fused.length) fused = lastGoodAround(key) ?? [];
 		else rememberAround(key, fused);
-		return fused;
+		return fused.map((raw) => ({ at: Date.now(), raw }));
+	});
+	// A cache hit retains the original observation time. Otherwise a held
+	// broad fix looks brand new and can replace a newer exact-identity fix.
+	return snapshot.map(({ at, raw }) => {
+		const heldSec = Math.max(0, Date.now() - at) / 1000;
+		return {
+			...raw,
+			seen_pos: seenOf(raw) + heldSec,
+			_fusion: raw._fusion ? { ...raw._fusion, ageSec: raw._fusion.ageSec + heldSec } : undefined,
+		};
 	});
 }
 function headingDelta(a, b) {
@@ -1578,7 +1591,18 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 	};
 }
 export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() / 1000) {
-	const usable = (records ?? []).filter(Boolean);
+	const MAX_FUTURE_SEC = 18 * 3600;
+	const MAX_PAST_SEC = 18 * 3600;
+	const usable = (records ?? []).filter(Boolean).filter((record) => {
+		const depart = bestUnix(record.gateOut);
+		const arrive = bestUnix(record.gateIn);
+		if (depart != null && arrive != null && arrive > depart && nowSec >= depart && nowSec <= arrive) return true;
+		if (depart != null && depart > nowSec) return depart - nowSec <= MAX_FUTURE_SEC;
+		if (arrive != null && arrive < nowSec) return nowSec - arrive <= MAX_PAST_SEC;
+		if (depart != null && depart <= nowSec && arrive == null) return nowSec - depart <= MAX_PAST_SEC;
+		if (arrive != null && arrive >= nowSec && depart == null) return arrive - nowSec <= MAX_FUTURE_SEC;
+		return depart == null && arrive == null;
+	});
 	if (!usable.length) return null;
 	const score = (record) => {
 		const depart = bestUnix(record.gateOut);
@@ -1624,9 +1648,20 @@ async function loadFlightStatsPublic(callsign) {
 		let candidates = directRecords.slice();
 		const bestDirect = chooseFlightStatsScheduleCandidate(directRecords);
 		const bestPage = bestDirect ? pages.find((page) => page.direct === bestDirect) : null;
-		if (bestPage) {
-			const detailUrls = flightStatsDetailUrls(bestPage.html, m[1], m[2], bestPage.date);
-			const details = await Promise.all(detailUrls.map(async (url) => {
+		const detailPages = bestPage ? [bestPage] : pages;
+		const detailRequests = [];
+		const seenDetailUrls = new Set();
+		for (const page of detailPages) {
+			for (const url of flightStatsDetailUrls(page.html, m[1], m[2], page.date)) {
+				if (seenDetailUrls.has(url)) continue;
+				seenDetailUrls.add(url);
+				detailRequests.push({ url, dateKey: page.date.key });
+				if (detailRequests.length >= 12) break;
+			}
+			if (detailRequests.length >= 12) break;
+		}
+		if (detailRequests.length) {
+			const details = await Promise.all(detailRequests.map(async ({ url, dateKey }) => {
 				try {
 					const res = await fetch(url, {
 						headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": UA },
@@ -1635,7 +1670,7 @@ async function loadFlightStatsPublic(callsign) {
 					if (!res.ok) return null;
 					const html = await res.text();
 					if (html.length > 4_000_000) return null;
-					return parseFlightStatsPublicSchedule(html, callsign, bestPage.date.key);
+					return parseFlightStatsPublicSchedule(html, callsign, dateKey);
 				} catch {
 					return null;
 				}
@@ -1661,9 +1696,16 @@ async function loadFlightStatsPublic(callsign) {
 	});
 }
 const awareRejections = new Map();
+let awarePublicBlockedUntil = 0;
 async function loadAware(callsign) {
 	const apiRecord = await loadAeroFlight(callsign);
 	if (apiRecord) return { ...apiRecord, _scheduleSource: "flightaware_api" };
+	if (Date.now() < awarePublicBlockedUntil) {
+		const fallback = await loadFlightStatsPublic(callsign);
+		noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
+		if (fallback) return fallback;
+		throw new Error("Current flight route unavailable: public FlightAware schedule source is temporarily blocked.");
+	}
 	const rejected = awareRejections.get(callsign);
 	if (rejected && Date.now() < rejected.until) {
 		const fallback = await loadFlightStatsPublic(callsign);
@@ -1673,12 +1715,15 @@ async function loadAware(callsign) {
 	}
 	awareRejections.delete(callsign);
 	try {
-		return await cached(`aware:${callsign}`, 8e3, async () => {
-			const record = await fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true);
-			return record ? { ...record, confirmedAt: Date.now() } : null;
+		const record = await cached(`aware:${callsign}`, 8e3, async () => {
+			const result = await fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true);
+			return result ? { ...result, confirmedAt: Date.now() } : null;
 		});
+		if (record) awarePublicBlockedUntil = 0;
+		return record;
 	} catch (error) {
 		if (/HTTP 402\b/.test(error?.message ?? "")) {
+			awarePublicBlockedUntil = Math.max(awarePublicBlockedUntil, Date.now() + 60_000);
 			for (const [key, entry] of awareRejections) if (entry.until <= Date.now()) awareRejections.delete(key);
 			if (awareRejections.size >= 100) awareRejections.delete(awareRejections.keys().next().value);
 			awareRejections.set(callsign, { until: Date.now() + 60000, error });
@@ -2525,17 +2570,25 @@ function baseCurrentStageOf(args) {
 }
 export function postLandingState(args) {
 	const { ourLanded, ourLandingActual, gateInActual, parkedAtGate, live, dest } = args;
-	if (gateInActual || parkedAtGate) return "gate";
-	if (!(ourLanded || ourLandingActual)) return "airborne";
-	const freshHighSpeedRollout = Boolean(
-		live && dest && live.onGround &&
+	const landedEvidence = Boolean(ourLanded || ourLandingActual || gateInActual || parkedAtGate);
+	if (!landedEvidence) return "airborne";
+	const freshDestinationSurface = Boolean(
+		live && dest && live.onGround && !live.extrapolated &&
 		(live.seenSec ?? 999) <= 60 &&
-		haversineNm(live, dest) < 10 &&
-		(live.gsKt ?? 0) >= 40
+		haversineNm(live, dest) < 10
 	);
+	const freshHighSpeedRollout = Boolean(freshDestinationSurface && (live.gsKt ?? 0) >= 40);
+	if (freshHighSpeedRollout) return "landed";
+	const freshTaxiing = Boolean(freshDestinationSurface
+		&& ((live.gsKt ?? 0) >= 3 || live.phase === "taxi"));
+	// Fresh physical movement beats a provider gate-in timestamp. Some schedule
+	// feeds stamp gate-in several minutes early while the aircraft is visibly
+	// still taxiing. Only settle at Gate once that contradiction disappears.
+	if (freshTaxiing) return "taxi_in";
+	if (gateInActual || parkedAtGate) return "gate";
 	// Once landing is latched, taxi-in is the durable intermediate state.
 	// Missing or stale surface ADS-B must not revert the passenger view to Landed.
-	return freshHighSpeedRollout ? "landed" : "taxi_in";
+	return "taxi_in";
 }
 async function hydrateField(base) {
 	const [{ metar }, nas, taf] = await Promise.all([loadMetar(base.icao), loadNas(base.iata), loadTaf(base.icao)]);
@@ -2898,12 +2951,23 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		safe(loadRoute(parsed.callsign), null),
 	]);
 	const operatingIdent = operatingIdentFromSchedule(publicAware, parsed.callsign);
+	const nowSec = Date.now() / 1000;
+	const fr24DepartureClock = publicAware ? bestUnix(publicAware.gateOut) : null;
+	const fr24SurfaceDeparture = Boolean(
+		publicAware &&
+		!publicAware?.takeoff?.actual &&
+		!publicAware?.landing?.actual &&
+		fr24DepartureClock != null &&
+		nowSec >= fr24DepartureClock - 2 * 60 * 60 &&
+		nowSec <= fr24DepartureClock + 4 * 60 * 60
+	);
 	const official = await loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
 		fr24OriginIata: publicAware?.originIata ?? null,
 		fr24DestIata: publicAware?.destIata ?? null,
 		fr24Registration: publicAware?.tail ?? null,
 		fr24OperatingCallsign: operatingIdent,
+		fr24SurfaceDeparture,
 	});
 	const fr24Aware = publicAware ? null : awareFromLiveFr24(official.fr24);
 	if (fr24Aware) {
@@ -2932,8 +2996,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	}
 	const aware = mergeOfficialAware(currentLegAware, flightawareOfficial);
 	// Flight-number route databases retain old assignments after a number moves
-	// to a different city pair. Require either a current schedule record or a
-	// fresh FR24 live record that identifies both ends of this exact active leg.
+	// to a different city pair. A fresh aircraft at the old origin cannot
+	// establish the destination or service date. Require a current schedule
+	// or FR24 live record that identifies both ends of the active leg.
 	if (!parsed.registration && (!(aware?.originIata || aware?.originIcao) || !(aware?.destIata || aware?.destIcao))) {
 		if (flightNotFound(scheduleError)) throw scheduleError;
 		throw new Error("Current flight route unavailable. Try again when the flight feed responds.");
@@ -3025,7 +3090,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 					/* stick to locked hex */
 				} else {
 					const cand = asOnGround(toLive(match), origin);
-					if (cand && stillOnField(cand, origin)) live = cand;
+					if (cand && stillOnField(cand, origin)
+						&& (!live || (liveAgeSec(cand) ?? Infinity) <= (liveAgeSec(live) ?? Infinity))) live = cand;
 				}
 			}
 		}
@@ -3304,6 +3370,52 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		});
 	}
 	const snap = inboundSnapByFlight.get(snapKey) ?? null;
+
+	// When the current departure has not acquired a callsign/registration on the
+	// surface yet, reuse the exact aircraft identity from its assigned inbound
+	// turn after that inbound has reached the gate. This is identity evidence,
+	// not a stage guess: the candidate must be a fresh on-ground ADS-B fix at
+	// this origin and within the current departure window.
+	const departureClock = bestUnix(aware?.gateOut);
+	const turnTail = inboundAware?.tail ?? snap?.tail ?? null;
+	const turnHex = String(inboundAware?.hex ?? snap?.hex ?? "").toLowerCase() || null;
+	const inboundTurnComplete = Boolean(inboundAware?.gateIn?.actual || snap?.frozen);
+	const inDepartureWindow = Boolean(departureClock && nowUnix >= departureClock - 45 * 60 && nowUnix <= departureClock + 3 * 60 * 60);
+	const currentLiveAge = liveAgeSec(live) ?? Number.POSITIVE_INFINITY;
+	if (!ourAirborne && inboundTurnComplete && inDepartureWindow && (turnTail || turnHex)
+		&& (!live || live.extrapolated || currentLiveAge > 15)) {
+		const turnRaw = turnTail
+			? await safe(adsbByReg(turnTail), null)
+			: turnHex
+				? await safe(adsbByHex(turnHex), null)
+				: null;
+		const turnLive = turnRaw ? asOnGround(toLive(turnRaw), origin) : null;
+		const turnAge = liveAgeSec(turnLive) ?? Number.POSITIVE_INFINITY;
+		const turnAtOrigin = Boolean(turnLive && turnLive.onGround
+			&& haversineNm({ lat: turnLive.lat, lon: turnLive.lon }, origin) < 12);
+		const turnIdentityMatches = Boolean(turnLive && (
+			(turnTail && turnLive.registration
+				&& String(turnLive.registration).replace(/[-\s]/g, "").toUpperCase() === String(turnTail).replace(/[-\s]/g, "").toUpperCase())
+			|| (turnHex && String(turnLive.hex ?? "").toLowerCase() === turnHex)
+		));
+		if (turnAtOrigin && turnIdentityMatches && turnAge <= 30 && turnAge + 1 < currentLiveAge) {
+			live = turnLive;
+			if (turnLive.hex) {
+				knownHex = String(turnLive.hex).toLowerCase();
+				hexByIdent.set(stateIdent, knownHex);
+				hexRouteByIdent.set(stateIdent, routeKey);
+			}
+			console.info("[outbound-turn-recovery]", {
+				flight: parsed.iata,
+				inbound: inboundIdent,
+				registration: turnLive.registration ?? turnTail,
+				hex: turnLive.hex ?? turnHex,
+				ageSec: Math.round(turnAge),
+				gsKt: turnLive.gsKt ?? null,
+			});
+		}
+	}
+
 	const start = {
 		lat: origin.lat,
 		lon: origin.lon

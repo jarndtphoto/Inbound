@@ -1,3 +1,4 @@
+import { advanceGroundMotion, type GroundMotionState } from "@/lib/ground-motion";
 import { phaseOf } from "@/lib/aircraft-phase";
 import { RouteMap } from "./route-map";
 import { getAirportSurfaceCached } from "@/lib/airport-surface";
@@ -50,6 +51,7 @@ export function fitGroundSurfaceView(points: Array<{ x: number; y: number }>, pa
 type TrackPoint = { lat: number; lon: number; at: number };
 type View = { scale: number; x: number; y: number };
 type MapTab = "departure" | "flight" | "arrival";
+
 type AircraftSnapshot = NonNullable<FlightStory["aircraft"]>;
 
 type GroundMode = {
@@ -267,6 +269,21 @@ function SurfaceShape({ feature, project }: { feature: SurfaceFeature; project: 
   return null;
 }
 
+function GroundAircraftDirection({ displayAircraft, displayFrozen, plane, scale }: {
+  displayAircraft: AircraftSnapshot;
+  displayFrozen: boolean;
+  plane: { x: number; y: number };
+  scale: number;
+}) {
+  return !displayFrozen && Number.isFinite(displayAircraft.track) ? (
+    <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / scale}) rotate(${displayAircraft.track})`}>
+      <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
+    </g>
+  ) : (
+    <circle cx={plane.x} cy={plane.y} r={8 / scale} className="fill-accent" />
+  );
+}
+
 function GroundMovementMap({
   story,
   mode,
@@ -321,6 +338,7 @@ function GroundMovementMap({
   // Keep using the leg-specific resume tail/hex as an identity hint for the
   // arrival ground lookup; it is never used as a position by itself.
   const identityRegistration = aircraft?.registration ?? storyAircraft?.registration ?? story.resume?.tail ?? null;
+  const identityHex = (aircraft?.hex ?? storyAircraft?.hex ?? story.resume?.hex ?? null)?.replace(/^~+/, "").toLowerCase() || null;
   const identityCallsign = aircraft?.callsign ?? storyAircraft?.callsign ?? story.callsign;
   const identityKey = `${story.flightId ?? story.iata}:${airport.iata}:${mode.kind}`;
   const groundIdentityRef = useRef<{ key: string; registration: string | null }>({ key: identityKey, registration: identityRegistration });
@@ -330,20 +348,21 @@ function GroundMovementMap({
     groundIdentityRef.current.registration = identityRegistration;
   }
   const groundQ = useQuery({
-    queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, mode.kind, identityRegistration ?? "", identityCallsign],
+    queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, mode.kind, identityHex ?? "", identityRegistration ?? "", identityCallsign],
     queryFn: () => getGroundPosition({ data: {
       callsign: identityCallsign,
       flightId: story.flightId ?? null,
       flightNumber: story.iata ?? null,
       registration: groundIdentityRef.current.registration ?? identityRegistration,
+      hex: identityHex,
       originIata: story.origin.iata ?? null,
       destIata: story.dest.iata ?? null,
       movementKind: mode.kind,
       airportLat: airport.lat,
       airportLon: airport.lon,
     } }),
-    enabled: groundPollingEnabled(active, pageVisible, flightPollingComplete(story), inFlight, Boolean(storyFast), Boolean(identityRegistration || identityCallsign)),
-    refetchInterval: () => active && document.visibilityState === "visible" && !flightPollingComplete(story) ? 3_000 : false,
+    enabled: groundPollingEnabled(active, pageVisible, flightPollingComplete(story), inFlight, Boolean(storyFast), Boolean(identityHex || identityRegistration || identityCallsign)),
+    refetchInterval: () => active && document.visibilityState === "visible" && !flightPollingComplete(story) ? 5_000 : false,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
@@ -355,8 +374,38 @@ function GroundMovementMap({
   const queriedFast = groundQ.data;
   if (queriedFast?.registration) groundIdentityRef.current.registration = queriedFast.registration;
   const queriedFastAge = queriedFast?.seenAt ? Math.max(0, Date.now() / 1000 - queriedFast.seenAt) : null;
-  const fast = storyFast ?? (queriedFast && (queriedFastAge ?? Infinity) <= 30 ? queriedFast : null);
+  const queriedCandidate = queriedFast && (queriedFastAge ?? Infinity) <= 30 ? queriedFast : null;
+
+  // Maintain heading history separately for story and map-ground feeds. MCO
+  // can report the same aircraft at slightly different timestamps/positions in
+  // those two streams; mixing them can manufacture a reciprocal heading.
+  type MotionSource = "story" | "ground";
+  type FastFix = NonNullable<typeof storyFast> | NonNullable<typeof queriedCandidate>;
+  const motionTracksRef = useRef<{ key: string; story: GroundMotionState | null; ground: GroundMotionState | null }>({
+    key: identityKey,
+    story: null,
+    ground: null,
+  });
+  if (motionTracksRef.current.key !== identityKey) {
+    motionTracksRef.current = { key: identityKey, story: null, ground: null };
+  }
+  const updateMotionSource = (source: MotionSource, fix: FastFix | null) => {
+    if (fix) motionTracksRef.current[source] = advanceGroundMotion(motionTracksRef.current[source], fix);
+  };
+  updateMotionSource("story", storyFast);
+  updateMotionSource("ground", queriedCandidate);
+
+  // Prefer whichever source has the newest observation for position, but use
+  // only that source's own motion history for orientation.
+  const candidates: Array<{ fix: FastFix; source: MotionSource }> = [];
+  if (storyFast) candidates.push({ fix: storyFast, source: "story" });
+  if (queriedCandidate) candidates.push({ fix: queriedCandidate, source: "ground" });
+  candidates.sort((a, b) => b.fix.seenAt - a.fix.seenAt);
+  const selectedFast = candidates[0] ?? null;
+  const fast = selectedFast?.fix ?? null;
   const fastKey = identityKey;
+  const motionTrack = selectedFast ? motionTracksRef.current[selectedFast.source]?.confirmedTrack ?? null : null;
+
   const lastFastRef = useRef<{ key: string; fix: NonNullable<typeof fast> } | null>(null);
   if (fast) lastFastRef.current = { key: fastKey, fix: fast };
 
@@ -377,14 +426,23 @@ function GroundMovementMap({
     lon: fastFix.lon,
     altFt: fastFix.altFt ?? 0,
     gsKt: fastFix.gsKt ?? 0,
-    track: fastFix.track ?? aircraft?.track ?? null,
+    // On the airport surface, actual position-to-position motion is the
+    // authoritative orientation. Provider track can be missing, stale, or
+    // reciprocal at low speed, so never use it for the ground marker.
+    track: motionTrack,
     vertFpm: aircraft?.vertFpm ?? null,
     onGround: fastFix.onGround,
     phase: phaseOf({ ...fastFix, phaseVertFpm: aircraft?.phaseVertFpm }, { origin: story.origin, dest: story.dest, groundTaxiKt: 5 }),
     callsign: fastFix.callsign ?? aircraft?.callsign ?? null,
     extrapolated: !fast,
     seenSec: fastAge,
-  } : hasEverFast ? null : aircraft;
+  } : hasEverFast ? null : aircraft ? {
+    ...aircraft,
+    // Story/saved fallbacks have no confirmed motion history. A provider
+    // heading never turns a surface position into a ground arrow.
+    track: aircraft.onGround || ((aircraft.altFt ?? Infinity) <= 250 && (aircraft.gsKt ?? Infinity) <= 80)
+      ? null : aircraft.track,
+  } : null;
   const zoom = useGroundZoom(`${story.iata}:${airport.iata}:${mode.kind}`);
   const autoFocusRef = useRef("");
   const cos = Math.max(0.35, Math.cos(airport.lat * Math.PI / 180));
@@ -485,6 +543,7 @@ function GroundMovementMap({
   const providerLabel = provider === "fr24" ? "FR24" : provider === "adsb" ? "ADS-B" : provider;
   const age = fastAge != null ? Math.max(0, Math.round(fastAge)) : typeof story.providers?.chosenPositionAgeSec === "number" ? Math.max(0, Math.round(story.providers.chosenPositionAgeSec)) : null;
   const fastStale = Boolean(!fast && fastFix);
+  const delayedFast = Boolean(fast && (fastAge ?? Infinity) > 12);
   const displayFrozen = frozen && !(fast && (fastAge ?? Infinity) <= 30);
 
   return (
@@ -492,11 +551,11 @@ function GroundMovementMap({
       <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-2">
         <div>
           <p className="font-mono text-[11px] tracking-widest text-subtle uppercase">{mode.kind === "departure" ? "Departure ground" : "Arrival ground"}</p>
-          <p className="font-display text-base font-semibold">{airport.iata} · {displayFrozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? `holding last ${providerLabel} fix` : displayAircraft ? "live movement" : "airport surface"}</p>
+          <p className="font-display text-base font-semibold">{airport.iata} · {displayFrozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? `holding last ${providerLabel} fix` : delayedFast ? `delayed ${providerLabel} position` : displayAircraft ? "live movement" : "airport surface"}</p>
         </div>
         <div className="text-right font-mono text-[10px] leading-tight text-muted">
           {inFlight ? <div>Plane in flight</div> : displayAircraft ? <div>{Math.round(displayAircraft.gsKt ?? 0)} kt · {displayFrozen ? "frozen" : displayAircraft.onGround ? "ground" : `${Math.round(displayAircraft.altFt ?? 0)} ft`}</div> : <div>Awaiting aircraft</div>}
-          <div>{displayFrozen ? "last known ground fix" : inFlight ? "departure complete" : `${providerLabel}${age != null ? ` · ${age}s` : ""}${fastStale ? " · held" : ""}`}</div>
+          <div>{displayFrozen ? "last known ground fix" : inFlight ? "departure complete" : `${providerLabel}${age != null ? ` · ${age}s` : ""}${fastStale ? " · held" : delayedFast ? " · delayed" : ""}`}</div>
         </div>
       </div>
       <div ref={zoom.boxRef} className="relative min-h-0 flex-1 overflow-hidden bg-bg" style={{ touchAction: "none" }}>
@@ -529,9 +588,7 @@ function GroundMovementMap({
             {plane && displayAircraft ? (
               <>
                 <circle cx={plane.x} cy={plane.y} r={27 / zoom.view.scale} className="fill-bg stroke-accent" strokeWidth={4.5 / zoom.view.scale} />
-                <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale}) rotate(${Number.isFinite(displayAircraft.track) ? displayAircraft.track : 0})`}>
-                  <path d="M0 -31 L12 17 L0 11 L-12 17 Z" className="fill-accent" />
-                </g>
+                <GroundAircraftDirection displayAircraft={displayAircraft} displayFrozen={displayFrozen} plane={plane} scale={zoom.view.scale} />
                 <g transform={`translate(${plane.x} ${plane.y}) scale(${1 / zoom.view.scale})`}>
                   <text x="38" y="-13" className="fill-fg" fontSize="32" fontWeight="900">{story.iata}</text>
                   <text x="38" y="17" className="fill-muted" fontSize="21" fontWeight="800">{displayFrozen ? "last known" : `${Math.round(displayAircraft.gsKt ?? 0)} kt`}</text>
