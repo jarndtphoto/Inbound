@@ -1,9 +1,10 @@
 import { InboundNearbyResponseSchema, type InboundNearbyResponse, type PublicFeaturedFlight, type PublicRadarTarget } from "./nearby-response";
+import { FlightResultV1Schema, type FlightCandidateV1, type FlightResultV1, type InboundFlightV1 } from "./contracts";
 import { deriveRadarDisplayPosition, projectRadarPoint, RADAR_AIRPORTS, radarLabels, radarRouteText, radarSelectionForClick, radarSelectionSnapshot, type RadarPoint } from "./radar-renderer";
 
 type View = "radar" | "flights";
 type DisplayMode = "inline" | "fullscreen" | "pip";
-type WidgetState = { version: 3; areaId: InboundNearbyResponse["area"]["id"]; selectedRadarId: string | null; views: Record<DisplayMode, View>; paused: boolean };
+type WidgetState = { version: 4; areaId: InboundNearbyResponse["area"]["id"]; selectedRadarId: string | null; views: Record<DisplayMode, View>; paused: boolean };
 type HostContext = { displayMode: DisplayMode; availableDisplayModes: string[] };
 type OpenAi = { widgetState?: Partial<WidgetState>; toolOutput?: unknown; setWidgetState?: (state: WidgetState) => void; callTool?: (name: string, args: object) => Promise<unknown>; requestClose?: () => void };
 type AcceptOutcome = { accepted: boolean; trajectoryAdvanced: boolean };
@@ -16,11 +17,11 @@ const el = <T extends HTMLElement = HTMLElement>(id: string): T => {
 const initial = InboundNearbyResponseSchema.parse(window.__INBOUND_RADAR_INITIAL__);
 const host = () => window.openai;
 let saved: Partial<WidgetState> = host()?.widgetState || {};
-if (!host()?.widgetState) { try { saved = JSON.parse(sessionStorage.getItem("inbound-radar-preview-v3") || "{}"); } catch { /* host may deny storage */ } }
+if (!host()?.widgetState) { try { saved = JSON.parse(sessionStorage.getItem("inbound-radar-preview-v4") || "{}"); } catch { /* host may deny storage */ } }
 const validView = (view: unknown): view is View => view === "radar" || view === "flights";
 const validArea = (area: unknown): area is WidgetState["areaId"] => ["preset:chicago", "airport:KORD", "airport:KMDW"].includes(String(area));
 const state: WidgetState = {
-  version: 3, areaId: validArea(saved.areaId) ? saved.areaId : initial.area.id,
+  version: 4, areaId: validArea(saved.areaId) ? saved.areaId : initial.area.id,
   selectedRadarId: typeof saved.selectedRadarId === "string" ? saved.selectedRadarId : null,
   views: { inline: validView(saved.views?.inline) ? saved.views.inline : "flights", fullscreen: validView(saved.views?.fullscreen) ? saved.views.fullscreen : "radar", pip: validView(saved.views?.pip) ? saved.views.pip : "flights" }, paused: saved.paused === true,
 };
@@ -34,6 +35,9 @@ let nextPollKind: "normal" | "short-retry" | null = null, motionRetryTrajectoryK
 let motionRetryCount = 0, lastMotionRetryAt: number | null = null, shortRetrySchedules = 0, shortRetryFires = 0;
 let mapKey = "", hostReady = false, hostOrigin: string | null = null, sequence = 0;
 let selectedTarget: PublicRadarTarget | null = null, selectedFeatured: PublicFeaturedFlight | null = null;
+let handoffMode: "nearby" | "loading" | "ambiguous" | "detail" | "error" = "nearby";
+let handoffResult: FlightResultV1 | null = null, handoffCalls = 0;
+const resolvedInstances = new Map<string, string>();
 let hostContext: HostContext = { displayMode: "inline", availableDisplayModes: [] };
 let latestAcceptedVersion = initial.collectionVersion, latestAcceptedGeneratedAt = Date.parse(initial.generatedAt);
 let acceptedResults = 0, rejectedResults = 0, globalsEvents = 0, hostContextEvents = 0;
@@ -72,7 +76,7 @@ const nextMotionRetryDeadline = () => {
 const wanted = () => !dismissed && !pageInactive && !state.paused && !document.hidden;
 const animationWanted = () => !dismissed && !pageInactive && !document.hidden;
 const liveFeaturedAge = (card: PublicFeaturedFlight) => { const fix = board.radarTargets.find(target => target.radarId === card.radarId); return fix ? liveAge(fix.observedAt) : card.freshness.ageSeconds + liveAge(board.generatedAt); };
-const save = () => { try { const copy = { ...state, views: { ...state.views } }; host()?.setWidgetState ? host()!.setWidgetState!(copy) : sessionStorage.setItem("inbound-radar-preview-v3", JSON.stringify(copy)); } catch { /* local persistence is optional */ } };
+const save = () => { try { const copy = { ...state, views: { ...state.views } }; host()?.setWidgetState ? host()!.setWidgetState!(copy) : sessionStorage.setItem("inbound-radar-preview-v4", JSON.stringify(copy)); } catch { /* local persistence is optional */ } };
 function rpc(method: string, params: object): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const id = ++sequence, timeout = setTimeout(() => { pending.delete(id); reject(new Error("Host request timed out")); }, 5_000);
@@ -86,7 +90,7 @@ function updateSelection() {
   const selected = radarSelectionSnapshot(state.selectedRadarId, board.radarTargets, board.featuredFlights, selectedTarget, selectedFeatured);
   selectedTarget = selected.target; selectedFeatured = selected.featured;
 }
-function selectAircraft(radarId: string) { state.selectedRadarId = radarId; updateSelection(); save(); render(); ensureAnimationLoop(); }
+function selectAircraft(radarId: string) { state.selectedRadarId = radarId; handoffMode = "nearby"; handoffResult = null; updateSelection(); save(); render(); ensureAnimationLoop(); }
 function setView(view: View) { if (dismissed) return; state.views[displayMode()] = view; save(); render(); ensureAnimationLoop(); }
 function svgElement(tag: string, attributes: Record<string, string | number> = {}, text = ""): SVGElement {
   const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
@@ -196,7 +200,52 @@ function renderSelection() {
   el("selected-distance").textContent = picked && present && selectedFeatured ? `${(selectedFeatured.distanceNm * 1.150779448).toFixed(1)} mi from ${board.area.reference.label}` : "";
   el("selected-age").textContent = picked ? expired ? "Observation expired. Last accepted observation retained for this selection." : !present ? "No current observation in this area. Last accepted observation retained." : `${board.health === "stale" || liveAge(picked.observedAt) > 45 ? "Stale · " : ""}Updated ${Math.floor(liveAge(picked.observedAt))} sec ago` : state.selectedRadarId ? "Selection is retained; no current observation is available." : "";
   el("selected-track").textContent = picked ? picked.groundTrackDeg === null ? "Track unavailable · Neutral symbol" : `Track ${Math.round(picked.groundTrackDeg)}° · ${picked.groundspeedKt === null ? "Speed unavailable" : `${Math.round(picked.groundspeedKt)} kt`}` : "";
+  const selection = picked?.selection, tokenExpired = selection?.expiresAt ? Date.parse(selection.expiresAt) <= Date.now() : false;
+  const knownInstance = picked ? resolvedInstances.get(picked.radarId) : null;
+  const actionable = Boolean(picked && (knownInstance || selection?.state !== "unsupported" && selection?.token && !tokenExpired));
+  const track = el<HTMLButtonElement>("track-flight"); track.disabled = !actionable || handoffMode === "loading"; track.textContent = knownInstance ? "View flight" : handoffMode === "loading" ? "Loading…" : "Track flight";
+  el("track-notice").textContent = !picked ? "Select an aircraft, then explicitly load its invented flight."
+    : selection?.state === "unsupported" ? "Detailed tracking is not supported for this invented aircraft."
+      : tokenExpired ? "This observation handle expired. Refresh Nearby to select a current observation."
+        : "Tracking starts only when you choose Track flight; selecting alone never refreshes a provider.";
   el("selection-note").textContent = state.selectedRadarId ? `Focused: ${picked?.displayIdent || "selected aircraft"}${expired ? " — observation expired" : ""}. Selection stays with you in Radar and Flights.` : "Select an aircraft to focus it locally.";
+}
+const factValue = (value: { value: unknown } | null) => value ? String(value.value) : "Unavailable";
+const eventValue = (event: InboundFlightV1["times"]["landing"]) => event.providerActual?.value ?? event.detected?.value ?? event.providerEstimated?.value ?? event.inboundEstimated?.value ?? event.scheduled?.value ?? null;
+function renderHandoff() {
+  const panel = el("handoff-panel"); panel.hidden = handoffMode === "nearby";
+  el("content").hidden = handoffMode !== "nearby"; el("selection-note").hidden = handoffMode !== "nearby";
+  const candidates = el("candidate-list"); candidates.replaceChildren(); el("detail-grid").hidden = handoffMode !== "detail";
+  el("handoff-error").textContent = "";
+  if (handoffMode === "nearby") return;
+  if (handoffMode === "loading") { el("handoff-kicker").textContent = "Invented flight"; el("detail-ident").textContent = selectedTarget?.displayIdent ?? "Flight detail"; el("detail-route").textContent = "Resolving the exact selected occurrence…"; el("handoff-status").textContent = "One bounded read-only handoff is in progress."; return; }
+  if (!handoffResult) return;
+  if (handoffResult.status === "ambiguous") {
+    el("handoff-kicker").textContent = "Choose a dated occurrence"; el("detail-ident").textContent = selectedTarget?.displayIdent ?? "Ambiguous flight";
+    el("detail-route").textContent = "The aircraft evidence matches more than one invented dated leg."; el("handoff-status").textContent = "No flight was chosen automatically.";
+    for (const candidate of handoffResult.candidates) {
+      const button = document.createElement("button"); button.className = "candidate";
+      const label = document.createElement("strong"), detail = document.createElement("span"); label.textContent = `${candidate.displayIdent} · ${candidate.originIata} → ${candidate.destinationIata}`;
+      detail.textContent = `${candidate.serviceDate}${candidate.scheduledDepartureAt ? ` · ${new Date(candidate.scheduledDepartureAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}`;
+      button.append(label, detail); button.onclick = () => { void chooseCandidate(candidate); }; candidates.append(button);
+    }
+    return;
+  }
+  if (handoffResult.status !== "resolved" || !handoffResult.flight) {
+    el("handoff-kicker").textContent = "Flight unavailable"; el("detail-ident").textContent = selectedTarget?.displayIdent ?? "Selected aircraft";
+    el("detail-route").textContent = "The exact invented occurrence was not loaded."; el("handoff-status").textContent = "Back to Radar keeps your area, tab, selection and current board.";
+    el("handoff-error").textContent = handoffResult.error?.message ?? "Flight detail is temporarily unavailable."; return;
+  }
+  const flight = handoffResult.flight, position = flight.position;
+  el("handoff-kicker").textContent = `${flight.identity.serviceDate} · Invented fixture`; el("detail-ident").textContent = flight.identity.displayIdent;
+  el("detail-route").textContent = `${flight.route.origin.iata} → ${flight.route.destination.iata}`; el("handoff-status").textContent = `Exact occurrence · ${flight.flightInstanceId}`;
+  el("detail-status").textContent = flight.status.text; el("detail-phase").textContent = flight.phase.label;
+  el("detail-position").textContent = position ? `${position.altitudeFt?.toLocaleString("en-US") ?? "Altitude unavailable"} ft · ${position.groundspeedKt ?? "Speed unavailable"}${position.groundspeedKt === null ? "" : " kt"}` : "Position unavailable";
+  el("detail-aircraft").textContent = flight.aircraft?.typeName ?? flight.aircraft?.typeCode ?? "Unavailable";
+  el("detail-departure").textContent = `${flight.route.origin.iata} · Gate ${factValue(flight.departure.gate)} · Runway ${flight.departure.runway?.designation ?? "Unavailable"}`;
+  el("detail-arrival").textContent = `${flight.route.destination.iata} · Gate ${factValue(flight.arrival.gate)} · Baggage ${factValue(flight.arrival.baggage)}`;
+  const landing = eventValue(flight.times.landing); el("detail-landing").textContent = landing ? new Date(landing).toLocaleString() : "Unavailable";
+  el("detail-freshness").textContent = flight.freshness.stale ? "Stale snapshot" : `Updated ${Math.floor(flight.freshness.storyAgeSeconds)} sec ago`;
 }
 function render() {
   hostControls(); const view = currentView();
@@ -210,7 +259,7 @@ function render() {
   const message = { ok: "Available coverage · Invented aircraft", partial: "Some coverage is limited. Available aircraft remain visible.", stale: "Last accepted observations · Motion stopped while updates are delayed.", unavailable: "Current aircraft data is temporarily unavailable. This does not mean empty sky." }[board.health];
   el("board-notice").textContent = dismissed ? "Preview dismissed. Refresh stopped." : document.hidden || state.paused ? "Refresh paused. Accepted observations continue to age." : !current.length && board.health !== "unavailable" ? "Accepted observations have expired. Current coverage is unavailable." : board.warning || (board.health === "ok" && current.some(target => liveAge(target.observedAt) > 45) ? "Last accepted observations are aging. Bounded motion has stopped." : message);
   el("proof-status").textContent = `Nearby refresh calls: ${refreshCalls}. Shared collection version: ${board.collectionVersion ?? "warming"}. This UI sends no chat messages or model requests.`;
-  renderCards(); renderSelection(); renderRadar();
+  renderCards(); renderSelection(); renderRadar(); renderHandoff();
 }
 function clearPollingTimers() {
   if (timer !== null) clearTimeout(timer); if (ageTimer !== null) clearInterval(ageTimer);
@@ -295,6 +344,47 @@ async function refresh(): Promise<RefreshOutcome> {
   finally { if (activeRequestGeneration === generation) activeRequestGeneration = null; if (abort === requestAbort) abort = null; el<HTMLButtonElement>("refresh").disabled = dismissed || activeRequestGeneration === requestGeneration; }
   return { started: true, accepted, trajectoryAdvanced };
 }
+const toolContent = (value: unknown) => value && typeof value === "object" && "structuredContent" in value
+  ? (value as { structuredContent: unknown }).structuredContent : value;
+async function invokeReadTool(name: "resolve_nearby_flight" | "get_flight", args: object): Promise<unknown> {
+  let result: unknown;
+  if (hostReady) result = await rpc("tools/call", { name, arguments: args });
+  else if (host()?.callTool) result = await host()!.callTool!(name, args);
+  else if (window.parent === window) {
+    const response = await fetch("/mcp", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: ++sequence, method: "tools/call", params: { name, arguments: args } }) });
+    if (!response.ok) throw new Error("Flight handoff unavailable"); result = (await response.json()).result;
+  } else throw new Error("No callable host bridge");
+  handoffCalls++; return toolContent(result);
+}
+function applyHandoff(value: unknown) {
+  const parsed = FlightResultV1Schema.safeParse(toolContent(value));
+  if (!parsed.success) return false;
+  const requestedForSelectedAircraft = handoffMode === "loading";
+  handoffResult = parsed.data;
+  if (parsed.data.status === "resolved") {
+    handoffMode = "detail";
+    if (requestedForSelectedAircraft && state.selectedRadarId && parsed.data.flightInstanceId)
+      resolvedInstances.set(state.selectedRadarId, parsed.data.flightInstanceId);
+  } else handoffMode = parsed.data.status === "ambiguous" ? "ambiguous" : "error";
+  render(); ensureAnimationLoop(); return true;
+}
+async function trackSelected() {
+  const target = selectedTarget; if (!target || handoffMode === "loading") return;
+  const instance = resolvedInstances.get(target.radarId); const selection = target.selection;
+  handoffMode = "loading"; handoffResult = null; render();
+  try {
+    const value = instance ? await invokeReadTool("get_flight", { target: { kind: "instance", flightInstanceId: instance } })
+      : selection.token ? await invokeReadTool("resolve_nearby_flight", { selectionToken: selection.token }) : null;
+    if (!value || !applyHandoff(value)) throw new Error("Invalid flight handoff response");
+  } catch { handoffResult = FlightResultV1Schema.parse({ schemaVersion: "1.0", status: "unavailable", responseAt: new Date().toISOString(), refreshAfterSeconds: 20,
+    flightInstanceId: null, flight: null, candidates: [], error: { code: "backend_unavailable", message: "Flight detail is temporarily unavailable." } }); handoffMode = "error"; render(); }
+}
+async function chooseCandidate(candidate: FlightCandidateV1) {
+  if (handoffMode === "loading") return; handoffMode = "loading"; render();
+  try { if (!applyHandoff(await invokeReadTool("get_flight", { target: { kind: "choice", candidateToken: candidate.candidateToken } }))) throw new Error("Invalid candidate response"); }
+  catch { handoffMode = "error"; render(); }
+}
 async function refreshAndSchedule(mode: "reset" | "after") {
   const generation = requestGeneration, outcome = await refresh();
   if (!outcome.started || generation !== requestGeneration) return false;
@@ -315,6 +405,8 @@ for (const view of ["radar", "flights"] as const) el(`view-${view}`).onkeydown =
   const next = event.key === "Home" ? "radar" : event.key === "End" ? "flights" : view === "radar" ? "flights" : "radar"; setView(next); el(`view-${next}`).focus();
 };
 el("pip").onclick = () => { void display("pip"); }; el("fullscreen").onclick = () => { void display(displayMode() === "fullscreen" ? "inline" : "fullscreen"); };
+el("track-flight").onclick = () => { void trackSelected(); };
+el("back-radar").onclick = () => { handoffMode = "nearby"; handoffResult = null; render(); ensureAnimationLoop(); };
 el("refresh").onclick = async () => { await refreshAndSchedule("reset"); ensureAnimationLoop(); };
 el("pause").onclick = async () => { state.paused = !state.paused; save(); stopPolling(); render(); ensureAnimationLoop(); if (!state.paused) await refreshAndSchedule("reset"); else schedule(); };
 el<HTMLSelectElement>("area").onchange = async () => { const area = el<HTMLSelectElement>("area").value; if (!validArea(area)) return; state.areaId = area; save(); stopPolling(); render(); ensureAnimationLoop(); await refreshAndSchedule("after"); };
@@ -341,7 +433,8 @@ window.addEventListener("openai:set_globals", event => {
   }
   const areaChanged = state.areaId !== previousArea, pausedChanged = state.paused !== previousPaused;
   if (areaChanged || pausedChanged) stopPolling();
-  const acceptedToolOutput = globals?.toolOutput ? accept(globals.toolOutput) : { accepted: false, trajectoryAdvanced: false }; render(); ensureAnimationLoop();
+  const isHandoff = globals?.toolOutput ? applyHandoff(globals.toolOutput) : false;
+  const acceptedToolOutput = globals?.toolOutput && !isHandoff ? accept(globals.toolOutput) : { accepted: false, trajectoryAdvanced: false }; render(); ensureAnimationLoop();
   if (areaChanged || pausedChanged) {
     const needsRefresh = pausedChanged && !state.paused || areaChanged && (!acceptedToolOutput.accepted || board.area.id !== state.areaId);
     if (wanted() && needsRefresh) void refreshAndSchedule(pausedChanged ? "reset" : "after");
@@ -358,16 +451,16 @@ window.addEventListener("message", event => {
   }
   if (message.method === "ui/resource-teardown") { dismissed = true; stopPolling(); stopAnimationLoop(); render(); window.parent.postMessage({ jsonrpc: "2.0", id: message.id, result: {} }, targetOrigin()); return; }
   if (!hostReady) return;
-  if (message.method === "ui/notifications/tool-result" && wanted()) accept(message.params);
+  if (message.method === "ui/notifications/tool-result" && wanted() && !applyHandoff(message.params)) accept(message.params);
   if (message.method === "ui/notifications/host-context-changed") { hostContextEvents++; hostContext = { ...hostContext, ...message.params }; render(); ensureAnimationLoop(); }
 });
 new ResizeObserver(() => renderRadar()).observe(el("radar-surface"));
 window.inboundRadarProof = {
-  read: () => ({ selectedRadarId: state.selectedRadarId, selectedView: currentView(), views: { ...state.views }, requestedAreaId: state.areaId, areaId: board.area.id, collectionVersion: board.collectionVersion, generatedAt: board.generatedAt, health: board.health, trajectoryKey: trajectoryKey(board), shortRetryTrajectoryKey: motionRetryTrajectoryKey, motionRetryCount, motionRetryBudgetRemaining: Math.max(0, MAX_MOTION_RETRIES - motionRetryCount), lastMotionRetryAt, motionCapDeadline: motionCapDeadline(), positions: board.radarTargets.map(target => ({ radarId: target.radarId, latitude: target.latitude, longitude: target.longitude, observedAt: target.observedAt, altitudeFt: target.altitudeFt, groundspeedKt: target.groundspeedKt, groundTrackDeg: target.groundTrackDeg, positionKind: target.positionKind })), displayPositions: displayPositions.map(position => ({ ...position })), labelIds: [...labelIds], refreshCalls, refreshInFlight: activeRequestGeneration === requestGeneration, pollScheduled: timer !== null, ageScheduled: ageTimer !== null, pollTimers: { pending: pendingPollTimers.size, maxPending: maxPendingPollTimers, fired: pollTimerFires }, ageTimers: { pending: pendingAgeTimers.size, maxPending: maxPendingAgeTimers, fired: ageTimerFires }, nextPollAt, nextPollKind, shortRetryUsed: motionRetryTrajectoryKey === trajectoryKey(board) && motionRetryCount > 0, shortRetrySchedules, shortRetryFires, pollScheduleEpoch, requestGeneration, activeRequestGeneration, displayMode: displayMode(), hostReady, hostContext: { ...hostContext, availableDisplayModes: [...hostContext.availableDisplayModes] }, hostWidgetState: host()?.widgetState ? { ...host()!.widgetState, views: host()!.widgetState!.views ? { ...host()!.widgetState!.views } : undefined } : null, frameCount, animationScheduled: frame !== null, paused: state.paused, documentHidden: document.hidden, pageInactive, dismissed, acceptedResults, rejectedResults, lastRejectedReason, latestAcceptedVersion, latestAcceptedGeneratedAt, globalsEvents, hostContextEvents }),
+  read: () => ({ selectedRadarId: state.selectedRadarId, selectedView: currentView(), views: { ...state.views }, requestedAreaId: state.areaId, areaId: board.area.id, collectionVersion: board.collectionVersion, generatedAt: board.generatedAt, health: board.health, handoffMode, handoffStatus: handoffResult?.status ?? null, handoffCalls, selectedSelection: selectedTarget ? { ...selectedTarget.selection, ...(resolvedInstances.has(selectedTarget.radarId) ? { state: "resolved", flightInstanceId: resolvedInstances.get(selectedTarget.radarId) } : {}) } : null, trajectoryKey: trajectoryKey(board), shortRetryTrajectoryKey: motionRetryTrajectoryKey, motionRetryCount, motionRetryBudgetRemaining: Math.max(0, MAX_MOTION_RETRIES - motionRetryCount), lastMotionRetryAt, motionCapDeadline: motionCapDeadline(), positions: board.radarTargets.map(target => ({ radarId: target.radarId, latitude: target.latitude, longitude: target.longitude, observedAt: target.observedAt, altitudeFt: target.altitudeFt, groundspeedKt: target.groundspeedKt, groundTrackDeg: target.groundTrackDeg, positionKind: target.positionKind })), displayPositions: displayPositions.map(position => ({ ...position })), labelIds: [...labelIds], refreshCalls, refreshInFlight: activeRequestGeneration === requestGeneration, pollScheduled: timer !== null, ageScheduled: ageTimer !== null, pollTimers: { pending: pendingPollTimers.size, maxPending: maxPendingPollTimers, fired: pollTimerFires }, ageTimers: { pending: pendingAgeTimers.size, maxPending: maxPendingAgeTimers, fired: ageTimerFires }, nextPollAt, nextPollKind, shortRetryUsed: motionRetryTrajectoryKey === trajectoryKey(board) && motionRetryCount > 0, shortRetrySchedules, shortRetryFires, pollScheduleEpoch, requestGeneration, activeRequestGeneration, displayMode: displayMode(), hostReady, hostContext: { ...hostContext, availableDisplayModes: [...hostContext.availableDisplayModes] }, hostWidgetState: host()?.widgetState ? { ...host()!.widgetState, views: host()!.widgetState!.views ? { ...host()!.widgetState!.views } : undefined } : null, frameCount, animationScheduled: frame !== null, paused: state.paused, documentHidden: document.hidden, pageInactive, dismissed, acceptedResults, rejectedResults, lastRejectedReason, latestAcceptedVersion, latestAcceptedGeneratedAt, globalsEvents, hostContextEvents }),
 };
 const restoredArea = state.areaId;
 accept(host()?.toolOutput || initial, { expectedArea: null }); state.areaId = restoredArea; render(); schedule(true); ensureAnimationLoop();
-if (window.parent !== window) void rpc("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "Inbound invented Radar proof", version: "0.3.0" }, appCapabilities: { availableDisplayModes: ["inline", "pip", "fullscreen"] } }).then(value => {
+if (window.parent !== window) void rpc("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "Inbound invented flight handoff proof", version: "0.4.0" }, appCapabilities: { availableDisplayModes: ["inline", "pip", "fullscreen"] } }).then(value => {
   if (dismissed) return;
   const result = value as { hostContext?: Partial<HostContext> }; hostReady = true; hostContext = { ...hostContext, ...result.hostContext }; notify("ui/notifications/initialized"); render(); ensureAnimationLoop();
   if (state.areaId !== board.area.id && wanted()) { stopPolling(); void refreshAndSchedule("after"); } else schedule();

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { createRadarProofServer, RADAR_PROOF_RESOURCE, RADAR_PROOF_TOOL } from "./radar-proof-server";
+import { createRadarProofServer, GET_FLIGHT_TOOL, RADAR_PROOF_RESOURCE, RADAR_PROOF_TOOL, RESOLVE_NEARBY_TOOL } from "./radar-proof-server";
 import { InboundNearbyResponseSchema, PUBLIC_NEARBY_PAYLOAD_BYTES } from "./nearby-response";
 
 const epoch = Date.parse("2026-10-04T03:00:06.000Z");
@@ -20,15 +20,16 @@ async function rpc(url: string, method: string, params: Record<string, unknown> 
   return { response, body: response.status === 202 ? null : await response.json() };
 }
 
-test("New MCP proof exposes one Nearby tool and one self-contained UI through the real serializer", async () => {
+test("New MCP proof exposes exactly three read-only handoff tools and one self-contained UI", async () => {
   await withProof(async (proof, url) => {
     const init = await rpc(url, "initialize", { protocolVersion: "2025-11-25" });
-    assert.equal(init.body.result.serverInfo.name, "inbound-fake-radar-proof");
+    assert.equal(init.body.result.serverInfo.name, "inbound-fake-flight-handoff-proof");
     const tools = (await rpc(url, "tools/list")).body.result.tools;
-    assert.equal(tools.length, 1); assert.equal(tools[0].name, RADAR_PROOF_TOOL);
-    assert.equal(tools[0].annotations.openWorldHint, false);
-    assert.equal(tools[0].inputSchema.additionalProperties, false);
-    assert.equal(tools[0]._meta.ui.resourceUri, RADAR_PROOF_RESOURCE);
+    assert.deepEqual(tools.map((tool: { name: string }) => tool.name), [RADAR_PROOF_TOOL, RESOLVE_NEARBY_TOOL, GET_FLIGHT_TOOL]);
+    for (const tool of tools) {
+      assert.deepEqual(tool.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+      assert.equal(tool.inputSchema.additionalProperties, false); assert.equal(tool._meta.ui.resourceUri, RADAR_PROOF_RESOURCE);
+    }
     const resources = (await rpc(url, "resources/list")).body.result.resources;
     assert.equal(resources.length, 1); assert.equal(resources[0].uri, RADAR_PROOF_RESOURCE);
     const resource = (await rpc(url, "resources/read", { uri: RADAR_PROOF_RESOURCE })).body.result.contents[0];

@@ -6,7 +6,7 @@ import { type AcceptedNearbyObservation, type SharedCollection, NEARBY_POLICY } 
 import { buildNearbyView } from "../nearby-v1/views";
 import { deriveNearbyDisplayPosition } from "../nearby-v1/motion";
 import { InboundNearbyResponseSchema, NearbyTransportRequestSchema, PUBLIC_NEARBY_PAYLOAD_BYTES,
-  PublicRadarTargetSchema, publicNearbyResponseBytes, serializeNearbyResponse } from "./nearby-response";
+  PUBLIC_RADAR_PAYLOAD_BYTES, PublicRadarTargetSchema, publicNearbyResponseBytes, serializeNearbyResponse } from "./nearby-response";
 
 const NOW = Date.UTC(2030, 0, 15, 18);
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -41,11 +41,27 @@ test("Public response keeps 100 Radar targets independent from Featured four/fiv
     assert.equal(value.radarTargets.filter(target => target.featured).length, limit);
     assert.equal(value.collectionVersion, 7); assert.equal(value.generatedAt, iso());
     assert.ok(publicNearbyResponseBytes(value) <= PUBLIC_NEARBY_PAYLOAD_BYTES);
-    assert.ok(publicNearbyResponseBytes(value.radarTargets) <= NEARBY_POLICY.maxRadarBytes);
+    assert.ok(publicNearbyResponseBytes(value.radarTargets) <= 60 * 1024);
   }
   const hundred = response(125);
   assert.equal(InboundNearbyResponseSchema.safeParse({ ...hundred, radarTargets: [...hundred.radarTargets, { ...hundred.radarTargets[0], radarId: id(50000) }] }).success, false);
   assert.equal(InboundNearbyResponseSchema.safeParse({ ...hundred, featuredFlights: Array(6).fill(hundred.featuredFlights[0]) }).success, false);
+});
+
+test("worst-case opaque selection handles trim only non-Featured tail within both public envelopes", () => {
+  const source = collection(Array.from({ length: 125 }, (_, i) => observation(i + 1)));
+  const view = buildNearbyView(source, chicago, NOW, { limit: 5 });
+  const selections = new Map(view.radar.map((target, index) => [target.radarId, {
+    state: "unresolved" as const, token: `${String(index).padStart(3, "0")}${"A".repeat(40)}`,
+    expiresAt: iso(NOW + 60_000), flightInstanceId: null,
+  }]));
+  const value = serializeNearbyResponse({ health: "ok", view }, chicago, NOW, selections);
+  assert.ok(value.radarTargets.length > value.featuredFlights.length);
+  assert.ok(value.radarTargets.length <= 100);
+  assert.ok(publicNearbyResponseBytes(value) <= PUBLIC_NEARBY_PAYLOAD_BYTES);
+  assert.ok(publicNearbyResponseBytes(value.radarTargets) <= PUBLIC_RADAR_PAYLOAD_BYTES);
+  const retained = new Set(value.radarTargets.map(target => target.radarId));
+  for (const featured of value.featuredFlights) assert.ok(retained.has(featured.radarId));
 });
 
 test("Explicit allowlists omit private engine/session/provider/selection fields without mutating the source", () => {
@@ -57,7 +73,7 @@ test("Explicit allowlists omit private engine/session/provider/selection fields 
   const value = serializeNearbyResponse({ health: "ok", view }, chicago, NOW);
   assert.deepEqual(view, before);
   const json = JSON.stringify(value);
-  for (const excluded of ["PRIVATE-", "privateAircraftIdentity", "sessionKey", "phaseEvidence", "provenance", "provider", "routeCacheKey", "dbRowId", "occurrenceId", "datedBinding", "selection", "token", "flightInstanceId", "collectionKey", "viewKey", "fencingGeneration", "ranked", "stability", "registration"])
+  for (const excluded of ["PRIVATE-", "privateAircraftIdentity", "sessionKey", "phaseEvidence", "provenance", "provider", "routeCacheKey", "dbRowId", "occurrenceId", "datedBinding", "collectionKey", "viewKey", "fencingGeneration", "ranked", "stability", "registration"])
     assert.equal(json.includes(excluded), false, excluded);
   for (const field of ["providerId", "rawProviderPayload", "phaseEvidence", "sessionKey", "selectionToken"])
     assert.equal(InboundNearbyResponseSchema.safeParse({ ...value, radarTargets: [{ ...value.radarTargets[0], [field]: "forbidden" }] }).success, false);

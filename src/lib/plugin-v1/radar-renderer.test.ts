@@ -9,7 +9,8 @@ const target = (patch: Partial<PublicRadarTarget> = {}): PublicRadarTarget => ({
   radarId: "radar-safe-0001", displayIdent: "TEST 1", latitude: 41.97, longitude: -87.90,
   observedAt: new Date(start).toISOString(), altitudeFt: 12_000, groundspeedKt: 250,
   groundTrackDeg: 90, verticalRateFpm: 1_000, positionKind: "observed",
-  freshness: { ageSeconds: 0, state: "fresh" }, motion: { phase: "climb", label: "Climbing", verticalTrend: "rising" }, featured: false, ...patch,
+  freshness: { ageSeconds: 0, state: "fresh" }, motion: { phase: "climb", label: "Climbing", verticalTrend: "rising" },
+  featured: false, selection: { state: "unsupported", token: null, expiresAt: null, flightInstanceId: null }, ...patch,
 });
 
 describe("Radar renderer reuses certified Nearby motion", () => {
@@ -119,6 +120,7 @@ describe("Selected Radar route evidence stays with its exact display identity", 
     cardId: "safe-card", radarId: oldTarget.radarId, displayIdent: oldTarget.displayIdent,
     route: { originIata: "ORD", destinationIata: "BOS", verification: "confirmed", checkedAt: oldTarget.observedAt },
     altitudeFt: 12_000, distanceNm: 5, bearingDeg: 90, motion: oldTarget.motion, freshness: oldTarget.freshness,
+    selection: oldTarget.selection,
   };
   it("drops old Featured evidence when the current target is no longer Featured", () => {
     const current = target({ displayIdent: "EDV 99", observedAt: new Date(start + 20_000).toISOString() });

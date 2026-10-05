@@ -3,16 +3,24 @@ import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { areaDefinition } from "./areas";
+import { FlightResultV1Schema, GetFlightRequestV1Schema, ResolveNearbyRequestV1Schema, serializedBytes } from "./contracts";
+import { createInventedDetailBuilder, createInventedHandoffResolver, createFlightHandoffService } from "./handoff-service.server";
+import { createMemoryFlightHandoffStore } from "./handoff-store.server";
 import { createFakeRadarProofService } from "./radar-proof-engine.server";
 import { InboundNearbyResponseSchema, NearbyTransportRequestSchema, PUBLIC_NEARBY_PAYLOAD_BYTES, serializeNearbyResponse } from "./nearby-response";
 
 export const RADAR_PROOF_TOOL = "get_nearby_flights";
+export const RESOLVE_NEARBY_TOOL = "resolve_nearby_flight";
+export const GET_FLIGHT_TOOL = "get_flight";
 export const RADAR_PROOF_RESOURCE = "ui://inbound/radar-v1.html";
 export const RADAR_UI_MIME = "text/html;profile=mcp-app";
 export const RADAR_PROOF_NOTICE = "Invented aircraft only. This Radar transport preview is not live flight information.";
 const protocols = ["2025-11-25", "2025-06-18", "2025-03-26"];
 const inputSchema = z.toJSONSchema(NearbyTransportRequestSchema);
 const outputSchema = z.toJSONSchema(InboundNearbyResponseSchema);
+const resolveInputSchema = z.toJSONSchema(ResolveNearbyRequestV1Schema);
+const getFlightInputSchema = z.toJSONSchema(GetFlightRequestV1Schema);
+const flightOutputSchema = z.toJSONSchema(FlightResultV1Schema);
 const rpcRequest = z.strictObject({ jsonrpc: z.literal("2.0"), id: z.union([z.string().max(128), z.number().int()]).optional(), method: z.string().min(1).max(80), params: z.record(z.string(), z.unknown()).optional() });
 const template = () => readFileSync(new URL("../../../docs/plugin-v1/radar-proof/widget.html", import.meta.url), "utf8");
 const widgetScript = () => readFileSync(new URL("../../../artifacts/plugin-v1-radar-widget.js", import.meta.url), "utf8");
@@ -40,13 +48,17 @@ function send(res: ServerResponse, status: number, body: unknown) {
 export async function createRadarProofHandler(options: RadarProofOptions = {}) {
   const clock = options.clock ?? Date.now;
   const service = await createFakeRadarProofService({ clock });
+  const handoffStore = createMemoryFlightHandoffStore();
+  const handoff = createFlightHandoffService({ store: handoffStore, environment: "fake_handoff_proof", clock,
+    resolver: createInventedHandoffResolver(), detailBuilder: createInventedDetailBuilder() });
   const stats = { requests: 0, toolCalls: 0, resourceReads: 0, aviationProviderCalls: 0, productionApiCalls: 0, productionDbAccess: 0 };
   async function nearby(input: unknown) {
     const request = NearbyTransportRequestSchema.parse(input);
     const area = areaDefinition(request.area);
     if (request.radiusNm !== undefined) area.radiusNm = request.radiusNm;
     const result = await service.request(request.area, { radiusNm: request.radiusNm, limit: request.limit });
-    return serializeNearbyResponse(result, area, clock());
+    const selections = await handoff.issueSelections(result);
+    return serializeNearbyResponse(result, area, clock(), selections);
   }
   async function html(nonce = randomBytes(18).toString("base64url")) {
     const initial = await nearby({ area: "preset:chicago" });
@@ -88,15 +100,23 @@ export async function createRadarProofHandler(options: RadarProofOptions = {}) {
       if (id === undefined) { res.writeHead(202); res.end(); return; }
       let result: unknown;
       switch (method) {
-        case "initialize": result = { protocolVersion: typeof params.protocolVersion === "string" && protocols.includes(params.protocolVersion) ? params.protocolVersion : protocols[0], capabilities: { tools: {}, resources: {} }, serverInfo: { name: "inbound-fake-radar-proof", version: "0.3.0" }, instructions: RADAR_PROOF_NOTICE }; break;
+        case "initialize": result = { protocolVersion: typeof params.protocolVersion === "string" && protocols.includes(params.protocolVersion) ? params.protocolVersion : protocols[0], capabilities: { tools: {}, resources: {} }, serverInfo: { name: "inbound-fake-flight-handoff-proof", version: "0.4.0" }, instructions: RADAR_PROOF_NOTICE }; break;
         case "ping": result = {}; break;
-        case "tools/list": result = { tools: [{ name: RADAR_PROOF_TOOL, title: "Inbound Live Radar preview", description: "Show invented Nearby aircraft for Chicago, ORD or MDW. Fake-data host proof only; never use as live flight information.", inputSchema, outputSchema, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }, _meta: { ui: { resourceUri: RADAR_PROOF_RESOURCE, visibility: ["model", "app"] }, "openai/outputTemplate": RADAR_PROOF_RESOURCE, "openai/widgetAccessible": true } }] }; break;
+        case "tools/list": result = { tools: [
+          { name: RADAR_PROOF_TOOL, title: "Inbound Live Radar preview", description: "Show invented Nearby aircraft for Chicago, ORD or MDW. Fake-data host proof only; never use as live flight information.", inputSchema, outputSchema, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }, _meta: { ui: { resourceUri: RADAR_PROOF_RESOURCE, visibility: ["model", "app"] }, "openai/outputTemplate": RADAR_PROOF_RESOURCE, "openai/widgetAccessible": true } },
+          { name: RESOLVE_NEARBY_TOOL, title: "Resolve selected invented flight", description: "Resolve one opaque Nearby selection to an exact invented dated occurrence or bounded ambiguity. Callsigns alone are not accepted.", inputSchema: resolveInputSchema, outputSchema: flightOutputSchema, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }, _meta: { ui: { resourceUri: RADAR_PROOF_RESOURCE, visibility: ["model", "app"] }, "openai/outputTemplate": RADAR_PROOF_RESOURCE, "openai/widgetAccessible": true } },
+          { name: GET_FLIGHT_TOOL, title: "Get invented flight detail", description: "Read an invented flight by exact instance, ambiguity choice or explicit fake lookup.", inputSchema: getFlightInputSchema, outputSchema: flightOutputSchema, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }, _meta: { ui: { resourceUri: RADAR_PROOF_RESOURCE, visibility: ["model", "app"] }, "openai/outputTemplate": RADAR_PROOF_RESOURCE, "openai/widgetAccessible": true } },
+        ] }; break;
         case "tools/call": {
-          if (params.name !== RADAR_PROOF_TOOL || !NearbyTransportRequestSchema.safeParse(params.arguments).success) { send(res, 200, rpcError(id, -32602, "Unsupported Nearby tool or request.")); return; }
+          let structuredContent: unknown;
+          if (params.name === RADAR_PROOF_TOOL && NearbyTransportRequestSchema.safeParse(params.arguments).success) structuredContent = await nearby(params.arguments);
+          else if (params.name === RESOLVE_NEARBY_TOOL && ResolveNearbyRequestV1Schema.safeParse(params.arguments).success) structuredContent = await handoff.resolveNearby(params.arguments);
+          else if (params.name === GET_FLIGHT_TOOL && GetFlightRequestV1Schema.safeParse(params.arguments).success) structuredContent = await handoff.getFlight(params.arguments);
+          else { send(res, 200, rpcError(id, -32602, "Unsupported read-only tool or request.")); return; }
           stats.toolCalls++;
-          result = { content: [{ type: "text", text: RADAR_PROOF_NOTICE }], structuredContent: await nearby(params.arguments), _meta: { fakeAircraftOnly: true, refreshIntervalSeconds: 20 } };
+          result = { content: [{ type: "text", text: RADAR_PROOF_NOTICE }], structuredContent, _meta: { fakeAircraftOnly: true, refreshIntervalSeconds: 20 } };
           // The outer tool response also fits the public V1 envelope.
-          if (Buffer.byteLength(JSON.stringify({ jsonrpc: "2.0", id, result }), "utf8") > PUBLIC_NEARBY_PAYLOAD_BYTES) { send(res, 200, rpcError(id, -32603, "Nearby response exceeds its safe transport envelope.")); return; }
+          if (serializedBytes(structuredContent) > PUBLIC_NEARBY_PAYLOAD_BYTES) { send(res, 200, rpcError(id, -32603, "Tool response exceeds its safe transport envelope.")); return; }
           break;
         }
         case "resources/list": result = { resources: [{ uri: RADAR_PROOF_RESOURCE, name: "Inbound Live Radar preview", mimeType: RADAR_UI_MIME, description: "Many invented aircraft through the certified Nearby engine." }] }; break;
@@ -109,7 +129,7 @@ export async function createRadarProofHandler(options: RadarProofOptions = {}) {
       send(res, 200, { jsonrpc: "2.0", id, result });
     } catch { if (!res.headersSent) send(res, 500, { error: "Radar proof is temporarily unavailable." }); else res.end(); }
   };
-  return { handler, stats, service, dispose: service.dispose };
+  return { handler, stats, service, handoff, handoffStore, dispose: service.dispose };
 }
 
 export async function createRadarProofServer(options: RadarProofOptions = {}) {

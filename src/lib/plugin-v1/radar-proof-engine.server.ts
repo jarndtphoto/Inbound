@@ -12,6 +12,11 @@ export const FAKE_RADAR_SCENARIOS = ["ok", "partial", "stale", "unavailable", "r
 export type FakeRadarProofScenario = (typeof FAKE_RADAR_SCENARIOS)[number];
 const opaqueId = (index: number) => `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
 const iso = (at: number) => new Date(at).toISOString();
+const chicagoServiceDate = (at: number) => {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(at);
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+};
 type AreaId = (typeof AREA_IDS)[number];
 
 /** Invented authoritative fixes follow bounded circuits around ORD, MDW and the
@@ -52,9 +57,13 @@ function inventedAcquisition(at: number, startedAt: number, partial: boolean): A
     const observedSeconds = (observedAt - startedAt) / 1000;
     const observedCallsign = `SYN${101 + index}`;
     const sessionKey = `invented-radar-session-${index + 1}`;
-    const confirmed = index < 2;
+    // SYN101/SYN102 carry an exact dated binding. SYN105 carries a confirmed
+    // route without a date so the handoff resolver must return two explicit
+    // dated candidates rather than guessing. SYN103 remains unconfirmed and
+    // SYN104 is the documented unsupported aircraft.
+    const confirmed = index < 2 || index === 4;
     const route = confirmed
-      ? { originIata: index === 0 ? "ORD" : "MDW", destinationIata: index === 0 ? "BOS" : "DEN",
+      ? { originIata: index === 1 ? "MDW" : "ORD", destinationIata: index === 1 ? "DEN" : "BOS",
         verification: "confirmed" as const, checkedAt: iso(observedAt) }
       : { originIata: null, destinationIata: null, verification: "unknown" as const, checkedAt: null };
     observations.push({
@@ -71,7 +80,7 @@ function inventedAcquisition(at: number, startedAt: number, partial: boolean): A
       interesting: index < 4, route,
       // Confirmed evidence is independently invented and dated in the accepted
       // acquisition; generic fake lookup results can only ever be hints.
-      datedBinding: confirmed ? { sessionKey, observedCallsign, serviceDate: iso(observedAt).slice(0, 10), confirmedAt: iso(observedAt) } : null,
+      datedBinding: index < 2 ? { sessionKey, observedCallsign, serviceDate: chicagoServiceDate(observedAt), confirmedAt: iso(observedAt) } : null,
       freshness: observationFreshness(iso(observedAt), at),
       provenance: { source: "invented_radar", receivedAt: iso(at), positionAgeSeconds: Math.max(0, (at - observedAt) / 1000), acceptance: "inbound-fusion" },
     });

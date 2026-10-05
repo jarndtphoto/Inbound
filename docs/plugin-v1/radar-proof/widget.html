@@ -67,6 +67,15 @@
     #selected-altitude { font-size:22px; font-weight:550; font-variant-numeric:tabular-nums; }
     #selected-motion { margin:3px 0 12px; } #selected-distance,#selected-age,#selected-track { font-size:12px; color:var(--muted); margin-top:5px; }
     #track-flight { width:100%; margin-top:16px; } .track-notice { font-size:11px; color:var(--muted); margin-top:6px; }
+    .detail-view { border:1px solid var(--line); border-radius:var(--radius); padding:16px; background:var(--bg); }
+    .detail-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:14px; }
+    .detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 16px; margin-top:14px; }
+    .detail-item { border-top:1px solid var(--line); padding-top:8px; min-width:0; }
+    .detail-item small { display:block; color:var(--muted); margin-bottom:2px; }
+    .candidate-list { display:grid; gap:8px; margin-top:14px; }
+    .candidate { width:100%; text-align:left; display:flex; justify-content:space-between; gap:12px; align-items:center; }
+    .candidate span { color:var(--muted); font-size:12px; }
+    #handoff-error { color:var(--muted); margin-top:10px; }
     .host-controls { margin-top:4px; }
     details { margin-top:8px; border-top:1px solid var(--line); padding-top:8px; color:var(--muted); font-size:12px; }
     summary { min-height:32px; cursor:pointer; } details p + p { margin-top:6px; }
@@ -76,7 +85,7 @@
     main { overflow-wrap:break-word; }
     [hidden] { display:none !important; }
     @media(min-width:820px) { main[data-display-mode="fullscreen"] .content[data-view="radar"] { grid-template-columns:minmax(0,1fr) 264px; } main[data-display-mode="fullscreen"] #radar-surface { height:clamp(420px,60vh,620px); } }
-    @media(max-width:420px) { main,main[data-display-mode="fullscreen"] { padding:12px; } h1 { font-size:19px; } #reference { font-size:12px; } .fixture { font-size:9px; padding:4px 6px; } .navigation { gap:8px; } .tabs button { min-width:76px; padding:6px 12px; } .controls { gap:6px; } .controls button,.controls select { padding:8px 10px; font-size:13px; } .card-top { gap:8px; } .ident { font-size:14px; } .altitude { font-size:14px; } .card[aria-pressed="true"] .ident::after { content:" ✓"; } #radar-surface { height:340px; } }
+    @media(max-width:420px) { main,main[data-display-mode="fullscreen"] { padding:12px; } h1 { font-size:19px; } #reference { font-size:12px; } .fixture { font-size:9px; padding:4px 6px; } .navigation { gap:8px; } .tabs button { min-width:76px; padding:6px 12px; } .controls { gap:6px; } .controls button,.controls select { padding:8px 10px; font-size:13px; } .card-top { gap:8px; } .ident { font-size:14px; } .altitude { font-size:14px; } .card[aria-pressed="true"] .ident::after { content:" ✓"; } #radar-surface { height:340px; } .detail-grid { grid-template-columns:1fr; } }
     @media(prefers-color-scheme:dark) { :root { --bg:#171c20; --fg:#edf1f3; --muted:#abb7c0; --line:#35414a; --soft:#222b32; --accent:#82b6cb; --chosen:#213a47; } }
   </style>
 </head>
@@ -89,8 +98,19 @@
   <div id="content" class="content" data-view="flights">
     <section id="radar-panel" role="tabpanel" aria-labelledby="view-radar" hidden><div class="radar-heading"><strong id="radar-reference">Chicago area center</strong><span id="radar-range"></span></div><div id="radar-surface" aria-label="Invented Chicago aircraft radar"><svg id="radar-map" aria-hidden="true"></svg><div id="radar-markers" role="group" aria-label="Select an invented aircraft"></div><span class="north" aria-hidden="true">▲<br>N</span><p id="radar-empty" hidden></p></div><div class="radar-footer"><span>North up · Local geographic sketch</span><span>Accepted ground track · Bounded motion</span></div></section>
     <section id="flights-panel" role="tabpanel" aria-labelledby="view-flights"><div id="cards" aria-label="Featured invented aircraft"></div><p id="flights-empty" class="notice" hidden>No current Featured aircraft. Coverage may be temporarily unavailable.</p></section>
-    <aside id="selected" class="selection" aria-label="Focused aircraft" hidden><p class="kicker">Focused aircraft · Invented</p><h2 id="selected-ident">Select an aircraft</h2><p id="selected-route" class="route">Tap a marker to see its observation.</p><p id="selected-altitude"></p><p id="selected-motion"></p><p id="selected-distance"></p><p id="selected-age"></p><p id="selected-track"></p><button id="track-flight" disabled title="Detailed tracking is not available in this preview">Track flight</button><p class="track-notice">Detailed tracking is not available in this preview.</p></aside>
+    <aside id="selected" class="selection" aria-label="Focused aircraft" hidden><p class="kicker">Focused aircraft · Invented</p><h2 id="selected-ident">Select an aircraft</h2><p id="selected-route" class="route">Tap a marker to see its observation.</p><p id="selected-altitude"></p><p id="selected-motion"></p><p id="selected-distance"></p><p id="selected-age"></p><p id="selected-track"></p><button id="track-flight" disabled>Track flight</button><p id="track-notice" class="track-notice">Select an aircraft, then explicitly load its invented flight.</p></aside>
   </div>
+  <section id="handoff-panel" class="detail-view" aria-label="Invented flight detail" hidden>
+    <div class="detail-head"><div><p id="handoff-kicker" class="kicker">Invented flight</p><h2 id="detail-ident">Flight detail</h2><p id="detail-route" class="route"></p></div><button id="back-radar">Back to Radar</button></div>
+    <p id="handoff-status" class="notice" role="status"></p><p id="handoff-error" role="alert"></p>
+    <div id="candidate-list" class="candidate-list" aria-label="Choose an invented dated flight"></div>
+    <div id="detail-grid" class="detail-grid">
+      <div class="detail-item"><small>Status</small><span id="detail-status"></span></div><div class="detail-item"><small>Phase</small><span id="detail-phase"></span></div>
+      <div class="detail-item"><small>Position</small><span id="detail-position"></span></div><div class="detail-item"><small>Aircraft</small><span id="detail-aircraft"></span></div>
+      <div class="detail-item"><small>Departure</small><span id="detail-departure"></span></div><div class="detail-item"><small>Arrival</small><span id="detail-arrival"></span></div>
+      <div class="detail-item"><small>Landing</small><span id="detail-landing"></span></div><div class="detail-item"><small>Freshness</small><span id="detail-freshness"></span></div>
+    </div>
+  </section>
   <p id="selection-note" aria-live="polite">Select an aircraft to focus it locally.</p>
   <p class="static-warning">Invented aircraft only. Smooth display movement is bounded to 25 seconds from each accepted fix.</p>
   <div class="controls host-controls"><button id="pip" disabled title="Available only when the host advertises Picture-in-Picture">Request PiP</button><button id="fullscreen" disabled>Expand</button><button id="dismiss">Dismiss preview</button></div>

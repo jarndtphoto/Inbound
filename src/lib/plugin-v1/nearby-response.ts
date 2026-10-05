@@ -4,13 +4,14 @@ import { NEARBY_POLICY, observationFreshness } from "../nearby-v1/model";
 import type { NearbyView } from "../nearby-v1/views";
 import type { AcceptedNearbyObservation } from "../nearby-v1/model";
 import { AREA_IDS, areaDefinition, rankingViewKey } from "./areas";
-import { DisplayIdentSchema, IataSchema, LatitudeSchema, LongitudeSchema, MOTION_LABELS, MotionPhaseSchema,
+import { DisplayIdentSchema, HandleSchema, IataSchema, LatitudeSchema, LongitudeSchema, MOTION_LABELS, MotionPhaseSchema,
   OpaqueIdSchema, RadiusSchema, ResolvedAreaV1Schema, TimestampSchema, serializedBytes, type ResolvedAreaV1 } from "./contracts";
 import { currentRoute, type RankedCandidate } from "./ranking";
 import { viewProximity } from "./geography";
 
 /** Full public JSON response, including both independent arrays and metadata. */
 export const PUBLIC_NEARBY_PAYLOAD_BYTES = 64 * 1024;
+export const PUBLIC_RADAR_PAYLOAD_BYTES = 60 * 1024;
 export const PUBLIC_RADAR_TARGET_MAX = NEARBY_POLICY.maxRadar;
 export const PUBLIC_FEATURED_MAX = 5;
 const displayText = (max: number) => z.string().min(1).max(max).refine(value => value === value.trim()
@@ -46,6 +47,17 @@ export const PublicNearbyRouteSchema = z.strictObject({
   : route.checkedAt !== null && (route.verification === "confirmed"
     ? route.originIata !== null && route.destinationIata !== null : route.originIata !== null || route.destinationIata !== null),
 "Route evidence and verification must agree");
+export const PublicSelectionSchema = z.strictObject({
+  state: z.enum(["unresolved", "resolved", "unsupported"]), token: HandleSchema.nullable(),
+  expiresAt: TimestampSchema.nullable(), flightInstanceId: OpaqueIdSchema.nullable(),
+}).superRefine((selection, context) => {
+  const fail = (message: string) => context.addIssue({ code: "custom", message });
+  if ((selection.token === null) !== (selection.expiresAt === null)) fail("Selection token and expiry must be paired");
+  if (selection.state === "unsupported" && (selection.token || selection.expiresAt || selection.flightInstanceId)) fail("Unsupported selection cannot carry a server handle");
+  if (selection.state === "unresolved" && (!selection.token || !selection.expiresAt || selection.flightInstanceId)) fail("Unresolved selection needs only an expiring handle");
+  if (selection.state === "resolved" && (!selection.flightInstanceId || !selection.token || !selection.expiresAt)) fail("Resolved selection needs a handle and exact occurrence");
+});
+export type PublicSelection = z.infer<typeof PublicSelectionSchema>;
 
 export const PublicRadarTargetSchema = z.strictObject({
   radarId: OpaqueIdSchema, displayIdent: DisplayIdentSchema,
@@ -54,14 +66,16 @@ export const PublicRadarTargetSchema = z.strictObject({
   groundTrackDeg: z.number().min(0).lt(360).nullable(), verticalRateFpm: z.number().min(-20000).max(20000).nullable(),
   // Essential public motion guard: an accepted projected fix must not be projected a second time.
   positionKind: z.enum(["observed", "extrapolated"]), motion: PublicNearbyMotionSchema,
-  freshness: PublicNearbyFreshnessSchema, featured: z.boolean(), typeCode: z.string().regex(/^[A-Z0-9]{1,8}$/).optional(),
+  freshness: PublicNearbyFreshnessSchema, featured: z.boolean(), selection: PublicSelectionSchema,
+  typeCode: z.string().regex(/^[A-Z0-9]{1,8}$/).optional(),
 });
 export type PublicRadarTarget = z.infer<typeof PublicRadarTargetSchema>;
 
 export const PublicFeaturedFlightSchema = z.strictObject({
   cardId: OpaqueIdSchema, radarId: OpaqueIdSchema, displayIdent: DisplayIdentSchema, route: PublicNearbyRouteSchema,
   distanceNm: z.number().min(0).max(38), bearingDeg: z.number().min(0).lt(360), altitudeFt: z.number().min(500).max(200000),
-  motion: PublicNearbyMotionSchema, freshness: PublicNearbyFreshnessSchema, airlineName: displayText(64).optional(),
+  motion: PublicNearbyMotionSchema, freshness: PublicNearbyFreshnessSchema, selection: PublicSelectionSchema,
+  airlineName: displayText(64).optional(),
 });
 export type PublicFeaturedFlight = z.infer<typeof PublicFeaturedFlightSchema>;
 
@@ -75,7 +89,7 @@ export const InboundNearbyResponseSchema = z.strictObject({
 }).superRefine((response, context) => {
   const fail = (message: string) => context.addIssue({ code: "custom", message });
   if (serializedBytes(response) > PUBLIC_NEARBY_PAYLOAD_BYTES) fail("Public Nearby response exceeds 64 KiB UTF-8");
-  if (serializedBytes(response.radarTargets) > NEARBY_POLICY.maxRadarBytes) fail("Radar array exceeds its certified 49,152-byte envelope");
+  if (serializedBytes(response.radarTargets) > PUBLIC_RADAR_PAYLOAD_BYTES) fail("Radar array exceeds its certified 61,440-byte public envelope");
   if (new Set(response.radarTargets.map(target => target.radarId)).size !== response.radarTargets.length) fail("Duplicate Radar ID");
   if (new Set(response.featuredFlights.map(flight => flight.cardId)).size !== response.featuredFlights.length
     || new Set(response.featuredFlights.map(flight => flight.radarId)).size !== response.featuredFlights.length) fail("Duplicate Featured ID");
@@ -88,10 +102,14 @@ export const InboundNearbyResponseSchema = z.strictObject({
     const age = (nowMs - Date.parse(target.observedAt)) / 1000;
     if (age < -1 || Math.abs(target.freshness.ageSeconds - Math.max(0, age)) > .001) fail("Radar age disagrees with the authoritative fix");
     if (viewProximity(response.area, target).distanceNm >= response.area.radiusNm) fail("Radar target outside requested display radius");
+    if (target.selection.expiresAt && (Date.parse(target.selection.expiresAt) <= nowMs
+      || Date.parse(target.selection.expiresAt) > Date.parse(target.observedAt) + 120_000)) fail("Radar selection lifetime is outside the accepted observation window");
   }
   for (const flight of response.featuredFlights) {
     if (flight.distanceNm >= response.area.radiusNm) fail("Featured flight outside requested display radius");
     if (flight.route.checkedAt && Date.parse(flight.route.checkedAt) > nowMs + 1000) fail("Route evidence is in the future");
+    const target = response.radarTargets.find(value => value.radarId === flight.radarId);
+    if (!target || JSON.stringify(target.selection) !== JSON.stringify(flight.selection)) fail("Featured selection must match its exact Radar occurrence");
   }
 });
 export type InboundNearbyResponse = z.infer<typeof InboundNearbyResponseSchema>;
@@ -109,7 +127,8 @@ function motionProjection(motion: RankedCandidate["motion"]) {
 }
 
 /** Thin engine-result adapter: no acquisition, lookup, ranking, phase or motion inference. */
-export function serializeNearbyResponse(result: PrivateNearbyResponse, area: ResolvedAreaV1, nowMs: number): InboundNearbyResponse {
+export function serializeNearbyResponse(result: PrivateNearbyResponse, area: ResolvedAreaV1, nowMs: number,
+  selections: ReadonlyMap<string, PublicSelection> = new Map()): InboundNearbyResponse {
   if (!Number.isFinite(nowMs)) throw new RangeError("Invalid public Nearby clock");
   PublicNearbyAreaSchema.parse(area);
   const generatedAt = new Date(nowMs).toISOString();
@@ -119,6 +138,8 @@ export function serializeNearbyResponse(result: PrivateNearbyResponse, area: Res
     status: "Nearby aircraft data is temporarily unavailable.", warning: "No current aircraft snapshot is available. Try again shortly.",
   });
   const view = result.view!;
+  const selectionFor = (radarId: string): PublicSelection => selections.get(radarId)
+    ?? { state: "unsupported", token: null, expiresAt: null, flightInstanceId: null };
   if (view.viewKey !== rankingViewKey(area)) throw new RangeError("Nearby view does not match requested area");
   const rankedByRadarId = new Map(view.ranked.map(row => [(row.candidate as AcceptedNearbyObservation).radarId, row]));
   const radarTargets = view.radar.map(target => {
@@ -129,7 +150,7 @@ export function serializeNearbyResponse(result: PrivateNearbyResponse, area: Res
       altitudeFt: target.altitudeFt, groundspeedKt: target.groundspeedKt, groundTrackDeg: target.groundTrackDeg,
       verticalRateFpm: target.verticalRateFpm, positionKind: target.positionKind,
       motion: motionProjection(target.motion), freshness: observationFreshness(target.observedAt, nowMs),
-      featured: target.featured, ...(target.typeCode ? { typeCode: target.typeCode } : {}),
+      featured: target.featured, selection: selectionFor(target.radarId), ...(target.typeCode ? { typeCode: target.typeCode } : {}),
     };
   });
   const featuredFlights = view.featured.map(row => ({
@@ -137,9 +158,23 @@ export function serializeNearbyResponse(result: PrivateNearbyResponse, area: Res
     // Reuse the existing dated-evidence guard, including its safe confirmed→hint downgrade.
     route: currentRoute(row.candidate, nowMs), distanceNm: row.distanceNm, bearingDeg: row.bearingDeg, altitudeFt: row.candidate.altitudeFt,
     motion: motionProjection(row.motion), freshness: observationFreshness(row.candidate.observedAt!, nowMs),
+    selection: selectionFor((row.candidate as AcceptedNearbyObservation).radarId),
   }));
-  return InboundNearbyResponseSchema.parse({ area, collectionVersion: view.collectionVersion, health, generatedAt, radarTargets, featuredFlights,
+  const response = { area, collectionVersion: view.collectionVersion, health, generatedAt, radarTargets, featuredFlights,
     ...(health === "partial" ? { warning: "Coverage is partial. Available aircraft remain visible." } : {}),
     ...(health === "stale" ? { warning: "Aircraft observations are delayed. Display motion is paused." } : {}),
-  });
+  };
+  // Selection handles are intentionally high-entropy and therefore larger
+  // than the former Radar-only rows. Preserve every Featured reference, then
+  // trim only the non-Featured tail when worst-case handles would exceed the
+  // certified public transport envelope.
+  const featuredIds = new Set(featuredFlights.map(flight => flight.radarId));
+  while (serializedBytes(response) > PUBLIC_NEARBY_PAYLOAD_BYTES
+    || serializedBytes(response.radarTargets) > PUBLIC_RADAR_PAYLOAD_BYTES) {
+    let index = response.radarTargets.length - 1;
+    while (index >= 0 && featuredIds.has(response.radarTargets[index]!.radarId)) index--;
+    if (index < 0) throw new RangeError("Featured Radar rows exceed the certified public envelope");
+    response.radarTargets.splice(index, 1);
+  }
+  return InboundNearbyResponseSchema.parse(response);
 }
