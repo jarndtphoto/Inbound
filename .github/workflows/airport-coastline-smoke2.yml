@@ -1,0 +1,55 @@
+name: Airport coastline live smoke 2
+on:
+  push:
+    branches:
+      - validation/airport-coastline-smoke2-20261005
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install
+      - name: Probe airport shoreline surfaces
+        run: |
+          node --experimental-strip-types --input-type=module <<'NODE'
+          import { loadAirportSurface } from './src/lib/airport-surface.server.ts';
+          const airports = [
+            ['KSAN', 32.7338, -117.1933],
+            ['KBOS', 42.3656, -71.0096],
+            ['KLGA', 40.7769, -73.8740],
+            ['KSFO', 37.6213, -122.3790],
+            ['KMIA', 25.7959, -80.2870],
+            ['KORD', 41.9786, -87.9048],
+            ['KMCO', 28.4312, -81.3081],
+            ['KDEN', 39.8561, -104.6737],
+          ];
+          for (const [airport, lat, lon] of airports) {
+            const started = Date.now();
+            try {
+              const surface = await loadAirportSurface({ airport, lat, lon });
+              const h = surface.hydrography;
+              console.log('COASTLINE_SMOKE2 ' + JSON.stringify({
+                airport,
+                durationMs: Date.now() - started,
+                source: surface.source,
+                featureCount: surface.features.length,
+                coastlineWays: h?.coastlineWays ?? 0,
+                waterPolygons: h?.waterPolygons ?? 0,
+                waterFraction: h ? Number(h.waterFraction.toFixed(3)) : null,
+                fallback: h?.fallback ?? null,
+                fallbackReason: h?.fallbackReason ?? null,
+              }));
+            } catch (error) {
+              console.log('COASTLINE_SMOKE2 ' + JSON.stringify({
+                airport,
+                durationMs: Date.now() - started,
+                error: String(error),
+              }));
+            }
+          }
+          NODE
