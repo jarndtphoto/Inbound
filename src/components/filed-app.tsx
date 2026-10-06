@@ -567,7 +567,6 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
     refetchInterval: (q) => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return false;
       if (!flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount)) return false;
-      if (q.state.fetchStatus === "fetching") return false;
       const s = q.state.data;
       if (q.state.status === "error") return /HTTP 402\b/.test(String(q.state.error?.message ?? "")) ? 60_000 : 15_000;
       if (!s) return false; // The bounded retryer owns initial search attempts.
