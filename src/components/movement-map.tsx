@@ -372,7 +372,7 @@ function GroundMovementMap({
   const queriedFast = groundQ.data;
   if (queriedFast?.registration) groundIdentityRef.current.registration = queriedFast.registration;
   const queriedFastAge = queriedFast?.seenAt ? Math.max(0, Date.now() / 1000 - queriedFast.seenAt) : null;
-  const queriedCandidate = queriedFast && (queriedFastAge ?? Infinity) <= 30 ? queriedFast : null;
+  const queriedCandidate = queriedFast && (queriedFastAge ?? Infinity) <= 90 ? queriedFast : null;
 
   // Maintain heading history separately for story and map-ground feeds. MCO
   // can report the same aircraft at slightly different timestamps/positions in
