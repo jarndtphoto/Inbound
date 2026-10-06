@@ -16,22 +16,6 @@ test("level downwind keeps the started pattern even without approach phase", () 
   assert.equal(r.state.active, true); assert.equal(r.reason, "continued");
   assert.ok(r.pattern!.lengthNm > haversineNm(live, runway.threshold));
 });
-test("detailed display starts only with approach evidence and then persists in state", () => {
-  const descent = updateArrivalProjection(emptyArrivalState(), input);
-  assert.equal(descent.state.active, true);
-  assert.equal(descent.state.detailedStartedAt, null);
-
-  const approach = updateArrivalProjection(descent.state, {
-    ...input,
-    now: 120_000,
-    live: { ...live, phase: "approach" },
-  });
-  assert.equal(approach.state.detailedStartedAt, 120_000);
-
-  const held = updateArrivalProjection(approach.state, { ...input, now: 150_000, live: null });
-  assert.equal(held.state.detailedStartedAt, 120_000);
-  assert.equal(held.state.active, true);
-});
 test("one extrapolated or 120-second fix holds the exact last pattern", () => {
   const s = started();
   for (const fix of [{ ...live, extrapolated: true }, { ...live, seenSec: 120 }]) {

@@ -110,12 +110,7 @@ test('UA219 durable filed/track geometry and oceanic progress survive provider h
     record.landingTimes={scheduled:now/1000+1800,estimated:now/1000+1800,actual:null};
     record.gateArrivalTimes={scheduled:now/1000+2100};
     record.coord=[-88.199775,41.877462]; record.altitude=4000; record.groundspeed=210; record.heading=267.67;
-    // Detailed runway geometry requires real approach evidence. Give this
-    // persistence replay a sustained descent instead of relying on distance.
-    record.track=[
-      {coord:[-88.18,41.87],timestamp:now/1000-61,alt:5000,gs:215,heading:267.67},
-      {coord:record.coord,timestamp:now/1000-1,alt:4000,gs:210,heading:267.67},
-    ];
+    record.track=[{coord:record.coord,timestamp:now/1000-1,alt:4000,gs:210,heading:267.67}];
     record.waypoints=[record.origin.coord,[-85,35],[-88,41.2],record.coord,record.destination.coord];
     await pg.query('insert into arrival_atis_cache(airport,entries,fetched_at) values ($1,$2::jsonb,$3) on conflict(airport) do update set entries=excluded.entries,fetched_at=excluded.fetched_at',
       ['KORD',JSON.stringify([{airport:'KORD',type:'combined',datis:'LDG RWY 10R.'}]),now]);

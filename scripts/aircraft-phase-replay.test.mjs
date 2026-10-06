@@ -38,10 +38,7 @@ for(const name of ['aa662','ual2207']) test(`${name.toUpperCase()} captured fixe
   const legacy=p=>({...normalizedToLive(p),vertFpm:null,phase:'cruise',phaseVertFpm:undefined});
   const oldServer={isFinalApproach:live=>server.isFinalApproach({...live,phaseVertFpm:undefined,phase:'cruise',vertFpm:null},fixture.destination)};
   const expected=runProjection(oldServer,legacy,arrival,fixture),actual=runProjection(server,normalizedToLive,arrival,fixture);
-  // detailedStartedAt is a display latch driven by the improved phase signal;
-  // it must not turn this geometry regression into a false positive.
-  const projectionState=rows=>rows.map(row=>({...row,state:{...row.state,detailedStartedAt:null}}));
-  assert.deepEqual(projectionState(actual),projectionState(expected));
+  assert.deepEqual(actual,expected);
   assert.ok(actual.some(p=>p.state.active));assert.ok(actual.at(-1).state.cursorNm>0);
 });
 test('FlightAware and trace cold starts derive the same descent from existing ≥30s tracks',()=>{
