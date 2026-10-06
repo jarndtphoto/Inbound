@@ -10,7 +10,7 @@ import react from '@vitejs/plugin-react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-test('UA219 durable filed/track geometry and oceanic progress survive provider handoff, cold instances, reroute and recovery', async () => {
+test('UA219 durable filed/track geometry and oceanic progress survive provider handoff, cold instances, reroute and recovery', async t => {
   const dir = await mkdtemp(resolve('node_modules/.route-memory-replay-'));
   const realFetch = globalThis.fetch;
   let restoreClock;
@@ -110,13 +110,22 @@ test('UA219 durable filed/track geometry and oceanic progress survive provider h
     record.landingTimes={scheduled:now/1000+1800,estimated:now/1000+1800,actual:null};
     record.gateArrivalTimes={scheduled:now/1000+2100};
     record.coord=[-88.199775,41.877462]; record.altitude=4000; record.groundspeed=210; record.heading=267.67;
-    record.track=[{coord:record.coord,timestamp:now/1000-1,alt:4000,gs:210,heading:267.67}];
+    // #67 intentionally waits for real approach evidence before drawing the
+    // runway pattern. Give this persistence replay a sustained descent so it
+    // exercises buildStory with an active arrival projection.
+    record.track=[
+      {coord:[-88.18,41.87],timestamp:now/1000-61,alt:5000,gs:215,heading:267.67},
+      {coord:record.coord,timestamp:now/1000-1,alt:4000,gs:210,heading:267.67},
+    ];
     record.waypoints=[record.origin.coord,[-85,35],[-88,41.2],record.coord,record.destination.coord];
     await pg.query('insert into arrival_atis_cache(airport,entries,fetched_at) values ($1,$2::jsonb,$3) on conflict(airport) do update set entries=excluded.entries,fetched_at=excluded.fetched_at',
       ['KORD',JSON.stringify([{airport:'KORD',type:'combined',datis:'LDG RWY 10R.'}]),now]);
-    const approach=await (await cold()).loadFlightStory('UA219',{fresh:true});
-    assert.equal(approach.route.arrivalPatternKind,'downwind-base'); assert.equal(approach.route.arrivalProjectionStale,false);
-    assert.equal(approach.route.source,'filed'); assert(approach.route.progress>.9,'filed-only plan retains its past reference geometry');
+    let approach;
+    await t.test('buildStory completes with an active arrival projection', async () => {
+      approach=await (await cold()).loadFlightStory('UA219',{fresh:true});
+      assert.equal(approach.route.arrivalPatternKind,'downwind-base'); assert.equal(approach.route.arrivalProjectionStale,false);
+      assert.equal(approach.route.source,'filed'); assert(approach.route.progress>.9,'filed-only plan retains its past reference geometry');
+    });
     record.coord=null; record.track=[]; record.waypoints=[]; record.altitude=null; record.groundspeed=null; now+=30_000;
     const info=console.info, projectionLogs=[];
     console.info=(...args)=>{ if(args[0]==='[arrival-projection]') projectionLogs.push(args[1]); info(...args); };
