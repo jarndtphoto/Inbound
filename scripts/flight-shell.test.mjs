@@ -62,6 +62,7 @@ test('near-departure flights without fresh ground evidence do not claim inbound,
 
 test('tracked-flight polling pauses while hidden and refreshes stale state on return',()=>{
   assert.match(flightPages,/document\.visibilityState !== "visible"\) return false/);
+  assert.doesNotMatch(flightPages,/q\.state\.fetchStatus === "fetching"\) return false/);
   assert.match(flightPages,/addEventListener\("visibilitychange", refreshWhenVisible\)/);
   assert.match(flightPages,/Date\.now\(\) - storyQ\.dataUpdatedAt > 2_500/);
   assert.match(flightPages,/void storyQ\.refetch\(\)/);
