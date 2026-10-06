@@ -91,6 +91,10 @@ test("paced ground map is free ADS-B only", async () => {
   assert.match(source, /wantedHex[\s\S]*?fetchByHex\(wantedHex\)/, "known hex remains the strongest free ground identity");
   assert.match(source, /return finish\(position\);/, "any usable exact fix avoids the extra airport scan");
   assert.match(source, /exactPacks\.every\(\(pack\) => pack\.status && pack\.status !== "ok"\)/, "provider cooldown skips a redundant broad scan");
+  assert.match(source, /recentGroundTrace\(wantedHex/, "provider cooldown can recover a recent ground point from the existing ADS-B trace service");
+  assert.match(source, /provider: "adsb-trace-recovery"/);
+  assert.match(source, /ageSec > 90/);
+  assert.match(source, /trace has no recent ground point/);
   assert.match(source, /provider: "adsb-around-fallback"/, "a broad scan remains available when exact lookup is healthy but empty");
 });
 
