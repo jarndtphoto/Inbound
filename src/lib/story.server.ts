@@ -56,6 +56,7 @@ import { faAltFt, hasAirborneEvidence, liveFromAware as liveFromAwareTrack, pars
 import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
 import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
 import { displayArrivalProjection } from "./arrival-display.ts";
+import { showDetailedArrivalGeometry } from "./arrival-pattern.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
 import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress, routeMemoryEqual, sanitizeRouteMemory } from "./route-memory.ts";
 import { routeMemoryStore } from "./route-memory-store.server.ts";
