@@ -4495,16 +4495,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	}, comfort);
 	const liveTail = String(live?.registration ?? "").replace(/[-\s]/g, "").toUpperCase();
 	const awareTail = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
-	const exactFr24Leg = Boolean(
-		official.fr24?.flightId &&
-		aware?.flightId &&
-		official.fr24.flightId === aware.flightId
-	);
 	const currentFlightSurfaceConfirmed = Boolean(
 		live &&
 		live.onGround &&
 		!live.extrapolated &&
-		(live.seenSec ?? 999) <= (exactFr24Leg ? 60 : 30) &&
+		(live.seenSec ?? 999) <= 60 &&
 		origin &&
 		haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10 &&
 		(flightIdentOk(live.callsign, parsed, aware) || Boolean(awareTail && liveTail && awareTail === liveTail))
