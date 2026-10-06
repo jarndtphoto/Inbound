@@ -941,7 +941,7 @@ export function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, loc
 	}
 	return locked;
 }
-export function exactRecoveryLookupPlan({ knownHex = null, scheduleHex = null, tail = null, callsign = null, scheduleIdent = null } = {}) {
+export function exactRecoveryLookupPlan({ knownHex = null, scheduleHex = null, tail = null, operatingCallsign = null, callsign = null, scheduleIdent = null } = {}) {
 	const plan = [];
 	const seen = new Set();
 	const add = (kind, rawValue, normalize) => {
@@ -961,6 +961,7 @@ export function exactRecoveryLookupPlan({ knownHex = null, scheduleHex = null, t
 	add("hex", knownHex, hex);
 	add("hex", scheduleHex, hex);
 	add("registration", tail, registration);
+	add("callsign", operatingCallsign, ident);
 	add("callsign", callsign, ident);
 	add("callsign", scheduleIdent, ident);
 	return plan;
@@ -3606,6 +3607,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			knownHex,
 			scheduleHex: aware?.hex,
 			tail: aware?.tail,
+			operatingCallsign: operatingIdent,
 			callsign: parsed.callsign,
 			scheduleIdent: aware?.ident,
 		});
