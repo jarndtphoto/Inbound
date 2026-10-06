@@ -905,7 +905,7 @@ function liveFitsLeg(live, aware, origin) {
 	if (aware?._publicScheduleSource === "flightstats" && !flightStatsAircraftLegFit(aware, live).possible) return false;
 	return true;
 }
-function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex) {
+export function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex) {
 	if (!near?.length || !origin) return null;
 	const vars = new Set(callsignVariants(parsed.callsign));
 	const atc = String(aware?.atcIdent ?? "").replace(/\s/g, "").toUpperCase();
