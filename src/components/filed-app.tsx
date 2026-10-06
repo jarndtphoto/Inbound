@@ -1033,7 +1033,7 @@ function departureUpdateDelayed(story: FlightStory, nowMs = Date.now()) {
 
 function stageHeadline(story: FlightStory) {
   const stage = displayStage(story);
-  if (departureGroundUnconfirmed(story)) return departureUpdateDelayed(story) ? "Departure update delayed" : "Ground movement not confirmed";
+  if (departureGroundUnconfirmed(story)) return departureUpdateDelayed(story) ? "Ground position unavailable" : "Ground movement not confirmed";
   if (stage === "ride") return "In flight";
   if (stage === "gate") return "At the gate";
   if (stage === "taxi_in") return "Taxiing in";
