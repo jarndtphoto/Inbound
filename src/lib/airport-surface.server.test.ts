@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { boxedAirportSurfaceOverpassQuery, exactAirportSurfaceOverpassQuery, parseAirportSurfaceElements } from "./airport-surface.server.ts";
+import { boxedAirportSurfaceOverpassQuery, exactAirportSurfaceOverpassQuery, fallbackAirportSurface, parseAirportSurfaceElements } from "./airport-surface.server.ts";
 import { airportDetailGeographyBounds, airportSurfaceBounds } from "./airport-coastline.ts";
 
 const square = (id: number, west: number, south: number, east: number, north: number, tags: Record<string, string>) => ({
@@ -72,6 +72,17 @@ test("boxed airport surface query remains available as a bounded fallback", () =
   assert.match(query, /natural"="coastline"/);
   assert.match(query, /natural"="water"/);
   assert.match(query, /out geom\(32\.283800/);
+});
+
+test("complete provider failure still returns geography that fades the coarse coastline", () => {
+  const surface = fallbackAirportSurface({ airport: "ksan", lat: 32.7338, lon: -117.1933 });
+  assert.equal(surface.airport, "KSAN");
+  assert.equal(surface.source, "fallback");
+  assert.deepEqual(surface.features, []);
+  assert.equal(surface.geography?.base, "land");
+  assert.equal(surface.geography?.fallback, true);
+  assert.equal(surface.geography?.fallbackReason, "airport-surface-unavailable");
+  assert.deepEqual(surface.geography?.bounds, airportDetailGeographyBounds({ lat: 32.7338, lon: -117.1933 }));
 });
 
 

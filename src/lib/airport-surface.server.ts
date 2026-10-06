@@ -10,13 +10,33 @@ export type SurfaceFeature = {
 export type AirportSurface = {
   airport: string;
   checkedAt: number;
-  source: "FAA" | "OpenStreetMap";
+  source: "FAA" | "OpenStreetMap" | "fallback";
   /** Target aerodrome boundary rings from the same surface request, when OSM exposes them. */
   boundary?: SurfacePoint[][];
   /** Detailed coastline/land/water from the same OSM request used for airport detail. */
   geography?: AirportDetailedGeography;
   features: SurfaceFeature[];
 };
+
+export function fallbackAirportSurface(
+  input: { airport: string; lat: number; lon: number },
+  reason = "airport-surface-unavailable",
+): AirportSurface {
+  return {
+    airport: input.airport.toUpperCase(),
+    checkedAt: Date.now(),
+    source: "fallback",
+    geography: {
+      bounds: airportDetailGeographyBounds(input),
+      base: "land",
+      land: [],
+      water: [],
+      fallback: true,
+      fallbackReason: reason,
+    },
+    features: [],
+  };
+}
 
 type OverpassGeometryPoint = { lat: number; lon: number };
 type OverpassMember = {
@@ -645,7 +665,10 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
       return fallback;
     } catch {
       settled = true;
-      throw new Error("Airport surface unavailable");
+      const fallback = fallbackAirportSurface({ airport, lat: input.lat, lon: input.lon });
+      console.warn("[airport-coastline-fallback]", { airport, reason: fallback.geography?.fallbackReason });
+      cache.set(key, { value: fallback, at: Date.now() });
+      return fallback;
     }
   })().finally(() => pending.delete(key));
   pending.set(key, request);
