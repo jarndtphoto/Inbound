@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { boxedAirportSurfaceOverpassQuery, exactAirportSurfaceOverpassQuery, parseAirportSurfaceElements } from "./airport-surface.server.ts";
+import { airportDetailGeographyBounds, airportSurfaceBounds } from "./airport-coastline.ts";
 
 const square = (id: number, west: number, south: number, east: number, north: number, tags: Record<string, string>) => ({
   id,
@@ -58,7 +59,7 @@ test("exact airport surface query targets the requested aerodrome before any bro
   assert.match(query, /natural"="coastline"/);
   assert.match(query, /natural"="water"/);
   assert.match(query, /water"~"\^\(lake\|lagoon\|reservoir\|bay\)\$"/);
-  assert.match(query, /32\.658800/);
+  assert.match(query, /32\.283800/);
 });
 
 test("boxed airport surface query remains available as a bounded fallback", () => {
@@ -92,4 +93,16 @@ test("surface parser includes same-response coastline and multipolygon inland wa
   assert.equal(parsed.geography?.fallback, false);
   assert.equal(parsed.geography?.base, "water");
   assert.equal(parsed.geography?.water.length, 1);
+});
+
+
+test("ORD detailed geography reaches Lake Michigan while airport features stay tightly boxed", () => {
+  const input = { lat: 41.9742, lon: -87.9073 };
+  const detail = airportDetailGeographyBounds(input);
+  const surface = airportSurfaceBounds(input);
+  assert.ok(detail.east > -87.55, "detailed geography reaches the Lake Michigan shoreline");
+  assert.ok(surface.east < -87.75, "airport feature box stays local to ORD");
+  const exact = exactAirportSurfaceOverpassQuery("KORD", input);
+  assert.ok(exact.includes(detail.east.toFixed(6)));
+  assert.match(exact, /natural"="water"/);
 });
