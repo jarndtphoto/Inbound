@@ -1,3 +1,4 @@
+import { airportSurfaceBounds, assembleAirportGeography, type AirportDetailedGeography, type SurfacePolygon } from "./airport-coastline.ts";
 export type SurfacePoint = { lat: number; lon: number };
 export type SurfaceFeature = {
   id: number;
@@ -12,6 +13,8 @@ export type AirportSurface = {
   source: "FAA" | "OpenStreetMap";
   /** Target aerodrome boundary rings from the same surface request, when OSM exposes them. */
   boundary?: SurfacePoint[][];
+  /** Detailed coastline/land/water from the same OSM request used for airport detail. */
+  geography?: AirportDetailedGeography;
   features: SurfaceFeature[];
 };
 
@@ -208,8 +211,14 @@ async function loadFaaAirportSurface(input: { airport: string; lat: number; lon:
     }
 
     if (!features.some((feature) => feature.kind === "taxiway_area") || features.length < 10) return null;
+    const bounds = airportSurfaceBounds(input);
+    const geography: AirportDetailedGeography = {
+      bounds, base: "land", land: [], water: [], fallback: true,
+      fallbackReason: "OSM-geography-unavailable",
+    };
+    console.warn("[airport-coastline-fallback]", { airport: input.airport, reason: geography.fallbackReason });
     console.log("[airport-surface]", { airport: input.airport, source: "FAA", serviceUrl, featureCount: features.length });
-    return { airport: input.airport, checkedAt: Date.now(), source: "FAA", features };
+    return { airport: input.airport, checkedAt: Date.now(), source: "FAA", geography, features };
   } catch (error) {
     console.warn("[airport-surface] FAA feature load failed", input.airport, error instanceof Error ? error.message : String(error));
     return null;
@@ -340,9 +349,9 @@ function validGeometry(points: OverpassGeometryPoint[] | undefined): SurfacePoin
     .map((p) => ({ lat: p.lat, lon: p.lon }));
 }
 
-function relationOuterRings(element: OverpassElement): SurfacePoint[][] {
+function relationRings(element: OverpassElement, role: "outer" | "inner"): SurfacePoint[][] {
   const segments = (element.members ?? [])
-    .filter((member) => member.type === "way" && (member.role === "outer" || !member.role))
+    .filter((member) => member.type === "way" && (role === "outer" ? member.role === "outer" || !member.role : member.role === "inner"))
     .map((member) => validGeometry(member.geometry))
     .filter((points) => points.length >= 2);
   const rings: SurfacePoint[][] = [];
@@ -370,9 +379,41 @@ function relationOuterRings(element: OverpassElement): SurfacePoint[][] {
         break;
       }
     }
-    if (ring.length >= 3) rings.push(ring);
+    if (ring.length >= 3) {
+      if (!samePoint(ring[0], ring.at(-1))) ring.push(ring[0]!);
+      rings.push(ring);
+    }
   }
   return rings;
+}
+
+function relationOuterRings(element: OverpassElement) {
+  return relationRings(element, "outer");
+}
+
+function relationInnerRings(element: OverpassElement) {
+  return relationRings(element, "inner");
+}
+
+function isWaterElement(element: OverpassElement) {
+  return element.tags?.natural === "water"
+    || ["lake", "lagoon", "reservoir", "bay"].includes(element.tags?.water ?? "");
+}
+
+function waterPolygonFromWay(element: OverpassElement): SurfacePolygon | null {
+  const ring = validGeometry(element.geometry);
+  if (ring.length < 3) return null;
+  if (!samePoint(ring[0], ring.at(-1))) ring.push(ring[0]!);
+  return { outer: ring };
+}
+
+function waterPolygonsFromRelation(element: OverpassElement): SurfacePolygon[] {
+  const outers = relationOuterRings(element);
+  const inners = relationInnerRings(element);
+  return outers.map((outer) => {
+    const holes = inners.filter((inner) => pointInRing(centroid(inner), outer));
+    return { outer, ...(holes.length ? { holes } : {}) };
+  });
 }
 
 export function parseAirportSurfaceElements(elements: OverpassElement[], airport: string, checkedAt: number, field?: SurfacePoint): AirportSurface {
@@ -415,11 +456,31 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
     pushFeature(element, kind, points);
     if (features.length >= 2_500) break;
   }
+  const bounds = airportSurfaceBounds(fieldPoint);
+  const coastlineWays = elements
+    .filter((element) => element.type === "way" && element.tags?.natural === "coastline")
+    .map((element) => validGeometry(element.geometry))
+    .filter((points) => points.length >= 2);
+  const waterPolygons: SurfacePolygon[] = [];
+  for (const element of elements) {
+    if (!isWaterElement(element)) continue;
+    if (element.type === "relation") waterPolygons.push(...waterPolygonsFromRelation(element));
+    else if (element.type === "way") {
+      const polygon = waterPolygonFromWay(element);
+      if (polygon) waterPolygons.push(polygon);
+    }
+  }
+  const runwaySamples = features
+    .filter((feature) => feature.kind === "runway" || feature.kind === "runway_area")
+    .map((feature) => centroid(feature.points));
+  const geography = assembleAirportGeography({ bounds, coastlineWays, waterPolygons, runwaySamples });
+  if (geography.fallback) console.warn("[airport-coastline-fallback]", { airport, reason: geography.fallbackReason });
   return {
     airport,
     checkedAt,
     source: "OpenStreetMap",
     ...(target ? { boundary: target.rings } : {}),
+    geography,
     features,
   };
 }
