@@ -38,6 +38,22 @@ function BrowserAirportSurface({ airport, near, approachActive, widthMiles, inve
         : feature.kind === "apron" ? "var(--route-airport-apron)" : "var(--route-airport-taxiway)";
       return <polygon key={key} data-surface-kind={feature.kind} points={points} fill={fill} />;
     }), [shapes]);
+  const geography = useMemo(() => {
+    const detail = surface?.geography;
+    if (!detail) return null;
+    const { bounds } = detail;
+    const x = sx(bounds.west);
+    const y = sy(bounds.north);
+    const width = sx(bounds.east) - x;
+    const height = sy(bounds.south) - y;
+    const ringPath = (ring: Array<{ lat: number; lon: number }>) =>
+      ring.map((point, index) => `${index ? "L" : "M"}${sx(point.lon).toFixed(6)} ${sy(point.lat).toFixed(6)}`).join(" ") + " Z";
+    return {
+      detail, x, y, width, height,
+      land: detail.land.map(ringPath),
+      water: detail.water.map((polygon) => [polygon.outer, ...(polygon.holes ?? [])].map(ringPath).join(" ")),
+    };
+  }, [surface?.geography, sx, sy]);
   if (!near || opacity <= 0) return null;
   if (showRouteAirportLoadingNote(widthMiles, query.isPending)) {
     return <g data-route-airport-loading={airport.icao}
@@ -48,6 +64,21 @@ function BrowserAirportSurface({ airport, near, approachActive, widthMiles, inve
         fontFamily="IBM Plex Mono, monospace">Loading airport map…</text>
     </g>;
   }
-  if (!shapes.length) return null;
-  return <g data-route-airport={airport.icao} opacity={opacity} pointerEvents="none" aria-hidden="true">{geometry}</g>;
+  if (!shapes.length && !geography) return null;
+  return <g data-route-airport={airport.icao} opacity={opacity} pointerEvents="none" aria-hidden="true">
+    {geography ? <g
+      data-airport-detailed-geography={airport.icao}
+      data-airport-geography-base={geography.detail.base}
+      data-airport-coastline-fallback={geography.detail.fallback ? geography.detail.fallbackReason ?? "fallback" : undefined}
+    >
+      <rect
+        x={geography.x} y={geography.y} width={geography.width} height={geography.height}
+        fill={geography.detail.base === "land" || geography.detail.fallback ? "var(--journey-land)" : "var(--journey-water)"}
+        stroke="none"
+      />
+      {geography.land.map((d, index) => <path key={`land-${index}`} d={d} fill="var(--journey-land)" stroke="none" />)}
+      {geography.water.map((d, index) => <path key={`water-${index}`} d={d} fill="var(--journey-water)" fillRule="evenodd" stroke="none" />)}
+    </g> : null}
+    {geometry}
+  </g>;
 }
