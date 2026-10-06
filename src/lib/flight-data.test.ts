@@ -90,10 +90,19 @@ describe("position confidence fusion", () => {
       assert.equal(choosePosition(positions, { registration: "N123AA", hex: "abc123" }, 10_000).chosen?.provider, "fr24");
     }
   });
+  it("keeps identity-compatible airborne positions through the shared 90-second continuity window", () => {
+    for (const age of [45, 46, 60, 89, 90]) {
+      assert.equal(choosePosition([pos("adsb", 41.79, -87.74, age)], {}, 10_000).chosen?.provider, "adsb", `airborne age ${age}`);
+    }
+    for (const age of [90.01, 91, 120]) {
+      assert.equal(choosePosition([pos("adsb", 41.79, -87.74, age)], {}, 10_000).chosen, null, `stale airborne age ${age}`);
+    }
+  });
   it("does not resurrect stale ground data when airborne data is absent or invalid", () => {
     const stale = groundPos("fr24", 41.786, -87.752, 50);
     assert.equal(choosePosition([stale], {}, 10_000).chosen, null);
-    assert.equal(choosePosition([stale, pos("adsb", 41.79, -87.74, 46)], {}, 10_000).chosen, null);
+    assert.equal(choosePosition([stale, pos("adsb", 41.79, -87.74, 46)], {}, 10_000).chosen?.provider, "adsb");
+    assert.equal(choosePosition([stale, pos("adsb", 41.79, -87.74, 91)], {}, 10_000).chosen, null);
     const wrong = { ...pos("adsb", 41.79, -87.74), hex: "999999" };
     assert.equal(choosePosition([stale, wrong], { hex: "abc123" }, 10_000).chosen, null);
     assert.equal(choosePosition([stale, groundPos("adsb", 41.784, -87.754, 50)], {}, 10_000).chosen?.provider, "adsb");
