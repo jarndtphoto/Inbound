@@ -260,3 +260,24 @@ Track/Back/no-replay, Chicago -> ORD -> MDW area switching, Radar -> Flights ->
 Radar, several aircraft selections, and automatic motion/refresh through the
 20/40/60/90-second checkpoints without manual Refresh.
 
+## Final actual ChatGPT host approval — 2026-10-06
+
+The corrected Part 3B.4 Preview passed the remaining real-host checks.
+
+- SYN101 stays on Radar until Track flight is explicitly pressed.
+- Track -> Back to Radar does not replay or reopen detail.
+- SYN105 re-entry shows both dated choices again after Back instead of reopening
+  the previously chosen occurrence.
+- Chicago -> ORD -> MDW area switching works.
+- Radar -> Flights -> Radar works.
+- Multiple aircraft selections remain usable.
+- Automatic refresh/motion continues through the extended host run without
+  manual Refresh.
+- The user observed a brief collective motion pause of about three seconds,
+  followed by automatic recovery. This is accepted as bounded watchdog/retry
+  behavior; the prior failure mode (collective freeze persisting until manual
+  Refresh) did not recur.
+
+Part 3B.4 is therefore HOST-APPROVED. No Inbound application, main, or
+production changes are part of this approval.
+
