@@ -823,7 +823,8 @@ describe('first-class pushback and taxi-out stages', () => {
     assert.equal(FLIGHT_STAGES.find(stage => stage.id === 'push')?.label, 'Pushback');
     assert.equal(FLIGHT_STAGES.find(stage => stage.id === 'taxi')?.label, 'Taxiing out');
     assert.match(source, /FLIGHT_STAGES as STAGES/);
-    assert.match(source, /const stage = displayStage\(story\);/);\n    assert.match(source, /if \(stage === "push"\) return/);
+    assert.match(source, /const stage = displayStage\(story\);/);
+    assert.match(source, /if \(stage === "push"\) return/);
     assert.match(source, /if \(stage === "taxi"\) return/);
   });
 });
