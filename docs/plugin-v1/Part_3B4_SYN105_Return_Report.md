@@ -247,3 +247,16 @@ was made for that infrastructure limitation.
 The authoritative next gate remains the real ChatGPT host retest against the
 exact MCP endpoint below. Part 3B.4 remains unapproved until that passes.
 
+## Actual ChatGPT host result — 2026-10-06
+
+SYN105 chooser re-entry **passed** in the real ChatGPT host on the corrected
+Preview. After selecting one dated SYN105 occurrence, returning to Radar,
+reselecting SYN105, and pressing Track flight again, the widget showed the two
+dated choices again instead of reopening the previously selected occurrence.
+
+This closes the SYN105 sticky-choice regression. Part 3B.4 still requires the
+remaining host lifecycle checks below before final approval: SYN101
+Track/Back/no-replay, Chicago -> ORD -> MDW area switching, Radar -> Flights ->
+Radar, several aircraft selections, and automatic motion/refresh through the
+20/40/60/90-second checkpoints without manual Refresh.
+
