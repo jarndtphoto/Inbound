@@ -1,4 +1,4 @@
-import { airportSurfaceBounds, assembleAirportGeography, type AirportDetailedGeography, type SurfacePolygon } from "./airport-coastline.ts";
+import { airportDetailGeographyBounds, airportSurfaceBounds, assembleAirportGeography, type AirportDetailedGeography, type SurfacePolygon } from "./airport-coastline.ts";
 export type SurfacePoint = { lat: number; lon: number };
 export type SurfaceFeature = {
   id: number;
@@ -211,7 +211,7 @@ async function loadFaaAirportSurface(input: { airport: string; lat: number; lon:
     }
 
     if (!features.some((feature) => feature.kind === "taxiway_area") || features.length < 10) return null;
-    const bounds = airportSurfaceBounds(input);
+    const bounds = airportDetailGeographyBounds(input);
     const geography: AirportDetailedGeography = {
       bounds, base: "land", land: [], water: [], fallback: true,
       fallbackReason: "OSM-geography-unavailable",
@@ -456,7 +456,7 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
     pushFeature(element, kind, points);
     if (features.length >= 2_500) break;
   }
-  const bounds = airportSurfaceBounds(fieldPoint);
+  const bounds = airportDetailGeographyBounds(fieldPoint);
   const coastlineWays = elements
     .filter((element) => element.type === "way" && element.tags?.natural === "coastline")
     .map((element) => validGeometry(element.geometry))
@@ -485,13 +485,20 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
   };
 }
 
-function overpassBox(input: { lat: number; lon: number }) {
-  const bounds = airportSurfaceBounds(input);
+function overpassBounds(bounds: { south: number; west: number; north: number; east: number }) {
   return [bounds.south, bounds.west, bounds.north, bounds.east].map((value) => value.toFixed(6)).join(",");
 }
 
+function overpassSurfaceBox(input: { lat: number; lon: number }) {
+  return overpassBounds(airportSurfaceBounds(input));
+}
+
+function overpassGeographyBox(input: { lat: number; lon: number }) {
+  return overpassBounds(airportDetailGeographyBounds(input));
+}
+
 function detailedGeographyOverpassClauses(input: { lat: number; lon: number }) {
-  const box = overpassBox(input);
+  const box = overpassGeographyBox(input);
   return [
     `way["natural"="coastline"](${box});`,
     `way["natural"="water"](${box});`,
@@ -518,7 +525,7 @@ export function exactAirportSurfaceOverpassQuery(airport: string, input?: { lat:
 }
 
 export function boxedAirportSurfaceOverpassQuery(input: { lat: number; lon: number }) {
-  const box = overpassBox(input);
+  const box = overpassSurfaceBox(input);
   return `[out:json][timeout:8];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${box});way["area:aeroway"="taxiway"](${box});relation["aeroway"~"^(apron|terminal)$"](${box});relation["area:aeroway"="taxiway"](${box});way["aeroway"="aerodrome"](${box});relation["aeroway"="aerodrome"](${box});${detailedGeographyOverpassClauses(input)});out geom;`;
 }
 
