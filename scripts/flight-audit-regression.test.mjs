@@ -222,6 +222,7 @@ describe('zoom-stable route presentation', () => {
   const source = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
   const groundSource = readFileSync(new URL('../src/components/movement-map.tsx', import.meta.url), 'utf8');
   const motionSource = readFileSync(new URL('../src/lib/ground-motion.ts', import.meta.url), 'utf8');
+  const surfaceServer = readFileSync(new URL('../src/lib/airport-surface.server.ts', import.meta.url), 'utf8');
   const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
   it('keeps every route, flown-track, projected, outline, and weather stroke screen-sized', () => {
@@ -291,6 +292,15 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /rotate\(\$\{displayAircraft\.track\}\)/);
     assert.doesNotMatch(groundSource, /displayAircraft\.track \+ 180/);
     assert.match(groundSource, /delayed \$\{providerLabel\} position/);
+    assert.match(groundSource, /storyPositionAge != null && storyPositionAge <= 30/);
+    assert.match(groundSource, /\? 8_000 : false/);
+  });
+
+  it('bounds cold airport-surface fallback instead of serially waiting about twelve seconds', () => {
+    assert.match(surfaceServer, /const OVERPASS_TIMEOUT_MS = 4_000/);
+    assert.match(surfaceServer, /await sleep\(1_000\)/);
+    assert.match(surfaceServer, /exactAirportSurfaceOverpassQuery\(airport\), 4_000/);
+    assert.match(surfaceServer, /loadFaaAirportSurface[\s\S]*?, 6_000, "FAA surface"/);
   });
 });
 
