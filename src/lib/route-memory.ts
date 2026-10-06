@@ -28,6 +28,37 @@ export function routeLeg(key: string, origin: string, destination: string): Rout
 }
 export const emptyRouteMemory = (leg: RouteLeg): RouteMemory => ({ leg, filed: null, track: [], lastObserved: null });
 export const sameRouteLeg = (a: RouteLeg, b: RouteLeg) => a.origin === b.origin && a.destination === b.destination && a.date === b.date;
+
+/** A whole-tail trace often ends one flight at the next flight's origin. The
+ * latest real observation near this leg's origin is the safe boundary: points
+ * before it belong to the aircraft's previous sector and cannot contribute to
+ * flown miles, progress, or phase history. */
+export function currentLegTrackBoundaryMs(track: RouteObservation[], origin: RoutePoint, radiusNm = 25): number | null {
+	const ordered = track.filter(point => validPoint(point) && Number.isFinite(point.seenAt) && point.seenAt > 0)
+		.slice().sort((a, b) => a.seenAt - b.seenAt);
+	let cluster: Array<{ point: RouteObservation; distance: number }> = [];
+	let previous: RouteObservation | null = null;
+	for (const point of ordered) {
+		const distance = haversineNm(point, origin);
+		if (distance <= radiusNm) {
+			// A long ground gap or a return from outside the airport radius starts
+			// a new visit. Within one visit, retain the closest stand/runway point
+			// so the first valid miles of the departure are not amputated.
+			if (previous && (point.seenAt - previous.seenAt > 45 * 60_000 || haversineNm(previous, origin) > radiusNm)) cluster = [];
+			cluster.push({ point, distance });
+		}
+		previous = point;
+	}
+	if (!cluster.length) return null;
+	return cluster.reduce((best, candidate) => candidate.distance < best.distance - 0.05
+		|| (Math.abs(candidate.distance - best.distance) <= 0.05 && candidate.point.seenAt > best.point.seenAt)
+		? candidate : best).point.seenAt;
+}
+
+export function isolateCurrentLegTrack(track: RouteObservation[], origin: RoutePoint, explicitBoundaryMs?: number | null): RouteObservation[] {
+  const boundary = explicitBoundaryMs ?? currentLegTrackBoundaryMs(track, origin);
+  return boundary == null ? mergeObservedTrack([], track) : mergeObservedTrack([], track.filter(point => point.seenAt >= boundary));
+}
 /** Compare facts, not object/JSONB property order, for the per-poll dirty check. */
 export function routeMemoryEqual(a: RouteMemory, b: RouteMemory): boolean {
   const pointEqual = (x: RoutePoint, y: RoutePoint) => x.lat === y.lat && x.lon === y.lon && (x.label ?? null) === (y.label ?? null);

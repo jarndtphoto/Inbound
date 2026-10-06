@@ -60,7 +60,7 @@ import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-project
 import { displayArrivalProjection } from "./arrival-display.ts";
 import { showDetailedArrivalGeometry } from "./arrival-pattern.ts";
 import { arrivalStateStore } from "./arrival-state-store.server.ts";
-import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress, routeMemoryEqual, sanitizeRouteMemory } from "./route-memory.ts";
+import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, validatedFiledRoute, freshRouteObservation, routeProgress, routeMemoryEqual, sanitizeRouteMemory, currentLegTrackBoundaryMs } from "./route-memory.ts";
 import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
@@ -499,16 +499,27 @@ async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, fa
 	const faRaw = Array.isArray(faTrack) && faTrack.length >= 2 ? faTrack : [];
 	let raw = faRaw.length ? faRaw.slice() : [];
 	if (hexRaw.length) raw = raw.length ? mergeTraces(raw, hexRaw) : hexRaw;
+	// Cut a whole-tail trace at this leg's latest real origin observation before
+	// computing phase or flown distance. The earlier sector belongs to the
+	// aircraft, but not to this flight instance.
+	const originBoundaryMs = currentLegTrackBoundaryMs(
+		raw.map((p) => ({ lat: p.lat, lon: p.lon, seenAt: p.t * 1000 })), origin);
+	if (originBoundaryMs != null) raw = raw.filter((p) => p.t * 1000 >= originBoundaryMs);
 	const sector = legsForThisSector(splitTraceLegs(raw), origin, dest, live, takeoffUnix ?? null);
-	const phaseHistory = sector.map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon }));
+	const newestRaw = raw.at(-1)?.t ?? null;
+	const phasePoints = sector.length ? sector : live && newestRaw != null
+		? raw.filter((p) => newestRaw - p.t <= 10 * 60 && haversineNm(p, live) <= 80)
+		: [];
+	const phaseHistory = phasePoints.map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon }));
+	const trackHistory = sector.map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon }));
 	const flown = uniqueTrack(sector, faRaw.length ? 1.6 : 6);
 	if (live && haversineNm({ lat: live.lat, lon: live.lon }, dest) < 68) {
 		const arrival = stitchArrival(flown, live, dest);
-		if (arrival && arrival.length >= 4) return { phaseHistory, points: arrival, spine, flown, source: flown.length >= 6 ? "track" : "direct" };
+		if (arrival && arrival.length >= 4) return { phaseHistory, trackHistory, points: arrival, spine, flown, source: flown.length >= 6 ? "track" : "direct" };
 	}
 	if (flown.length >= 6) {
 		return {
-			phaseHistory, points: densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48),
+			phaseHistory, trackHistory, points: densifyPath(downsampleNm(ensureEnds(blendTrackOntoSpine(flown, spine), origin, dest), 22), 48),
 			spine,
 			flown,
 			source: "track"
@@ -516,15 +527,15 @@ async function loadFiledPath(hex, origin, dest, live, takeoffUnix, waypoints, fa
 	}
 	if (flown.length >= 2) {
 		return {
-			phaseHistory, points: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36),
+			phaseHistory, trackHistory, points: densifyPath(downsampleNm(ensureEnds(flown, origin, dest), 12), 36),
 			spine,
 			flown,
 			source: "track"
 		};
 	}
-	if (Array.isArray(waypoints) && waypoints.length >= 4) return { phaseHistory, points: spine, spine, flown, source: "filed" };
-	if (live) return { phaseHistory, points: directSpine(origin, dest, live), spine, flown, source: "direct" };
-	return { phaseHistory, points: spine, spine, flown, source: "direct" };
+	if (Array.isArray(waypoints) && waypoints.length >= 4) return { phaseHistory, trackHistory, points: spine, spine, flown, source: "filed" };
+	if (live) return { phaseHistory, trackHistory, points: directSpine(origin, dest, live), spine, flown, source: "direct" };
+	return { phaseHistory, trackHistory, points: spine, spine, flown, source: "direct" };
 }
 
 function acList(d) {
@@ -885,6 +896,7 @@ function liveFitsLeg(live, aware, origin) {
 		// A distant flight with this number cannot be the leg still awaiting departure.
 		return false;
 	}
+	if (aware?._publicScheduleSource === "flightstats" && !flightStatsAircraftLegFit(aware, live).possible) return false;
 	return true;
 }
 function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex) {
@@ -1537,16 +1549,17 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 	// FlightStats exposes IATA codes in the route header even when an airport is
 	// not in our curated display directory. Keep those identities so the field
 	// resolver can obtain coordinates from AviationWeather instead of dropping
-	// the entire schedule. Route codes are the final uppercase triplets before
-	// the departure section; status/timezone tokens are excluded explicitly.
+	// the entire schedule. The first two distinct codes are the route banner.
+	// The origin is repeated later in the airport detail immediately before
+	// "Flight Departure Times"; taking the final two codes reverses the leg.
 	const ignoredCodes = new Set(["ARR", "DEP", "ETA", "ETD", "EST", "UTC", "GMT", "TBD"]);
 	const candidates = [...header.matchAll(/\b([A-Z]{3})\b/g)]
 		.map((m) => m[1])
 		.filter((code) => !ignoredCodes.has(code));
 	const codes = [];
-	for (let i = candidates.length - 1; i >= 0 && codes.length < 2; i--) {
-		const code = candidates[i];
-		if (!codes.includes(code)) codes.unshift(code);
+	for (const code of candidates) {
+		if (!codes.includes(code)) codes.push(code);
+		if (codes.length === 2) break;
 	}
 	if (codes.length < 2 || codes[0] === codes[1]) return null;
 	const origin = airportByIata(codes[0]);
@@ -1599,7 +1612,93 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 		_publicScheduleDate: dateKey,
 	};
 }
-export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() / 1000) {
+function flightStatsLeg(record) {
+	const origin = String(record?.originIata ?? record?.originIcao ?? "").trim().toUpperCase();
+	const destination = String(record?.destIata ?? record?.destIcao ?? "").trim().toUpperCase();
+	return origin && destination && origin !== destination ? { origin, destination, date: record?._publicScheduleDate ?? null } : null;
+}
+export function flightStatsLegMatches(record, lockedLeg) {
+	if (!lockedLeg) return true;
+	const leg = flightStatsLeg(record);
+	if (!leg) return false;
+	const origin = String(lockedLeg.originIata ?? lockedLeg.originIcao ?? lockedLeg.origin ?? "").trim().toUpperCase();
+	const destination = String(lockedLeg.destIata ?? lockedLeg.destIcao ?? lockedLeg.destination ?? "").trim().toUpperCase();
+	if (!origin || !destination || leg.origin !== origin || leg.destination !== destination) return false;
+	return !lockedLeg.date || !leg.date || lockedLeg.date === leg.date;
+}
+function recordAirport(record, side) {
+	const iata = String(side === "origin" ? record?.originIata ?? "" : record?.destIata ?? "").trim().toUpperCase();
+	const icao = String(side === "origin" ? record?.originIcao ?? "" : record?.destIcao ?? "").trim().toUpperCase();
+	return airportByIata(iata) ?? scheduledAirportByIata(iata) ?? airportByIcao(icao) ?? null;
+}
+function flightStatsLegFinished(record) {
+	return Boolean(record?.landing?.actual || record?.gateIn?.actual
+		|| /\b(?:arrived|landed)\b/i.test(String(record?.status ?? "")));
+}
+function flightStatsLegDeparted(record) {
+	return Boolean(record?.gateOut?.actual || record?.takeoff?.actual
+		|| /\b(?:departed|airborne|arrived|landed)\b/i.test(String(record?.status ?? "")));
+}
+function reliableLegPosition(aircraft) {
+	return Boolean(aircraft && Number.isFinite(aircraft.lat) && Number.isFinite(aircraft.lon)
+		&& !aircraft.extrapolated && (!Number.isFinite(aircraft.seenSec) || aircraft.seenSec <= 120));
+}
+export function livePositionConfirmsLeg(record, aircraft) {
+	if (!reliableLegPosition(aircraft)) return false;
+	const origin = recordAirport(record, "origin"), destination = recordAirport(record, "destination");
+	if (!origin || !destination) return false;
+	const dOrigin = haversineNm(aircraft, origin), dDestination = haversineNm(aircraft, destination);
+	if (aircraft.onGround) return dOrigin <= 5 || dDestination <= 5;
+	const fit = flightStatsAircraftLegFit(record, aircraft);
+	if (!fit.possible) return false;
+	if (!Number.isFinite(aircraft.track)) return false;
+	return headingDelta(aircraft.track, initialBearing(aircraft, destination)) <= 90;
+}
+function livePositionContradictsLeg(record, aircraft) {
+	if (!reliableLegPosition(aircraft)) return false;
+	const fit = flightStatsAircraftLegFit(record, aircraft);
+	if (!fit.possible) return true;
+	if (aircraft.onGround || !Number.isFinite(aircraft.track)) return false;
+	const origin = recordAirport(record, "origin"), destination = recordAirport(record, "destination");
+	if (!origin || !destination) return false;
+	const towardOrigin = headingDelta(aircraft.track, initialBearing(aircraft, origin));
+	const towardDestination = headingDelta(aircraft.track, initialBearing(aircraft, destination));
+	return towardOrigin <= 60 && towardDestination >= 120;
+}
+/** Rank a same-number leg by the physical aircraft. Impossible off-route
+ * matches are rejected; opposite directions on the same corridor are split
+ * by the aircraft heading instead of the schedule clock. */
+export function flightStatsAircraftLegFit(record, aircraft) {
+	if (!aircraft || !Number.isFinite(aircraft.lat) || !Number.isFinite(aircraft.lon)) return { possible: true, score: 0 };
+	if (aircraft.extrapolated || (Number.isFinite(aircraft.seenSec) && aircraft.seenSec > 120)) return { possible: true, score: 0 };
+	const origin = recordAirport(record, "origin"), destination = recordAirport(record, "destination");
+	if (!origin || !destination) return { possible: true, score: 0 };
+	const dOrigin = haversineNm(aircraft, origin), dDestination = haversineNm(aircraft, destination);
+	const direct = Math.max(1, haversineNm(origin, destination));
+	const offRoute = distanceToSegmentNm(aircraft, origin, destination);
+	if (aircraft.onGround) {
+		if (dOrigin <= 5) return { possible: true, score: dOrigin * 120 };
+		// Once the aircraft has landed at this record's destination, that sector
+		// is finished. It cannot outrank the next departure from the same field.
+		if (dDestination <= 5 && flightStatsLegFinished(record))
+			return { possible: false, score: Number.POSITIVE_INFINITY };
+		// Preserve an unfinished taxi-in only when there is no departure leg from
+		// the airport; chooseFlightStatsScheduleCandidate gives origin matches
+		// absolute priority before reaching this fallback.
+		if (dDestination <= 5) return { possible: true, score: 20_000 + dDestination * 120 };
+		return { possible: false, score: Number.POSITIVE_INFINITY };
+	}
+	if (offRoute > Math.max(120, direct * 0.32) && dOrigin > 90 && dDestination > 90)
+		return { possible: false, score: Number.POSITIVE_INFINITY };
+	const toward = Number.isFinite(aircraft.track) ? headingDelta(aircraft.track, initialBearing(aircraft, destination)) : 90;
+	if (Number.isFinite(aircraft.track) && Math.min(dOrigin, dDestination) <= 75 && toward > 135)
+		return { possible: false, score: Number.POSITIVE_INFINITY };
+	// Heading is deliberately stronger than a few minutes of schedule proximity:
+	// the reverse leg has the same corridor and often overlaps in time.
+	const endpoint = Math.min(dDestination, direct * 0.5);
+	return { possible: true, score: toward * 240 + offRoute * 20 + endpoint };
+}
+export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() / 1000, context = {}) {
 	const MAX_FUTURE_SEC = 18 * 3600;
 	const MAX_PAST_SEC = 18 * 3600;
 	const usable = (records ?? []).filter(Boolean).filter((record) => {
@@ -1613,6 +1712,42 @@ export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() 
 		return depart == null && arrive == null;
 	});
 	if (!usable.length) return null;
+	const locked = context.lockedLeg ? usable.filter((record) => flightStatsLegMatches(record, context.lockedLeg)) : [];
+	// A confirmed leg is a hard boundary, not a ranking hint. If the provider
+	// temporarily returns only the opposite/same-number sector, the caller must
+	// retain the saved schedule instead of silently switching routes.
+	const firmLock = context.lockedLeg?.liveConfirmed === true;
+	let pool = context.lockedLeg ? locked : usable;
+	if (context.lockedLeg && !firmLock && reliableLegPosition(context.aircraft)) {
+		const contradictsLock = !locked.length || locked.every((record) => livePositionContradictsLeg(record, context.aircraft));
+		const confirmedAlternative = usable.some((record) => !flightStatsLegMatches(record, context.lockedLeg)
+			&& livePositionConfirmsLeg(record, context.aircraft));
+		if (contradictsLock && confirmedAlternative) pool = usable;
+	}
+	if (!pool.length) return null;
+	const aircraft = context.aircraft;
+	const reliablePosition = reliableLegPosition(aircraft);
+	if (reliablePosition && aircraft.onGround) {
+		const departingHere = pool.filter((record) => {
+			const origin = recordAirport(record, "origin");
+			return origin && haversineNm(aircraft, origin) <= 5;
+		});
+		if (departingHere.length) pool = departingHere;
+	} else if (!reliablePosition) {
+		const primaryLeg = flightStatsLeg(context.primaryRecord);
+		const primaryMatches = primaryLeg ? pool.filter((record) => flightStatsLegMatches(record, primaryLeg)) : [];
+		if (primaryMatches.length) {
+			pool = primaryMatches;
+		} else {
+			const active = pool.filter((record) => flightStatsLegDeparted(record) && !flightStatsLegFinished(record));
+			if (active.length) pool = active;
+			else {
+				const upcoming = pool.filter((record) => !flightStatsLegDeparted(record)
+					&& (bestUnix(record.gateOut) == null || bestUnix(record.gateOut) >= nowSec - 15 * 60));
+				if (upcoming.length) pool = upcoming;
+			}
+		}
+	}
 	const score = (record) => {
 		const depart = bestUnix(record.gateOut);
 		const arrive = bestUnix(record.gateIn);
@@ -1626,9 +1761,24 @@ export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() 
 		const day = Date.parse(`${record._publicScheduleDate ?? ""}T12:00:00Z`) / 1000;
 		return Number.isFinite(day) ? Math.abs(day - nowSec) + 36 * 3600 : Number.POSITIVE_INFINITY;
 	};
-	return usable.slice().sort((a, b) => score(a) - score(b))[0] ?? null;
+	const physicallyPossible = pool.map((record) => ({ record, fit: flightStatsAircraftLegFit(record, aircraft) }))
+		.filter(({ fit }) => fit.possible);
+	if (!physicallyPossible.length) return null;
+	return physicallyPossible.sort((a, b) => score(a.record) + a.fit.score - score(b.record) - b.fit.score)[0]?.record ?? null;
 }
-async function loadFlightStatsPublic(callsign) {
+
+/** FlightStats does not expose a takeoff clock, but its explicit Departed
+ * state plus an actual gate departure is enough to avoid leaving a correct
+ * leg stuck at Pushback for hours. This does not manufacture a takeoff time. */
+export function flightStatsScheduleAirborne(record, nowSec = Date.now() / 1000) {
+	if (record?._publicScheduleSource !== "flightstats" || !/^departed$/i.test(String(record?.status ?? ""))) return false;
+	const departed = record?.gateOut?.actual;
+	const arrival = bestUnix(record?.gateIn);
+	return Number.isFinite(departed) && nowSec - departed >= 12 * 60 && nowSec - departed <= 24 * 3600
+		&& !record?.landing?.actual && !record?.gateIn?.actual
+		&& (!Number.isFinite(arrival) || arrival >= nowSec - 30 * 60);
+}
+async function loadFlightStatsPublic(callsign, selection = {}) {
 	const parsed = parseFlightQuery(callsign);
 	const m = String(parsed?.iata ?? "").match(/^([A-Z0-9]{2})(\d{1,4}[A-Z]?)$/);
 	if (!m) return null;
@@ -1637,7 +1787,7 @@ async function loadFlightStatsPublic(callsign) {
 		const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offset));
 		return { key: d.toISOString().slice(0, 10), year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
 	});
-	return cached(`flightstats-public-v2:${parsed.iata}:${dates[0].key}`, 60_000, async () => {
+	const result = await cached(`flightstats-public-v3:${parsed.iata}:${dates[0].key}`, 60_000, async () => {
 		const pages = (await Promise.all(dates.map(async (date) => {
 			try {
 				const url = `https://www.flightstats.com/v2/flight-tracker/${encodeURIComponent(m[1])}/${encodeURIComponent(m[2])}?year=${date.year}&month=${date.month}&date=${date.day}`;
@@ -1655,7 +1805,7 @@ async function loadFlightStatsPublic(callsign) {
 		}))).filter(Boolean);
 		const directRecords = pages.map((page) => page.direct).filter(Boolean);
 		let candidates = directRecords.slice();
-		const bestDirect = chooseFlightStatsScheduleCandidate(directRecords);
+		const bestDirect = chooseFlightStatsScheduleCandidate(directRecords, Date.now() / 1000, selection);
 		const bestPage = bestDirect ? pages.find((page) => page.direct === bestDirect) : null;
 		const detailPages = bestPage ? [bestPage] : pages;
 		const detailRequests = [];
@@ -1686,41 +1836,49 @@ async function loadFlightStatsPublic(callsign) {
 			}));
 			candidates = candidates.concat(details.filter(Boolean));
 		}
-		const selected = chooseFlightStatsScheduleCandidate(candidates);
-		if (!selected && pages.length === dates.length && pages.every(page => verifiedFlightNotFoundPage(200, page.html)))
-			throw new Error(`[flight_not_found] No flight found for ${parsed.iata} on the checked service dates.`);
-		if (selected) {
-			console.info("[flightstats-schedule]", {
-				callsign: parsed.callsign,
-				date: selected._publicScheduleDate,
-				origin: selected.originIata,
-				destination: selected.destIata,
-				status: selected.status,
-				gateOut: bestUnix(selected.gateOut),
-				gateIn: bestUnix(selected.gateIn),
-				candidates: candidates.length,
-			});
-		}
-		return selected;
+		return { candidates, verifiedNotFound: pages.length === dates.length && pages.every(page => verifiedFlightNotFoundPage(200, page.html)) };
 	});
+	const selected = chooseFlightStatsScheduleCandidate(result.candidates, Date.now() / 1000, selection);
+	if (!selected && result.verifiedNotFound)
+		throw new Error(`[flight_not_found] No flight found for ${parsed.iata} on the checked service dates.`);
+	if (selected) {
+		console.info("[flightstats-schedule]", {
+			callsign: parsed.callsign,
+			date: selected._publicScheduleDate,
+			origin: selected.originIata,
+			destination: selected.destIata,
+			status: selected.status,
+			gateOut: bestUnix(selected.gateOut),
+			gateIn: bestUnix(selected.gateIn),
+			candidates: result.candidates.length,
+		});
+	}
+	return selected;
 }
 const awareRejections = new Map();
 let awarePublicBlockedUntil = 0;
 export function scheduleHasRoute(record) {
 	return Boolean(record && (record.originIata || record.originIcao) && (record.destIata || record.destIcao));
 }
-async function loadAware(callsign) {
+async function loadAware(callsign, selection = {}) {
 	const apiRecord = await loadAeroFlight(callsign);
 	if (apiRecord) return { ...apiRecord, _scheduleSource: "flightaware_api" };
+	const fallbackSelection = async () => ({
+		...selection,
+		aircraft: await selection.aircraft,
+		// The last successful FlightAware record remains the best route identity
+		// during a temporary public-page failure, even after its short cache TTL.
+		primaryRecord: cache.get(`aware:${callsign}`)?.value ?? null,
+	});
 	if (Date.now() < awarePublicBlockedUntil) {
-		const fallback = await loadFlightStatsPublic(callsign);
+		const fallback = await loadFlightStatsPublic(callsign, await fallbackSelection());
 		noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
 		if (fallback) return fallback;
 		throw new Error("Current flight route unavailable: public FlightAware schedule source is temporarily blocked.");
 	}
 	const rejected = awareRejections.get(callsign);
 	if (rejected && Date.now() < rejected.until) {
-		const fallback = await loadFlightStatsPublic(callsign);
+		const fallback = await loadFlightStatsPublic(callsign, await fallbackSelection());
 		noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
 		if (fallback) return fallback;
 		throw rejected.error;
@@ -1736,7 +1894,7 @@ async function loadAware(callsign) {
 			// FlightAware occasionally publishes a truthy trackpoll shell with no
 			// route. Treat it as unavailable so it cannot suppress the independent
 			// public schedule fallback.
-			const fallback = await loadFlightStatsPublic(callsign);
+			const fallback = await loadFlightStatsPublic(callsign, await fallbackSelection());
 			noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
 			if (fallback) return fallback;
 		}
@@ -1749,7 +1907,7 @@ async function loadAware(callsign) {
 			awareRejections.set(callsign, { until: Date.now() + 60000, error });
 		}
 		if (!flightNotFound(error)) {
-			const fallback = await loadFlightStatsPublic(callsign);
+			const fallback = await loadFlightStatsPublic(callsign, await fallbackSelection());
 			noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
 			if (fallback) return fallback;
 		}
@@ -3004,6 +3162,41 @@ function awareFromResume(resume, scope) {
 		typicalTaxiOutMin: null, typicalTaxiInMin: null, filedTaxiOutMin: null, filedTaxiInMin: null,
 	};
 }
+function lockedLegFromResume(resume) {
+	if (!resume) return null;
+	const keyDate = typeof resume.stateKey === "string" && resume.stateKey.startsWith("leg:v1:")
+		? resume.stateKey.split("|")[1] ?? null : null;
+	return { originIata: resume.originIata, originIcao: resume.originIcao,
+		destIata: resume.destIata, destIcao: resume.destIcao, date: keyDate,
+		...(resume.legLiveConfirmed === true ? { liveConfirmed: true } : {}) };
+}
+const COMPLETED_LEG_GRACE_SEC = 45 * 60;
+function localDateKey(unix, timeZone) {
+	try {
+		return new Intl.DateTimeFormat("en-CA", {
+			timeZone: timeZone || "UTC", year: "numeric", month: "2-digit", day: "2-digit",
+		}).format(new Date(unix * 1000));
+	} catch {
+		return new Date(unix * 1000).toISOString().slice(0, 10);
+	}
+}
+/** Keep a confirmed leg sticky only while it can still be the active leg.
+ * A provider gate-in closes it immediately; a landing closes it after enough
+ * time for taxi-in. An old service date also expires after its planned arrival
+ * plus the same grace, so a stale resume cannot capture a brand-new flight. */
+export function activeFlightStatsLegLock(resume, nowSec = Date.now() / 1000) {
+	const leg = lockedLegFromResume(resume);
+	if (!leg) return null;
+	const gateActual = resume?.gateIn?.actual;
+	if (Number.isFinite(gateActual) && gateActual <= nowSec) return null;
+	const landingActual = resume?.landing?.actual;
+	if (Number.isFinite(landingActual) && nowSec - landingActual >= COMPLETED_LEG_GRACE_SEC) return null;
+	const plannedArrival = bestUnix(resume?.gateIn) ?? bestUnix(resume?.landing);
+	if (leg.date && Number.isFinite(plannedArrival)
+		&& localDateKey(nowSec, resume?.originTz) > leg.date
+		&& nowSec - plannedArrival >= COMPLETED_LEG_GRACE_SEC) return null;
+	return leg;
+}
 async function buildStory(query, resumed = null, progressResume = null) {
 	const parsed = parseFlightQuery(query);
 	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
@@ -3012,13 +3205,18 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	let knownHex = hexByIdent.get(stateIdent) || null;
 	const hazardsP = loadHazards();
 	let scheduleError = null;
-	const [rawAc0, publicAware, route] = await Promise.all([
-		knownHex
-			? safe(adsbByHex(knownHex), null)
-			: parsed.registration
-				? safe(adsbByReg(parsed.registration), null)
-				: safe(adsbByCallsign(parsed.callsign), null),
-		(resumed ? Promise.resolve(awareFromResume(resumed.resume, resumed.scope)) : loadAware(parsed.callsign)).catch((err) => {
+	const rawAcP = knownHex
+		? safe(adsbByHex(knownHex), null)
+		: parsed.registration
+			? safe(adsbByReg(parsed.registration), null)
+			: safe(adsbByCallsign(parsed.callsign), null);
+	const lockedLeg = activeFlightStatsLegLock(progressResume);
+	const [rawAc0, loadedAware, route] = await Promise.all([
+		rawAcP,
+		(resumed ? Promise.resolve(awareFromResume(resumed.resume, resumed.scope)) : loadAware(parsed.callsign, {
+			lockedLeg,
+			aircraft: rawAcP.then((raw) => raw ? toLive(raw) : null),
+		})).catch((err) => {
 			scheduleError = err;
 			console.warn("[schedule-fallback-unavailable]", {
 				callsign: parsed.callsign,
@@ -3028,6 +3226,28 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		}),
 		safe(loadRoute(parsed.callsign), null),
 	]);
+	let scheduleHeldByLegLock = false;
+	let publicAware = loadedAware;
+	if (!resumed && progressResume && publicAware?._publicScheduleSource === "flightstats"
+		&& lockedLeg?.liveConfirmed && !flightStatsLegMatches(publicAware, lockedLeg)) {
+		publicAware = awareFromResume(progressResume, "leg-lock");
+		scheduleHeldByLegLock = true;
+		console.warn("[flight-leg-lock]", {
+			requested: parsed.callsign,
+			locked: [lockedLeg.originIata, lockedLeg.destIata, lockedLeg.date],
+			rejected: [loadedAware?.originIata, loadedAware?.destIata, loadedAware?._publicScheduleDate ?? null],
+		});
+	}
+	if (!resumed && lockedLeg && !lockedLeg.liveConfirmed && publicAware
+		&& !flightStatsLegMatches(publicAware, lockedLeg)) {
+		console.warn("[flight-leg-lock]", {
+			action: "override",
+			reason: "fresh_position",
+			requested: parsed.callsign,
+			locked: [lockedLeg.originIata, lockedLeg.destIata, lockedLeg.date],
+			selected: [publicAware.originIata, publicAware.destIata, publicAware._publicScheduleDate ?? null],
+		});
+	}
 	const operatingIdent = operatingIdentFromSchedule(publicAware, parsed.callsign);
 	const nowSec = Date.now() / 1000;
 	const fr24DepartureClock = publicAware ? bestUnix(publicAware.gateOut) : null;
@@ -3039,6 +3259,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		nowSec >= fr24DepartureClock - 2 * 60 * 60 &&
 		nowSec <= fr24DepartureClock + 4 * 60 * 60
 	);
+	const rawSchedulePosition = rawAc0 ? toLive(rawAc0) : null;
+	const scheduleLiveConfirmed = Boolean(
+		publicAware && ((lockedLeg?.liveConfirmed && flightStatsLegMatches(publicAware, lockedLeg))
+			|| livePositionConfirmsLeg(publicAware, rawSchedulePosition))
+	);
 	const official = await loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
 		fr24OriginIata: publicAware?.originIata ?? null,
@@ -3046,8 +3271,24 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		fr24Registration: publicAware?.tail ?? null,
 		fr24OperatingCallsign: operatingIdent,
 		fr24SurfaceDeparture,
+		fr24AllowRouteOverride: !scheduleLiveConfirmed,
 	});
-	const fr24Aware = publicAware ? null : awareFromLiveFr24(official.fr24);
+	const liveFr24Aware = awareFromLiveFr24(official.fr24);
+	let fr24Aware = publicAware ? null : liveFr24Aware;
+	if (publicAware && liveFr24Aware && !flightStatsLegMatches(liveFr24Aware, flightStatsLeg(publicAware))
+		&& !scheduleLiveConfirmed) {
+		if (lockedLeg && !lockedLeg.liveConfirmed) {
+			console.warn("[flight-leg-lock]", {
+				action: "override",
+				reason: "fresh_fr24_route",
+				requested: parsed.callsign,
+				locked: [lockedLeg.originIata, lockedLeg.destIata, lockedLeg.date],
+				selected: [liveFr24Aware.originIata, liveFr24Aware.destIata, liveFr24Aware._publicScheduleDate ?? null],
+			});
+		}
+		publicAware = null;
+		fr24Aware = liveFr24Aware;
+	}
 	if (fr24Aware) {
 		console.info(JSON.stringify({
 			event: "fr24_live_leg_fallback",
@@ -3057,8 +3298,19 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			destination: fr24Aware.destIata ?? fr24Aware.destIcao,
 		}));
 	}
-	const currentLegAware = publicAware ?? fr24Aware;
-	const scheduleSource = resumed ? "saved_resume" : publicAware
+	let currentLegAware = publicAware ?? fr24Aware;
+	if (!resumed && progressResume && lockedLeg?.liveConfirmed && currentLegAware && !flightStatsLegMatches(currentLegAware, lockedLeg)) {
+		console.warn("[flight-leg-lock]", {
+			requested: parsed.callsign,
+			locked: [lockedLeg.originIata, lockedLeg.destIata, lockedLeg.date],
+			rejected: [currentLegAware.originIata, currentLegAware.destIata, currentLegAware._publicScheduleDate ?? null],
+		});
+		currentLegAware = awareFromResume(progressResume, "leg-lock");
+		publicAware = currentLegAware;
+		fr24Aware = null;
+		scheduleHeldByLegLock = true;
+	}
+	const scheduleSource = resumed ? "saved_resume" : scheduleHeldByLegLock ? "saved_leg_lock" : publicAware
 		? publicAware._scheduleSource ?? (publicAware._publicScheduleDate ? "flightstats_public" : "flightaware_public")
 		: fr24Aware ? "fr24_live" : "unavailable";
 	noteStorySchedule(scheduleSource);
@@ -3398,7 +3650,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	confirmedTakeoff = activeConfirmedTakeoff(takeoffEvidence);
 	const faSaysAir = Boolean(confirmedTakeoff);
 	const surfaceFixAtOrigin = Boolean(live && live.onGround && stillOnField(live, origin));
-	const ourAirborne = Boolean(confirmedTakeoff && !ourLanded) || Boolean(flightBegun(live, origin))
+	const untrustedResumeTakeoffClaim = Boolean(progressResume?.confirmedTakeoff && !confirmedTakeoff);
+	const scheduleAirborne = !untrustedResumeTakeoffClaim && flightStatsScheduleAirborne(aware, Date.now() / 1000);
+	const ourAirborne = Boolean(confirmedTakeoff && !ourLanded) || scheduleAirborne || Boolean(flightBegun(live, origin))
 		|| (Boolean(faSaysAir) && !(aware?.landing?.actual) && !surfaceFixAtOrigin);
 	let inboundRaw = null;
 	if (!inboundLocked && !atGateFa && !inboundAlreadyDone) {
@@ -3509,8 +3763,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		const poll = emptyRouteMemory(memoryLeg);
 		poll.filed = validatedFiledRoute(aware?.waypoints ?? [], start, end,
 			aware?.originIata === origin.iata && aware?.destIata === dest.iata, Date.now());
-		if (!ourLanded && ourAirborne && !live?.onGround)
-			poll.track = (filedRaw.phaseHistory ?? []).map(p => ({ lat: p.lat, lon: p.lon, seenAt: p.seenAt * 1000 }));
+		if (!ourLanded && ourAirborne && !live?.onGround) {
+			poll.track = (filedRaw.trackHistory ?? []).map(p => ({ lat: p.lat, lon: p.lon, seenAt: p.seenAt * 1000 }));
+		}
 		routeMemory = mergeRouteMemory(routeMemory, poll);
 		// Repair legacy whole-tail traces only with a real confirmed takeoff
 		// clock and an actual early-origin observation. A first oceanic fix,
@@ -3596,7 +3851,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// projection changes display/weather distance and ETA, never flight phases.
 	const stageRemainingNm = remainingNm;
 	if (live) {
-		const history = [...filedRaw.phaseHistory ?? [], ...(aware?.faTrack ?? []).map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon }))];
+		// loadFiledPath already isolates this origin-to-destination sector. The
+		// raw whole-tail track can contain the previous leg's push and takeoff.
+		const history = [...filedRaw.phaseHistory ?? []];
 		live = { ...live, ...observePhase(`${stateKey}|${live.hex || live.registration || live.callsign}`, live, { ...phaseContext, history }) };
 	}
 	let expectedArrival = null;
@@ -4234,7 +4491,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		// aircraft's fresh departure-airport position as an inbound flight.
 		inboundStatus: resumed && !inboundAware ? "unknown" : inbound.status,
 		pushed: Boolean(times.pushed || leftGate),
-		faAirborne: Boolean((confirmedTakeoff && confirmTakeoff({ ...evidenceArgs, position: live })) || flightBegun(live, origin) || motion.flying) && !surfaceFixAtOrigin && !stageTaxiHint,
+		faAirborne: Boolean((confirmedTakeoff && confirmTakeoff({ ...evidenceArgs, position: live })) || (!confirmedTakeoff && scheduleAirborne) || flightBegun(live, origin) || motion.flying) && !surfaceFixAtOrigin && !stageTaxiHint,
 		taxiHint: stageTaxiHint,
 		taxiOutLatched,
 		distPark,
@@ -4462,6 +4719,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		hex: baseResume.hex ?? aircraft?.hex ?? null,
 		type: baseResume.type ?? aircraft?.type ?? null,
 		stateKey,
+		legLiveConfirmed: Boolean(
+			(progressResume?.legLiveConfirmed === true && lockedLeg && flightStatsLegMatches(aware, lockedLeg))
+			|| livePositionConfirmsLeg(aware, live)
+			|| (liveFr24Aware && flightStatsLegMatches(aware, flightStatsLeg(liveFr24Aware)))
+		),
 		confirmedTakeoff: takeoffDiagnostic(confirmedTakeoff),
 		takeoffRevocations: takeoffEvidence?.revocations,
 		takeoff: { ...baseResume.takeoff, actual: confirmedTakeoff?.time ?? (takeoffEvidence?.revocations?.some(r => r.time === baseResume.takeoff?.actual) ? null : baseResume.takeoff?.actual) ?? null },
@@ -4487,7 +4749,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		selectedStageReason,
 		takeoffFloorApplied,
 		candidateStage,
-		schedule: aware ? { status: resumed ? "saved" : "current", confirmedAt: aware.confirmedAt ?? Date.now(), serviceDate: aware._publicScheduleDate ?? null } : undefined,
+		schedule: aware ? { status: resumed || scheduleHeldByLegLock ? "saved" : "current", confirmedAt: aware.confirmedAt ?? Date.now(), serviceDate: aware._publicScheduleDate ?? null } : undefined,
 		resume: storyResume,
 		flightId: aware?.flightId ?? undefined,
 		cancelled: Boolean(aware?.cancelled),

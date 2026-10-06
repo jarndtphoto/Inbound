@@ -101,7 +101,10 @@ export function normalizedToLive(position: NormalizedPosition, context: PhaseCon
 export function finalApproachEtaMin(remainingNm: number, gsKt: number): number { const kin = remainingNm / Math.max(90, gsKt) * 60; return remainingNm < 0.15 ? 0 : Math.min(60, kin); }
 export function passengerEtaMin(input: { remainingNm: number; directToDestNm: number | null; gsKt: number; providerEtaMin: number | null; }): number {
   const { remainingNm, directToDestNm, gsKt, providerEtaMin } = input; const onFinalApproach = directToDestNm != null && directToDestNm <= 25;
-  if (onFinalApproach) return finalApproachEtaMin(remainingNm, gsKt); const nearDest = remainingNm < 80;
+  // Close in, the fresh aircraft-to-airport distance is the remaining trip.
+  // A filed route can still contain an approach loop and must not turn 1.6 NM
+  // on final into a schedule-shaped twelve-minute estimate.
+  if (onFinalApproach) return finalApproachEtaMin(directToDestNm <= 3 ? directToDestNm : remainingNm, gsKt); const nearDest = remainingNm < 80;
   const speed = gsKt > 120 && nearDest ? gsKt : Math.max(420, gsKt > 300 ? gsKt : 0) || 440, kinetic = remainingNm / speed * 60;
   if (nearDest && gsKt > 120) return Math.max(1, kinetic); if (providerEtaMin != null && providerEtaMin > 1) return providerEtaMin; return Math.max(1, kinetic);
 }

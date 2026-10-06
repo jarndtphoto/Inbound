@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emptyRouteMemory, freshRouteObservation, mergeObservedTrack, mergeRouteMemory, routeProgress, type RouteObservation } from "./route-memory.ts";
+import { currentLegTrackBoundaryMs, emptyRouteMemory, freshRouteObservation, isolateCurrentLegTrack, mergeObservedTrack, mergeRouteMemory, routeProgress, type RouteObservation } from "./route-memory.ts";
+import { polylineLengthNm } from "./geo.ts";
 const now = Date.parse("2026-10-03T21:00:00Z");
 const leg = { origin: "ORD", destination: "HNL", date: "2026-10-03" };
 const path = [{ lat: 41.98, lon: -87.9 }, { lat: 33, lon: -130 }, { lat: 21.32, lon: -157.92 }];
@@ -30,4 +31,21 @@ test("large tracks stay bounded and preserve the first and latest real observati
   const track: RouteObservation[] = Array.from({ length: 2000 }, (_, i) => ({ lat: 40, lon: -100 + i * .02, seenAt: now + i * 30_000 }));
   const held = mergeObservedTrack([], track);
   assert(held.length <= 512); assert.deepEqual(held[0], track[0]); assert.deepEqual(held.at(-1), track.at(-1));
+});
+
+test("UA411 discards the prior EWR→MCO sector before flown miles and phase", () => {
+  const mco = { lat: 28.4312, lon: -81.3081 };
+  const trace: RouteObservation[] = [
+    { lat: 40.6895, lon: -74.1745, seenAt: now - 7 * 3600_000 },
+    { lat: 34.4, lon: -78.2, seenAt: now - 5 * 3600_000 },
+    { ...mco, seenAt: now - 3 * 3600_000 },
+    { lat: 28.55, lon: -81.20, seenAt: now - 2 * 3600_000 },
+    { lat: 28.78, lon: -81.03, seenAt: now - 110 * 60_000 },
+  ];
+  const boundary = currentLegTrackBoundaryMs(trace, mco);
+  const isolated = isolateCurrentLegTrack(trace, mco, boundary);
+  assert.equal(boundary, trace[3]!.seenAt);
+  assert.deepEqual(isolated[0], trace[3]);
+  assert.ok(polylineLengthNm(isolated) < 50, `current leg was ${polylineLengthNm(isolated)} NM`);
+  assert.ok(isolated.every(point => point.seenAt >= trace[3]!.seenAt));
 });

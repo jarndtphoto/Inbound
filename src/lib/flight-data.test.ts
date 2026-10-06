@@ -142,4 +142,8 @@ describe("AA2668 touchdown ETA regression", () => {
     const eta = passengerEtaMin({ remainingNm: 0.7, directToDestNm: 0.7, gsKt: 32, providerEtaMin: 20 });
     assert.ok(eta <= 1, `expected <= 1 minute, got ${eta}`);
   });
+  it("WN4775 uses its fresh 1.6 NM position instead of a 12-minute route estimate", () => {
+    const eta = passengerEtaMin({ remainingNm: 27, directToDestNm: 1.6, gsKt: 135, providerEtaMin: 12 });
+    assert.ok(eta < 1, `expected position ETA under 1 minute, got ${eta}`);
+  });
 });

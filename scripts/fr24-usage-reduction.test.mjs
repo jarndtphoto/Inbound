@@ -153,7 +153,8 @@ test("matched FR24 registration skips failed route lookup, but wrong leg/missing
       const url = new URL(String(input)); assert.equal(url.hostname, "fr24api.flightradar24.com");
       const params = url.searchParams; calls.push(params.has("registrations") ? "registration" : params.has("callsigns") ? "callsign" : "route");
       const data = (params.has("registrations") || params.has("callsigns")) && mode !== "missing" ? [{ fr24_id: "test-id", flight: "AA1", callsign: "AAL1", reg: "NTEST", lat: 41, lon: -87,
-        orig_iata: mode === "wrong" ? "LAX" : "ORD", dest_iata: "SEA", timestamp: now / 1000 - (mode === "stale" ? 60 : 1) }] : [];
+        orig_iata: mode === "wrong" ? "LAX" : mode === "reverse" ? "SEA" : "ORD",
+        dest_iata: mode === "reverse" ? "ORD" : "SEA", timestamp: now / 1000 - (mode === "stale" ? 60 : 1) }] : [];
       return Response.json({ data });
     };
     const api = await import(pathToFileURL(join(directory, "official.mjs")).href);
@@ -184,6 +185,13 @@ test("matched FR24 registration skips failed route lookup, but wrong leg/missing
     now += 30000; calls = [];
     assert.ok((await api.loadOfficialFlightData("AAL1", surfaceRegistration)).fr24);
     assert.deepEqual(calls, ["registration"], "known surface registration replaces the callsign without adding a second probe");
+
+    mode = "reverse"; now += 30000; calls = [];
+    const corrected = await api.loadOfficialFlightData("AAL1", { ...surfaceRegistration, fr24AllowRouteOverride: true });
+    assert.equal(corrected.fr24?.origin?.iata, "SEA", "fresh FR24 reverse route overrides a schedule-only leg");
+    assert.equal(corrected.fr24?.destination?.iata, "ORD");
+    assert.deepEqual(calls, ["registration"], "live correction does not add another surface query");
+    mode = "good";
 
     now += 16 * 60000; calls = []; await api.loadOfficialFlightData("AAL1", options);
     assert.equal(calls[0], "route", "expired memory uses original cascade");

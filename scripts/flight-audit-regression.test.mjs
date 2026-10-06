@@ -23,7 +23,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint, loadAirportInfo, resolveFlightField, scheduleHasRoute } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, flightStatsLegMatches, activeFlightStatsLegLock, flightStatsScheduleAirborne, departureSurfaceLocationHint, loadAirportInfo, resolveFlightField, scheduleHasRoute } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 let loadFlightStory;
 let storyInstance = 0;
 async function coldStoryFixture() {
@@ -52,6 +52,136 @@ describe('geographic bearing regression', () => {
     closeTo(initialBearing(mco, { lat: 28.42, lon: -81.29 }), 90);
     closeTo(initialBearing(mco, { lat: 28.41, lon: -81.30 }), 180);
     closeTo(initialBearing(mco, { lat: 28.42, lon: -81.31 }), 270);
+  });
+});
+
+describe('same-number leg lock replays', () => {
+  const stamp = (scheduled) => ({ scheduled, estimated: null, actual: null });
+  const leg = (originIata, destIata, departure, arrival, status = 'scheduled') => ({
+    originIata, destIata, _publicScheduleDate: '2026-10-06', _publicScheduleSource: 'flightstats', status,
+    gateOut: stamp(departure), gateIn: stamp(arrival), landing: { scheduled: null, estimated: null, actual: null },
+  });
+  const now = Date.parse('2026-10-06T14:10:00Z') / 1000;
+
+  it('WN4775 ALB→MCO beats the schedule-closer reverse leg near MCO', () => {
+    const correct = leg('ALB', 'MCO', now - 150 * 60, now + 8 * 60);
+    const reverse = leg('MCO', 'ALB', now + 2 * 60, now + 170 * 60);
+    const aircraft = { lat: 28.45, lon: -81.30, onGround: false, track: 185 };
+    assert.equal(chooseFlightStatsScheduleCandidate([reverse, correct], now, { aircraft }), correct);
+  });
+
+  it('WN3737 STL→MCO beats MCO→STL when the aircraft is arriving in Orlando', () => {
+    const correct = leg('STL', 'MCO', now - 130 * 60, now + 5 * 60);
+    const reverse = leg('MCO', 'STL', now - 1 * 60, now + 140 * 60);
+    const aircraft = { lat: 28.60, lon: -81.30, onGround: false, track: 178 };
+    assert.equal(chooseFlightStatsScheduleCandidate([reverse, correct], now, { aircraft }), correct);
+  });
+
+  it('AA1007 on the ground at RSW selects RSW→ORD, never the arrived reverse leg', () => {
+    const departing = leg('RSW', 'ORD', now + 8 * 60, now + 3 * 3600);
+    const arrived = leg('ORD', 'RSW', now - 3 * 3600, now - 15 * 60, 'arrived');
+    arrived.landing.actual = now - 25 * 60;
+    arrived.gateIn.actual = now - 15 * 60;
+    const aircraft = { lat: 26.5362, lon: -81.7552, onGround: true, track: 0 };
+    assert.equal(chooseFlightStatsScheduleCandidate([arrived, departing], now, { aircraft }), departing);
+  });
+
+  it('AA1007 with no position follows FlightAware’s last confirmed RSW→ORD leg', () => {
+    const departing = leg('RSW', 'ORD', now + 8 * 60, now + 3 * 3600);
+    const arrived = leg('ORD', 'RSW', now - 3 * 3600, now - 5 * 60, 'arrived');
+    arrived.gateIn.actual = now - 5 * 60;
+    const primaryRecord = { originIata: 'RSW', destIata: 'ORD' };
+    assert.equal(chooseFlightStatsScheduleCandidate([arrived, departing], now, { primaryRecord }), departing);
+  });
+
+  it('with no position or primary record, an upcoming leg beats its arrived reverse', () => {
+    const departing = leg('RSW', 'ORD', now + 20 * 60, now + 3 * 3600);
+    const arrived = leg('ORD', 'RSW', now - 3 * 3600, now - 2 * 60, 'arrived');
+    arrived.gateIn.actual = now - 2 * 60;
+    assert.equal(chooseFlightStatsScheduleCandidate([arrived, departing], now), departing);
+  });
+
+  it('rejects a route flip after the dated origin and destination are locked', () => {
+    const correct = leg('ALB', 'MCO', now - 150 * 60, now + 8 * 60);
+    const reverse = leg('MCO', 'ALB', now + 2 * 60, now + 170 * 60);
+    const lockedLeg = { originIata: 'ALB', destIata: 'MCO', date: '2026-10-06', liveConfirmed: true };
+    assert.equal(flightStatsLegMatches(correct, lockedLeg), true);
+    assert.equal(flightStatsLegMatches(reverse, lockedLeg), false);
+    assert.equal(chooseFlightStatsScheduleCandidate([reverse], now, { lockedLeg }), null);
+    assert.equal(chooseFlightStatsScheduleCandidate([reverse, correct], now, { lockedLeg }), correct);
+  });
+
+  it('AA1007 fresh airborne evidence overrides a wrong schedule-only soft lock', () => {
+    const wrong = leg('ORD', 'RSW', now - 55 * 60, now + 2 * 3600, 'departed');
+    const correct = leg('RSW', 'ORD', now - 2 * 3600, now + 25 * 60, 'departed');
+    const aircraft = { lat: 41.55, lon: -87.82, onGround: false, seenSec: 2,
+      track: initialBearing({ lat: 41.55, lon: -87.82 }, { lat: 41.9786, lon: -87.9048 }) };
+    const softLock = { originIata: 'ORD', destIata: 'RSW', date: '2026-10-06' };
+    assert.equal(chooseFlightStatsScheduleCandidate([wrong, correct], now, { lockedLeg: softLock, aircraft }), correct);
+  });
+
+  const resume = ({ date = '2026-10-06', landingActual = null, gateActual = null,
+    arrival = now - 60 * 60 } = {}) => ({
+    stateKey: `leg:v1:SWA4775|${date}|ALB|MCO`,
+    originIata: 'ALB', originIcao: 'KALB', originTz: 'America/New_York',
+    destIata: 'MCO', destIcao: 'KMCO',
+    landing: { scheduled: arrival - 10 * 60, estimated: null, actual: landingActual },
+    gateIn: { scheduled: arrival, estimated: null, actual: gateActual },
+  });
+
+  it('releases WN4775 at confirmed gate arrival so the afternoon MCO→ALB leg loads', () => {
+    const morning = leg('ALB', 'MCO', now - 3 * 3600, now - 60 * 60);
+    morning.gateIn.actual = now - 30;
+    const afternoon = leg('MCO', 'ALB', now + 10 * 60, now + 3 * 3600);
+    const lockedLeg = activeFlightStatsLegLock(resume({ gateActual: now - 30 }), now);
+    assert.equal(lockedLeg, null);
+    assert.equal(chooseFlightStatsScheduleCandidate([morning, afternoon], now, {
+      lockedLeg, aircraft: { lat: 28.43, lon: -81.31, onGround: true, track: 0 },
+    }), afternoon);
+  });
+
+  it('releases WN4775 after the landing grace so the afternoon MCO→ALB leg loads', () => {
+    const morning = leg('ALB', 'MCO', now - 3 * 3600, now - 60 * 60);
+    const afternoon = leg('MCO', 'ALB', now + 10 * 60, now + 3 * 3600);
+    const lockedLeg = activeFlightStatsLegLock(resume({ landingActual: now - 46 * 60 }), now);
+    assert.equal(lockedLeg, null);
+    assert.equal(chooseFlightStatsScheduleCandidate([morning, afternoon], now, {
+      lockedLeg, aircraft: { lat: 28.43, lon: -81.31, onGround: true, track: 0 },
+    }), afternoon);
+  });
+
+  it('keeps WN4775 locked during the post-landing taxi-in grace period', () => {
+    assert.deepEqual(activeFlightStatsLegLock(resume({ landingActual: now - 20 * 60 }), now), {
+      originIata: 'ALB', originIcao: 'KALB', destIata: 'MCO', destIcao: 'KMCO', date: '2026-10-06',
+    });
+  });
+
+  it('never carries a locked leg into a brand-new service date', () => {
+    const nextDayNow = Date.parse('2026-10-07T14:10:00Z') / 1000;
+    const newFlight = { ...leg('MCO', 'ALB', nextDayNow + 10 * 60, nextDayNow + 3 * 3600),
+      _publicScheduleDate: '2026-10-07' };
+    const lockedLeg = activeFlightStatsLegLock(resume({
+      date: '2026-10-06', arrival: Date.parse('2026-10-06T22:00:00Z') / 1000,
+    }), nextDayNow);
+    assert.equal(lockedLeg, null);
+    assert.equal(chooseFlightStatsScheduleCandidate([newFlight], nextDayNow, { lockedLeg }), newFlight);
+  });
+
+  it('always resolves an out-and-back pair to the direction the aircraft is flying', () => {
+    const outbound = leg('MCO', 'STL', now - 90 * 60, now + 20 * 60);
+    const inbound = leg('STL', 'MCO', now - 95 * 60, now + 15 * 60);
+    const southwest = { lat: 34.8, lon: -86.5, onGround: false, track: 145 };
+    const northwest = { ...southwest, track: 325 };
+    assert.equal(chooseFlightStatsScheduleCandidate([outbound, inbound], now, { aircraft: southwest }), inbound);
+    assert.equal(chooseFlightStatsScheduleCandidate([outbound, inbound], now, { aircraft: northwest }), outbound);
+  });
+
+  it('DL4712 explicit Departed status cannot remain at Pushback two hours later', () => {
+    const dl4712 = { ...leg('MDW', 'MSP', now - 2 * 3600, now + 20 * 60, 'departed'),
+      gateOut: { scheduled: now - 2 * 3600, estimated: null, actual: now - 2 * 3600 } };
+    assert.equal(flightStatsScheduleAirborne(dl4712, now), true);
+    assert.equal(currentStageOf({ live: null, origin: {}, dest: {}, remainingNm: 300, pushed: true,
+      faAirborne: flightStatsScheduleAirborne(dl4712, now), inboundStatus: 'unknown' }), 'ride');
   });
 });
 
@@ -905,6 +1035,15 @@ describe('stage and ground-map position identity', () => {
 describe('public schedule fallback', () => {
   const datedPage = (departure, arrival) => `<html><body><h1>Flight Status</h1><div>AA 536 American Airlines CLT Charlotte ORD Chicago Arrived</div><div>Flight Departure Times ${departure}</div><div>Flight Arrival Times ${arrival}</div></body></html>`;
 
+  it('AA1007 keeps RSW→ORD when FlightStats repeats the origin before departure times', () => {
+    const html = `<html><body><h1>Flight Status</h1><div>AA 1007 American Airlines RSW Fort Myers ORD Chicago Departed RSW Fort Myers, FL, US Southwest Florida International Airport</div><div>Flight Departure Times 06-Oct-2026 Scheduled 08:18 EDT Actual 08:17 EDT</div><div>Flight Arrival Times 06-Oct-2026 Scheduled 10:40 CDT Estimated 10:14 CDT</div></body></html>`;
+    const record = parseFlightStatsPublicSchedule(html, 'AAL1007', '2026-10-06');
+    assert.equal(record.originIata, 'RSW');
+    assert.equal(record.destIata, 'ORD');
+    assert.equal(record.gateOut.actual, Date.UTC(2026, 9, 6, 12, 17) / 1000);
+    assert.equal(record.gateIn.estimated, Date.UTC(2026, 9, 6, 15, 14) / 1000);
+  });
+
   it('shares each section date across Scheduled, Estimated and Actual labels', () => {
     const record = parseFlightStatsPublicSchedule(datedPage(
       '01-Oct-2026 Scheduled 16:18 EDT Estimated 16:20 EDT Actual 16:24 EDT',
@@ -1103,7 +1242,7 @@ describe('public schedule fallback', () => {
     assert.equal(scheduleHasRoute({ originIata: 'PHL', destIcao: 'KABE' }), true);
     const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
     assert.match(source, /record && !scheduleHasRoute\(record\)/);
-    assert.match(source, /const fallback = await loadFlightStatsPublic\(callsign\)/);
+    assert.match(source, /const fallback = await loadFlightStatsPublic\(callsign, await fallbackSelection\(\)\)/);
   });
 
   it('fails closed when the page does not identify two known airports', () => {
