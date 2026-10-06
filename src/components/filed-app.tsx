@@ -1,6 +1,6 @@
 import { keepRouteGeometry as keepRecentTrackGeometry } from "@/lib/route-continuity";
 import { applyTakeoffFloor } from "@/lib/confirmed-takeoff";
-import { displayStage, flightAirborne, liveFix, elapsedFlight, flownDistance, remainingFlight, type RemainingFlightPresentation } from "@/lib/flight-presentation";
+import { displayStage, flightAirborne, liveFix, livePositionAgeSec, lastSeenLabel, elapsedFlight, flownDistance, remainingFlight, type RemainingFlightPresentation } from "@/lib/flight-presentation";
 import { FLIGHT_STAGES as STAGES, stageStepId, statusProgressIndex } from "@/lib/flight-stage";
 import { AppearanceControl } from "@/components/appearance-control";
 import { TravelerCompanion } from "@/components/traveler-companion";
@@ -75,15 +75,7 @@ function readCachedStory(q: string): FlightStory | undefined {
 
 export function cachedStorySafeDuringRefreshFailure(story: FlightStory, now = Date.now()) {
   const moving = story.live || story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach" || story.currentStage === "taxi_in";
-  const providerAge = story.providers?.chosenPositionAgeSec;
-  const aircraftAge = story.aircraft?.seenSec;
-  const validAges = [providerAge, aircraftAge].filter((value): value is number =>
-    typeof value === "number" && Number.isFinite(value) && value >= 0
-  );
-  const positionAge = validAges.length ? Math.min(...validAges) : null;
-  // Airborne ETA freshness follows the freshest validated aircraft fix. The
-  // provider metadata can lag behind a newer aircraft object during handoffs.
-  const positionFresh = !moving || (positionAge !== null && positionAge <= 90);
+  const positionFresh = !moving || liveFix(story, now);
   if (moving) return positionFresh;
   return now - story.fetchedAt <= 45 * 60_000;
 }
@@ -1016,12 +1008,15 @@ function departureUpdateDelayed(story: FlightStory, nowMs = Date.now()) {
 
 function stageHeadline(story: FlightStory) {
   const stage = displayStage(story);
+  if (stage === "inbound" && !["airborne", "at_field"].includes(story.inbound.status)) return "Aircraft status unconfirmed";
   if (stage === "ride") return "In flight";
   if (stage === "gate") return "At the gate";
   if (stage === "taxi_in") return "Taxiing in";
   if (stage === "final_approach") return "Final approach";
   if (stage === "arrival" && wheelsDown(story)) return "Landed";
-  if (stage === "origin_gate") return departureUpdateDelayed(story) ? "Departure update delayed" : "At the gate";
+  if (stage === "origin_gate") return departureUpdateDelayed(story)
+    ? "Departure update delayed"
+    : story.inbound.status === "complete" ? "At the gate" : "Aircraft on the ground";
   if (stage === "push") return "Pushback";
   if (stage === "taxi") return "Taxiing out";
   if (stage === "takeoff_roll") return "Takeoff roll";
@@ -1032,6 +1027,9 @@ function headStatus(story: FlightStory, remaining = remainingFlight(story)) {
   const airline = story.airline;
   const air = flightAirborne(story);
   const live = liveFix(story);
+  const positionAge = livePositionAgeSec(story);
+  const staleAge = !live && positionAge != null && positionAge > 60 && story.aircraft
+    && Number.isFinite(story.aircraft.lat) && Number.isFinite(story.aircraft.lon) ? positionAge : null;
   const inAirLive = Boolean(live && story.aircraft && !story.aircraft.onGround && !remaining.estimated);
   if (story.currentStage === "gate") return airline ?? "Parked";
   if (story.currentStage === "taxi_in") return airline ? `Taxiing in · ${airline}` : "Taxiing in";
@@ -1044,8 +1042,9 @@ function headStatus(story: FlightStory, remaining = remainingFlight(story)) {
   if (story.currentStage === "taxi") return airline ? `Taxiing out · ${airline}` : "Taxiing out";
   if (story.currentStage === "takeoff_roll") return airline ? `Takeoff roll · ${airline}` : "Takeoff roll";
   if (air && inAirLive) return airline ?? "";
-  if (air) return "In the air — live position unavailable right now";
+  if (air) return staleAge != null ? `In the air · ${lastSeenLabel(staleAge)}` : "In the air — live position unavailable right now";
   if (live) return airline ? `On the ground · ${airline}` : "On the ground";
+  if (staleAge != null) return airline ? `${lastSeenLabel(staleAge)} · ${airline}` : lastSeenLabel(staleAge);
   return airline ?? "";
 }
 
@@ -2068,7 +2067,7 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
             <div className="weather-event-map pointer-events-none h-80 overflow-hidden rounded-md" aria-label={title}>
               <RouteMap story={story} fixedViewport weatherPreview={{ reported, pilotReports: g.pilotReports, intensityBand: g.intensities.length === 1 && g.intensities[0] === "light-moderate" ? "light" : undefined, intensity: g.key.startsWith("turbulence:") ? g.key.slice(11) : undefined, eventNumber: weatherEventNumber(visibleGroups, g), label: copy.mapLabel, startFrac: g.startFrac, endFrac: g.endFrac, startEtaMin: g.startEtaMin, endEtaMin: g.endEtaMin, ranges: g.ranges }} />
             </div>
-            <figcaption className="mt-2 text-xs text-muted">{reported ? "Highlighted: the reported area along the route. A report describes another aircraft’s recent experience; conditions may change before this flight reaches the area." : "Highlighted: where these conditions overlap the route. Radar colors show recent precipitation; conditions may change before the flight reaches this area."} {story.live ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
+            <figcaption className="mt-2 text-xs text-muted">{reported ? "Highlighted: the reported area along the route. A report describes another aircraft’s recent experience; conditions may change before this flight reaches the area." : "Highlighted: where these conditions overlap the route. Radar colors show recent precipitation; conditions may change before the flight reaches this area."} {liveFix(story) ? "Aircraft shown when within this view." : "Live aircraft position unavailable."}</figcaption>
           </figure>}
           {g.note && <details className="weather-disclosure mt-2 text-sm text-muted"><summary><span>Technical details</span><ChevronDown className="size-5 shrink-0 text-muted" aria-hidden="true" /></summary><p>{g.note}</p></details>}
         </li>;

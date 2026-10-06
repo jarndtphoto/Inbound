@@ -9,6 +9,7 @@ import { filterAirportSurfaceFeatures } from "@/lib/airport-surface-filter";
 import { flightPollingComplete, groundPollingEnabled } from "@/lib/flight-polling";
 import { usePageVisible } from "@/lib/use-page-visible";
 import { getGroundPosition } from "@/lib/ground-position";
+import { lastSeenLabel, liveFix, livePositionAgeSec } from "@/lib/flight-presentation";
 import type { FlightStory } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -592,6 +593,8 @@ function GroundMovementMap({
 }
 
 function FlightRadar({ story }: { story: FlightStory }) {
+  const age = livePositionAgeSec(story);
+  const live = liveFix(story);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-x border-t border-border bg-surface px-3 py-2">
@@ -599,7 +602,9 @@ function FlightRadar({ story }: { story: FlightStory }) {
           <p className="font-mono text-[11px] tracking-widest text-subtle uppercase">Flight radar</p>
           <p className="font-display text-base font-semibold">{story.origin.iata} → {story.dest.iata}</p>
         </div>
-        <p className="font-mono text-[10px] text-muted">{story.aircraft?.gsKt ? `${Math.round(story.aircraft.gsKt)} kt` : "Live route"}</p>
+        <p className="font-mono text-[10px] text-muted">{live && story.aircraft?.gsKt
+          ? `${Math.round(story.aircraft.gsKt)} kt`
+          : live ? "Live route" : age != null ? lastSeenLabel(age) : "Position unavailable"}</p>
       </div>
       <div className="min-h-0 flex-1"><RouteMap story={story} fixedViewport /></div>
     </div>
@@ -667,7 +672,7 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
     const ac = story.aircraft;
     if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon)) return;
     const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : null;
-    if (age != null && age > 120) return;
+    if (age != null && age > 60) return;
 
     const originNm = haversineNm(ac, story.origin);
     const destNm = haversineNm(ac, story.dest);
@@ -711,11 +716,12 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
     : null;
   const currentOriginNm = current ? haversineNm(current, story.origin) : Infinity;
   const currentDestNm = current ? haversineNm(current, story.dest) : Infinity;
-  const departureLive = Boolean(current && currentOriginNm <= 6 && (
+  const currentIsLive = liveFix(story);
+  const departureLive = Boolean(currentIsLive && current && currentOriginNm <= 6 && (
     current.onGround === true ||
     ((current.altFt == null || current.altFt <= 1200) && (current.gsKt == null || current.gsKt <= 165))
   ));
-  const arrivalLive = Boolean(current && currentDestNm <= 6 && (
+  const arrivalLive = Boolean(currentIsLive && current && currentDestNm <= 6 && (
     current.onGround === true || story.currentStage === "taxi_in" || story.currentStage === "gate"
   ));
   const planeInFlight = airborneNow || ["ride", "arrival", "final_approach"].includes(story.currentStage);

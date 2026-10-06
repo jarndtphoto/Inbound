@@ -31,6 +31,7 @@ function markup(Component, story, now = story.fetchedAt) {
   } finally { Date.now = realNow; globalThis.fetch = realFetch; }
 }
 const airlineLine = html => html.match(/<p class="summary-airline text-sm text-muted">([^<]*)<\/p>/)?.[1];
+const stageLine = html => html.match(/<h2 class="summary-stage[^>]*">([^<]*)<\/h2>/)?.[1];
 
 test('live airborne headers show only the airline throughout flight and approach', () => {
   const base = polishStory();
@@ -55,10 +56,13 @@ test('missing, stale, extrapolated or surface positions retain the airborne avai
     ]) {
       const story = { ...base, currentStage, ...patch };
       if (currentStage === 'arrival' && story.aircraft?.onGround) continue;
-      assert.equal(airlineLine(markup(ui.FlightHead, story)), 'In the air — live position unavailable right now');
+      const expected = story.aircraft?.seenSec === 91
+        ? 'In the air · Last seen 2 min ago'
+        : 'In the air — live position unavailable right now';
+      assert.equal(airlineLine(markup(ui.FlightHead, story)), expected);
     }
   }
-  assert.equal(airlineLine(markup(ui.FlightHead, base, base.fetchedAt + 90_000)), 'In the air — live position unavailable right now');
+  assert.equal(airlineLine(markup(ui.FlightHead, base, base.fetchedAt + 90_000)), 'In the air · Last seen 2 min ago');
 });
 
 test('ground stages, inbound and landed headers retain their informative labels', () => {
@@ -75,4 +79,23 @@ test('ground stages, inbound and landed headers retain their informative labels'
   assert.equal(airlineLine(markup(ui.FlightHead, landed)), 'Landed · United');
   assert.equal(airlineLine(markup(ui.FlightHead, { ...base, times: { ...base.times, landKind: 'actual' } })), 'Landed · United');
   assert.equal(airlineLine(markup(ui.FlightHead, { ...base, currentStage: 'inbound', live: false, aircraft: null })), 'United');
+});
+
+test('Skeeter TPA and MCO stale fixes show age instead of live status', () => {
+  const base = polishStory();
+  for (const [airport, minutes] of [['TPA', 9], ['MCO', 7]]) {
+    const age = minutes * 60;
+    const story = { ...base, origin: { ...base.origin, iata: airport },
+      aircraft: { ...base.aircraft, seenSec: age }, providers: { chosenPositionAgeSec: age } };
+    const html = markup(ui.FlightHead, story);
+    assert.equal(airlineLine(html), `In the air · Last seen ${minutes} min ago`);
+    assert.doesNotMatch(html, /Live route|live movement/i);
+  }
+});
+
+test('UA219 schedule-only inbound assignment is labeled unconfirmed', () => {
+  const base = polishStory();
+  const story = { ...base, currentStage: 'inbound', live: false, aircraft: null,
+    inbound: { ...base.inbound, status: 'unconfirmed', headline: 'Aircraft status unconfirmed' } };
+  assert.equal(stageLine(markup(ui.FlightHead, story)), 'Aircraft status unconfirmed');
 });

@@ -23,7 +23,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint, loadAirportInfo, resolveFlightField, scheduleHasRoute } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint, loadAirportInfo, resolveFlightField, scheduleHasRoute, buildInbound, freshLivePosition, preferNewerLive } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 let loadFlightStory;
 let storyInstance = 0;
 async function coldStoryFixture() {
@@ -1120,12 +1120,64 @@ describe('outbound turn-aircraft recovery', () => {
   it('reuses only a completed inbound aircraft identity near the departure window', () => {
     const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
     assert.match(source, /const turnTail = inboundAware\?\.tail \?\? snap\?\.tail/);
-    assert.match(source, /const inboundTurnComplete = Boolean\(inboundAware\?\.gateIn\?\.actual \|\| snap\?\.frozen\)/);
+    assert.match(source, /const inboundTurnComplete = Boolean\(inboundAware\?\.gateIn\?\.actual \|\| snap\?\.gateConfirmed\)/);
     assert.match(source, /departureClock - 45 \* 60/);
     assert.match(source, /departureClock \+ 3 \* 60 \* 60/);
     assert.match(source, /turnLive && turnLive\.onGround/);
     assert.match(source, /turnAge <= 30/);
     assert.match(source, /\[outbound-turn-recovery\]/);
+  });
+});
+
+describe('honest aircraft status and position freshness', () => {
+  const origin = { iata: 'ORD', lat: 41.9786, lon: -87.9048, tz: 'America/Chicago' };
+  const times = { actual: null, estimated: null, scheduled: null };
+  const inbound = { ident: 'UAL900', iataIdent: 'UA900', originIata: 'DEN', originCity: 'Denver',
+    destIata: 'ORD', takeoff: { ...times }, landing: { ...times }, gateIn: { ...times }, status: 'Scheduled' };
+
+  it('keeps UA219-style schedule-only inbound data unconfirmed', () => {
+    const result = buildInbound({ live: null, ourTakeoffActual: null, origin,
+      inboundIdent: 'UAL900', inboundAware: inbound, inboundLive: null, snap: null });
+    assert.equal(result.status, 'unconfirmed');
+    assert.equal(result.headline, 'Aircraft status unconfirmed');
+  });
+
+  it('uses Inbound only for fresh position or confirmed en-route evidence', () => {
+    const now = Date.now() / 1000;
+    const fresh = { lat: 42.2, lon: -88.4, onGround: false, gsKt: 330, altFt: 18_000, seenAt: now - 20 };
+    assert.equal(buildInbound({ live: null, ourTakeoffActual: null, origin,
+      inboundIdent: 'UAL900', inboundAware: inbound, inboundLive: fresh, snap: null }).status, 'airborne');
+    assert.equal(buildInbound({ live: null, ourTakeoffActual: null, origin, inboundIdent: 'UAL900',
+      inboundAware: { ...inbound, takeoff: { ...times, actual: now - 1800 }, status: 'En Route' },
+      inboundLive: null, snap: null }).status, 'airborne');
+  });
+
+  it('uses At gate only for a confirmed gate arrival', () => {
+    const unconfirmed = buildInbound({ live: null, ourTakeoffActual: null, origin, inboundIdent: 'UAL900',
+      inboundAware: inbound, inboundLive: null, snap: { frozen: true, gateUnix: Date.now() / 1000 } });
+    assert.notEqual(unconfirmed.status, 'complete');
+    const confirmed = buildInbound({ live: null, ourTakeoffActual: null, origin, inboundIdent: 'UAL900',
+      inboundAware: { ...inbound, gateIn: { ...times, actual: Date.now() / 1000 - 60 } }, inboundLive: null, snap: null });
+    assert.equal(confirmed.status, 'complete');
+  });
+
+  it('rejects Skeeter TPA 9 min and MCO 7 min fixes', () => {
+    const now = 20_000;
+    for (const [airport, age] of [['TPA', 9 * 60], ['MCO', 7 * 60]]) {
+      assert.equal(freshLivePosition({ airport, lat: 28, lon: -82, seenAt: now - age }, now), false, airport);
+    }
+  });
+
+  it('keeps the newer fix for DTW, CLT, and the SAN jump case', () => {
+    const now = 20_000;
+    for (const airport of ['DTW', 'CLT']) {
+      const newer = { airport, lat: 35, lon: -84, seenAt: now - 8 };
+      const older = { airport, lat: 35.1, lon: -84.1, seenAt: now - 42 };
+      assert.equal(preferNewerLive(newer, older, now), newer, airport);
+    }
+    const sanNewer = { airport: 'SAN', lat: 32.73, lon: -117.19, seenAt: now - 6 };
+    const sanOlderJump = { airport: 'SAN', lat: 33.8, lon: -116.1, seenAt: now - 38 };
+    assert.equal(preferNewerLive(sanNewer, sanOlderJump, now), sanNewer);
   });
 });
 
