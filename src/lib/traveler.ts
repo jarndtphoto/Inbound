@@ -120,7 +120,8 @@ export function journeyChanges(prev: FlightStory, next: FlightStory): JourneyAle
   if(journeyKey(prev)!==journeyKey(next)) return [];
   const out: JourneyAlert[]=[]; const add=(kind:AlertKind,text:string)=>out.push({kind,text,at:next.fetchedAt});
   const pd=prev.times.delayMin, nd=next.times.delayMin;
-  if(!isLanded(next) && pd!=null && nd!=null && Math.abs(nd-pd)>=5) add("delay",`Departure delay ${nd>pd?"increased":"decreased"} by ${Math.abs(nd-pd)} minutes; now ${Math.max(0,nd)} minutes behind the original schedule. The specific cause is not confirmed.`);
+  const departureUnderway = Boolean(next.times.pushed || ["push","taxi","takeoff_roll","ride","arrival","final_approach","taxi_in","gate"].includes(next.currentStage));
+  if(!departureUnderway && !isLanded(next) && pd!=null && nd!=null && Math.abs(nd-pd)>=5) add("delay",`Departure delay ${nd>pd?"increased":"decreased"} by ${Math.abs(nd-pd)} minutes; now ${Math.max(0,nd)} minutes behind the original schedule. The specific cause is not confirmed.`);
   for(const [key,label] of [["originGate","Departure"],["destGate","Arrival"]] as const) {
     if(key==="originGate" && isLanded(next)) continue;
     const a=prev.times[key],b=next.times[key];
