@@ -195,6 +195,7 @@ export function clipRingToBounds(ring: GeoPoint[], bounds: SurfaceBounds): GeoPo
 function joinDirectedWays(ways: GeoPoint[][]) {
   const pending = ways.filter((way) => way.length >= 2).map((way) => way.slice());
   const joined: GeoPoint[][] = [];
+  let inconsistent = false;
   while (pending.length) {
     let chain = pending.shift()!;
     let changed = true;
@@ -214,11 +215,12 @@ function joinDirectedWays(ways: GeoPoint[][]) {
           changed = true;
           break;
         }
+        if (samePoint(chain.at(-1), other.at(-1)) || samePoint(chain[0], other[0])) inconsistent = true;
       }
     }
     joined.push(chain);
   }
-  return joined;
+  return { chains: joined, inconsistent };
 }
 
 function boundaryParam(point: GeoPoint, bounds: SurfaceBounds) {
@@ -305,10 +307,11 @@ export function assembleAirportGeography(input: {
   const water = prepareWater(input.waterPolygons, bounds);
 
   const joined = joinDirectedWays(input.coastlineWays);
+  if (joined.inconsistent) return fallback(bounds, "coastline-direction-conflict");
   const land: GeoPoint[][] = [];
   let coastIntersections = 0;
 
-  for (const way of joined) {
+  for (const way of joined.chains) {
     if (way.length < 2) continue;
     if (samePoint(way[0], way.at(-1))) {
       const ring = simplify(clipRingToBounds(way, bounds));
@@ -343,10 +346,7 @@ export function assembleAirportGeography(input: {
   if (airportGeographyWaterFraction(geography) > 0.95) return fallback(bounds, "water-over-95-percent");
 
   const runwaySamples = input.runwaySamples ?? [];
-  if (runwaySamples.length) {
-    const onLand = runwaySamples.filter((point) => !airportGeographyIsWater(geography, point)).length;
-    if (onLand / runwaySamples.length < 0.5) return fallback(bounds, "water-covers-runways");
-  }
+  if (runwaySamples.some((point) => airportGeographyIsWater(geography, point))) return fallback(bounds, "water-covers-runways");
 
   return geography;
 }

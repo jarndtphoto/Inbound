@@ -130,6 +130,23 @@ test("water covering runway samples falls back to plain land", () => {
   assert.equal(geography.base, "land");
 });
 
+test("one submerged runway triggers fallback even when most runway samples are dry", () => {
+  const geography = assembleAirportGeography({ bounds, coastlineWays: [], waterPolygons: [{ outer: [
+    { lat: 4, lon: 4 }, { lat: 4, lon: 6 }, { lat: 6, lon: 6 }, { lat: 6, lon: 4 }, { lat: 4, lon: 4 },
+  ] }], runwaySamples: [{ lat: 5, lon: 5 }, { lat: 1, lon: 1 }, { lat: 2, lon: 2 }] });
+  assert.equal(geography.fallbackReason, "water-covers-runways");
+});
+
+test("coastline fragments sharing a start or end cannot assemble contradictory land sides", () => {
+  for (const coastlineWays of [
+    [[{ lat: 0, lon: 0 }, { lat: 10, lon: 5 }], [{ lat: 0, lon: 0 }, { lat: 5, lon: 10 }]],
+    [[{ lat: 10, lon: 5 }, { lat: 0, lon: 0 }], [{ lat: 5, lon: 10 }, { lat: 0, lon: 0 }]],
+  ]) {
+    const geography = assembleAirportGeography({ bounds, coastlineWays, waterPolygons: [] });
+    assert.equal(geography.fallbackReason, "coastline-direction-conflict");
+  }
+});
+
 test("ocean inferred from a coastline also obeys the 95-percent water guard", () => {
   const geography = assembleAirportGeography({ bounds,
     coastlineWays: [[{ lat: -1, lon: 0.2 }, { lat: 11, lon: 0.2 }]],
