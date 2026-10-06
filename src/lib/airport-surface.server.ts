@@ -518,8 +518,27 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
 
   const request = (async () => {
     let settled = false;
-    // Start the FAA fallback only if the exact OSM request has not resolved
-    // quickly. This avoids serial 5s + 6s + FAA waits on a cold airport.
+    // Exact and boxed OSM are independent reads of the same public surface
+    // data. Race them so a slow exact aerodrome lookup cannot add a second
+    // full timeout before the broader, boundary-filtered query even starts.
+    const exactOsm = requireSurface(
+      loadOsmSurface(airport, input, "exact", exactAirportSurfaceOverpassQuery(airport), OVERPASS_TIMEOUT_MS)
+        .catch((error) => {
+          console.warn("[airport-surface] OpenStreetMap load failed", airport, "exact", error instanceof AggregateError
+            ? error.errors.map(compactError).join(" | ") : compactError(error));
+          return null;
+        }),
+      "exact OpenStreetMap",
+    );
+    const boxedOsm = requireSurface(
+      loadOsmSurface(airport, input, "boxed", boxedAirportSurfaceOverpassQuery(input), OVERPASS_TIMEOUT_MS)
+        .catch((error) => {
+          console.warn("[airport-surface] OpenStreetMap load failed", airport, "boxed", error instanceof AggregateError
+            ? error.errors.map(compactError).join(" | ") : compactError(error));
+          return null;
+        }),
+      "boxed OpenStreetMap",
+    );
     const faaFallback = likelyUsAirport(airport)
       ? (async () => {
           await sleep(1_000);
@@ -534,31 +553,14 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
       : Promise.resolve(null);
 
     try {
-      const exact = await loadOsmSurface(airport, input, "exact", exactAirportSurfaceOverpassQuery(airport), 4_000);
-      settled = true;
-      cache.set(key, { value: exact, at: Date.now() });
-      return exact;
-    } catch (error) {
-      console.warn("[airport-surface] OpenStreetMap load failed", airport, "exact", error instanceof AggregateError
-        ? error.errors.map(compactError).join(" | ") : compactError(error));
-    }
-
-    try {
-      const fallback = await Promise.any([
-        requireSurface(
-          loadOsmSurface(airport, input, "boxed", boxedAirportSurfaceOverpassQuery(input), OVERPASS_TIMEOUT_MS)
-            .catch((error) => {
-              console.warn("[airport-surface] OpenStreetMap load failed", airport, "boxed", error instanceof AggregateError
-                ? error.errors.map(compactError).join(" | ") : compactError(error));
-              return null;
-            }),
-          "boxed OpenStreetMap",
-        ),
+      const surface = await Promise.any([
+        exactOsm,
+        boxedOsm,
         requireSurface(faaFallback, "FAA surface"),
       ]);
       settled = true;
-      cache.set(key, { value: fallback, at: Date.now() });
-      return fallback;
+      cache.set(key, { value: surface, at: Date.now() });
+      return surface;
     } catch {
       settled = true;
       throw new Error("Airport surface unavailable");
