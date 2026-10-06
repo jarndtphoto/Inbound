@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 
 const source=readFileSync(new URL('../src/components/filed-app.tsx',import.meta.url),'utf8');
 const styles=readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
+const traveler=readFileSync(new URL('../src/lib/traveler.ts',import.meta.url),'utf8');
 const flightPages=source.slice(source.indexOf('function FlightPages'),source.indexOf('function wheelsDown'));
 const filedApp=source.slice(source.indexOf('export function FiledApp'),source.indexOf('function FlightPages'));
 
@@ -55,9 +56,16 @@ test('near-departure flights without fresh ground evidence do not claim inbound,
   assert.match(source,/pushAt - 15 \* 60/);
   assert.match(source,/ageSec <= 30/);
   assert.match(source,/Ground movement not confirmed/);
+  assert.match(source,/Ground position unavailable/);
+  assert.doesNotMatch(source,/Departure update delayed/);
   assert.match(source,/Movement not confirmed/);
   assert.match(source,/!departureUnderway && !departureGroundUnconfirmed\(story\)/);
   assert.match(source,/\["Status", \.\.\.STATUS_PROGRESS\.slice\(1\)\]/);
+});
+
+test('departure delay alerts stop once departure movement is underway',()=>{
+  assert.match(traveler,/const departureUnderway = Boolean\(next\.times\.pushed/);
+  assert.match(traveler,/!departureUnderway && !isLanded\(next\)/);
 });
 
 test('tracked-flight polling pauses while hidden and refreshes stale state on return',()=>{
