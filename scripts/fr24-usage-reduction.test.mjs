@@ -85,10 +85,12 @@ test("five-second ground map is free ADS-B only", async () => {
   assert.doesNotMatch(source, /from "\.\/fr24\.server"/);
   assert.doesNotMatch(source, /loadFr24|FR24_API_TOKEN/, "ground polling cannot reach paid FR24");
   assert.match(source, /fr24KeyType: "disabled-ground-map"/);
-  assert.match(source, /const aroundPacks = await fetchAround/, "departure map still refreshes from open ADS-B");
-  assert.match(source, /wantedHex[\s\S]*?fetchByHex\(wantedHex\)/, "delayed broad fixes retry the strongest free exact hex identity");
-  assert.match(source, /if \(ageSec <= 8\)/, "only genuinely fresh broad fixes bypass the exact lookup");
-  assert.match(source, /position\.seenAt > aroundFallback\.seenAt/, "the newer exact or broad observation wins");
+  const exactIndex = source.indexOf("const exactPacks = wantedHex");
+  const aroundIndex = source.indexOf("const aroundPacks = await fetchAround");
+  assert.ok(exactIndex >= 0 && aroundIndex > exactIndex, "ground polling tries exact identity before an airport-radius scan");
+  assert.match(source, /wantedHex[\s\S]*?fetchByHex\(wantedHex\)/, "known hex remains the strongest free ground identity");
+  assert.match(source, /if \(ageSec <= 12\)/, "a genuinely recent exact fix avoids the extra airport scan");
+  assert.match(source, /exactFallback\.seenAt >= aroundFallback\.seenAt/, "when both paths are needed, the newest real observation wins");
 });
 
 test("surface providers are paced and expose throttling instead of silently looking empty", async () => {
