@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { boxedAirportSurfaceOverpassQuery, exactAirportSurfaceOverpassQuery, fallbackAirportSurface, parseAirportSurfaceElements } from "./airport-surface.server.ts";
+import { boxedAirportSurfaceOverpassQuery, exactAirportSurfaceOverpassQuery, fallbackAirportSurface, overpassResponseElements, parseAirportSurfaceElements } from "./airport-surface.server.ts";
 import { airportDetailGeographyBounds, airportGeographyIsWater, airportSurfaceBounds } from "./airport-coastline.ts";
 
 const square = (id: number, west: number, south: number, east: number, north: number, tags: Record<string, string>) => ({
@@ -60,18 +60,18 @@ test("exact airport surface query targets the requested aerodrome before any bro
   assert.match(query, /natural"="water"/);
   assert.match(query, /water"~"\^\(lake\|lagoon\|reservoir\|bay\)\$"/);
   assert.match(query, /32\.283800/);
-  assert.match(query, /out geom\(32\.283800/);
+  assert.match(query, /out tags geom\(32\.283800/);
 });
 
 test("boxed airport surface query remains available as a bounded fallback", () => {
   const query = boxedAirportSurfaceOverpassQuery({ lat: 32.7338, lon: -117.1933 });
-  assert.match(query, /\[timeout:8\]/);
+  assert.match(query, /\[timeout:15\]/);
   assert.match(query, /32\.658800/);
   assert.match(query, /32\.808800/);
   assert.match(query, /aeroway"="aerodrome"/);
   assert.match(query, /natural"="coastline"/);
   assert.match(query, /natural"="water"/);
-  assert.match(query, /out geom\(32\.283800/);
+  assert.match(query, /out tags geom\(32\.283800/);
 });
 
 test("complete provider failure still returns geography that fades the coarse coastline", () => {
@@ -202,4 +202,26 @@ test("airport point remains dry when runway geometry is unavailable", () => {
   const parsed = parseAirportSurfaceElements([square(1, -0.1, -0.1, 0.1, 0.1, { natural: "water" })],
     "KORD", 123, { lat: 0, lon: 0 });
   assert.equal(parsed.geography?.fallbackReason, "water-covers-runways");
+});
+
+
+test("airport lookup is spatially bounded and output avoids unused node IDs and ID sorting", () => {
+  const query = exactAirportSurfaceOverpassQuery("KSAN", { lat: 32.7338, lon: -117.1933 });
+  const target = query.split("->.target")[0]!;
+  const selectors = target.match(/(?:way|relation)\["aeroway"="aerodrome"\][^;]+;/g)!;
+  assert.equal(selectors.length, 12);
+  assert.ok(selectors.every((selector) => /\(32\.658800,[^)]+,32\.808800,[^)]+\);$/.test(selector)));
+  assert.match(query, /out geom qt;/);
+  assert.match(query, /way\.geography;out tags geom\([^)]+\) qt;relation\.geography;out geom\([^)]+\) qt;/);
+  assert.match(query, /out tags geom\([^)]+\) qt;/);
+  assert.match(query, /\[timeout:15\]/);
+});
+
+test("HTTP 200 partial airport data with an Overpass runtime remark is rejected", () => {
+  const elements = [line(1, [{ lat: 0, lon: 0 }, { lat: 0, lon: 0.01 }], { aeroway: "runway" })];
+  assert.throws(() => overpassResponseElements({ elements,
+    remark: 'runtime error: Query timed out in "print" at line 1 after 9 seconds.' }), /Incomplete Overpass response.*timed out/);
+  assert.throws(() => overpassResponseElements({ elements: [], remark: "runtime error: Query run out of memory" }), /run out of memory/);
+  assert.deepEqual(overpassResponseElements({ elements }), elements);
+  assert.throws(() => overpassResponseElements({}), /Invalid airport surface response/);
 });

@@ -58,7 +58,9 @@ type OverpassElement = {
 type CacheEntry = { value: AirportSurface; at: number };
 const cache = new Map<string, CacheEntry>();
 const pending = new Map<string, Promise<AirportSurface>>();
-const OVERPASS_TIMEOUT_MS = 6_000;
+// Allow the declared provider budget plus connection/response transfer time.
+const OVERPASS_QUERY_SECONDS = 15;
+const OVERPASS_TIMEOUT_MS = 20_000;
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -556,28 +558,31 @@ function detailedGeographyOverpassQuery(input: { lat: number; lon: number }) {
   ].join("");
   // Keep this in the same HTTP request/cache as the airport surface, but ask
   // Overpass to clip enormous coast/lake relation geometry to the detail box.
-  return `(${clauses});out geom(${box});`;
+  // tags+geom omits unused way node-ID arrays. Relations need body output
+  // to retain member roles/references/geometry. qt avoids sorting by ID.
+  return `(${clauses})->.geography;way.geography;out tags geom(${box}) qt;relation.geography;out geom(${box}) qt;`;
 }
 
 export function exactAirportSurfaceOverpassQuery(airport: string, input?: { lat: number; lon: number }) {
   const code = airport.toUpperCase();
   const aliases = airportCodeCandidates(code);
   const clauses: string[] = [];
+  const targetBox = input ? `(${overpassSurfaceBox(input)})` : "";
   for (const value of aliases) {
-    clauses.push(`way["aeroway"="aerodrome"]["icao"="${value}"];`);
-    clauses.push(`relation["aeroway"="aerodrome"]["icao"="${value}"];`);
-    clauses.push(`way["aeroway"="aerodrome"]["iata"="${value}"];`);
-    clauses.push(`relation["aeroway"="aerodrome"]["iata"="${value}"];`);
-    clauses.push(`way["aeroway"="aerodrome"]["ref"="${value}"];`);
-    clauses.push(`relation["aeroway"="aerodrome"]["ref"="${value}"];`);
+    clauses.push(`way["aeroway"="aerodrome"]["icao"="${value}"]${targetBox};`);
+    clauses.push(`relation["aeroway"="aerodrome"]["icao"="${value}"]${targetBox};`);
+    clauses.push(`way["aeroway"="aerodrome"]["iata"="${value}"]${targetBox};`);
+    clauses.push(`relation["aeroway"="aerodrome"]["iata"="${value}"]${targetBox};`);
+    clauses.push(`way["aeroway"="aerodrome"]["ref"="${value}"]${targetBox};`);
+    clauses.push(`relation["aeroway"="aerodrome"]["ref"="${value}"]${targetBox};`);
   }
   const geography = input ? detailedGeographyOverpassQuery(input) : "";
-  return `[out:json][timeout:7];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];);out geom;${geography}`;
+  return `[out:json][timeout:${OVERPASS_QUERY_SECONDS}];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];);out geom qt;${geography}`;
 }
 
 export function boxedAirportSurfaceOverpassQuery(input: { lat: number; lon: number }) {
   const box = overpassSurfaceBox(input);
-  return `[out:json][timeout:8];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${box});way["area:aeroway"="taxiway"](${box});relation["aeroway"~"^(apron|terminal)$"](${box});relation["area:aeroway"="taxiway"](${box});way["aeroway"="aerodrome"](${box});relation["aeroway"="aerodrome"](${box}););out geom;${detailedGeographyOverpassQuery(input)}`;
+  return `[out:json][timeout:${OVERPASS_QUERY_SECONDS}];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${box});way["area:aeroway"="taxiway"](${box});relation["aeroway"~"^(apron|terminal)$"](${box});relation["area:aeroway"="taxiway"](${box});way["aeroway"="aerodrome"](${box});relation["aeroway"="aerodrome"](${box}););out geom qt;${detailedGeographyOverpassQuery(input)}`;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -612,27 +617,41 @@ async function loadOsmSurface(
     durationMs: Date.now() - startedAt,
     featureCount: osm.features.length,
     boundaryRings: osm.boundary?.length ?? 0,
+    coastlineWays: elements.filter((element) => element.tags?.natural === "coastline").length,
+    waterPolygons: osm.geography?.water.length ?? 0,
+    coastlineFallback: osm.geography?.fallback ?? false,
+    coastlineFallbackReason: osm.geography?.fallbackReason,
   });
   return osm;
+}
+
+export function overpassResponseElements(payload: { elements?: OverpassElement[]; remark?: string }) {
+  // Overpass can return HTTP 200 and partial elements after a query/print
+  // timeout. Airport features alone must not masquerade as verified land.
+  if (payload.remark) throw new Error(`Incomplete Overpass response: ${payload.remark}`);
+  if (!Array.isArray(payload.elements)) throw new Error("Invalid airport surface response");
+  return payload.elements;
 }
 
 async function fetchOverpassElements(query: string, timeoutMs = OVERPASS_TIMEOUT_MS) {
   const body = new URLSearchParams({ data: query }).toString();
   return Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "User-Agent": "Inbound/1.0 airport-surface experiment",
-      },
-      body,
-    });
-    if (!response.ok) throw new Error(`Airport surface unavailable (${response.status})`);
-    const payload = await response.json() as { elements?: OverpassElement[] };
-    if (!Array.isArray(payload.elements)) throw new Error("Invalid airport surface response");
-    return payload.elements;
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "User-Agent": "Inbound/1.0 airport-surface experiment",
+        },
+        body,
+      });
+      if (!response.ok) throw new Error(`Airport surface unavailable (${response.status})`);
+      return overpassResponseElements(await response.json());
+    } catch (error) {
+      throw new Error(`${new URL(endpoint).hostname}: ${compactError(error)}`, { cause: error });
+    }
   }));
 }
 
@@ -650,7 +669,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   const request = (async () => {
     let settled = false;
     // Start the FAA fallback only if the exact OSM request has not resolved
-    // quickly. This avoids serial 5s + 6s + FAA waits on a cold airport.
+    // quickly. Its catalog/service lookup overlaps the OSM request.
     const faaFallback = likelyUsAirport(airport)
       ? (async () => {
           await sleep(2_500);
@@ -665,7 +684,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
       : Promise.resolve(null);
 
     try {
-      const exact = await loadOsmSurface(airport, input, "exact", exactAirportSurfaceOverpassQuery(airport, input), 5_000);
+      const exact = await loadOsmSurface(airport, input, "exact", exactAirportSurfaceOverpassQuery(airport, input), OVERPASS_TIMEOUT_MS);
       settled = true;
       cache.set(key, { value: exact, at: Date.now() });
       return exact;
