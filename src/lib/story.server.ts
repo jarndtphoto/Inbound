@@ -1621,8 +1621,8 @@ export function flightStatsLegMatches(record, lockedLeg) {
 	if (!lockedLeg) return true;
 	const leg = flightStatsLeg(record);
 	if (!leg) return false;
-	const origin = String(lockedLeg.originIata ?? lockedLeg.originIcao ?? "").trim().toUpperCase();
-	const destination = String(lockedLeg.destIata ?? lockedLeg.destIcao ?? "").trim().toUpperCase();
+	const origin = String(lockedLeg.originIata ?? lockedLeg.originIcao ?? lockedLeg.origin ?? "").trim().toUpperCase();
+	const destination = String(lockedLeg.destIata ?? lockedLeg.destIcao ?? lockedLeg.destination ?? "").trim().toUpperCase();
 	if (!origin || !destination || leg.origin !== origin || leg.destination !== destination) return false;
 	return !lockedLeg.date || !leg.date || lockedLeg.date === leg.date;
 }
@@ -1638,6 +1638,32 @@ function flightStatsLegFinished(record) {
 function flightStatsLegDeparted(record) {
 	return Boolean(record?.gateOut?.actual || record?.takeoff?.actual
 		|| /\b(?:departed|airborne|arrived|landed)\b/i.test(String(record?.status ?? "")));
+}
+function reliableLegPosition(aircraft) {
+	return Boolean(aircraft && Number.isFinite(aircraft.lat) && Number.isFinite(aircraft.lon)
+		&& !aircraft.extrapolated && (!Number.isFinite(aircraft.seenSec) || aircraft.seenSec <= 120));
+}
+export function livePositionConfirmsLeg(record, aircraft) {
+	if (!reliableLegPosition(aircraft)) return false;
+	const origin = recordAirport(record, "origin"), destination = recordAirport(record, "destination");
+	if (!origin || !destination) return false;
+	const dOrigin = haversineNm(aircraft, origin), dDestination = haversineNm(aircraft, destination);
+	if (aircraft.onGround) return dOrigin <= 5 || dDestination <= 5;
+	const fit = flightStatsAircraftLegFit(record, aircraft);
+	if (!fit.possible) return false;
+	if (!Number.isFinite(aircraft.track)) return false;
+	return headingDelta(aircraft.track, initialBearing(aircraft, destination)) <= 90;
+}
+function livePositionContradictsLeg(record, aircraft) {
+	if (!reliableLegPosition(aircraft)) return false;
+	const fit = flightStatsAircraftLegFit(record, aircraft);
+	if (!fit.possible) return true;
+	if (aircraft.onGround || !Number.isFinite(aircraft.track)) return false;
+	const origin = recordAirport(record, "origin"), destination = recordAirport(record, "destination");
+	if (!origin || !destination) return false;
+	const towardOrigin = headingDelta(aircraft.track, initialBearing(aircraft, origin));
+	const towardDestination = headingDelta(aircraft.track, initialBearing(aircraft, destination));
+	return towardOrigin <= 60 && towardDestination >= 120;
 }
 /** Rank a same-number leg by the physical aircraft. Impossible off-route
  * matches are rejected; opposite directions on the same corridor are split
@@ -1690,11 +1716,17 @@ export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() 
 	// A confirmed leg is a hard boundary, not a ranking hint. If the provider
 	// temporarily returns only the opposite/same-number sector, the caller must
 	// retain the saved schedule instead of silently switching routes.
+	const firmLock = context.lockedLeg?.liveConfirmed === true;
 	let pool = context.lockedLeg ? locked : usable;
+	if (context.lockedLeg && !firmLock && reliableLegPosition(context.aircraft)) {
+		const contradictsLock = !locked.length || locked.every((record) => livePositionContradictsLeg(record, context.aircraft));
+		const confirmedAlternative = usable.some((record) => !flightStatsLegMatches(record, context.lockedLeg)
+			&& livePositionConfirmsLeg(record, context.aircraft));
+		if (contradictsLock && confirmedAlternative) pool = usable;
+	}
 	if (!pool.length) return null;
 	const aircraft = context.aircraft;
-	const reliablePosition = Boolean(aircraft && Number.isFinite(aircraft.lat) && Number.isFinite(aircraft.lon)
-		&& !aircraft.extrapolated && (!Number.isFinite(aircraft.seenSec) || aircraft.seenSec <= 120));
+	const reliablePosition = reliableLegPosition(aircraft);
 	if (reliablePosition && aircraft.onGround) {
 		const departingHere = pool.filter((record) => {
 			const origin = recordAirport(record, "origin");
@@ -3135,7 +3167,8 @@ function lockedLegFromResume(resume) {
 	const keyDate = typeof resume.stateKey === "string" && resume.stateKey.startsWith("leg:v1:")
 		? resume.stateKey.split("|")[1] ?? null : null;
 	return { originIata: resume.originIata, originIcao: resume.originIcao,
-		destIata: resume.destIata, destIcao: resume.destIcao, date: keyDate };
+		destIata: resume.destIata, destIcao: resume.destIcao, date: keyDate,
+		...(resume.legLiveConfirmed === true ? { liveConfirmed: true } : {}) };
 }
 const COMPLETED_LEG_GRACE_SEC = 45 * 60;
 function localDateKey(unix, timeZone) {
@@ -3196,13 +3229,23 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	let scheduleHeldByLegLock = false;
 	let publicAware = loadedAware;
 	if (!resumed && progressResume && publicAware?._publicScheduleSource === "flightstats"
-		&& lockedLeg && !flightStatsLegMatches(publicAware, lockedLeg)) {
+		&& lockedLeg?.liveConfirmed && !flightStatsLegMatches(publicAware, lockedLeg)) {
 		publicAware = awareFromResume(progressResume, "leg-lock");
 		scheduleHeldByLegLock = true;
 		console.warn("[flight-leg-lock]", {
 			requested: parsed.callsign,
 			locked: [lockedLeg.originIata, lockedLeg.destIata, lockedLeg.date],
 			rejected: [loadedAware?.originIata, loadedAware?.destIata, loadedAware?._publicScheduleDate ?? null],
+		});
+	}
+	if (!resumed && lockedLeg && !lockedLeg.liveConfirmed && publicAware
+		&& !flightStatsLegMatches(publicAware, lockedLeg)) {
+		console.warn("[flight-leg-lock]", {
+			action: "override",
+			reason: "fresh_position",
+			requested: parsed.callsign,
+			locked: [lockedLeg.originIata, lockedLeg.destIata, lockedLeg.date],
+			selected: [publicAware.originIata, publicAware.destIata, publicAware._publicScheduleDate ?? null],
 		});
 	}
 	const operatingIdent = operatingIdentFromSchedule(publicAware, parsed.callsign);
@@ -3216,6 +3259,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		nowSec >= fr24DepartureClock - 2 * 60 * 60 &&
 		nowSec <= fr24DepartureClock + 4 * 60 * 60
 	);
+	const rawSchedulePosition = rawAc0 ? toLive(rawAc0) : null;
+	const scheduleLiveConfirmed = Boolean(
+		publicAware && ((lockedLeg?.liveConfirmed && flightStatsLegMatches(publicAware, lockedLeg))
+			|| livePositionConfirmsLeg(publicAware, rawSchedulePosition))
+	);
 	const official = await loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
 		fr24OriginIata: publicAware?.originIata ?? null,
@@ -3223,8 +3271,24 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		fr24Registration: publicAware?.tail ?? null,
 		fr24OperatingCallsign: operatingIdent,
 		fr24SurfaceDeparture,
+		fr24AllowRouteOverride: !scheduleLiveConfirmed,
 	});
-	let fr24Aware = publicAware ? null : awareFromLiveFr24(official.fr24);
+	const liveFr24Aware = awareFromLiveFr24(official.fr24);
+	let fr24Aware = publicAware ? null : liveFr24Aware;
+	if (publicAware && liveFr24Aware && !flightStatsLegMatches(liveFr24Aware, flightStatsLeg(publicAware))
+		&& !scheduleLiveConfirmed) {
+		if (lockedLeg && !lockedLeg.liveConfirmed) {
+			console.warn("[flight-leg-lock]", {
+				action: "override",
+				reason: "fresh_fr24_route",
+				requested: parsed.callsign,
+				locked: [lockedLeg.originIata, lockedLeg.destIata, lockedLeg.date],
+				selected: [liveFr24Aware.originIata, liveFr24Aware.destIata, liveFr24Aware._publicScheduleDate ?? null],
+			});
+		}
+		publicAware = null;
+		fr24Aware = liveFr24Aware;
+	}
 	if (fr24Aware) {
 		console.info(JSON.stringify({
 			event: "fr24_live_leg_fallback",
@@ -3235,7 +3299,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		}));
 	}
 	let currentLegAware = publicAware ?? fr24Aware;
-	if (!resumed && progressResume && lockedLeg && currentLegAware && !flightStatsLegMatches(currentLegAware, lockedLeg)) {
+	if (!resumed && progressResume && lockedLeg?.liveConfirmed && currentLegAware && !flightStatsLegMatches(currentLegAware, lockedLeg)) {
 		console.warn("[flight-leg-lock]", {
 			requested: parsed.callsign,
 			locked: [lockedLeg.originIata, lockedLeg.destIata, lockedLeg.date],
@@ -4655,6 +4719,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		hex: baseResume.hex ?? aircraft?.hex ?? null,
 		type: baseResume.type ?? aircraft?.type ?? null,
 		stateKey,
+		legLiveConfirmed: Boolean(
+			(progressResume?.legLiveConfirmed === true && lockedLeg && flightStatsLegMatches(aware, lockedLeg))
+			|| livePositionConfirmsLeg(aware, live)
+			|| (liveFr24Aware && flightStatsLegMatches(aware, flightStatsLeg(liveFr24Aware)))
+		),
 		confirmedTakeoff: takeoffDiagnostic(confirmedTakeoff),
 		takeoffRevocations: takeoffEvidence?.revocations,
 		takeoff: { ...baseResume.takeoff, actual: confirmedTakeoff?.time ?? (takeoffEvidence?.revocations?.some(r => r.time === baseResume.takeoff?.actual) ? null : baseResume.takeoff?.actual) ?? null },

@@ -39,6 +39,7 @@ export type FlightResume = {
   type: string | null;
   waypoints: { lat: number; lon: number }[];
   stateKey?: string | null;
+  legLiveConfirmed?: boolean;
   confirmedTakeoff?: TakeoffDiagnostic | null;
   takeoffRevocations?: TakeoffRevocation[];
   departureStage?: DepartureStageCheckpoint | null;
@@ -143,7 +144,9 @@ export function readFlightResume(input: unknown, q: string, now = Date.now()): F
     originGate: token(r.originGate, /^[A-Z0-9 -]{1,12}$/i), destGate: token(r.destGate, /^[A-Z0-9 -]{1,12}$/i),
     gateOut: stamps.gateOut, takeoff: stamps.takeoff, landing: stamps.landing, gateIn: stamps.gateIn,
     tail: token(r.tail, /^[A-Z0-9-]{3,12}$/i), hex: token(r.hex, /^[a-f0-9]{6}$/i),
-    type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, stateKey, confirmedTakeoff, takeoffRevocations, departureStage: confirmedTakeoff ? null : departureStage, detectedPushUnix, detectedTaxiUnix, parkedLat, parkedLon,
+    type: token(r.type, /^[A-Z0-9-]{2,8}$/i), waypoints, stateKey,
+    legLiveConfirmed: r.legLiveConfirmed === true,
+    confirmedTakeoff, takeoffRevocations, departureStage: confirmedTakeoff ? null : departureStage, detectedPushUnix, detectedTaxiUnix, parkedLat, parkedLon,
     takeoffRollStreak, takeoffRollStreakSeenAt, flightSpeedStreak, flightSpeedStreakSeenAt,
   } as FlightResume;
 }

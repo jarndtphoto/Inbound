@@ -62,6 +62,10 @@ export async function loadOfficialFlightData(
     fr24DestIata?: string | null;
     fr24Registration?: string | null;
     fr24OperatingCallsign?: string | null;
+    // A schedule-only route may be wrong for a reused flight number. A fresh
+    // FR24 route is allowed to correct it; a route already confirmed by live
+    // aircraft evidence remains a hard lookup boundary.
+    fr24AllowRouteOverride?: boolean;
     // Surface departures must stay within the Explorer plan's 10-query/minute
     // throttle. In this mode FR24 gets exactly one live identity probe: known
     // registration first, otherwise the operating/transponder callsign.
@@ -74,7 +78,7 @@ export async function loadOfficialFlightData(
   const routeDestination = options?.fr24DestIata?.trim().toUpperCase() || null;
   const lookupKey = JSON.stringify([new Date(Date.now()).toISOString().slice(0, 10), ident.toUpperCase(), preferredFlightNumber,
     routeOrigin, routeDestination, options?.fr24Registration?.trim().toUpperCase(), options?.fr24Bounds, options?.fr24OperatingCallsign?.trim().toUpperCase(),
-    Boolean(options?.fr24SurfaceDeparture)]);
+    Boolean(options?.fr24SurfaceDeparture), Boolean(options?.fr24AllowRouteOverride)]);
   const remembered = matchedLookups.get(lookupKey);
   if (remembered && Date.now() - remembered.at < MATCHED_LOOKUP_TTL_MS) {
     const recalled = await probe(fr24Configured(), () => {
@@ -100,6 +104,7 @@ export async function loadOfficialFlightData(
   const publicRegistration = options?.fr24Registration?.trim().toUpperCase() || null;
   const publicOperating = options?.fr24OperatingCallsign?.trim().toUpperCase() || null;
   const surfaceDeparture = Boolean(options?.fr24SurfaceDeparture);
+  const allowRouteOverride = Boolean(options?.fr24AllowRouteOverride);
 
   let matchedKind: MatchedLookup["kind"];
   let matchedValue: string;
@@ -116,7 +121,8 @@ export async function loadOfficialFlightData(
     const routeMatches = Boolean(candidate
       && (!routeOrigin || candidate.origin?.iata?.trim().toUpperCase() === routeOrigin)
       && (!routeDestination || candidate.destination?.iata?.trim().toUpperCase() === routeDestination));
-    if (candidate && !routeMatches) {
+    const candidateAge = candidate?.position?.seenAt != null ? Math.max(0, Date.now() / 1000 - candidate.position.seenAt) : Infinity;
+    if (candidate && !routeMatches && !(allowRouteOverride && candidateAge <= 60)) {
       console.warn(JSON.stringify({
         event: "fr24_surface_wrong_leg_rejected",
         requested: ident,
@@ -128,6 +134,16 @@ export async function loadOfficialFlightData(
         candidateDestination: candidate.destination?.iata ?? candidate.destination?.icao ?? null,
       }));
       fr = { flight: null, state: "NO_MATCH" };
+    } else if (candidate && !routeMatches) {
+      console.warn(JSON.stringify({
+        event: "fr24_live_route_override",
+        requested: ident,
+        routeOrigin,
+        routeDestination,
+        candidateOrigin: candidate.origin?.iata ?? candidate.origin?.icao ?? null,
+        candidateDestination: candidate.destination?.iata ?? candidate.destination?.icao ?? null,
+        positionAgeSec: Math.round(candidateAge),
+      }));
     }
   } else {
     matchedKind = preferredFlightNumber ? routeOrigin && routeDestination ? "route" : "number" : "callsign";
@@ -153,6 +169,24 @@ export async function loadOfficialFlightData(
       fr = await probe(fr24Configured(), () => loadFr24Flight(ident));
       matchedKind = "callsign";
       matchedValue = ident;
+    }
+    if (fr.state === "NO_MATCH" && preferredFlightNumber && routeOrigin && routeDestination && allowRouteOverride) {
+      const byNumber = await probe(fr24Configured(), () => loadFr24FlightByNumber(preferredFlightNumber, options?.fr24Bounds ?? undefined));
+      const age = byNumber.flight?.position?.seenAt != null ? Math.max(0, Date.now() / 1000 - byNumber.flight.position.seenAt) : Infinity;
+      if (byNumber.flight && age <= 60) {
+        fr = byNumber;
+        matchedKind = "number";
+        matchedValue = preferredFlightNumber;
+        console.warn(JSON.stringify({
+          event: "fr24_live_route_override",
+          requested: ident,
+          routeOrigin,
+          routeDestination,
+          candidateOrigin: byNumber.flight.origin?.iata ?? byNumber.flight.origin?.icao ?? null,
+          candidateDestination: byNumber.flight.destination?.iata ?? byNumber.flight.destination?.icao ?? null,
+          positionAgeSec: Math.round(age),
+        }));
+      }
     }
   }
   const currentAge = fr.flight?.position?.seenAt != null ? Math.max(0, Date.now() / 1000 - fr.flight.position.seenAt) : Number.POSITIVE_INFINITY;

@@ -104,11 +104,20 @@ describe('same-number leg lock replays', () => {
   it('rejects a route flip after the dated origin and destination are locked', () => {
     const correct = leg('ALB', 'MCO', now - 150 * 60, now + 8 * 60);
     const reverse = leg('MCO', 'ALB', now + 2 * 60, now + 170 * 60);
-    const lockedLeg = { originIata: 'ALB', destIata: 'MCO', date: '2026-10-06' };
+    const lockedLeg = { originIata: 'ALB', destIata: 'MCO', date: '2026-10-06', liveConfirmed: true };
     assert.equal(flightStatsLegMatches(correct, lockedLeg), true);
     assert.equal(flightStatsLegMatches(reverse, lockedLeg), false);
     assert.equal(chooseFlightStatsScheduleCandidate([reverse], now, { lockedLeg }), null);
     assert.equal(chooseFlightStatsScheduleCandidate([reverse, correct], now, { lockedLeg }), correct);
+  });
+
+  it('AA1007 fresh airborne evidence overrides a wrong schedule-only soft lock', () => {
+    const wrong = leg('ORD', 'RSW', now - 55 * 60, now + 2 * 3600, 'departed');
+    const correct = leg('RSW', 'ORD', now - 2 * 3600, now + 25 * 60, 'departed');
+    const aircraft = { lat: 41.55, lon: -87.82, onGround: false, seenSec: 2,
+      track: initialBearing({ lat: 41.55, lon: -87.82 }, { lat: 41.9786, lon: -87.9048 }) };
+    const softLock = { originIata: 'ORD', destIata: 'RSW', date: '2026-10-06' };
+    assert.equal(chooseFlightStatsScheduleCandidate([wrong, correct], now, { lockedLeg: softLock, aircraft }), correct);
   });
 
   const resume = ({ date = '2026-10-06', landingActual = null, gateActual = null,
