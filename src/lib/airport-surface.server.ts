@@ -386,10 +386,14 @@ function geometrySegments(points: Array<OverpassGeometryPoint | null> | undefine
   return segments;
 }
 
-function relationRings(element: OverpassElement, role: "outer" | "inner", requireClosed = false): SurfacePoint[][] {
+function relationRings(element: OverpassElement, role: "outer" | "inner", requireClosed = false,
+  wayGeometry?: Map<number, Array<OverpassGeometryPoint | null>>): SurfacePoint[][] {
   const segments = (element.members ?? [])
     .filter((member) => member.type === "way" && (role === "outer" ? member.role === "outer" || !member.role : member.role === "inner"))
-    .flatMap((member) => requireClosed ? geometrySegments(member.geometry) : [validGeometry(member.geometry)])
+    .flatMap((member) => {
+      const geometry = member.geometry ?? (member.ref == null ? undefined : wayGeometry?.get(member.ref));
+      return requireClosed ? geometrySegments(geometry) : [validGeometry(geometry)];
+    })
     .filter((points) => points.length >= 2);
   const rings: SurfacePoint[][] = [];
 
@@ -443,11 +447,11 @@ function waterPolygonFromWay(element: OverpassElement): SurfacePolygon | null {
   return { outer: ring };
 }
 
-function waterPolygonsFromRelation(element: OverpassElement): SurfacePolygon[] {
-  const outers = relationRings(element, "outer", true);
-  const inners = relationRings(element, "inner", true);
+function waterPolygonsFromRelation(element: OverpassElement, wayGeometry: Map<number, Array<OverpassGeometryPoint | null>>): SurfacePolygon[] {
+  const outers = relationRings(element, "outer", true, wayGeometry);
+  const inners = relationRings(element, "inner", true, wayGeometry);
   return outers.map((outer) => {
-    const holes = inners.filter((inner) => pointInRing(centroid(inner), outer));
+    const holes = inners.filter((inner) => inner[0] && pointInRing(inner[0], outer));
     return { outer, ...(holes.length ? { holes } : {}) };
   });
 }
@@ -498,10 +502,17 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
     .flatMap((element) => geometrySegments(element.geometry))
     .filter((points) => points.length >= 2);
   const waterPolygons: SurfacePolygon[] = [];
+  const waterRelations = elements.filter((element) => element.type === "relation" && isWaterElement(element));
+  const relationMemberIds = new Set(waterRelations.flatMap((element) =>
+    (element.members ?? []).filter((member) => member.type === "way" && member.ref != null).map((member) => member.ref!),
+  ));
+  const wayGeometry = new Map(elements.filter((element) => element.type === "way" && element.geometry)
+    .map((element) => [element.id, element.geometry!]));
   for (const element of elements) {
     if (!isWaterElement(element)) continue;
-    if (element.type === "relation") waterPolygons.push(...waterPolygonsFromRelation(element));
+    if (element.type === "relation") waterPolygons.push(...waterPolygonsFromRelation(element, wayGeometry));
     else if (element.type === "way") {
+      if (relationMemberIds.has(element.id)) continue;
       const polygon = waterPolygonFromWay(element);
       if (polygon) waterPolygons.push(polygon);
     }
@@ -509,7 +520,8 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
   const runwaySamples = features
     .filter((feature) => feature.kind === "runway" || feature.kind === "runway_area")
     .map((feature) => centroid(feature.points));
-  const geography = assembleAirportGeography({ bounds, coastlineWays, waterPolygons, runwaySamples });
+  const geography = assembleAirportGeography({ bounds, coastlineWays, waterPolygons,
+    runwaySamples: runwaySamples.length ? runwaySamples : field ? [fieldPoint] : [] });
   if (geography.fallback) console.warn("[airport-coastline-fallback]", { airport, reason: geography.fallbackReason });
   return {
     airport,
@@ -629,7 +641,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   if (!/^[A-Z0-9]{3,4}$/.test(airport) || !validCoord(input.lat, -90, 90) || !validCoord(input.lon, -180, 180)) {
     throw new Error("Invalid airport surface request");
   }
-  const key = `${airport}:surface-v11:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
+  const key = `${airport}:surface-v12:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const existing = pending.get(key);

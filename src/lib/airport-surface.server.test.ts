@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { boxedAirportSurfaceOverpassQuery, exactAirportSurfaceOverpassQuery, fallbackAirportSurface, parseAirportSurfaceElements } from "./airport-surface.server.ts";
-import { airportDetailGeographyBounds, airportSurfaceBounds } from "./airport-coastline.ts";
+import { airportDetailGeographyBounds, airportGeographyIsWater, airportSurfaceBounds } from "./airport-coastline.ts";
 
 const square = (id: number, west: number, south: number, east: number, north: number, tags: Record<string, string>) => ({
   id,
@@ -155,4 +155,51 @@ test("bounded water ways and incomplete relation members never receive invented 
       members: [{ type: "way", role: "outer", geometry }] },
   ], "KORD", 123, { lat: 0, lon: 0 });
   assert.equal(parsed.geography?.water.length, 0);
+});
+
+
+test("water relation joins separately returned member ways and preserves island holes without duplicates", () => {
+  const outer = square(901, 0.03, 0.03, 0.12, 0.12, { natural: "water" });
+  const inner = square(902, 0.05, 0.05, 0.09, 0.09, { natural: "water" });
+  const parsed = parseAirportSurfaceElements([
+    { id: 90, type: "relation", tags: { natural: "water", type: "multipolygon" }, members: [
+      { type: "way", ref: 901, role: "outer" }, { type: "way", ref: 902, role: "inner" },
+    ] }, outer, inner,
+  ], "KORD", 123, { lat: 0, lon: 0 });
+  assert.equal(parsed.geography?.fallback, false);
+  assert.equal(parsed.geography?.water.length, 1);
+  assert.equal(parsed.geography?.water[0]?.holes?.length, 1);
+  assert.equal(airportGeographyIsWater(parsed.geography!, { lat: 0.07, lon: 0.07 }), false);
+  assert.equal(airportGeographyIsWater(parsed.geography!, { lat: 0.04, lon: 0.04 }), true);
+});
+
+test("bounded reference-only water members join complete fragments but retain missing-node breaks", () => {
+  const a = [{ lat: 0.03, lon: 0.03 }, { lat: 0.03, lon: 0.05 }, { lat: 0.05, lon: 0.05 }];
+  const b = [{ lat: 0.05, lon: 0.05 }, { lat: 0.05, lon: 0.03 }, { lat: 0.03, lon: 0.03 }];
+  const relation = { id: 90, type: "relation" as const, tags: { natural: "water" }, members: [
+    { type: "way" as const, ref: 901, role: "outer" }, { type: "way" as const, ref: 902, role: "outer" },
+  ] };
+  const parse = (geometry: Array<{ lat: number; lon: number } | null>) => parseAirportSurfaceElements([
+    relation, line(901, a, {}), { id: 902, type: "way", geometry },
+  ], "KORD", 123, { lat: 0, lon: 0 });
+  assert.equal(parse(b).geography?.water.length, 1);
+  assert.equal(parse([b[0]!, null, b[1]!, b[2]!]).geography?.water.length, 0);
+});
+
+test("water relation associates a concave island with its outer ring using an island vertex", () => {
+  const outer = [{ lat: 0.01, lon: 0.01 }, { lat: 0.01, lon: 0.12 }, { lat: 0.04, lon: 0.12 },
+    { lat: 0.04, lon: 0.04 }, { lat: 0.12, lon: 0.04 }, { lat: 0.12, lon: 0.01 }, { lat: 0.01, lon: 0.01 }];
+  const inner = [{ lat: 0.02, lon: 0.02 }, { lat: 0.02, lon: 0.11 }, { lat: 0.03, lon: 0.11 },
+    { lat: 0.03, lon: 0.03 }, { lat: 0.11, lon: 0.03 }, { lat: 0.11, lon: 0.02 }, { lat: 0.02, lon: 0.02 }];
+  const parsed = parseAirportSurfaceElements([{ id: 90, type: "relation", tags: { natural: "water" }, members: [
+    { type: "way", role: "outer", geometry: outer }, { type: "way", role: "inner", geometry: inner },
+  ] }], "KORD", 123, { lat: 0, lon: 0 });
+  assert.equal(parsed.geography?.water[0]?.holes?.length, 1);
+  assert.equal(airportGeographyIsWater(parsed.geography!, { lat: 0.025, lon: 0.08 }), false);
+});
+
+test("airport point remains dry when runway geometry is unavailable", () => {
+  const parsed = parseAirportSurfaceElements([square(1, -0.1, -0.1, 0.1, 0.1, { natural: "water" })],
+    "KORD", 123, { lat: 0, lon: 0 });
+  assert.equal(parsed.geography?.fallbackReason, "water-covers-runways");
 });
