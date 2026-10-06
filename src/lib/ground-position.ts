@@ -35,6 +35,7 @@ const TRACE_HOSTS = [
   "https://globe.airplanes.live",
 ];
 const groundTraceCache = new Map<string, { at: number; value: GroundTracePosition | null }>();
+const groundMissLogAt = new Map<string, number>();
 
 async function recentGroundTrace(
   hex: string,
@@ -256,6 +257,37 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         ageSec: Math.round(Date.now() / 1000 - aroundFallback.seenAt),
       });
       return finish(aroundFallback);
+    }
+
+    // An "ok" live response can still omit one aircraft. If both exact and
+    // airport-radius lookup miss, try the already-supported recent trace for
+    // the known hex before leaving the map without a marker.
+    const traced = wantedHex
+      ? await recentGroundTrace(wantedHex, airport, resolvedRegistration, callsigns[0] ?? data.callsign)
+      : null;
+    if (traced) {
+      console.info("[ground-position]", {
+        provider: "adsb-trace-recovery",
+        callsign: traced.callsign,
+        ageSec: Math.round(Date.now() / 1000 - traced.seenAt),
+      });
+      return finish(traced);
+    }
+
+    const missKey = `${data.movementKind ?? "ground"}:${data.flightNumber ?? data.callsign ?? wantedHex ?? wantedReg ?? "unknown"}:${diagnosticAirport ?? "unknown"}`;
+    const now = Date.now();
+    if (now - (groundMissLogAt.get(missKey) ?? 0) >= 15_000) {
+      groundMissLogAt.set(missKey, now);
+      console.info("[ground-position-miss]", {
+        airport: diagnosticAirport,
+        movement: data.movementKind,
+        flight: data.flightNumber,
+        hasHex: Boolean(wantedHex),
+        hasRegistration: Boolean(wantedReg),
+        callsigns,
+        exactStatus: exactPacks.map((pack) => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
+        aroundStatus: aroundPacks.map((pack) => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
+      });
     }
     return finish(null);
   });;
