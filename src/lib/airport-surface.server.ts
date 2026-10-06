@@ -35,7 +35,7 @@ type OverpassElement = {
 type CacheEntry = { value: AirportSurface; at: number };
 const cache = new Map<string, CacheEntry>();
 const pending = new Map<string, Promise<AirportSurface>>();
-const OVERPASS_TIMEOUT_MS = 6_000;
+const OVERPASS_TIMEOUT_MS = 4_000;
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -522,10 +522,10 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
     // quickly. This avoids serial 5s + 6s + FAA waits on a cold airport.
     const faaFallback = likelyUsAirport(airport)
       ? (async () => {
-          await sleep(2_500);
+          await sleep(1_000);
           if (settled) return null;
           try {
-            return await withDeadline(loadFaaAirportSurface({ airport, lat: input.lat, lon: input.lon }), 7_000, "FAA surface");
+            return await withDeadline(loadFaaAirportSurface({ airport, lat: input.lat, lon: input.lon }), 6_000, "FAA surface");
           } catch (error) {
             console.warn("[airport-surface] FAA fallback failed", airport, compactError(error));
             return null;
@@ -534,7 +534,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
       : Promise.resolve(null);
 
     try {
-      const exact = await loadOsmSurface(airport, input, "exact", exactAirportSurfaceOverpassQuery(airport), 5_000);
+      const exact = await loadOsmSurface(airport, input, "exact", exactAirportSurfaceOverpassQuery(airport), 4_000);
       settled = true;
       cache.set(key, { value: exact, at: Date.now() });
       return exact;
