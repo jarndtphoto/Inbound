@@ -485,7 +485,23 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
   };
 }
 
-export function exactAirportSurfaceOverpassQuery(airport: string) {
+function overpassBox(input: { lat: number; lon: number }) {
+  const bounds = airportSurfaceBounds(input);
+  return [bounds.south, bounds.west, bounds.north, bounds.east].map((value) => value.toFixed(6)).join(",");
+}
+
+function detailedGeographyOverpassClauses(input: { lat: number; lon: number }) {
+  const box = overpassBox(input);
+  return [
+    `way["natural"="coastline"](${box});`,
+    `way["natural"="water"](${box});`,
+    `relation["natural"="water"](${box});`,
+    `way["water"~"^(lake|lagoon|reservoir|bay)$"](${box});`,
+    `relation["water"~"^(lake|lagoon|reservoir|bay)$"](${box});`,
+  ].join("");
+}
+
+export function exactAirportSurfaceOverpassQuery(airport: string, input?: { lat: number; lon: number }) {
   const code = airport.toUpperCase();
   const aliases = airportCodeCandidates(code);
   const clauses: string[] = [];
@@ -497,17 +513,13 @@ export function exactAirportSurfaceOverpassQuery(airport: string) {
     clauses.push(`way["aeroway"="aerodrome"]["ref"="${value}"];`);
     clauses.push(`relation["aeroway"="aerodrome"]["ref"="${value}"];`);
   }
-  return `[out:json][timeout:7];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];);out geom;`;
+  const geography = input ? detailedGeographyOverpassClauses(input) : "";
+  return `[out:json][timeout:7];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];${geography});out geom;`;
 }
 
 export function boxedAirportSurfaceOverpassQuery(input: { lat: number; lon: number }) {
-  const latPad = 0.075;
-  const lonPad = Math.min(0.12, 0.075 / Math.max(0.45, Math.cos(input.lat * Math.PI / 180)));
-  const south = (input.lat - latPad).toFixed(6);
-  const north = (input.lat + latPad).toFixed(6);
-  const west = (input.lon - lonPad).toFixed(6);
-  const east = (input.lon + lonPad).toFixed(6);
-  return `[out:json][timeout:8];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${south},${west},${north},${east});way["area:aeroway"="taxiway"](${south},${west},${north},${east});relation["aeroway"~"^(apron|terminal)$"](${south},${west},${north},${east});relation["area:aeroway"="taxiway"](${south},${west},${north},${east});way["aeroway"="aerodrome"](${south},${west},${north},${east});relation["aeroway"="aerodrome"](${south},${west},${north},${east}););out geom;`;
+  const box = overpassBox(input);
+  return `[out:json][timeout:8];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${box});way["area:aeroway"="taxiway"](${box});relation["aeroway"~"^(apron|terminal)$"](${box});relation["area:aeroway"="taxiway"](${box});way["aeroway"="aerodrome"](${box});relation["aeroway"="aerodrome"](${box});${detailedGeographyOverpassClauses(input)});out geom;`;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -571,7 +583,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   if (!/^[A-Z0-9]{3,4}$/.test(airport) || !validCoord(input.lat, -90, 90) || !validCoord(input.lon, -180, 180)) {
     throw new Error("Invalid airport surface request");
   }
-  const key = `${airport}:surface-v10:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
+  const key = `${airport}:surface-v11:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const existing = pending.get(key);
@@ -595,7 +607,7 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
       : Promise.resolve(null);
 
     try {
-      const exact = await loadOsmSurface(airport, input, "exact", exactAirportSurfaceOverpassQuery(airport), 5_000);
+      const exact = await loadOsmSurface(airport, input, "exact", exactAirportSurfaceOverpassQuery(airport, input), 5_000);
       settled = true;
       cache.set(key, { value: exact, at: Date.now() });
       return exact;
