@@ -3,7 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { loadFlightStory, loadLiveBoard } from "./story.server";
 import { readFlightResume, type DepartureStageCheckpoint, type FlightResume } from "./flight-resume";
 import { haversineNm } from "./geo";
-import { FR24_SURFACE_FRESH_SEC, airborneFixSupersedesGround, identityCompatible, normalizedToLive, positionAgeSec } from "./flight-data";
+import { AIRBORNE_POSITION_FRESH_SEC, FR24_SURFACE_FRESH_SEC, airborneFixSupersedesGround, identityCompatible, normalizedToLive, positionAgeSec } from "./flight-data";
 import { airportByIata, airportByIcao } from "./airports";
 import type { FlightStory } from "./types";
 import { formatClockTime } from "./presentation-time";
@@ -191,7 +191,7 @@ export function preferFreshAirborneState(story: FlightStory): FlightStory {
   const ac = story.aircraft;
   if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon) || ac.onGround !== false) return story;
   const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : ac.seenSec ?? null;
-  if (age != null && age > 30) return story;
+  if (age != null && age > AIRBORNE_POSITION_FRESH_SEC) return story;
   const altFt = typeof ac.altFt === "number" && Number.isFinite(ac.altFt) ? ac.altFt : null;
   const gsKt = typeof ac.gsKt === "number" && Number.isFinite(ac.gsKt) ? ac.gsKt : null;
   const originNm = Number.isFinite(story.origin?.lat) && Number.isFinite(story.origin?.lon)
