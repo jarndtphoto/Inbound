@@ -4490,6 +4490,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		schedule: aware ? { status: resumed ? "saved" : "current", confirmedAt: aware.confirmedAt ?? Date.now(), serviceDate: aware._publicScheduleDate ?? null } : undefined,
 		resume: storyResume,
 		flightId: aware?.flightId ?? undefined,
+		cancelled: Boolean(aware?.cancelled),
 		diversion: aware?.diversion,
 		inboundDiversion,
 		query,

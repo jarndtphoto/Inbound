@@ -148,15 +148,16 @@ test('a stronger observation does not raise an independent lighter forecast or h
 test('the shared welcome summary retains separate icing, wind-shear and visibility alerts', () => {
   const story = pirepPresentationStory();
   const warnings = [
-    { id: 'ice', kind: 'ice', label: 'Icing possible ahead' },
-    { id: 'wind', kind: 'llws', label: 'Wind shear near arrival' },
-    { id: 'cloud', kind: 'ifr', label: 'Low cloud near arrival' },
+    { id: 'ice', kind: 'ice', label: 'Icing possible ahead', chip: 'Ice' },
+    { id: 'wind', kind: 'llws', label: 'Wind shear near arrival', chip: 'Wind shear' },
+    { id: 'cloud', kind: 'ifr', label: 'Low cloud near arrival', chip: 'Low visibility' },
   ];
   story.hazards.push(...warnings.map(warning => ({ ...warning, remaining: true })));
   const output = views(story);
   assert.match(output.welcome, /Smooth now · moderate bumps reported ahead/);
-  assert.match(output.welcome, /Weather alerts:/);
-  for (const warning of warnings) assert(output.welcome.includes(warning.label));
+  assert.match(output.welcomeHtml, /aria-label="Weather alerts"/);
+  for (const warning of warnings) assert(output.welcome.includes(warning.chip));
+  for (const warning of warnings) assert(!output.welcome.includes(warning.label), 'chips use consistent passenger labels');
 });
 
 test('cache accepts timestamped observations and ordinary stories but rejects untimed legacy PIREP forecasts', () => {
