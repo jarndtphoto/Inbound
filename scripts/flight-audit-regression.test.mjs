@@ -292,8 +292,18 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /rotate\(\$\{displayAircraft\.track\}\)/);
     assert.doesNotMatch(groundSource, /displayAircraft\.track \+ 180/);
     assert.match(groundSource, /delayed \$\{providerLabel\} position/);
-    assert.match(groundSource, /storyPositionAge != null && storyPositionAge <= 30/);
+    assert.match(groundSource, /storyPositionAge != null && storyPositionAge <= 90/);
     assert.match(groundSource, /\? 8_000 : false/);
+    assert.match(groundSource, /airportRunwayFallbackFeatures\(airport\.icao\)/);
+    assert.match(groundSource, /Detailed taxiways unavailable; runways shown\./);
+  });
+
+  it('switches from flight to arrival ground when the trusted story confirms landing even if the last coordinate is stale', () => {
+    assert.match(groundSource, /const arrivalStageConfirmed = arrivedGroundNow/);
+    assert.match(groundSource, /story\.currentStage === "taxi_in"/);
+    assert.match(groundSource, /story\.arrivalStatus === "landed"/);
+    assert.match(groundSource, /if \(arrivalStageConfirmed && !autoArrivalSwitched\.current\)/);
+    assert.match(groundSource, /setTab\("arrival"\)/);
   });
 
   it('bounds cold airport-surface fallback instead of serially waiting about twelve seconds', () => {
