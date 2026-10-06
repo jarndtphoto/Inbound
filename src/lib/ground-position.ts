@@ -36,6 +36,7 @@ const TRACE_HOSTS = [
 ];
 const groundTraceCache = new Map<string, { at: number; value: GroundTracePosition | null }>();
 const groundMissLogAt = new Map<string, number>();
+const groundAroundCache = new Map<string, { at: number; ac: AdsbRaw[] }>();
 
 async function recentGroundTrace(
   hex: string,
@@ -239,7 +240,24 @@ export const getGroundPosition = createServerFn({ method: "POST" })
 
     const aroundPacks = await fetchAround(airport.lat, airport.lon, 20).catch(() => []);
     noteAdsbPacks(aroundPacks);
-    const around = fuseProviderLists(aroundPacks, { airside: true })
+    const aroundKey = `${airport.lat.toFixed(3)}:${airport.lon.toFixed(3)}:20`;
+    const fusedAround = fuseProviderLists(aroundPacks, { airside: true });
+    if (fusedAround.length) {
+      groundAroundCache.set(aroundKey, { at: Date.now(), ac: fusedAround });
+    }
+    const heldAround = !fusedAround.length ? groundAroundCache.get(aroundKey) : null;
+    const aroundSource = heldAround && Date.now() - heldAround.at <= 30_000
+      ? heldAround.ac.map((raw) => {
+          const heldSec = Math.max(0, Date.now() - heldAround.at) / 1000;
+          return {
+            ...raw,
+            seen_pos: typeof raw.seen_pos === "number" ? raw.seen_pos + heldSec : raw.seen_pos,
+            seen: typeof raw.seen === "number" ? raw.seen + heldSec : raw.seen,
+            _fusion: raw._fusion ? { ...raw._fusion, ageSec: raw._fusion.ageSec + heldSec } : undefined,
+          };
+        })
+      : fusedAround;
+    const around = aroundSource
       .filter(matchesIdentity)
       .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
     let aroundFallback: ReturnType<typeof usableAdsb> = null;
