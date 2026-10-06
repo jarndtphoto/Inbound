@@ -282,6 +282,7 @@ export type FlightStory = {
     providerDistancesNm?: Partial<Record<"flightaware" | "fr24" | "adsb", number | null>>;
     filedRouteDeviationNm?: number | null;
     providerEta?: { flightaware: number | null; fr24: number | null };
+    fr24Usage?: import("./fr24-budget.server").Fr24UsageDiagnostics | null;
     remainingNm?: number;
     etaMin?: number;
     landed?: boolean;

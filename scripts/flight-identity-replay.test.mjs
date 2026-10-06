@@ -60,13 +60,13 @@ test('fixture audit and FR24-only push/taxi survive actual cold story instances 
     assert.equal(parked.providers.canonicalKey, null);
     assert.equal(parked.providers.canonicalKeyFailure, 'missing_scheduled');
     assert.equal(parked.providers.flightStateKey, fallbackKey);
-    now += 10_000; raw.lon += 0.0012; raw.gspeed = 4;
+    now += 21_000; raw.lon += 0.0012; raw.gspeed = 4;
     const pushed = await server.loadFlightStory('UA219', { fresh: true });
     assert.equal(pushed.currentStage, 'push'); assert.equal(pushed.times.pushed, true);
-    now += 10_000; raw.lon += 0.0020; raw.gspeed = 15; server = await cold();
+    now += 21_000; raw.lon += 0.0020; raw.gspeed = 15; server = await cold();
     const taxi = await server.loadFlightStory('UA219', { fresh: true });
     assert.equal(taxi.currentStage, 'taxi'); assert.equal(taxi.times.pushUnix, pushed.times.pushUnix);
-    now += 10_000; raw.gspeed = 0; server = await cold();
+    now += 21_000; raw.gspeed = 0; server = await cold();
     const held = await server.loadFlightStory('UA219', { fresh: true });
     assert.equal(held.currentStage, 'taxi'); assert.equal(held.times.pushUnix, pushed.times.pushUnix);
     const rows = (await pg.query('select * from flight_phase_state where land_key=$1', [fallbackKey])).rows;
@@ -76,7 +76,7 @@ test('fixture audit and FR24-only push/taxi survive actual cold story instances 
     awareRecord = structuredClone(fixture.flightawareRecord);
     awareRecord.flightStatus = 'scheduled'; awareRecord.gateDepartureTimes.actual = null;
     awareRecord.takeoffTimes.actual = null; awareRecord.track = []; delete awareRecord.coord;
-    now += 10_000; server = await cold();
+    now += 21_000; server = await cold();
     const promoted = await server.loadFlightStory('UA219', { fresh: true });
     assert.equal(promoted.providers.flightStateKey, 'leg:v1:UAL219|2026-10-02|ORD|HNL');
     assert.equal(promoted.providers.canonicalKeyFailure, null);

@@ -4,7 +4,7 @@ import type { LiveAircraft } from "./types.ts";
 
 export type FlightProvider = "fr24" | "flightaware" | "adsb";
 export type Confidence = "high" | "medium" | "low";
-export type ProviderState = "ACTIVE" | "DISABLED" | "AUTH_FAILED" | "RATE_LIMITED" | "NO_MATCH" | "ERROR";
+export type ProviderState = "ACTIVE" | "DISABLED" | "AUTH_FAILED" | "RATE_LIMITED" | "BUDGET_EXHAUSTED" | "NO_MATCH" | "ERROR";
 
 export type NormalizedPosition = {
   provider: FlightProvider;

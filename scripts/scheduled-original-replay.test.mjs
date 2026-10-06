@@ -94,9 +94,9 @@ test('FR24-only no schedule: cold taxi stories have null originals and no Schedu
     await globalThis.__pgBootstrapPromise__; const pg = await globalThis.__pgliteInstance__;
     await pg.exec('delete from flight_phase_state; delete from arrival_projection_state');
     await core.loadFlightStory('UA219', { fresh: true });
-    now += 10_000; raw.lon += 0.0012; raw.gspeed = 4;
+    now += 21_000; raw.lon += 0.0012; raw.gspeed = 4;
     await core.loadFlightStory('UA219', { fresh: true });
-    now += 10_000; raw.lon += 0.002; raw.gspeed = 15;
+    now += 21_000; raw.lon += 0.002; raw.gspeed = 15;
     const cold = await import(pathToFileURL(join(directory, 'server/story.mjs')).href + '?cold=taxi');
     taxi = await cold.loadFlightStory('UA219', { fresh: true }); staysTaxi(taxi);
     const again = await (await import(pathToFileURL(join(directory, 'server/story.mjs')).href + '?cold=held')).loadFlightStory('UA219', { fresh: true });
@@ -117,13 +117,13 @@ test('FR24-only no schedule: cold taxi stories have null originals and no Schedu
         renders++;
       }
     }
-    assert.equal(requests.filter(url => url.includes('fr24api')).length, 4);
-    evidence.cases.push({ case: 'FR24-only cold taxi', stage: taxi.currentStage, coldStage: again.currentStage, scheduledRows: 0, renders, liveRequests: 4 });
+    assert.equal(requests.filter(url => url.includes('fr24api')).length, 3, 'immediate cold read shares the Neon response');
+    evidence.cases.push({ case: 'FR24-only cold taxi', stage: taxi.currentStage, coldStage: again.currentStage, scheduledRows: 0, renders, liveRequests: 3 });
     // Actual FlightAware -> FlightStats -> FlightAware loading, with fresh
     // origin surface evidence throughout. Preserve proven original schedules
     // even where the two providers post different scheduled clocks.
     now += 70_000; mode = 'aware'; const aware = await core.loadFlightStory('UA219', { fresh: true });
-    now += 10_000; mode = 'stats'; const fallback = await core.loadFlightStory('UA219', { fresh: true });
+    now += 21_000; mode = 'stats'; const fallback = await core.loadFlightStory('UA219', { fresh: true });
     now += 70_000; mode = 'aware'; const back = await core.loadFlightStory('UA219', { fresh: true });
     for (const story of [aware, fallback, back]) {
       staysTaxi(story); assert.equal(story.stateKey, aware.stateKey);
@@ -132,9 +132,9 @@ test('FR24-only no schedule: cold taxi stories have null originals and no Schedu
     }
     assert.equal(aware.times.origPushUnix, awareRecord.gateDepartureTimes.scheduled);
     assert.equal(fallback.flightId ?? null, null); assert.equal(back.flightId, aware.flightId);
-    assert.equal(requests.filter(url => url.includes('fr24api')).length, 7);
+    assert.equal(requests.filter(url => url.includes('fr24api')).length, 6);
     evidence.cases.push({ case: 'actual UA219 provider handoff', stages: [aware, fallback, back].map(story => story.currentStage),
-      originalSchedules: [aware.times.origPushUnix, aware.times.origTakeoffUnix, aware.times.origLandUnix], stateKey: aware.stateKey, liveRequests: 7 });
+      originalSchedules: [aware.times.origPushUnix, aware.times.origTakeoffUnix, aware.times.origLandUnix], stateKey: aware.stateKey, liveRequests: 6 });
   } finally {
     globalThis.fetch = realFetch; restoreClock?.();
     envKeys.forEach((key, i) => oldEnv[i] == null ? delete process.env[key] : process.env[key] = oldEnv[i]);
