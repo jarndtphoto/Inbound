@@ -132,7 +132,7 @@ test("MCO/TPA ground diagnostics emit one compact free-provider summary", async 
   assert.match(fr24, /probe\.upstream = "fresh"/);
   assert.match(fr24, /probe\.rowsReturned = rows\.length/);
 
-  assert.match(fusion, /ProviderFetchStatus = "ok" \| "429" \| "timeout" \| "error" \| "backoff"/);
+  assert.match(fusion, /ProviderFetchStatus = "ok" \| "403" \| "429" \| "timeout" \| "error" \| "backoff"/);
   assert.match(fusion, /status: "backoff"/);
   assert.match(fusion, /status: "ok"/);
 });
