@@ -3,14 +3,6 @@
 These regressions retain their executable assertions with explicit `todo`
 reasons. They count separately from passing tests. No test was deleted.
 
-## 6: ZRH / unknown-airport public route support
-
-`scripts/flight-audit-regression.test.mjs` — "loads an exact route from a
-FlightStats-style public status page" returns null for ORD→ZRH because the
-parser requires both airports in the local airport directory, which lacks ZRH.
-Route support remains on hold. Changing its fixture to a supported airport
-would hide this failure.
-
 ## 7: One date followed by multiple public time labels
 
 `scripts/flight-audit-regression.test.mjs` — "parses public scheduled and

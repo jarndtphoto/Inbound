@@ -256,6 +256,7 @@ html[data-theme="sunrise"], html[data-theme="sunrise"] .inbound-redesign {
 .appearance-menu button { display: block; width: 100%; min-height: 44px; text-align: left; border-radius: 6px; padding: 8px 12px; }
 .appearance-menu button[aria-pressed="true"] { background: var(--color-surface-2); color: var(--color-accent); font-weight: 600; }
 .appearance-menu p { font-size: 12px; padding: 8px 12px; color: var(--color-muted); }
+.appearance-menu .appearance-build { margin: 2px 4px 0; padding: 10px 8px 4px; border-top: 1px solid var(--color-border); font-size: 10px; line-height: 1.45; letter-spacing: .01em; opacity: .78; }
 .inbound-redesign .journey-main { padding: 0; }
 .inbound-redesign .journey-content { padding-bottom: 0; max-width: 1100px; }
 .inbound-redesign .journey-map { height: 240px; flex: none; position: relative; }

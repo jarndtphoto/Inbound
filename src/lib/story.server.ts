@@ -9,6 +9,7 @@ import { withStoryRequest, noteStoryCache, noteStorySchedule, noteStoryFallback 
 import { loadPhaseState, savePhaseState, phaseStateEqual } from "./flight-phase-state.server";
 import { confirmTakeoff, reconcileTakeoff, takeoffFloorStage, takeoffDiagnostic, hasOriginSurfaceFix } from "./confirmed-takeoff.ts";
 import { activeConfirmedTakeoff, mergeConfirmedTakeoff } from "./flight-phase-state-logic.ts";
+import { BUILD_INFO } from "./build-info.ts";
 // Only server-validated evidence enters this bounded outage continuity memo.
 // Durable state remains authoritative across cold instances.
 const takeoffContinuity = new Map();
@@ -19,6 +20,7 @@ import { routeWeatherEvents } from "./weather-events";
 import { flightWeatherSummary } from "./weather-presentation";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
 import { AIRPORT_BY_ICAO, airportByIata, airportByIcao } from "./airports";
+import { scheduledAirportByIata } from "./scheduled-airports.ts";
 import { IATA_TO_ICAO, displayIata, parseFlightQuery } from "./flight-parse";
 import {
   densifyPath,
@@ -1532,17 +1534,23 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 	const header = section.slice(0, departureIndex);
 	const departureSection = section.slice(departureIndex, arrivalIndex);
 	const arrivalSection = section.slice(arrivalIndex);
+	// FlightStats exposes IATA codes in the route header even when an airport is
+	// not in our curated display directory. Keep those identities so the field
+	// resolver can obtain coordinates from AviationWeather instead of dropping
+	// the entire schedule. Route codes are the final uppercase triplets before
+	// the departure section; status/timezone tokens are excluded explicitly.
+	const ignoredCodes = new Set(["ARR", "DEP", "ETA", "ETD", "EST", "UTC", "GMT", "TBD"]);
+	const candidates = [...header.matchAll(/\b([A-Z]{3})\b/g)]
+		.map((m) => m[1])
+		.filter((code) => !ignoredCodes.has(code));
 	const codes = [];
-	for (const m of header.matchAll(/\b([A-Z]{3})\b/g)) {
-		const code = m[1];
-		if (!airportByIata(code) || codes.includes(code)) continue;
-		codes.push(code);
-		if (codes.length >= 2) break;
+	for (let i = candidates.length - 1; i >= 0 && codes.length < 2; i--) {
+		const code = candidates[i];
+		if (!codes.includes(code)) codes.unshift(code);
 	}
 	if (codes.length < 2 || codes[0] === codes[1]) return null;
 	const origin = airportByIata(codes[0]);
 	const dest = airportByIata(codes[1]);
-	if (!origin || !dest) return null;
 	const gateOut = flightStatsTimes(departureSection);
 	const gateIn = flightStatsTimes(arrivalSection);
 	const none = { scheduled: null, estimated: null, actual: null };
@@ -1554,22 +1562,22 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 		iataIdent,
 		status: cancelled ? "cancelled" : arrived ? "arrived" : departed ? "departed" : /\bScheduled\b/i.test(header) ? "scheduled" : "",
 		confirmedAt: Date.now(),
-		originIata: origin.iata,
-		originIcao: origin.icao,
-		originName: origin.name,
-		originCity: origin.city,
-		originLat: origin.lat,
-		originLon: origin.lon,
+		originIata: origin?.iata ?? codes[0],
+		originIcao: origin?.icao ?? null,
+		originName: origin?.name ?? codes[0],
+		originCity: origin?.city ?? "",
+		originLat: origin?.lat ?? null,
+		originLon: origin?.lon ?? null,
 		originGate: null,
-		originTz: origin.tz ?? null,
-		destIata: dest.iata,
-		destIcao: dest.icao,
-		destName: dest.name,
-		destCity: dest.city,
-		destLat: dest.lat,
-		destLon: dest.lon,
+		originTz: origin?.tz ?? null,
+		destIata: dest?.iata ?? codes[1],
+		destIcao: dest?.icao ?? null,
+		destName: dest?.name ?? codes[1],
+		destCity: dest?.city ?? "",
+		destLat: dest?.lat ?? null,
+		destLon: dest?.lon ?? null,
 		destGate: null,
-		destTz: dest.tz ?? null,
+		destTz: dest?.tz ?? null,
 		takeoff: { ...none },
 		landing: { ...none },
 		gateOut,
@@ -1698,6 +1706,9 @@ async function loadFlightStatsPublic(callsign) {
 }
 const awareRejections = new Map();
 let awarePublicBlockedUntil = 0;
+export function scheduleHasRoute(record) {
+	return Boolean(record && (record.originIata || record.originIcao) && (record.destIata || record.destIcao));
+}
 async function loadAware(callsign) {
 	const apiRecord = await loadAeroFlight(callsign);
 	if (apiRecord) return { ...apiRecord, _scheduleSource: "flightaware_api" };
@@ -1720,7 +1731,15 @@ async function loadAware(callsign) {
 			const result = await fetchAwarePage(`https://www.flightaware.com/live/flight/${encodeURIComponent(callsign)}`, callsign, true);
 			return result ? { ...result, confirmedAt: Date.now() } : null;
 		});
-		if (record) awarePublicBlockedUntil = 0;
+		if (scheduleHasRoute(record)) awarePublicBlockedUntil = 0;
+		if (record && !scheduleHasRoute(record)) {
+			// FlightAware occasionally publishes a truthy trackpoll shell with no
+			// route. Treat it as unavailable so it cannot suppress the independent
+			// public schedule fallback.
+			const fallback = await loadFlightStatsPublic(callsign);
+			noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
+			if (fallback) return fallback;
+		}
 		return record;
 	} catch (error) {
 		if (/HTTP 402\b/.test(error?.message ?? "")) {
@@ -1728,6 +1747,8 @@ async function loadAware(callsign) {
 			for (const [key, entry] of awareRejections) if (entry.until <= Date.now()) awareRejections.delete(key);
 			if (awareRejections.size >= 100) awareRejections.delete(awareRejections.keys().next().value);
 			awareRejections.set(callsign, { until: Date.now() + 60000, error });
+		}
+		if (!flightNotFound(error)) {
 			const fallback = await loadFlightStatsPublic(callsign);
 			noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
 			if (fallback) return fallback;
@@ -1767,8 +1788,47 @@ function fieldFromKnown(iata, icao, lat, lon, name, city, tzHint) {
 		category: "UNK"
 	};
 }
+export async function loadAirportInfo(iata, icao) {
+	const normalizedIata = String(iata ?? "").toUpperCase();
+	const normalizedIcao = String(icao ?? "").toUpperCase();
+	const scheduled = scheduledAirportByIata(normalizedIata);
+	if (scheduled && (!normalizedIcao || !scheduled.icao || normalizedIcao === scheduled.icao)) {
+		return scheduled.icao ? scheduled : { ...scheduled, icao: normalizedIcao };
+	}
+
+	// AviationWeather is a coordinate fallback only. Never manufacture a US
+	// ICAO identifier from an IATA code; non-US airports such as VCE do not use
+	// a K prefix. Missing and failed responses throw inside cached(), so they
+	// are not retained as negative cache entries.
+	const candidate = /^[A-Z0-9]{4}$/.test(normalizedIcao)
+		? normalizedIcao
+		: /^[A-Z]{3}$/.test(normalizedIata) ? normalizedIata : null;
+	if (candidate) {
+		const row = await safe(cached(`airport-info-v3:${candidate}`, 24 * 60 * 60_000, async () => {
+			const rows = await fetchJson(`https://aviationweather.gov/api/data/airport?ids=${encodeURIComponent(candidate)}&format=json`, 10e3);
+			const found = Array.isArray(rows) ? rows[0] ?? null : null;
+			if (!found || !Number.isFinite(found.lat) || !Number.isFinite(found.lon)) throw new Error("airport not found");
+			return found;
+		}), null);
+		if (!row) return null;
+		const rowIata = String(row.iataId ?? "").toUpperCase();
+		const rowIcao = String(row.icaoId ?? "").toUpperCase();
+		if (normalizedIata && rowIata && rowIata !== normalizedIata) return null;
+		if (normalizedIcao && rowIcao !== normalizedIcao) return null;
+		return {
+			iata: rowIata || normalizedIata,
+			icao: rowIcao || normalizedIcao,
+			lat: row.lat,
+			lon: row.lon,
+			name: row.name ?? row.site ?? normalizedIata,
+			city: row.city ?? "",
+			tz: null,
+		};
+	}
+	return null;
+}
 /** Resolve coordinates without replacing a current flight's airport identity. */
-async function resolveFlightField(aware, side, fallback) {
+export async function resolveFlightField(aware, side, fallback) {
   const prefix = side === "origin" ? "origin" : "dest";
   const iata = aware?.[prefix + "Iata"] ?? null;
   const icao = aware?.[prefix + "Icao"] ?? null;
@@ -1776,6 +1836,13 @@ async function resolveFlightField(aware, side, fallback) {
     aware?.[prefix + "Name"], aware?.[prefix + "City"], aware?.[prefix + "Tz"]);
   const known = make(aware?.[prefix + "Lat"], aware?.[prefix + "Lon"]);
   if (known) return known;
+  const airportInfo = await loadAirportInfo(iata, icao);
+  if (airportInfo) {
+	const resolved = fieldFromKnown(airportInfo.iata, airportInfo.icao, airportInfo.lat, airportInfo.lon,
+		aware?.[prefix + "Name"] || airportInfo.name, aware?.[prefix + "City"] || airportInfo.city,
+		airportInfo.tz || aware?.[prefix + "Tz"]);
+	if (resolved) return resolved;
+  }
   if (icao && /^[A-Z0-9]{4}$/.test(icao)) {
     const { metar } = await safe(loadMetar(icao), {metar:null});
     if (Number.isFinite(metar?.lat) && Number.isFinite(metar?.lon)) return make(metar.lat, metar.lon);
@@ -4412,6 +4479,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		routeMemoryPersistence = savedRoute.status;
 	}
 	return {
+		build: BUILD_INFO,
 		fetchedAt: Date.now(),
 		stateKey,
 		confirmedTakeoff: takeoffDiagnostic(confirmedTakeoff),

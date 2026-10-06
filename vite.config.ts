@@ -1,4 +1,5 @@
 import { readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
@@ -11,6 +12,25 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
+
+function gitCommit(): string {
+  const supplied = process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA;
+  if (supplied) return supplied.slice(0, 7);
+  try {
+    return execFileSync("git", ["rev-parse", "--short=7", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "local";
+  }
+}
+
+// Vercel does not expose a deployment-created timestamp to the build. The
+// build timestamp is the closest stable value and travels in both bundles and
+// every story response, so UI and API reports identify the same deployment.
+const BUILD_COMMIT = gitCommit();
+const BUILD_TIME = new Date().toISOString();
 
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
@@ -146,6 +166,10 @@ function authPopupPlugin(): Plugin {
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
+  define: {
+    __INBOUND_BUILD_COMMIT__: JSON.stringify(BUILD_COMMIT),
+    __INBOUND_BUILD_TIME__: JSON.stringify(BUILD_TIME),
+  },
   server: {
     host: "0.0.0.0",
     port: 8080,

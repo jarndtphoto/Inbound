@@ -23,7 +23,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint, loadAirportInfo, resolveFlightField, scheduleHasRoute } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 let loadFlightStory;
 let storyInstance = 0;
 async function coldStoryFixture() {
@@ -942,13 +942,98 @@ describe('public schedule fallback', () => {
     assert.equal(record.gateIn.actual, null);
   });
 
-  it('loads an exact route from a FlightStats-style public status page', { todo: "Held #6: unknown-airport route support — https://github.com/jarndtphoto/Inbound/blob/codex/test-suite-cleanup/docs/test-cleanup-held-bugs.md#6-zrh--unknown-airport-public-route-support" }, () => {
+  it('loads an exact route from a FlightStats-style public status page', () => {
     const html = `<html><body><h1>Flight Status</h1><div>UA 3 United Airlines ORD Chicago ZRH Zurich Scheduled On time</div><div>Flight Departure Times Scheduled 15:50 CDT</div><div>Flight Arrival Times Scheduled 07:45 CEST</div></body></html>`;
     const record = parseFlightStatsPublicSchedule(html, 'UAL3', '2026-10-01');
     assert.equal(record?.iataIdent, 'UA3');
     assert.equal(record?.originIata, 'ORD');
     assert.equal(record?.destIata, 'ZRH');
     assert.equal(record?.status, 'scheduled');
+  });
+
+  it('preserves every affected PHL route when the other airport is not curated', () => {
+    const cases = [
+      ['OH5427', 'GSP', 'PHL'],
+      ['AA1834', 'RSW', 'PHL'],
+      ['F91989', 'PHL', 'BNA'],
+      ['AA714', 'PHL', 'VNC'],
+    ];
+    for (const [flight, origin, dest] of cases) {
+      const carrier = flight.match(/^[A-Z0-9]{2}/)?.[0];
+      const number = flight.slice(2);
+      const html = `<html><body><h1>Flight Status</h1><div>${carrier} ${number} Airline ${origin} Origin ${dest} Destination Scheduled On time</div><div>Flight Departure Times 05-Oct-2026 Scheduled 18:00 EDT</div><div>Flight Arrival Times 05-Oct-2026 Scheduled 20:00 EDT</div></body></html>`;
+      const record = parseFlightStatsPublicSchedule(html, flight, '2026-10-05');
+      assert.equal(record?.originIata, origin, `${flight} origin`);
+      assert.equal(record?.destIata, dest, `${flight} destination`);
+    }
+  });
+
+  it('resolves scheduled airports from the static OurAirports lookup with IANA zones', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error('static airports must not call AviationWeather'); };
+    try {
+      const cases = [
+        ['VCE', 'LIPZ', 'Europe/Rome'],
+        ['ZRH', 'LSZH', 'Europe/Zurich'],
+        ['GSP', 'KGSP', 'America/New_York'],
+        ['RSW', 'KRSW', 'America/New_York'],
+        ['BNA', 'KBNA', 'America/Chicago'],
+      ];
+      for (const [iata, icao, tz] of cases) {
+        const info = await loadAirportInfo(iata, null);
+        assert.equal(info?.icao, icao, `${iata} ICAO`);
+        assert.equal(info?.tz, tz, `${iata} time zone`);
+        const field = await resolveFlightField({
+          destIata: iata, destIcao: null, destName: iata,
+          destCity: '', destLat: null, destLon: null, destTz: null,
+        }, 'dest', null);
+        assert.equal(field?.icao, icao, `${iata} resolved ICAO`);
+        assert.equal(field?.tz, tz, `${iata} resolved time zone`);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('uses AviationWeather only as an uncatalogued-airport coordinate fallback', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests = [];
+    globalThis.fetch = async (input) => {
+      requests.push(String(input));
+      return new Response(JSON.stringify([{
+        icaoId: 'ZZZZ', iataId: 'QXZ', name: 'Fixture Airport',
+        lat: 10.5, lon: 20.25,
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    try {
+      const info = await loadAirportInfo('QXZ', 'ZZZZ');
+      assert.equal(info?.icao, 'ZZZZ');
+      assert.equal(info?.lat, 10.5);
+      assert.equal(info?.lon, 20.25);
+      assert.equal(info?.tz, null);
+      assert.deepEqual(requests, ['https://aviationweather.gov/api/data/airport?ids=ZZZZ&format=json']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('returns null for an unknown airport without caching the failure', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests = [];
+    globalThis.fetch = async (input) => {
+      requests.push(String(input));
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    try {
+      assert.equal(await loadAirportInfo('ZZZ', null), null);
+      assert.equal(await loadAirportInfo('ZZZ', null), null);
+      assert.deepEqual(requests, [
+        'https://aviationweather.gov/api/data/airport?ids=ZZZ&format=json',
+        'https://aviationweather.gov/api/data/airport?ids=ZZZ&format=json',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('parses public scheduled and actual gate times when FlightStats exposes them', () => {
@@ -1011,6 +1096,14 @@ describe('public schedule fallback', () => {
     assert.match(source, /awarePublicBlockedUntil = Math\.max\(awarePublicBlockedUntil, Date\.now\(\) \+ 60_000\)/);
     assert.match(source, /const detailPages = bestPage \? \[bestPage\] : pages/);
     assert.match(source, /detailRequests\.length >= 12/);
+  });
+
+  it('falls back when FlightAware returns a truthy shell without a route', () => {
+    assert.equal(scheduleHasRoute({ ident: 'AAL6582', originIata: null, destIata: null }), false);
+    assert.equal(scheduleHasRoute({ originIata: 'PHL', destIcao: 'KABE' }), true);
+    const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(source, /record && !scheduleHasRoute\(record\)/);
+    assert.match(source, /const fallback = await loadFlightStatsPublic\(callsign\)/);
   });
 
   it('fails closed when the page does not identify two known airports', () => {
