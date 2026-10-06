@@ -34,6 +34,7 @@ import { INITIAL_FLIGHT_SEARCH_MS, TEMPORARY_FLIGHT_RETRY_MS, flightStoryQueryKe
 import { WeatherEventMarker } from "@/components/weather-event-marker";
 import { sampleWeather } from "@/lib/route-weather-segments";
 import { WeatherEventBody, WeatherEventHeadline, WeatherIntensityLabel } from "@/components/weather-event-copy";
+import { usePageVisible } from "@/lib/use-page-visible";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
@@ -493,6 +494,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   const publishedLegDate = useRef<string | null>(null);
   const surfacePrefetchRef = useRef<{ flightKey: string; airports: Set<string> }>({ flightKey: "", airports: new Set() });
   const flightKey = normFlight(query);
+  const pageVisible = usePageVisible();
   const storyQueryKey = flightStoryQueryKey(query, linkedDate);
   const shellStyle = {
     background: "var(--color-bg)",
@@ -560,7 +562,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
       return cached ? rememberOrigOnClient(cached) : undefined;
     },
     initialDataUpdatedAt: 0,
-    enabled: (q) => cacheOk && query.length > 0
+    enabled: (q) => cacheOk && pageVisible && query.length > 0
       && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     refetchInterval: (q) => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return false;
@@ -881,7 +883,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
 
   return (
     <div className={cn("pwa-flight-shell", "inbound-redesign", "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg")} style={shellStyle}>
-      <header className="journey-header"><div className="flex min-w-0 items-center gap-2"><button type="button" aria-label="Back to search" onClick={leaveFlight} className="flex size-11 shrink-0 items-center justify-center rounded-md text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><ChevronLeft className="size-6" aria-hidden="true" /></button>{story ? <p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p> : <p>{query || "Preparing your flight…"}</p>}</div><AppearanceControl /></header>
+      <header className="journey-header"><div className="flex min-w-0 items-center gap-2"><button type="button" aria-label="Back to search" onClick={leaveFlight} className="flex size-11 shrink-0 items-center justify-center rounded-md text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><ChevronLeft className="size-6" aria-hidden="true" /></button>{story ? <p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p> : <p>{query || "Preparing your flight…"}</p>}</div><AppearanceControl fr24Usage={story?.providers?.fr24Usage} /></header>
       {story && <FlightWelcome open={briefPopupOpen} onClose={closeWelcome} story={story} />}
       <ScreenErrorBoundary>
       <main
@@ -1141,7 +1143,17 @@ function FlightHead({
         </p>
       </div>
       <FlightStatusProgress story={story} />
-      <Freshness failed={failed} partial={story.schedule?.status === "saved"} restored={restored} at={story.fetchedAt} fetching={fetching} refreshing={refreshing} onRefresh={onRefresh} />
+      <Freshness
+        failed={failed}
+        partial={story.schedule?.status === "saved"}
+        restored={restored}
+        at={story.fetchedAt}
+        fetching={fetching}
+        refreshing={refreshing}
+        fr24BudgetBlocked={story.providers?.status?.fr24 === "BUDGET_EXHAUSTED"}
+        positionAgeSec={story.providers?.chosenPositionAgeSec ?? story.aircraft?.seenSec ?? null}
+        onRefresh={onRefresh}
+      />
     </div>
   );
 }
@@ -1436,6 +1448,8 @@ function Freshness({
   restored = false,
   failed = false,
   partial = false,
+  fr24BudgetBlocked = false,
+  positionAgeSec = null,
   onRefresh,
 }: {
   at: number;
@@ -1444,6 +1458,8 @@ function Freshness({
   restored?: boolean;
   failed?: boolean;
   partial?: boolean;
+  fr24BudgetBlocked?: boolean;
+  positionAgeSec?: number | null;
   onRefresh: () => void;
 }) {
   const [, setTick] = useState(0);
@@ -1451,6 +1467,14 @@ function Freshness({
     const id = window.setInterval(() => setTick((n) => n + 1), 4000);
     return () => window.clearInterval(id);
   }, []);
+  const liveAgeSec = typeof positionAgeSec === "number" && Number.isFinite(positionAgeSec)
+    ? Math.max(0, positionAgeSec + (Date.now() - at) / 1000)
+    : null;
+  const lastSeen = liveAgeSec == null
+    ? "Live position unavailable"
+    : liveAgeSec < 60
+      ? `Last seen ${Math.round(liveAgeSec)}s ago`
+      : `Last seen ${Math.round(liveAgeSec / 60)} min ago`;
   return (
     <div className="flight-freshness flex flex-col items-end gap-1.5">
       <button
@@ -1463,7 +1487,9 @@ function Freshness({
         {refreshing ? "Updating…" : "Refresh"}
       </button>
       <p className="font-mono text-xs tracking-widest text-muted uppercase">
-        {restored
+        {fr24BudgetBlocked
+          ? `FR24 cap reached · ${lastSeen}`
+          : restored
           ? `${updatedAgoLabel(at)} · ${fetching || refreshing ? "refreshing" : failed ? "refresh delayed" : "waiting to refresh"}`
           : refreshing
             ? "Updating…"

@@ -3171,6 +3171,7 @@ function lockedLegFromResume(resume) {
 		...(resume.legLiveConfirmed === true ? { liveConfirmed: true } : {}) };
 }
 const COMPLETED_LEG_GRACE_SEC = 45 * 60;
+const FR24_COMPLETED_AFTER_LANDING_SEC = 30 * 60;
 function localDateKey(unix, timeZone) {
 	try {
 		return new Intl.DateTimeFormat("en-CA", {
@@ -3264,6 +3265,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		publicAware && ((lockedLeg?.liveConfirmed && flightStatsLegMatches(publicAware, lockedLeg))
 			|| livePositionConfirmsLeg(publicAware, rawSchedulePosition))
 	);
+	const fr24Completed = Boolean(Number.isFinite(publicAware?.gateIn?.actual)
+		|| (Number.isFinite(publicAware?.landing?.actual) && nowSec - publicAware.landing.actual >= FR24_COMPLETED_AFTER_LANDING_SEC));
 	const official = await loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
 		fr24OriginIata: publicAware?.originIata ?? null,
@@ -3272,6 +3275,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		fr24OperatingCallsign: operatingIdent,
 		fr24SurfaceDeparture,
 		fr24AllowRouteOverride: !scheduleLiveConfirmed,
+		fr24Allowed: !fr24Completed,
 	});
 	const liveFr24Aware = awareFromLiveFr24(official.fr24);
 	let fr24Aware = publicAware ? null : liveFr24Aware;
@@ -4611,6 +4615,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			adsbPosition,
 			providerStatus: official.status,
 			providerEta: { flightaware: flightawareOfficial?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
+			fr24Usage: official.fr24Usage,
 			providerDistancesNm,
 			fusionDisagreementNm: positionChoice.disagreementNm,
 			filedRouteDeviationNm,
@@ -4779,6 +4784,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			providerDistancesNm,
 			filedRouteDeviationNm,
 			providerEta: { flightaware: flightawareOfficial?.providerEta ?? null, fr24: official.fr24?.providerEta ?? null },
+			fr24Usage: official.fr24Usage,
 			remainingNm,
 			etaMin,
 			landed: ourLanded,

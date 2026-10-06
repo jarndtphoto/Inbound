@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { BUILD_INFO, formatBuildTime } from "@/lib/build-info";
+import type { Fr24UsageDiagnostics } from "@/lib/fr24-budget.server";
 
 type Appearance = "auto" | "light" | "dark";
 const KEY = "inbound-appearance";
 
-export function AppearanceControl() {
+export function AppearanceControl({ fr24Usage }: { fr24Usage?: Fr24UsageDiagnostics | null } = {}) {
   const [mode, setMode] = useState<Appearance>("auto");
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
@@ -48,6 +49,10 @@ export function AppearanceControl() {
         setOpen(false);
       }}>{value[0].toUpperCase() + value.slice(1)}</button>)}
       <p>Auto: Light 7 AM–7 PM<br />Device local time</p>
+      {fr24Usage ? <p className="appearance-build" title={`Shared ${fr24Usage.day} budget`}>
+        FR24 today {fr24Usage.credits.toLocaleString()} / {fr24Usage.cap.toLocaleString()} credits<br />
+        {fr24Usage.calls.toLocaleString()} calls · {fr24Usage.remaining.toLocaleString()} left
+      </p> : null}
       <p className="appearance-build" title={BUILD_INFO.deployedAt}>Build {BUILD_INFO.commit}<br />Deployed {formatBuildTime(BUILD_INFO.deployedAt)}</p>
     </div>}
   </div>;

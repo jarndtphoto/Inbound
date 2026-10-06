@@ -80,15 +80,15 @@ test("visibility and Map selection are wired through to the ground observer", as
   assert.match(hook, /removeEventListener\("visibilitychange", onChange\)/);
 });
 
-test("departure ground map does not duplicate the tracked-flight FR24 stream", async () => {
+test("five-second ground map is free ADS-B only", async () => {
   const source = await readFile(resolve("src/lib/ground-position.ts"), "utf8");
-  assert.match(source, /if \(data\.movementKind === "departure"\) \{[\s\S]*?fr24KeyType = "owned-by-story"/);
-  assert.match(source, /\} else \{[\s\S]*?loadFr24FlightByRegistration/, "arrival recovery retains FR24");
+  assert.doesNotMatch(source, /from "\.\/fr24\.server"/);
+  assert.doesNotMatch(source, /loadFr24|FR24_API_TOKEN/, "ground polling cannot reach paid FR24");
+  assert.match(source, /fr24KeyType: "disabled-ground-map"/);
   assert.match(source, /const aroundPacks = await fetchAround/, "departure map still refreshes from open ADS-B");
   assert.match(source, /wantedHex[\s\S]*?fetchByHex\(wantedHex\)/, "delayed broad fixes retry the strongest free exact hex identity");
   assert.match(source, /if \(ageSec <= 8\)/, "only genuinely fresh broad fixes bypass the exact lookup");
   assert.match(source, /position\.seenAt > aroundFallback\.seenAt/, "the newer exact or broad observation wins");
-  assert.match(source, /loadFr24RecentArrivalIdentity/, "completed-arrival identity recovery remains available");
 });
 
 test("surface providers are paced and expose throttling instead of silently looking empty", async () => {
@@ -100,11 +100,12 @@ test("surface providers are paced and expose throttling instead of silently look
   assert.match(story, /cached\(\`around8:\$\{key\}\`, 6000/);
   assert.match(story, /fr24DepartureClock - 2 \* 60 \* 60/);
   assert.match(story, /fr24DepartureClock \+ 4 \* 60 \* 60/);
+  assert.match(story, /providers:\s*\{[\s\S]*?fr24Usage: official\.fr24Usage/, "today's shared total reaches client diagnostics");
   assert.match(fusion, /\[adsb-provider-fail\]/);
   assert.match(fusion, /\[adsb-provider-backoff\]/);
 });
 
-test("MCO/TPA ground diagnostics emit one compact poll summary and preserve reject reasons", async () => {
+test("MCO/TPA ground diagnostics emit one compact free-provider summary", async () => {
   const ground = await readFile(resolve("src/lib/ground-position.ts"), "utf8");
   const fr24 = await readFile(resolve("src/lib/fr24.server.ts"), "utf8");
   const fusion = await readFile(resolve("src/lib/adsb-fusion.ts"), "utf8");
@@ -116,11 +117,10 @@ test("MCO/TPA ground diagnostics emit one compact poll summary and preserve reje
     "errorKind", "rateLimitedUntilActive", "registrationKnownAtPollStart", "adsbStatus",
     "finalProvider", "finalAgeSec",
   ]) assert.match(ground, new RegExp(`\\b${field}\\b`), `missing diagnostic field ${field}`);
-  for (const reason of [
-    "missing_position", "distance_gt_20nm", "airborne_gt_250ft", "age_gt_30s", "future_age",
-  ]) assert.match(ground, new RegExp(reason));
   assert.doesNotMatch(ground, /diagnostic\("/, "old multi-line ground coverage diagnostics were removed");
   assert.equal((ground.match(/\[ground-coverage\]/g) ?? []).length, 1, "one compact ground-coverage logger remains");
+  assert.match(ground, /fr24KeyType: "disabled-ground-map"/);
+  assert.match(ground, /fr24Upstream: "none"/);
 
   assert.match(fr24, /event: "fr24_upstream_error"/);
   assert.match(fr24, /statusCode/);
@@ -137,10 +137,10 @@ test("MCO/TPA ground diagnostics emit one compact poll summary and preserve reje
   assert.match(fusion, /status: "ok"/);
 });
 
-test("matched FR24 registration skips failed route lookup, but wrong leg/missing/stale/expired matches fall back", async () => {
+test("FR24 uses one strongest lookup per cycle and shares it for twenty seconds", async () => {
   const directory = await mkdtemp(resolve("node_modules/.fr24-lookup-test-"));
   const realFetch = globalThis.fetch, realNow = Date.now;
-  const keys = ["FR24_API_TOKEN", "FR24_ENABLE_TRACKS", "FR24_ENABLE_SUMMARY", "FLIGHTAWARE_PAID_API_ENABLED"];
+  const keys = ["FR24_API_TOKEN", "FR24_ENABLE_TRACKS", "FR24_ENABLE_SUMMARY", "FLIGHTAWARE_PAID_API_ENABLED", "VERCEL_ENV", "FR24_PREVIEW_ENABLED"];
   const saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
   let now = realNow(), calls = [], mode = "good";
   try {
@@ -158,23 +158,45 @@ test("matched FR24 registration skips failed route lookup, but wrong leg/missing
       return Response.json({ data });
     };
     const api = await import(pathToFileURL(join(directory, "official.mjs")).href);
+    const cache = new Map(), leases = new Map();
+    api.setFr24GuardForTests({
+      usage: async () => ({ day: "2026-10-06", calls: 0, credits: 0, reservedCredits: 0, cap: 1000, remaining: 1000, blocked: false }),
+      reserve: async maximum => ({ day: "2026-10-06", maximum, cap: 1000 }),
+      finish: async () => {},
+      cached: async (key, maxAgeMs, at = Date.now()) => {
+        const hit = cache.get(key);
+        return hit && at - hit.at <= maxAgeMs ? { value: hit.value, ageMs: at - hit.at } : null;
+      },
+      acquire: async (key, _endpoint, _ident, token) => {
+        if (leases.has(key)) return false;
+        leases.set(key, token); return true;
+      },
+      store: async (key, token, value, at = Date.now()) => {
+        assert.equal(leases.get(key), token); cache.set(key, { value, at }); leases.delete(key);
+      },
+      release: async (key, token) => { if (leases.get(key) === token) leases.delete(key); },
+    });
     const options = { fr24FlightNumber: "AA1", fr24OriginIata: "ORD", fr24DestIata: "SEA", fr24Registration: "NTEST" };
     assert.ok((await api.loadOfficialFlightData("AAL1", options)).fr24);
-    assert.deepEqual(calls, ["route", "registration"]);
+    assert.deepEqual(calls, ["registration"], "known registration is the sole upstream lookup");
     now += 6000; calls = []; await api.loadOfficialFlightData("AAL1", options);
-    assert.deepEqual(calls, ["registration"]);
-    for (const bad of ["wrong", "missing", "stale"]) {
+    assert.deepEqual(calls, [], "all users/requests reuse the shared twenty-second response");
+    for (const bad of ["wrong", "missing"]) {
       now += 30000; mode = bad; calls = [];
       const result = await api.loadOfficialFlightData("AAL1", options);
-      assert.ok(calls.includes("route"), `${bad} retries normal lookup`);
-      if (bad !== "stale") assert.equal(result.fr24, null);
+      assert.deepEqual(calls, ["registration"], `${bad} does not start a fallback cascade`);
+      assert.equal(result.fr24, null);
       mode = "good"; now += 30000; await api.loadOfficialFlightData("AAL1", options);
     }
     const operatingOptions = { fr24FlightNumber: "AA2", fr24OriginIata: "ORD", fr24DestIata: "SEA", fr24OperatingCallsign: "AAL1" };
     now += 30000; calls = []; await api.loadOfficialFlightData("AAL2", operatingOptions);
-    assert.deepEqual(calls, ["route", "callsign"]);
+    assert.deepEqual(calls, ["callsign"]);
     now += 6000; calls = []; await api.loadOfficialFlightData("AAL2", operatingOptions);
-    assert.deepEqual(calls, ["callsign"], "marketing flight remembers the successful operating lookup");
+    assert.deepEqual(calls, [], "marketing flight also uses the shared response");
+
+    const routeOptions = { fr24FlightNumber: "AA3", fr24OriginIata: "ORD", fr24DestIata: "SEA" };
+    now += 30000; calls = []; await api.loadOfficialFlightData("AAL3", routeOptions);
+    assert.deepEqual(calls, ["route"], "route is used when no stronger public identity is known");
 
     const surfaceCallsign = { fr24OriginIata: "ORD", fr24DestIata: "SEA", fr24OperatingCallsign: "AAL1", fr24SurfaceDeparture: true };
     now += 30000; calls = [];
@@ -193,10 +215,14 @@ test("matched FR24 registration skips failed route lookup, but wrong leg/missing
     assert.deepEqual(calls, ["registration"], "live correction does not add another surface query");
     mode = "good";
 
-    now += 16 * 60000; calls = []; await api.loadOfficialFlightData("AAL1", options);
-    assert.equal(calls[0], "route", "expired memory uses original cascade");
-    now += 6000; calls = []; await api.loadOfficialFlightData("AAL1", { ...options, fr24DestIata: "DEN" });
-    assert.equal(calls[0], "route", "another leg cannot reuse remembered lookup");
+    process.env.VERCEL_ENV = "preview"; delete process.env.FR24_PREVIEW_ENABLED;
+    now += 30000; calls = [];
+    const previewOff = await api.loadOfficialFlightData("PREV1", { fr24OperatingCallsign: "PREV1" });
+    assert.equal(previewOff.configured.fr24, false);
+    assert.deepEqual(calls, [], "previews cannot spend FR24 credits by default");
+    process.env.FR24_PREVIEW_ENABLED = "1";
+    now += 30000; calls = []; await api.loadOfficialFlightData("PREV1", { fr24OperatingCallsign: "PREV1" });
+    assert.deepEqual(calls, ["callsign"], "the explicit preview override works in code");
   } finally {
     globalThis.fetch = realFetch; Date.now = realNow;
     for (const key of keys) { if (saved[key] == null) delete process.env[key]; else process.env[key] = saved[key]; }
