@@ -1,7 +1,7 @@
 import { RouteAirportSurface } from "./route-airport-surface";
 import { airportNearViewport, maxRouteZoom, routeVisibleWidthMiles, routeStrokeWidths } from "@/lib/route-airport-detail";
 import { lastKnownProgressLabel } from "@/lib/route-continuity";
-import { remainingFlight, type RemainingFlightPresentation } from "@/lib/flight-presentation";
+import { liveFix, remainingFlight, type RemainingFlightPresentation } from "@/lib/flight-presentation";
 import { destPoint, formatDuration, formatMiles, haversineNm } from "@/lib/geo";
 import { ArrivalRunwayChip } from "./arrival-runway-chip";
 import { upcomingStorms } from "@/lib/route-hazards";
@@ -493,8 +493,8 @@ function RouteMapContent({ story, fixedViewport = false, weatherPreview, remaini
     if (Number.isFinite(story.dest.lat)) lats.push(story.dest.lat);
     if (Number.isFinite(story.origin.lon)) lons.push(story.origin.lon);
     if (Number.isFinite(story.dest.lon)) lons.push(story.dest.lon);
-    if (story.live && story.aircraft && Number.isFinite(story.aircraft.lat)) lats.push(story.aircraft.lat);
-    if (story.live && story.aircraft && Number.isFinite(story.aircraft.lon)) lons.push(story.aircraft.lon);
+    if (liveFix(story) && story.aircraft && Number.isFinite(story.aircraft.lat)) lats.push(story.aircraft.lat);
+    if (liveFix(story) && story.aircraft && Number.isFinite(story.aircraft.lon)) lons.push(story.aircraft.lon);
   }
 
   let minLat = Math.min(...lats);
@@ -525,7 +525,7 @@ function RouteMapContent({ story, fixedViewport = false, weatherPreview, remaini
   const origin = { lat: story.origin.lat, lon: story.origin.lon };
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
   const ac = story.aircraft;
-  const hasFix = Boolean(story.route.progressSource !== "last_known" && story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
+  const hasFix = Boolean(story.route.progressSource !== "last_known" && liveFix(story) && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
   const lastKnownLabel = lastKnownProgressLabel(story);
   const remainingView = remaining ?? remainingFlight(story);
   const hasCredibleProgress = (hasFix && !remainingView.estimated) || story.route.progressSource === "last_known";

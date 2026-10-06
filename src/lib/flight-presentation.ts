@@ -36,9 +36,35 @@ export function displayStage(story: FlightStory): StageId {
   return flightStageId(story.currentStage);
 }
 
-export function liveFix(story: FlightStory) {
+export const LIVE_POSITION_MAX_AGE_SEC = 60;
+
+export function livePositionAgeSec(story: FlightStory, nowMs = Date.now()): number | null {
+  const nowSec = nowMs / 1000;
+  const seenAt = story.providers?.chosenPositionSeenAt;
+  if (typeof seenAt === "number" && Number.isFinite(seenAt) && seenAt > 0) {
+    return Math.max(0, nowSec - seenAt);
+  }
+  const sinceFetch = Math.max(0, nowSec - story.fetchedAt / 1000);
+  const reportedAge = story.providers?.chosenPositionAgeSec;
+  if (typeof reportedAge === "number" && Number.isFinite(reportedAge) && reportedAge >= 0) {
+    return reportedAge + sinceFetch;
+  }
+  const aircraftAge = story.aircraft?.seenSec;
+  return typeof aircraftAge === "number" && Number.isFinite(aircraftAge) && aircraftAge >= 0
+    ? aircraftAge + sinceFetch
+    : null;
+}
+
+export function lastSeenLabel(ageSec: number): string {
+  if (ageSec < 90) return `Last seen ${Math.max(1, Math.round(ageSec))} sec ago`;
+  return `Last seen ${Math.max(1, Math.round(ageSec / 60))} min ago`;
+}
+
+export function liveFix(story: FlightStory, nowMs = Date.now()) {
   const ac = story.aircraft;
-  return Boolean(story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
+  const age = livePositionAgeSec(story, nowMs);
+  return Boolean(story.live && ac && !ac.extrapolated && Number.isFinite(ac.lat) && Number.isFinite(ac.lon)
+    && age != null && age <= LIVE_POSITION_MAX_AGE_SEC);
 }
 
 export function flightAirborne(story: FlightStory) {
@@ -85,7 +111,7 @@ export function flownDistance(story: FlightStory): { nm: number; source: "track"
   const track = story.route.observedFlownNm;
   if (typeof track === "number" && Number.isFinite(track) && track > 0) return { nm: track, source: "track" };
   const ac = story.aircraft;
-  if (!liveFix(story) || !ac || ac.onGround || ac.extrapolated
+  if (!liveFix(story, story.fetchedAt) || !ac || ac.onGround || ac.extrapolated
     || !Number.isFinite(story.origin.lat) || !Number.isFinite(story.origin.lon)) return null;
   const distance = haversineNm(story.origin, ac);
   return Number.isFinite(distance) && distance > 0 ? { nm: distance, source: "position" } : null;
@@ -101,13 +127,8 @@ export type RemainingFlightPresentation = {
 /** One passenger-facing remaining-time model for every flight screen. */
 export function remainingFlight(story: FlightStory, nowMs = Date.now()): RemainingFlightPresentation {
   const now = nowMs / 1000, sinceFetch = Math.max(0, now - story.fetchedAt / 1000);
-  const ages = [story.providers?.chosenPositionAgeSec, story.aircraft?.seenSec]
-    .filter((age): age is number => typeof age === "number" && Number.isFinite(age) && age >= 0)
-    .map(age => age + sinceFetch);
-  const seenAt = story.providers?.chosenPositionSeenAt;
-  if (typeof seenAt === "number" && Number.isFinite(seenAt) && seenAt > 0 && seenAt <= now) ages.push(now - seenAt);
-  const age = ages.length ? Math.min(...ages) : null;
-  const fresh = Boolean(liveFix(story) && !story.aircraft?.extrapolated && age != null && age <= 90);
+  const age = livePositionAgeSec(story, nowMs);
+  const fresh = liveFix(story, nowMs);
   const gapNote = fresh ? null : age == null ? "No live position" : `No live position · last seen ${Math.max(1, Math.round(age / 60))} min ago`;
   const validEta = (unix: unknown): unix is number => typeof unix === "number" && Number.isFinite(unix) && unix > now && unix < now + 48 * 3600;
   const etas = [story.providers?.providerEta?.fr24, story.providers?.providerEta?.flightaware, story.resume?.landing.estimated,

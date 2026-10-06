@@ -2037,7 +2037,7 @@ function comfortOf(samples, hazards, dest, origin, progress, times, inboundStatu
 	const lateChop = lateWorst === "moderate" || lateWorst === "severe";
 	const landWait = destDelayed || longTaxiIn;
 	const hourSlip = depDelay >= 50;
-	const inboundOpen = inboundStatus === "watching" || inboundStatus === "unknown" || inboundStatus === "airborne";
+	const inboundOpen = inboundStatus === "unconfirmed" || inboundStatus === "unknown" || inboundStatus === "airborne";
 	const originLow = origin.category === "IFR" || origin.category === "LIFR";
 	const destLow = dest.category === "IFR" || dest.category === "LIFR";
 	if (lateWorst === "severe") score -= 16;
@@ -2336,6 +2336,7 @@ function inboundServesOrigin(inb, originIata) {
 }
 function inboundLiveFits(live, inb, origin, landed) {
 	if (!live || !origin) return false;
+	if (!freshLivePosition(live)) return false;
 	if (inb && inboundAtGate(inb)) return false;
 	if (inb && !inboundServesOrigin(inb, origin.iata)) return false;
 	const here = {
@@ -2380,6 +2381,7 @@ function rememberInboundSnap(key, patch) {
 		if (!keep.gateUnix && patch.gateUnix) {
 			keep.gateUnix = patch.gateUnix;
 			keep.gateClock = patch.gateClock ?? keep.gateClock;
+			keep.gateConfirmed = Boolean(patch.gateConfirmed);
 		}
 		if (!keep.landUnix && patch.landUnix) {
 			keep.landUnix = patch.landUnix;
@@ -2402,6 +2404,7 @@ function rememberInboundSnap(key, patch) {
 		landClock: prev.landClock ?? patch.landClock ?? null,
 		gateUnix: prev.gateUnix ?? patch.gateUnix ?? null,
 		gateClock: prev.gateClock ?? patch.gateClock ?? null,
+		gateConfirmed: Boolean(prev.gateConfirmed || patch.gateConfirmed),
 		taxiing: patch.taxiing ?? prev.taxiing ?? false,
 		frozen: Boolean(prev.frozen)
 	};
@@ -2427,6 +2430,7 @@ function snapFromAware(inb, originTz) {
 		landClock: clockAt(landUnix, originTz),
 		gateUnix,
 		gateClock: clockAt(gateUnix, originTz),
+		gateConfirmed: Boolean(gateUnix),
 		freeze: Boolean(gateUnix)
 	};
 }
@@ -2438,8 +2442,8 @@ async function adsbByHex(hex) {
 		return fusePacks(packs, false).find((a) => String(a.hex ?? "").toLowerCase() === id) ?? null;
 	});
 }
-function buildInbound(args) {
-	const { live, ourTakeoffActual, ourGateOutActual, origin, inboundIdent, inboundAware, inboundLive, snap } = args;
+export function buildInbound(args) {
+	const { live, ourTakeoffActual, origin, inboundIdent, inboundAware, inboundLive, snap } = args;
 	if (Boolean(ourTakeoffActual) || Boolean(live && !live.onGround)) return {
 		status: "complete",
 		headline: "You’re on this aircraft",
@@ -2453,7 +2457,7 @@ function buildInbound(args) {
 	const originTz = tzOf(origin);
 	const gate = snap?.gate ?? inboundAware?.destGate ?? null;
 	const landUnix = snap?.landUnix ?? inboundAware?.landing?.actual ?? null;
-	const gateInActual = snap?.gateUnix ?? inboundAware?.gateIn?.actual ?? null;
+	const gateInActual = inboundAware?.gateIn?.actual ?? (snap?.gateConfirmed ? snap.gateUnix : null) ?? null;
 	const gateEst = inboundAware ? bestUnix(inboundAware.gateIn) : snap?.gateUnix ?? null;
 	const landClock = snap?.landClock ?? clockAt(landUnix, originTz);
 	const gateClock = snap?.gateClock ?? clockAt(gateInActual ?? (snap?.frozen ? gateEst : null), originTz);
@@ -2467,15 +2471,14 @@ function buildInbound(args) {
 	if (!here && inboundAware && bestUnix(inboundAware.landing) && bestUnix(inboundAware.landing) > now) distNm = (bestUnix(inboundAware.landing) - now) / 60 * 7.5;
 	const parked = Boolean(inboundLive && inboundLive.onGround && (inboundLive.gsKt ?? 0) < 5 && distNm < 3);
 	const taxiingLive = Boolean(inboundLive && inboundLive.onGround && (inboundLive.gsKt ?? 0) >= 5 && distNm < 12);
-	const frozen = Boolean(snap?.frozen);
-	const atGate = frozen || Boolean(gateInActual) || Boolean(ourGateOutActual && (landUnix || inboundLanded(inboundAware)));
+	const atGate = Boolean(gateInActual);
 	const arrived = Boolean(landUnix) || inboundLanded(inboundAware) || Boolean(inboundLive && inboundLive.onGround && distNm < 12) || taxiingLive;
 	const inboundAirborne = !arrived && (Boolean(inboundLive && !inboundLive.onGround) || Boolean(inboundAware?.takeoff.actual && !inboundAware.landing.actual) || /airborne/i.test(inboundAware?.status ?? ""));
 	let status;
 	if (atGate) status = "complete";
 	else if (arrived) status = "at_field";
 	else if (inboundAirborne) status = "airborne";
-	else if (cs) status = "watching";
+	else if (cs) status = "unconfirmed";
 	else status = "unknown";
 	if (status === "unknown") {
 		if (live && live.onGround && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 12) {
@@ -2540,8 +2543,8 @@ function buildInbound(args) {
 	};
 	return {
 		status,
-		headline: `Inbound is ${iata}`,
-		detail: `${fromCity ? `Coming in from ${fromCity}` : "Inbound posted"}${gate ? ` to posted gate ${gate}` : ""}. Not on the radio yet${gateEtaClock ? ` — at the gate around ${gateEtaClock}` : ""}.`,
+		headline: "Aircraft status unconfirmed",
+		detail: `${iata ? `${iata} is assigned as the inbound aircraft, but` : "The inbound aircraft is posted, but"} no fresh position or confirmed en-route status is available.`,
 		watch
 	};
 }
@@ -2604,7 +2607,7 @@ function baseCurrentStageOf(args) {
 	// Otherwise a generic surface position can still belong to the identified
 	// inbound leg, so preserve Inbound until this flight has departure evidence.
 	if (!pushed && !faAirborne && !ourTakeoffActual
-		&& ["airborne", "watching", "at_field"].includes(inboundStatus)) return "inbound";
+		&& ["airborne", "at_field"].includes(inboundStatus)) return "inbound";
 	const begun = flightBegun(live, origin);
 	const freshSurface = Boolean(live && live.onGround && !live.extrapolated
 		&& (live.seenSec ?? 999) <= 30 && atOrigin);
@@ -2633,7 +2636,7 @@ function baseCurrentStageOf(args) {
 	if (taxiOutLatched || taxiHint) return "taxi";
 	if (pushed) return "push";
 	if (atOrigin && live) return pushMovement ? "push" : "origin_gate";
-	if (inboundStatus === "airborne" || inboundStatus === "watching" || inboundStatus === "at_field") return "inbound";
+	if (inboundStatus === "airborne" || inboundStatus === "at_field") return "inbound";
 	if (inboundStatus === "complete") return "origin_gate";
 	return "inbound";
 }
@@ -2845,6 +2848,23 @@ function liveAgeSec(live) {
 	if (!live) return null;
 	if (Number.isFinite(live.seenAt)) return Math.max(0, Date.now() / 1000 - live.seenAt);
 	return Number.isFinite(live.seenSec) ? Math.max(0, live.seenSec) : null;
+}
+
+export const LIVE_POSITION_MAX_AGE_SEC = 60;
+export function freshLivePosition(live, nowSec = Date.now() / 1000) {
+	if (!live || !Number.isFinite(live.lat) || !Number.isFinite(live.lon) || live.extrapolated) return false;
+	const age = Number.isFinite(live.seenAt)
+		? Math.max(0, nowSec - live.seenAt)
+		: Number.isFinite(live.seenSec) ? Math.max(0, live.seenSec) : null;
+	return age != null && age <= LIVE_POSITION_MAX_AGE_SEC;
+}
+export function preferNewerLive(current, candidate, nowSec = Date.now() / 1000) {
+	const usableCurrent = freshLivePosition(current, nowSec) ? current : null;
+	const usableCandidate = freshLivePosition(candidate, nowSec) ? candidate : null;
+	if (!usableCandidate) return usableCurrent;
+	if (!usableCurrent) return usableCandidate;
+	return (liveAgeSec(usableCandidate) ?? Infinity) < (liveAgeSec(usableCurrent) ?? Infinity)
+		? usableCandidate : usableCurrent;
 }
 
 function providerDistance(a, b) {
@@ -3112,7 +3132,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		Date.now() / 1000, fieldElev(surfaceField)
 	);
 	const phaseContext = { origin: { ...origin, elevationFt: fieldElev(origin) }, dest: { ...dest, elevationFt: fieldElev(dest) } };
-	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen, phaseContext) : adsbLive ?? liveFromAware(aware, phaseContext);
+	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen, phaseContext)
+		: preferNewerLive(adsbLive, liveFromAware(aware, phaseContext));
 	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
 	live = asOnGround(live, origin);
@@ -3138,14 +3159,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		hexByIdent.delete(stateIdent);
 		hexRouteByIdent.delete(stateIdent);
 	}
-	if (!live) live = liveFromAware(aware);
+	if (!live) live = preferNewerLive(null, liveFromAware(aware));
 	let fieldList = [];
 	const hexHint = (live?.hex || knownHex || aware?.hex || "").toLowerCase();
 	if (hexHint && /^[0-9a-f]{6}$/.test(hexHint) && live?.hex !== hexHint) {
 		const freshRaw = await safe(adsbByHex(hexHint), null);
 		if (freshRaw && rawMatchesQuery(freshRaw, parsed, aware)) {
 			const cand = asOnGround(toLive(freshRaw), origin);
-			if (cand && !destParkedLeftover(cand, dest, aware)) live = cand;
+			if (cand && !destParkedLeftover(cand, dest, aware)) live = preferNewerLive(live, cand);
 			else if (cand && destParkedLeftover(cand, dest, aware)) {
 				live = null;
 				hexByIdent.delete(stateIdent);
@@ -3168,8 +3189,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 					/* stick to locked hex */
 				} else {
 					const cand = asOnGround(toLive(match), origin);
-					if (cand && stillOnField(cand, origin)
-						&& (!live || (liveAgeSec(cand) ?? Infinity) <= (liveAgeSec(live) ?? Infinity))) live = cand;
+					if (cand && stillOnField(cand, origin)) live = preferNewerLive(live, cand);
 				}
 			}
 		}
@@ -3183,7 +3203,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				const keepHex = String(knownHex || live?.hex || "").toLowerCase();
 				if (!(keepHex && swap !== keepHex && live?.hex === keepHex && !rawMatchesQuery(match, parsed, aware))) {
 					const cand = toLive(match);
-					if (cand) live = asOnGround(cand, dest);
+					if (cand) live = preferNewerLive(live, asOnGround(cand, dest));
 				}
 			}
 		}
@@ -3202,7 +3222,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		const match = pickAroundAircraft(nearDest, parsed, aware, dest, origin, 45, knownHex || live?.hex);
 		if (match) {
 			const cand = asOnGround(toLive(match), dest);
-			if (cand) live = cand;
+			if (cand) live = preferNewerLive(live, cand);
 		}
 	}
 	const faLanded = Boolean(aware?.landing?.actual) || /arrived|landed/i.test(aware?.status ?? "");
@@ -3283,7 +3303,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	if (!live && origin && !ourLanded && !Boolean(aware?.takeoff?.actual)) {
 		const near = await safe(adsbAround(origin.lat, origin.lon, 48), []);
 		const match = pickAroundAircraft(near, parsed, aware, origin, dest, 48, knownHex);
-		if (match) live = asOnGround(toLive(match), origin);
+		if (match) live = preferNewerLive(live, asOnGround(toLive(match), origin));
 	}
 	if (!live && origin && dest) {
 		const extra = [];
@@ -3310,14 +3330,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			else if (dDest < 20) destSide.push(cand);
 			else if (!cand.onGround) airborneAway.push(cand);
 		}
-		if (ourLanded && destSide[0]) live = destSide[0];
-		else if (airborneAway[0]) live = airborneAway[0];
-		else if (!ourLanded && originSide[0]) live = originSide[0];
+		if (ourLanded && destSide[0]) live = preferNewerLive(live, destSide[0]);
+		else if (airborneAway[0]) live = preferNewerLive(live, airborneAway[0]);
+		else if (!ourLanded && originSide[0]) live = preferNewerLive(live, originSide[0]);
 	}
 	if (live && !liveFitsLeg(live, aware, origin)) live = null;
 	if (!ourLanded && Boolean(aware?.takeoff?.actual) && !aware?.landing?.actual) {
 		live = restoreKin(stateIdent, live, dest, aware);
-		if (!live) live = liveFromAware(aware);
+		if (!live) live = preferNewerLive(null, liveFromAware(aware));
 		const needTrace = !live || live.altFt == null || live.gsKt == null;
 		const hexForTrace = String(live?.hex || hexByIdent.get(stateIdent) || aware?.hex || "").toLowerCase();
 		if (needTrace && /^[0-9a-f]{6}$/.test(hexForTrace)) {
@@ -3330,7 +3350,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			if (pt) {
 				if (!live) {
 					const cand = liveFromTracePt(pt, hexForTrace, { hex: hexForTrace, callsign: parsed.callsign, registration: aware?.tail ?? null, type: aware?.type ?? null, typeName: airframeOf(aware?.type)?.name ?? aware?.type ?? null }, { ...phaseContext, history: trace.map(p => ({ seenAt: p.t, altFt: p.alt, onGround: p.ground, lat: p.lat, lon: p.lon })) });
-					if (cand && !destParkedLeftover(cand, dest, aware)) live = cand;
+					if (cand && !destParkedLeftover(cand, dest, aware)) live = preferNewerLive(live, cand);
 				} else {
 					live = {
 						...live,
@@ -3427,23 +3447,23 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			type: inboundLive.type,
 			taxiing: (inboundLive.gsKt ?? 0) >= 5
 		});
-		const landAt = inboundSnapByFlight.get(snapKey)?.landUnix;
-		const parkedLong = (inboundLive.gsKt ?? 0) < 5 && landAt && nowUnix - landAt > 4 * 60;
-		if (parkedLong || atGateFa || confirmedGateOutActual(aware?.gateOut)) {
-			const gateUnix = inboundAware?.gateIn?.actual ?? (parkedLong ? nowUnix : null);
+		if (atGateFa && inboundAware?.gateIn?.actual) {
+			const gateUnix = inboundAware.gateIn.actual;
 			rememberInboundSnap(snapKey, {
 				gateUnix,
 				gateClock: clockAt(gateUnix, originTz),
+				gateConfirmed: true,
 				freeze: true,
 				taxiing: false
 			});
 		}
-	} else if (!inboundLocked && (atGateFa || confirmedGateOutActual(aware?.gateOut) && landed)) {
+	} else if (!inboundLocked && atGateFa && inboundAware?.gateIn?.actual) {
 		const gateUnix = inboundAware?.gateIn?.actual ?? null;
 		rememberInboundSnap(snapKey, {
 			...snapFromAware(inboundAware, originTz),
 			gateUnix,
 			gateClock: clockAt(gateUnix, originTz),
+			gateConfirmed: true,
 			freeze: true
 		});
 	}
@@ -3457,7 +3477,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const departureClock = bestUnix(aware?.gateOut);
 	const turnTail = inboundAware?.tail ?? snap?.tail ?? null;
 	const turnHex = String(inboundAware?.hex ?? snap?.hex ?? "").toLowerCase() || null;
-	const inboundTurnComplete = Boolean(inboundAware?.gateIn?.actual || snap?.frozen);
+	const inboundTurnComplete = Boolean(inboundAware?.gateIn?.actual || snap?.gateConfirmed);
 	const inDepartureWindow = Boolean(departureClock && nowUnix >= departureClock - 45 * 60 && nowUnix <= departureClock + 3 * 60 * 60);
 	const currentLiveAge = liveAgeSec(live) ?? Number.POSITIVE_INFINITY;
 	if (!ourAirborne && inboundTurnComplete && inDepartureWindow && (turnTail || turnHex)
@@ -3477,7 +3497,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			|| (turnHex && String(turnLive.hex ?? "").toLowerCase() === turnHex)
 		));
 		if (turnAtOrigin && turnIdentityMatches && turnAge <= 30 && turnAge + 1 < currentLiveAge) {
-			live = turnLive;
+			live = preferNewerLive(live, turnLive);
 			if (turnLive.hex) {
 				knownHex = String(turnLive.hex).toLowerCase();
 				hexByIdent.set(stateIdent, knownHex);
@@ -3543,7 +3563,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	if (!ourLanded && ourAirborne) {
 		if (!live || !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) {
 			const fromFa = liveFromAware(aware);
-			if (fromFa && !fromFa.onGround) live = fromFa;
+			if (fromFa && !fromFa.onGround) live = preferNewerLive(live, fromFa);
 		}
 		// Elapsed time is an ETA input, never an observed aircraft position.
 		if (live && Number.isFinite(live.lat) && Number.isFinite(live.lon) && (!live.hex || live.extrapolated)) {
@@ -3551,10 +3571,11 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			const match = pickAroundAircraft(nearby, parsed, aware, origin, dest, 90, live.hex || knownHex);
 			if (match) {
 				const cand = asOnGround(toLive(match), origin);
-				if (cand && !destParkedLeftover(cand, dest, aware) && !cand.onGround) live = cand;
+				if (cand && !destParkedLeftover(cand, dest, aware) && !cand.onGround) live = preferNewerLive(live, cand);
 			}
 		}
 	}
+	if (!freshLivePosition(live)) live = null;
 	const routeObservation = freshRouteObservation(live);
 	const repairedAnchor = !ourLanded && ourAirborne && previousRouteAnchor
 		&& (!routeMemory?.lastObserved || routeMemory.progressGeometryVersion !== 1)
@@ -4098,13 +4119,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	if (!ourAirborne && times.taxiOutKind === "measured" && !(live && !live.onGround)) {
 		times = { ...times, taxiOutKind: "posted" };
 	}
-	const dGate = live && dest ? haversineNm({ lat: live.lat, lon: live.lon }, dest) : 999;
-	const parkedAtGate = Boolean(
-		ourLanded && (
-			Boolean(aware?.gateIn?.actual) ||
-			(live && live.onGround && (live.gsKt ?? 0) < 1.2 && dGate < 0.55)
-		)
-	);
+	const parkedAtGate = Boolean(ourLanded && aware?.gateIn?.actual);
 	if (parkedAtGate) {
 		const now = Date.now() / 1e3;
 		const prev = gateLatch.get(landKey) ?? {};

@@ -319,7 +319,7 @@ export type FlightStory = {
   comfort: Comfort;
   wx?: WxBrief;
   inbound: {
-    status: "complete" | "airborne" | "at_field" | "watching" | "unknown";
+    status: "complete" | "airborne" | "at_field" | "unconfirmed" | "unknown";
     headline: string;
     detail: string;
     watch: InboundWatch[];

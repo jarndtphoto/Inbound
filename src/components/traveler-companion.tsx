@@ -17,7 +17,7 @@ export function TravelerCompanion({story, failed=false, onTrackInbound}:{story:F
   const inboundFlight=inbound?.callsign ? parseFlightQuery(inbound.callsign) : null;
   const canTrackInbound=Boolean(onTrackInbound && inboundFlight && !inboundFlight.registration
     && inboundFlight.callsign!==parseFlightQuery(story.callsign)?.callsign
-    && !inbound?.locked && ["airborne","watching","at_field"].includes(story.inbound.status)
+    && !inbound?.locked && ["airborne","unconfirmed","at_field"].includes(story.inbound.status)
     && ["inbound","push"].includes(story.currentStage) && !story.times.pushed);
   const airlineLink=airlineStatusLink(story);
   const showFlightActions=Boolean((story.diversion && onTrackInbound) || (canTrackInbound && inboundFlight));

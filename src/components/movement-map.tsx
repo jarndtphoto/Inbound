@@ -9,9 +9,11 @@ import { filterAirportSurfaceFeatures } from "@/lib/airport-surface-filter";
 import { flightPollingComplete, groundPollingEnabled } from "@/lib/flight-polling";
 import { usePageVisible } from "@/lib/use-page-visible";
 import { getGroundPosition } from "@/lib/ground-position";
+import { lastSeenLabel, liveFix, livePositionAgeSec } from "@/lib/flight-presentation";
+import { newestAircraftPosition, storyAircraftPosition, storyWithSharedAircraftPosition, type SharedAircraftPosition } from "@/lib/shared-aircraft-position";
 import type { FlightStory } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const W = 800;
 const H = 800;
@@ -289,6 +291,7 @@ function GroundMovementMap({
   frozen = false,
   inFlight = false,
   active = true,
+  onPosition,
 }: {
   story: FlightStory;
   mode: GroundMode;
@@ -297,16 +300,14 @@ function GroundMovementMap({
   frozen?: boolean;
   inFlight?: boolean;
   active?: boolean;
+  onPosition?: (position: SharedAircraftPosition) => void;
 }) {
   const pageVisible = usePageVisible();
   const airport = mode.airport;
   const surfaceQ = useQuery(surfaceQueryOptions(airport));
   const storyAircraft = story.aircraft;
-  const storyPositionAge = typeof story.providers?.chosenPositionAgeSec === "number"
-    ? Math.max(0, story.providers.chosenPositionAgeSec)
-    : typeof storyAircraft?.seenSec === "number"
-      ? Math.max(0, storyAircraft.seenSec)
-      : null;
+  const storyPosition = storyAircraftPosition(story);
+  const storyPositionAge = storyPosition ? Math.max(0, Date.now() / 1000 - storyPosition.seenAt) : null;
   const storyProvider = story.providers?.chosenPosition;
   const storyPhysicalProvider = storyProvider === "fr24" || storyProvider === "adsb";
   const storyNearAirport = Boolean(storyAircraft && Number.isFinite(storyAircraft.lat) && Number.isFinite(storyAircraft.lon)
@@ -315,21 +316,9 @@ function GroundMovementMap({
     storyAircraft.onGround === true ||
     ((storyAircraft.altFt ?? 9999) <= 250 && (storyAircraft.gsKt ?? 999) <= 80)
   ));
-  const storyFast = storyAircraft && storyPhysicalProvider && storyNearAirport && storySurfaceLike
-    && storyPositionAge != null && storyPositionAge <= 12
-    ? {
-        lat: storyAircraft.lat,
-        lon: storyAircraft.lon,
-        altFt: storyAircraft.altFt ?? null,
-        gsKt: storyAircraft.gsKt ?? null,
-        track: storyAircraft.track ?? null,
-        onGround: storyAircraft.onGround === true,
-        seenAt: Date.now() / 1000 - storyPositionAge,
-        registration: storyAircraft.registration ?? null,
-        callsign: storyAircraft.callsign ?? story.callsign ?? null,
-        provider: storyProvider,
-      }
-    : null;
+  const storyCandidate = storyPosition && storyNearAirport && storySurfaceLike ? storyPosition : null;
+  const storyFreshForPolling = Boolean(storyCandidate && storyPhysicalProvider
+    && storyPositionAge != null && storyPositionAge <= 12);
   // The live flight-number identity can disappear immediately after landing,
   // especially when the same flight number continues on another segment.
   // Keep using the leg-specific resume tail/hex as an identity hint for the
@@ -358,7 +347,7 @@ function GroundMovementMap({
       airportLat: airport.lat,
       airportLon: airport.lon,
     } }),
-    enabled: groundPollingEnabled(active, pageVisible, flightPollingComplete(story), inFlight, Boolean(storyFast), Boolean(identityHex || identityRegistration || identityCallsign)),
+    enabled: groundPollingEnabled(active, pageVisible, flightPollingComplete(story), inFlight, storyFreshForPolling, Boolean(identityHex || identityRegistration || identityCallsign)),
     refetchInterval: () => active && document.visibilityState === "visible" && !flightPollingComplete(story) ? 5_000 : false,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -370,14 +359,20 @@ function GroundMovementMap({
   });
   const queriedFast = groundQ.data;
   if (queriedFast?.registration) groundIdentityRef.current.registration = queriedFast.registration;
-  const queriedFastAge = queriedFast?.seenAt ? Math.max(0, Date.now() / 1000 - queriedFast.seenAt) : null;
-  const queriedCandidate = queriedFast && (queriedFastAge ?? Infinity) <= 30 ? queriedFast : null;
+  const queriedCandidate: SharedAircraftPosition | null = queriedFast ? {
+    ...(storyAircraft ?? aircraft ?? {}),
+    ...queriedFast,
+    provider: queriedFast.provider ?? null,
+  } : null;
+  useEffect(() => {
+    if (queriedCandidate) onPosition?.(queriedCandidate);
+  }, [onPosition, queriedCandidate?.seenAt, queriedCandidate?.lat, queriedCandidate?.lon]);
 
   // Maintain heading history separately for story and map-ground feeds. MCO
   // can report the same aircraft at slightly different timestamps/positions in
   // those two streams; mixing them can manufacture a reciprocal heading.
   type MotionSource = "story" | "ground";
-  type FastFix = NonNullable<typeof storyFast> | NonNullable<typeof queriedCandidate>;
+  type FastFix = SharedAircraftPosition;
   const motionTracksRef = useRef<{ key: string; story: GroundMotionState | null; ground: GroundMotionState | null }>({
     key: identityKey,
     story: null,
@@ -389,13 +384,13 @@ function GroundMovementMap({
   const updateMotionSource = (source: MotionSource, fix: FastFix | null) => {
     if (fix) motionTracksRef.current[source] = advanceGroundMotion(motionTracksRef.current[source], fix);
   };
-  updateMotionSource("story", storyFast);
+  updateMotionSource("story", storyCandidate);
   updateMotionSource("ground", queriedCandidate);
 
   // Prefer whichever source has the newest observation for position, but use
   // only that source's own motion history for orientation.
   const candidates: Array<{ fix: FastFix; source: MotionSource }> = [];
-  if (storyFast) candidates.push({ fix: storyFast, source: "story" });
+  if (storyCandidate) candidates.push({ fix: storyCandidate, source: "story" });
   if (queriedCandidate) candidates.push({ fix: queriedCandidate, source: "ground" });
   candidates.sort((a, b) => b.fix.seenAt - a.fix.seenAt);
   const selectedFast = candidates[0] ?? null;
@@ -428,7 +423,7 @@ function GroundMovementMap({
     // reciprocal at low speed, so never use it for the ground marker.
     track: motionTrack,
     vertFpm: aircraft?.vertFpm ?? null,
-    onGround: fastFix.onGround,
+    onGround: fastFix.onGround === true,
     phase: phaseOf({ ...fastFix, phaseVertFpm: aircraft?.phaseVertFpm }, { origin: story.origin, dest: story.dest, groundTaxiKt: 5 }),
     callsign: fastFix.callsign ?? aircraft?.callsign ?? null,
     extrapolated: !fast,
@@ -503,11 +498,12 @@ function GroundMovementMap({
   const age = fastAge != null ? Math.max(0, Math.round(fastAge)) : typeof story.providers?.chosenPositionAgeSec === "number" ? Math.max(0, Math.round(story.providers.chosenPositionAgeSec)) : null;
   const fastStale = Boolean(!fast && fastFix);
   const delayedFast = Boolean(fast && (fastAge ?? Infinity) > 12);
-  const displayFrozen = frozen && !(fast && (fastAge ?? Infinity) <= 30);
+  const stalePosition = age != null && age > 60;
+  const displayFrozen = Boolean(frozen || fastStale || age == null || stalePosition);
   const coverageNotice = groundCoverageNotice({
     kind: mode.kind,
     airportIata: airport.iata,
-    hasReliableLiveGroundPosition: Boolean(fast),
+    hasReliableLiveGroundPosition: Boolean(fast && age != null && age <= 60),
   });
 
   return (
@@ -515,7 +511,15 @@ function GroundMovementMap({
       <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-2">
         <div>
           <p className="font-mono text-[11px] tracking-widest text-subtle uppercase">{mode.kind === "departure" ? "Departure ground" : "Arrival ground"}</p>
-          <p className="font-display text-base font-semibold">{airport.iata} · {displayFrozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? `holding last ${providerLabel} fix` : delayedFast ? `delayed ${providerLabel} position` : displayAircraft ? "live movement" : "airport surface"}</p>
+          <p className="font-display text-base font-semibold">{airport.iata} · {inFlight
+            ? "aircraft in flight"
+            : stalePosition && age != null
+              ? lastSeenLabel(age)
+              : displayFrozen
+                ? "last ground position"
+                : delayedFast
+                  ? `delayed ${providerLabel} position`
+                  : displayAircraft ? "live movement" : "airport surface"}</p>
         </div>
         <div className="text-right font-mono text-[10px] leading-tight text-muted">
           {inFlight ? <div>Plane in flight</div> : displayAircraft ? <div>{Math.round(displayAircraft.gsKt ?? 0)} kt · {displayFrozen ? "frozen" : displayAircraft.onGround ? "ground" : `${Math.round(displayAircraft.altFt ?? 0)} ft`}</div> : <div>Awaiting aircraft</div>}
@@ -592,6 +596,8 @@ function GroundMovementMap({
 }
 
 function FlightRadar({ story }: { story: FlightStory }) {
+  const age = livePositionAgeSec(story);
+  const live = liveFix(story);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-x border-t border-border bg-surface px-3 py-2">
@@ -599,7 +605,9 @@ function FlightRadar({ story }: { story: FlightStory }) {
           <p className="font-mono text-[11px] tracking-widest text-subtle uppercase">Flight radar</p>
           <p className="font-display text-base font-semibold">{story.origin.iata} → {story.dest.iata}</p>
         </div>
-        <p className="font-mono text-[10px] text-muted">{story.aircraft?.gsKt ? `${Math.round(story.aircraft.gsKt)} kt` : "Live route"}</p>
+        <p className="font-mono text-[10px] text-muted">{live && story.aircraft?.gsKt
+          ? `${Math.round(story.aircraft.gsKt)} kt`
+          : live ? "Live route" : age != null ? lastSeenLabel(age) : "Position unavailable"}</p>
       </div>
       <div className="min-h-0 flex-1"><RouteMap story={story} fixedViewport /></div>
     </div>
@@ -636,13 +644,23 @@ function initialTab(story: FlightStory): MapTab {
 }
 
 export function MovementMap({ story, active = true }: { story: FlightStory; active?: boolean }) {
-  const trail = useMovementTrail(story);
   const flightKey = `${story.iata}:${story.origin.iata}:${story.dest.iata}`;
   const [tab, setTab] = useState<MapTab>(() => initialTab(story));
   const [lastDeparture, setLastDeparture] = useState<AircraftSnapshot | null>(null);
   const [lastArrival, setLastArrival] = useState<AircraftSnapshot | null>(null);
+  const [groundPositionState, setGroundPositionState] = useState<{ key: string; position: SharedAircraftPosition } | null>(null);
   const userSelectedTab = useRef(false);
   const autoArrivalSwitched = useRef(false);
+  const groundPosition = groundPositionState?.key === flightKey ? groundPositionState.position : null;
+  const sharedPosition = newestAircraftPosition(storyAircraftPosition(story), groundPosition);
+  const sharedStory = storyWithSharedAircraftPosition(story, sharedPosition);
+  const trail = useMovementTrail(sharedStory);
+  const rememberGroundPosition = useCallback((position: SharedAircraftPosition) => {
+    setGroundPositionState((previous) => ({
+      key: flightKey,
+      position: newestAircraftPosition(previous?.key === flightKey ? previous.position : null, position) ?? position,
+    }));
+  }, [flightKey]);
 
   useEffect(() => {
     userSelectedTab.current = false;
@@ -650,10 +668,11 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
     setTab(initialTab(story));
     setLastDeparture(loadSavedGround(flightKey, "departure"));
     setLastArrival(loadSavedGround(flightKey, "arrival"));
+    setGroundPositionState(null);
   }, [flightKey]);
 
-  const airborneNow = clearlyAirborne(story);
-  const arrivedGroundNow = clearlyArrivedOnGround(story);
+  const airborneNow = clearlyAirborne(sharedStory);
+  const arrivedGroundNow = clearlyArrivedOnGround(sharedStory);
   useEffect(() => {
     if (arrivedGroundNow && !autoArrivalSwitched.current) {
       autoArrivalSwitched.current = true;
@@ -664,13 +683,13 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
   }, [airborneNow, arrivedGroundNow, tab]);
 
   useEffect(() => {
-    const ac = story.aircraft;
+    const ac = sharedStory.aircraft;
     if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon)) return;
-    const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : null;
-    if (age != null && age > 120) return;
+    const age = livePositionAgeSec(sharedStory);
+    if (age != null && age > 60) return;
 
-    const originNm = haversineNm(ac, story.origin);
-    const destNm = haversineNm(ac, story.dest);
+    const originNm = haversineNm(ac, sharedStory.origin);
+    const destNm = haversineNm(ac, sharedStory.dest);
     const altFt = typeof ac.altFt === "number" && Number.isFinite(ac.altFt) ? ac.altFt : null;
     const gsKt = typeof ac.gsKt === "number" && Number.isFinite(ac.gsKt) ? ac.gsKt : null;
 
@@ -686,8 +705,8 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
 
     const arrivalSurfaceLike = destNm <= 6 && (
       ac.onGround === true ||
-      story.currentStage === "taxi_in" ||
-      story.currentStage === "gate"
+      sharedStory.currentStage === "taxi_in" ||
+      sharedStory.currentStage === "gate"
     );
     if (arrivalSurfaceLike) {
       const snapshot = { ...ac };
@@ -696,39 +715,42 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
     }
   }, [
     flightKey,
-    story.fetchedAt,
-    story.currentStage,
-    story.aircraft?.lat,
-    story.aircraft?.lon,
-    story.aircraft?.altFt,
-    story.aircraft?.gsKt,
-    story.aircraft?.onGround,
-    story.providers?.chosenPositionAgeSec,
+    sharedStory.fetchedAt,
+    sharedStory.currentStage,
+    sharedStory.aircraft?.lat,
+    sharedStory.aircraft?.lon,
+    sharedStory.aircraft?.altFt,
+    sharedStory.aircraft?.gsKt,
+    sharedStory.aircraft?.onGround,
+    sharedStory.providers?.chosenPositionSeenAt,
   ]);
 
-  const current = story.aircraft && Number.isFinite(story.aircraft.lat) && Number.isFinite(story.aircraft.lon)
-    ? story.aircraft
+  const current = sharedStory.aircraft && Number.isFinite(sharedStory.aircraft.lat) && Number.isFinite(sharedStory.aircraft.lon)
+    ? sharedStory.aircraft
     : null;
-  const currentOriginNm = current ? haversineNm(current, story.origin) : Infinity;
-  const currentDestNm = current ? haversineNm(current, story.dest) : Infinity;
-  const departureLive = Boolean(current && currentOriginNm <= 6 && (
+  const currentOriginNm = current ? haversineNm(current, sharedStory.origin) : Infinity;
+  const currentDestNm = current ? haversineNm(current, sharedStory.dest) : Infinity;
+  const currentIsLive = liveFix(sharedStory);
+  const departureAtAirport = Boolean(current && currentOriginNm <= 6 && (
     current.onGround === true ||
     ((current.altFt == null || current.altFt <= 1200) && (current.gsKt == null || current.gsKt <= 165))
   ));
-  const arrivalLive = Boolean(current && currentDestNm <= 6 && (
-    current.onGround === true || story.currentStage === "taxi_in" || story.currentStage === "gate"
+  const arrivalAtAirport = Boolean(current && currentDestNm <= 6 && (
+    current.onGround === true || sharedStory.currentStage === "taxi_in" || sharedStory.currentStage === "gate"
   ));
-  const planeInFlight = airborneNow || ["ride", "arrival", "final_approach"].includes(story.currentStage);
+  const departureLive = currentIsLive && departureAtAirport;
+  const arrivalLive = currentIsLive && arrivalAtAirport;
+  const planeInFlight = airborneNow || ["ride", "arrival", "final_approach"].includes(sharedStory.currentStage);
 
-  const departureAircraft = departureLive ? current : lastDeparture;
-  const arrivalAircraft = arrivalLive ? current : lastArrival;
-  const departureTrail = trail.filter((p) => haversineNm(p, story.origin) < 15);
-  const arrivalTrail = trail.filter((p) => haversineNm(p, story.dest) < 15);
+  const departureAircraft = departureAtAirport ? current : lastDeparture;
+  const arrivalAircraft = arrivalAtAirport ? current : lastArrival;
+  const departureTrail = trail.filter((p) => haversineNm(p, sharedStory.origin) < 15);
+  const arrivalTrail = trail.filter((p) => haversineNm(p, sharedStory.dest) < 15);
 
   const tabs: Array<{ id: MapTab; label: string }> = [
-    { id: "departure", label: `${story.origin.iata} Ground` },
+    { id: "departure", label: `${sharedStory.origin.iata} Ground` },
     { id: "flight", label: "Flight" },
-    { id: "arrival", label: `${story.dest.iata} Ground` },
+    { id: "arrival", label: `${sharedStory.dest.iata} Ground` },
   ];
 
   return (
@@ -751,24 +773,26 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
         {tab === "departure" ? (
           <GroundMovementMap
             active={active}
-            story={story}
-            mode={{ kind: "departure", airport: story.origin }}
+            story={sharedStory}
+            mode={{ kind: "departure", airport: sharedStory.origin }}
             trail={departureTrail}
             aircraft={departureAircraft}
             frozen={!departureLive && Boolean(lastDeparture)}
             inFlight={planeInFlight && !departureLive}
+            onPosition={rememberGroundPosition}
           />
         ) : tab === "arrival" ? (
           <GroundMovementMap
             active={active}
-            story={story}
-            mode={{ kind: "arrival", airport: story.dest }}
+            story={sharedStory}
+            mode={{ kind: "arrival", airport: sharedStory.dest }}
             trail={arrivalTrail}
             aircraft={arrivalAircraft}
             frozen={!arrivalLive && Boolean(lastArrival)}
+            onPosition={rememberGroundPosition}
           />
         ) : (
-          <FlightRadar story={story} />
+          <FlightRadar story={sharedStory} />
         )}
       </div>
     </div>
