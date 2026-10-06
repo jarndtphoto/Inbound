@@ -26,6 +26,19 @@ const render = (component, props, prefix = 'test-') => {
   finally { client.clear(); }
 };
 
+function taxiWelcomeStory() {
+  const base = polishStory();
+  return { ...base, iata: 'WN544', callsign: 'SWA544', airline: 'Southwest', currentStage: 'taxi',
+    aircraft: { ...base.aircraft, lat: 41.7868, lon: -87.7522, onGround: true, altFt: 620, gsKt: 17 },
+    origin: { ...base.origin, iata: 'MDW', icao: 'KMDW', city: 'Chicago', name: 'Midway' },
+    dest: { ...base.dest, iata: 'FLL', icao: 'KFLL', city: 'Fort Lauderdale', name: 'Fort Lauderdale–Hollywood', tz: 'America/New_York' },
+    times: { ...base.times, push: '7:56 PM CDT', pushKind: 'estimated', pushSource: 'live_detected', pushed: true,
+      takeoff: '8:01 PM CDT', takeoffKind: 'estimated', airborne: false,
+      land: '11:18 PM EDT', landKind: 'estimated', gate: '11:29 PM EDT', gateKind: 'estimated', destGate: 'D4',
+      delayMin: 21, arriveDelayMin: 14 },
+  };
+}
+
 test('client cache rejects old unscheduled memories, retains takeoff evidence, and remembers schedules without pushback', () => {
   const oldStorage = globalThis.localStorage;
   const memory = new Map();
@@ -153,7 +166,8 @@ test('overnight event clocks use each airport zone and mark the next local day a
     const brief = composeBrief(ui.rideFacts({ ...shown, currentStage: 'arrival' }, 'UA203', 'arrival'));
     assert.match(head, /4:27 AM/); assert.match(head, /CDT \+1/);
     for (const value of ['4:16 PM HST', '4:27 PM HST', '4:16 AM CDT +1', '4:27 AM CDT +1']) assert.match(details, new RegExp(value.replace('+', '\\+')));
-    for (const value of ['4:16 PM HST', '4:27 PM HST', '4:16 AM CDT +1', '4:27 AM CDT +1']) assert.match(welcome, new RegExp(value.replace('+', '\\+')));
+    for (const value of ['4:16 PM', '4:27 PM', '4:16 AM +1', '4:27 AM +1']) assert.match(welcome, new RegExp(value.replace('+', '\\+')));
+    assert.equal((welcome.match(/HST/g) ?? []).length, 1); assert.equal((welcome.match(/CDT/g) ?? []).length, 1);
     assert.match(JSON.stringify(brief), /4:16 AM CDT \+1|4:27 AM CDT \+1/);
   } finally {
     if (oldStorage === undefined) delete globalThis.localStorage;
@@ -161,7 +175,7 @@ test('overnight event clocks use each airport zone and mark the next local day a
   }
 });
 
-test('Flight welcome shows red delay rows only at five minutes or more', () => {
+test('Flight welcome shows alert-red delay rows only at five minutes or more', () => {
   const base = polishStory();
   const onTime = { ...base, times: { ...base.times, delayMin: 4, arriveDelayMin: 0 } };
   const onTimeHtml = render(ui.FlightWelcome, { open: true, onClose() {}, story: onTime });
@@ -169,12 +183,12 @@ test('Flight welcome shows red delay rows only at five minutes or more', () => {
 
   const delayed = { ...base, times: { ...base.times, delayMin: 5, arriveDelayMin: 18 } };
   const delayedHtml = render(ui.FlightWelcome, { open: true, onClose() {}, story: delayed });
-  assert.match(delayedHtml, /class="[^"]*text-ifr[^"]*" data-flight-alerts/);
+  assert.match(delayedHtml, /class="[^"]*text-turbulence-moderate[^"]*" data-flight-alerts/);
   assert.match(delayedHtml, /Departure delayed 5 min/);
   assert.match(delayedHtml, /Arrival delayed 18 min/);
 });
 
-test('Flight welcome distinguishes actual and estimated clocks and shares the Overview stage line', () => {
+test('Flight welcome distinguishes occurred and estimated clocks and shares the Overview stage line', () => {
   const base = polishStory();
   const story = { ...base, times: { ...base.times,
     pushKind: 'actual', pushSource: 'provider_actual',
@@ -182,10 +196,41 @@ test('Flight welcome distinguishes actual and estimated clocks and shares the Ov
   } };
   const welcome = render(ui.FlightWelcome, { open: true, onClose() {}, story });
   const overview = render(ui.FlightHead, { story, fetching: false, refreshing: false, onRefresh() {} });
-  assert.match(welcome, /Pushback[\s\S]*data-time-state="actual">Actual/);
-  assert.match(welcome, /Takeoff[\s\S]*data-time-state="estimated">Est\./);
+  assert.match(welcome, /Pushback[\s\S]*data-time-state="actual"> · Actual/);
+  assert.match(welcome, /Takeoff[\s\S]*data-time-state="detected"> · Detected/);
+  assert.match(welcome, /data-time-value="takeoff">8:26 AM/);
+  assert.doesNotMatch(welcome, /data-time-value="takeoff">~/);
   assert.match(welcome, /data-flight-stage="true">In flight/);
   assert.match(overview, />In flight</);
+});
+
+test('taxi welcome uses the Overview pushback clock as detected, without an estimate marker', () => {
+  const story = taxiWelcomeStory();
+  const welcome = render(ui.FlightWelcome, { open: true, onClose() {}, story });
+  const overview = render(ui.TimesStrip, { story });
+  const departure = welcome.slice(welcome.indexOf('data-flight-time-row="departure"'), welcome.indexOf('data-flight-ride'));
+  assert.match(overview, /7:56 PM CDT/);
+  assert.match(departure, /data-time-state="detected"> · Detected/);
+  assert.match(departure, /data-time-value="pushback">7:56 PM/);
+  assert.doesNotMatch(departure, /~7:56 PM/);
+  assert.match(departure, /data-time-value="takeoff">~8:01 PM/);
+  assert.equal((departure.match(/CDT/g) ?? []).length, 1, 'departure timezone is shown once');
+});
+
+test('occurred takeoff, landing, and gate clocks lose estimate markers', () => {
+  const base = polishStory();
+  const airborne = { ...base, currentStage: 'ride', confirmedTakeoff: { source: 'observed_airborne', at: null, confirmedAt: base.fetchedAt / 1000 },
+    times: { ...base.times, takeoffKind: 'estimated', airborne: true } };
+  const airborneHtml = render(ui.FlightWelcome, { open: true, onClose() {}, story: airborne });
+  assert.match(airborneHtml, /Takeoff[\s\S]*data-time-state="detected"> · Detected/);
+  assert.doesNotMatch(airborneHtml, /data-time-value="takeoff">~/);
+
+  const arrived = actualOnlyStory();
+  arrived.currentStage = 'gate';
+  arrived.times.gateKind = 'estimated';
+  const arrivedHtml = render(ui.FlightWelcome, { open: true, onClose() {}, story: arrived });
+  assert.match(arrivedHtml, /Gate[\s\S]*data-time-state="detected"> · Detected/);
+  assert.doesNotMatch(arrivedHtml, /data-time-value="gate">~/);
 });
 
 test('Flight welcome hides ride weather after landing and does not repeat the Briefing lead', () => {
@@ -236,6 +281,7 @@ test('Weather timeline and map alerts agree on light at 11 minutes and moderate 
       overview: render(ui.FlightHead, { story, fetching: false, refreshing: false, onRefresh() {} }, 'head-') + overview,
       details: render(ui.OverviewDetails, { story: actualOnlyStory(), timing: h(ui.TimesStrip, { story: actualOnlyStory() }) }, 'details-'),
       briefing: render(ui.BreakdownCard, { briefing: composeBrief(ui.rideFacts(story, 'UA219', 'ride')), pending: false, feedback: null, onCompile() {} }, 'brief-'),
+      welcome: render(ui.FlightWelcome, { open: true, onClose() {}, story: taxiWelcomeStory() }, 'welcome-').replace('<dialog', '<dialog open'),
       map, weather,
     };
     for (const [name, content] of Object.entries(sections)) for (const theme of ['sunrise', 'sunset']) {
@@ -243,7 +289,7 @@ test('Weather timeline and map alerts agree on light at 11 minutes and moderate 
       const html = `<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Inbound polish · ${name} · ${theme}</title><style>${css}\n${styles}</style></head><body class="inbound-redesign"><main class="p-4"><p class="mb-3 text-xs text-muted">Presentation fixture · ${name} · ${theme}</p>${name === 'map' ? `<div class="journey-map" style="height:650px">${content}</div>` : content}</main></body></html>`;
       await writeFile(join(output, `${name}-${theme}.html`), html);
     }
-    const frames = ['overview', 'details', 'briefing', 'map', 'weather'].flatMap(name => ['sunrise', 'sunset'].map(theme => `<section><h2>${name} · ${theme} · 390 px</h2><iframe title="${name}-${theme}" src="${name}-${theme}.html" width="390" height="1100"></iframe></section>`)).join('');
+    const frames = ['overview', 'details', 'briefing', 'welcome', 'map', 'weather'].flatMap(name => ['sunrise', 'sunset'].map(theme => `<section><h2>${name} · ${theme} · 390 px</h2><iframe title="${name}-${theme}" src="${name}-${theme}.html" width="390" height="${name === 'welcome' ? 700 : 1100}"></iframe></section>`)).join('');
     await writeFile(join(output, 'index.html'), `<!doctype html><title>Inbound presentation evidence</title><style>body{font:16px system-ui;background:#eee}main{display:grid;grid-template-columns:repeat(2,430px);gap:24px}iframe{border:1px solid #aaa}</style><h1>Inbound presentation evidence</h1><p>Actual components · deterministic fixtures · no provider requests. Flight details expanded for inspection.</p><main>${frames}</main>`);
   }
 });
