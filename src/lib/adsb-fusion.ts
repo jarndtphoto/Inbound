@@ -55,6 +55,7 @@ export type TrackState = {
 };
 
 export const STALE_AIR_SEC = 32;
+export const STALE_AIR_RECOVERY_SEC = 90;
 export const STALE_ENROUTE_SEC = 12 * 60;
 export const STALE_GROUND_SEC = 45;
 export const TELEPORT_NM = 5;
@@ -188,7 +189,9 @@ export function isStaleObs(obs: Observation, now: number, airside = false): bool
     (obs.gs ?? 0) >= 180 ||
     (typeof obs.altBaro === "number" && obs.altBaro > 15_000) ||
     (typeof obs.raw.alt_geom === "number" && obs.raw.alt_geom > 15_000);
-  return age > (cruise ? STALE_ENROUTE_SEC : STALE_AIR_SEC);
+  // Exact/broad flight recovery must not discard a real descent/approach fix
+  // before the story layer's 90-second continuity window can evaluate it.
+  return age > (cruise ? STALE_ENROUTE_SEC : STALE_AIR_RECOVERY_SEC);
 }
 
 export function isTeleport(
