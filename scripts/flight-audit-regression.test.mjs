@@ -1269,6 +1269,31 @@ describe('outbound turn-aircraft recovery', () => {
   });
 });
 
+describe('ground status during provider gaps', () => {
+  it('does not call a near-departure stale or missing surface position gate/inbound', () => {
+    const now = Date.parse('2026-10-06T21:22:42Z');
+    const base = {
+      fetchedAt: now,
+      currentStage: 'inbound',
+      live: true,
+      origin: { iata: 'ORD', icao: 'KORD', lat: 41.9786, lon: -87.9048 },
+      dest: { iata: 'MIA', icao: 'KMIA', lat: 25.7959, lon: -80.2870 },
+      times: { pushUnix: now / 1000 + 9 * 60, pushKind: 'estimated', pushed: false, airborne: false },
+      providers: { chosenPositionAgeSec: 49 },
+      aircraft: { lat: 41.98, lon: -87.90, onGround: true, extrapolated: false, seenSec: 49 },
+      inbound: { status: 'watching', detail: '' },
+    };
+    const stale = nextStep(base, now);
+    assert.equal(stale.title, 'Ground movement not confirmed');
+    assert.match(stale.body, /still at the gate, pushing back, or taxiing/);
+
+    const missing = nextStep({ ...base, currentStage: 'origin_gate', live: false, aircraft: null,
+      providers: { chosenPositionAgeSec: null } }, now);
+    assert.equal(missing.title, 'Ground movement not confirmed');
+    assert.doesNotMatch(missing.body, /Your aircraft is at the departure airport/);
+  });
+});
+
 describe('departure checkpoint survives provider handoff', () => {
   it('rebuilds a provider-actual push latch from the saved checkpoint', () => {
     assert.deepEqual(pushLatchFromResume({
