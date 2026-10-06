@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assembleAirportGeography, type GeoPoint, type SurfaceBounds } from "./airport-coastline.ts";
+import { assembleAirportGeography, airportGeographyWaterFraction, type GeoPoint, type SurfaceBounds } from "./airport-coastline.ts";
 
 const bounds: SurfaceBounds = { south: 0, west: 0, north: 10, east: 10 };
 
@@ -45,7 +45,7 @@ test("closed counter-clockwise coastline inside the box remains an island", () =
     { lat: 6, lon: 4 },
     { lat: 4, lon: 4 },
   ];
-  const geography = assembleAirportGeography({ bounds, coastlineWays: [island], waterPolygons: [] });
+  const geography = assembleAirportGeography({ bounds: { south: 3, west: 3, north: 7, east: 7 }, coastlineWays: [island], waterPolygons: [] });
   assert.equal(geography.fallback, false);
   assert.equal(geography.base, "water");
   assert.equal(geography.land.length, 1);
@@ -91,4 +91,22 @@ test("water covering runway samples falls back to plain land", () => {
   assert.equal(geography.fallback, true);
   assert.equal(geography.fallbackReason, "water-covers-runways");
   assert.equal(geography.base, "land");
+});
+
+test("ocean inferred from a coastline also obeys the 95-percent water guard", () => {
+  const geography = assembleAirportGeography({ bounds,
+    coastlineWays: [[{ lat: -1, lon: 0.2 }, { lat: 11, lon: 0.2 }]],
+    waterPolygons: [],
+  });
+  assert.equal(geography.fallback, true);
+  assert.equal(geography.fallbackReason, "water-over-95-percent");
+});
+
+test("overlapping water polygons count once and retain island holes", () => {
+  const outer = [{ lat: 0, lon: 0 }, { lat: 0, lon: 10 }, { lat: 6, lon: 10 }, { lat: 6, lon: 0 }, { lat: 0, lon: 0 }];
+  const hole = [{ lat: 2, lon: 2 }, { lat: 2, lon: 4 }, { lat: 4, lon: 4 }, { lat: 4, lon: 2 }, { lat: 2, lon: 2 }];
+  const polygon = { outer, holes: [hole] };
+  const geography = assembleAirportGeography({ bounds, coastlineWays: [], waterPolygons: [polygon, polygon] });
+  assert.equal(geography.fallback, false);
+  assert.ok(Math.abs(airportGeographyWaterFraction(geography) - 0.56) < 0.01);
 });

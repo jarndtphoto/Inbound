@@ -255,10 +255,6 @@ function closeAlongLandSide(end: GeoPoint, start: GeoPoint, bounds: SurfaceBound
   return points;
 }
 
-function polygonArea(ring: GeoPoint[]) {
-  return Math.abs(signedArea(ring));
-}
-
 function fallback(bounds: SurfaceBounds, reason: string): AirportDetailedGeography {
   return { bounds, base: "land", land: [], water: [], fallback: true, fallbackReason: reason };
 }
@@ -276,14 +272,24 @@ function prepareWater(polygons: SurfacePolygon[], bounds: SurfaceBounds) {
   return out;
 }
 
-function waterCoverage(polygons: SurfacePolygon[], bounds: SurfaceBounds) {
-  const boxArea = Math.max(EPS, (bounds.east - bounds.west) * (bounds.north - bounds.south));
-  let area = 0;
-  for (const polygon of polygons) {
-    area += polygonArea(polygon.outer);
-    for (const hole of polygon.holes ?? []) area -= polygonArea(hole);
+export function airportGeographyIsWater(geography: AirportDetailedGeography, point: GeoPoint) {
+  return geography.water.some((polygon) => pointInPolygon(point, polygon))
+    || (geography.base === "water" && !geography.land.some((ring) => pointInRing(point, ring)));
+}
+
+/** Sample the union, including ocean and polygon holes, without double-counting overlaps. */
+export function airportGeographyWaterFraction(geography: AirportDetailedGeography) {
+  if (geography.base === "land" && !geography.water.length) return 0;
+  const { bounds } = geography;
+  const grid = 40;
+  let water = 0;
+  for (let y = 0; y < grid; y++) for (let x = 0; x < grid; x++) {
+    if (airportGeographyIsWater(geography, {
+      lat: bounds.south + (y + 0.5) / grid * (bounds.north - bounds.south),
+      lon: bounds.west + (x + 0.5) / grid * (bounds.east - bounds.west),
+    })) water++;
   }
-  return Math.max(0, area) / boxArea;
+  return water / (grid * grid);
 }
 
 export function assembleAirportGeography(input: {
@@ -294,7 +300,6 @@ export function assembleAirportGeography(input: {
 }): AirportDetailedGeography {
   const { bounds } = input;
   const water = prepareWater(input.waterPolygons, bounds);
-  if (waterCoverage(water, bounds) > 0.95) return fallback(bounds, "water-over-95-percent");
 
   const joined = joinDirectedWays(input.coastlineWays);
   const land: GeoPoint[][] = [];
@@ -326,14 +331,11 @@ export function assembleAirportGeography(input: {
 
   const base: "land" | "water" = coastIntersections ? "water" : "land";
   const geography: AirportDetailedGeography = { bounds, base, land, water, fallback: false };
+  if (airportGeographyWaterFraction(geography) > 0.95) return fallback(bounds, "water-over-95-percent");
 
   const runwaySamples = input.runwaySamples ?? [];
   if (runwaySamples.length) {
-    const onLand = runwaySamples.filter((point) => {
-      const inlandWater = water.some((polygon) => pointInPolygon(point, polygon));
-      if (inlandWater) return false;
-      return base === "land" || land.some((ring) => pointInRing(point, ring));
-    }).length;
+    const onLand = runwaySamples.filter((point) => !airportGeographyIsWater(geography, point)).length;
     if (onLand / runwaySamples.length < 0.5) return fallback(bounds, "water-covers-runways");
   }
 
