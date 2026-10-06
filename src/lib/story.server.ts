@@ -920,7 +920,9 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex)
 	let locked = null;
 	for (const a of near) {
 		if (typeof a.lat !== "number" || typeof a.lon !== "number") continue;
-		if (fusionSeen(a) > 40) continue;
+		const ageSec = fusionSeen(a);
+		const rawOnGround = a.alt_baro === "ground" || a.alt_baro === 0;
+		if (ageSec > (rawOnGround ? 40 : AIRBORNE_POSITION_FRESH_SEC)) continue;
 		const here = { lat: a.lat, lon: a.lon };
 		const dOrig = haversineNm(here, origin);
 		const dDest = dest ? haversineNm(here, dest) : 999;
@@ -938,6 +940,35 @@ function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex)
 		}
 	}
 	return locked;
+}
+export function exactRecoveryLookupPlan({ knownHex = null, scheduleHex = null, tail = null, callsign = null, scheduleIdent = null } = {}) {
+	const plan = [];
+	const seen = new Set();
+	const add = (kind, rawValue, normalize) => {
+		const value = normalize(rawValue);
+		if (!value) return;
+		const key = `${kind}:${value}`;
+		if (seen.has(key)) return;
+		seen.add(key);
+		plan.push({ kind, value });
+	};
+	const hex = (value) => {
+		const normalized = String(value ?? "").trim().toLowerCase();
+		return /^[0-9a-f]{6}$/.test(normalized) ? normalized : "";
+	};
+	const registration = (value) => String(value ?? "").replace(/[-\s]/g, "").toUpperCase();
+	const ident = (value) => String(value ?? "").replace(/\s/g, "").toUpperCase();
+	add("hex", knownHex, hex);
+	add("hex", scheduleHex, hex);
+	add("registration", tail, registration);
+	add("callsign", callsign, ident);
+	add("callsign", scheduleIdent, ident);
+	return plan;
+}
+async function exactRecoveryLookup(item) {
+	if (item.kind === "hex") return adsbByHex(item.value);
+	if (item.kind === "registration") return adsbByReg(item.value);
+	return adsbByCallsign(item.value);
 }
 function seenOf(a) {
 	return fusionSeen(a);
@@ -3568,33 +3599,32 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		if (match) live = asOnGround(toLive(match), origin);
 	}
 	if (!live && origin && dest) {
-		const extra = [];
-		if (aware?.hex) extra.push(safe(adsbByHex(aware.hex), null));
-		if (aware?.tail) extra.push(safe(adsbByReg(aware.tail), null));
-		extra.push(safe(adsbByCallsign(parsed.callsign), null));
-		if (aware?.ident) {
-			const faCs = String(aware.ident).replace(/\s/g, "").toUpperCase();
-			if (faCs && faCs !== identKey) extra.push(safe(adsbByCallsign(faCs), null));
-		}
-		const extras = extra.length ? await Promise.all(extra) : [];
-		const airborneAway = [];
-		const originSide = [];
-		const destSide = [];
-		for (const raw of extras) {
+		// Reacquire strongest identities first and stop as soon as one physically
+		// fits this leg. This makes the saved hex useful in the same poll and avoids
+		// bursting hex + registration + callsign requests at free ADS-B providers.
+		const recoveryPlan = exactRecoveryLookupPlan({
+			knownHex,
+			scheduleHex: aware?.hex,
+			tail: aware?.tail,
+			callsign: parsed.callsign,
+			scheduleIdent: aware?.ident,
+		});
+		for (const lookup of recoveryPlan) {
+			const raw = await safe(exactRecoveryLookup(lookup), null);
 			if (!rawMatchesQuery(raw, parsed, aware)) continue;
 			const cand = raw ? asOnGround(toLive(raw), origin) : null;
 			if (!cand || !liveFitsLeg(cand, aware, origin)) continue;
 			if (destParkedLeftover(cand, dest, aware)) continue;
 			const dOrig = haversineNm({ lat: cand.lat, lon: cand.lon }, origin);
 			const dDest = haversineNm({ lat: cand.lat, lon: cand.lon }, dest);
-			if (!cand.onGround && dDest > 25) airborneAway.push(cand);
-			else if (dOrig < 20) originSide.push(cand);
-			else if (dDest < 20) destSide.push(cand);
-			else if (!cand.onGround) airborneAway.push(cand);
+			if (ourLanded) {
+				if (dDest < 20) { live = cand; break; }
+				continue;
+			}
+			if (!cand.onGround && dDest > 25) { live = cand; break; }
+			if (dOrig < 20) { live = cand; break; }
+			if (!cand.onGround) { live = cand; break; }
 		}
-		if (ourLanded && destSide[0]) live = destSide[0];
-		else if (airborneAway[0]) live = airborneAway[0];
-		else if (!ourLanded && originSide[0]) live = originSide[0];
 	}
 	if (live && !liveFitsLeg(live, aware, origin)) live = null;
 	if (!ourLanded && Boolean(aware?.takeoff?.actual) && !aware?.landing?.actual) {
