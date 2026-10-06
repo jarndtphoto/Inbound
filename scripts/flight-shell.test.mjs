@@ -68,6 +68,14 @@ test('departure delay alerts stop once departure movement is underway',()=>{
   assert.match(traveler,/!departureUnderway && !isLanded\(next\)/);
 });
 
+test('a newly opened Pushback stage gets two bounded confirmation checks without changing steady polling',()=>{
+  assert.match(flightPages,/const pushConfirmRef = useRef/);
+  assert.match(flightPages,/pushConfirmRef\.current\.attempts >= 2/);
+  assert.match(flightPages,/2_500 : 4_000/);
+  assert.match(flightPages,/story\.currentStage !== "push"/);
+  assert.match(flightPages,/void storyQ\.refetch\(\)/);
+});
+
 test('tracked-flight polling pauses while hidden and refreshes stale state on return',()=>{
   assert.match(flightPages,/document\.visibilityState !== "visible"\) return false/);
   assert.doesNotMatch(flightPages,/q\.state\.fetchStatus === "fetching"\) return false/);
