@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 50762)
-Total output lines: 4660
-
 // @ts-nocheck
 import { phaseOf, verticalTrend, createPhaseHistory, destinationContext, type PhaseContext } from "./aircraft-phase.ts";
 import { loadAeroFlight } from "./aeroapi.server.ts";
@@ -1951,7 +1948,984 @@ function nasCopy(nas, role) {
 	}
 	if (/ground delay/i.test(type)) return `Arrival ground delay.${waitBit} ${reason}.`;
 	if (/ground stop/i.test(type)) return `Arrival ground stop.${waitBit} ${reason}.`;
-	if (/arrival/i.test(type)) return `Inbound…10762 tokens truncated…o: flight.origin.icao ?? null,
+	if (/arrival/i.test(type)) return `Inbound metering.${waitBit} ${reason}.`;
+	return `Delay at arrival (${type}).${waitBit} ${reason}.`;
+}
+function chopRank(c) {
+	return {
+		smooth: 0,
+		light: 1,
+		moderate: 2,
+		severe: 3
+	}[c];
+}
+function worse(a, b) {
+	return chopRank(a) >= chopRank(b) ? a : b;
+}
+function gairmetChop(hazard, severity) {
+	return gairmetChopOf(hazard, severity);
+}
+function pirepChop(tb) {
+	return pirepChopOf(tb);
+}
+function letterOf(score) {
+	const s = Math.max(22, Math.min(99, Math.round(score)));
+	return s >= 65 ? "A" : s >= 72 ? "B" : s >= 58 ? "C" : s >= 44 ? "D" : "F";
+}
+function letterRank(g) {
+	return {
+		A: 4,
+		B: 3,
+		C: 2,
+		D: 1,
+		F: 0
+	}[g];
+}
+function catRank(c) {
+	if (c === "LIFR") return 3;
+	if (c === "IFR") return 2;
+	if (c === "MVFR") return 1;
+	return 0;
+}
+function comfortOf(samples, hazards, dest, origin, progress, times, inboundStatus, weatherCoverage) {
+	const chopPenalty = {
+		smooth: 0,
+		light: 9,
+		moderate: 22,
+		severe: 40
+	};
+	let weighted = 0;
+	let dist = 0;
+	for (let i = 1; i < samples.length; i++) {
+		const d = Math.max(.01, haversineNm(samples[i - 1], samples[i]));
+		const frac = samples[i].frac;
+		let w = chopPenalty[samples[i].chop];
+		if (frac >= .85) w *= 2.2;
+		else if (frac >= .68) w *= 1.7;
+		weighted += w * d;
+		dist += d;
+	}
+	const rideChop = dist > 0 ? weighted / dist : 0;
+	let score = 92 - rideChop;
+	const ahead = samples.filter((s) => s.frac >= progress);
+	const late = samples.filter((s) => s.frac >= Math.max(progress, .68));
+	const arriving = progress >= 0.88;
+	const worstAhead = arriving ? "smooth" : ahead.reduce((acc, s) => worse(acc, s.chop), "smooth");
+	const lateWorst = arriving ? "smooth" : late.reduce((acc, s) => worse(acc, s.chop), "smooth");
+	const convAhead = arriving ? false : ahead.some((s) => s.convective);
+	const convAny = arriving ? false : samples.some((s) => s.convective);
+	const taxiOut = times.taxiOutMin;
+	const taxiIn = times.taxiInMin;
+	const destDelayed = Boolean(dest.nas?.delayed);
+	const originDelayed = Boolean(origin.nas?.delayed);
+	const depDelay = times.delayMin ?? 0;
+	const longTaxiOut = taxiOut != null && taxiOut >= 22;
+	const longTaxiIn = taxiIn != null && taxiIn >= 14;
+	const lateChop = lateWorst === "moderate" || lateWorst === "severe";
+	const landWait = destDelayed || longTaxiIn;
+	const hourSlip = depDelay >= 50;
+	const inboundOpen = inboundStatus === "watching" || inboundStatus === "unknown" || inboundStatus === "airborne";
+	const originLow = origin.category === "IFR" || origin.category === "LIFR";
+	const destLow = dest.category === "IFR" || dest.category === "LIFR";
+	if (lateWorst === "severe") score -= 16;
+	else if (lateWorst === "moderate") score -= 10;
+	else if (worstAhead === "moderate") score -= 5;
+	else if (worstAhead === "severe") score -= 12;
+	if (convAhead) score -= 5;
+	if (destDelayed) score -= 9;
+	if (originDelayed) score -= 4;
+	if (destLow) score -= 4;
+	if (originLow) score -= 4;
+	else if (origin.category === "MVFR") score -= 1;
+	if (dest.category === "MVFR") score -= 2;
+	if (taxiOut != null && taxiOut >= 18) score -= Math.min(14, Math.round((taxiOut - 16) * .7));
+	if (taxiIn != null && taxiIn >= 12) score -= Math.min(10, Math.round((taxiIn - 10) * .8));
+	if (depDelay >= 20) score -= Math.min(18, Math.round((depDelay - 10) * .2));
+	if (inboundOpen && (originDelayed || originLow)) score -= 4;
+	if (lateChop && landWait && longTaxiOut) score = Math.min(score, 68);
+	else if (lateChop && landWait) score = Math.min(score, 70);
+	else if (lateChop || landWait || longTaxiOut) score = Math.min(score, 83);
+	if (lateWorst === "severe" && landWait) score = Math.min(score, 56);
+	if (hourSlip) score = Math.min(score, 68);
+	else if (depDelay >= 25) score = Math.min(score, 83);
+	if (originLow && destLow && lateChop) score = Math.min(score, 66);
+	score = Math.max(22, Math.min(99, Math.round(score)));
+	const grade = letterOf(score);
+	const label = "";
+	// Comfort's forecast wording and grade describe advisories/forecasts only;
+	// timestamped aircraft observations are presented separately by the weather UI.
+	const weatherEvents = arriving ? [] : routeWeatherEvents(ahead).filter(event => event.source !== "observed");
+	const bumpEvent = weatherEvents.find((event) => (event.strongestChop ?? event.start.chop) !== "smooth" && event.startEtaMin > 4);
+	const reasons = [];
+	if (inboundOpen && (originDelayed || originLow)) reasons.push(`Inbound isn’t at the gate yet, and ${origin.iata} weather/delays are already in the trip grade.`);
+	if (bumpEvent) {
+		const bumpChop = bumpEvent.strongestChop ?? bumpEvent.start.chop;
+		reasons.push(`${bumpChop === "light" ? "Light turbulence" : bumpChop === "moderate" ? "Moderate turbulence" : "Quite bumpy air"} is possible in about ${formatDuration(bumpEvent.startEtaMin)}${bumpEvent.note ? ` — ${bumpEvent.note}` : ""}.`);
+	}
+	if (convAny) reasons.push("Storms clip part of this corridor. The rest can still be a sitting-still ride.");
+	if (originLow) reasons.push(`Low weather at ${origin.iata} — inbound and the taxi both feel that.`);
+	if (destLow) reasons.push(`Low weather into ${dest.iata} — arrival and the ramp.`);
+	if (taxiOut != null && taxiOut >= 18) reasons.push(`Taxi out is posted around ${taxiOut} minutes${times.originGate ? ` from gate ${times.originGate}` : ""}.`);
+	if (taxiIn != null && taxiIn >= 12) reasons.push(times.taxiInKind === "measured" ? `Taxi in after landing is ${taxiIn} minutes.` : `Estimated taxi in after landing is ${taxiIn} minutes.`);
+	if (depDelay >= 15) reasons.push(`Posted push slipped about ${depDelay} minutes${times.pushWas ? ` off ${times.pushWas}` : ""}.`);
+	if (destDelayed) reasons.push(`Arrival delay at ${dest.iata}: ${dest.nas.reason}.`);
+	if (originDelayed) reasons.push(`Departure delay at ${origin.iata}: ${origin.nas.reason}.`);
+	if (!reasons.length) reasons.push("Nothing ugly in the current advisories.");
+	const ground = [];
+	if (originLow) ground.push(`Low weather at ${origin.iata}`);
+	if (depDelay >= 15) ground.push(`${depDelay} min ground delay`);
+	else if (originDelayed) ground.push(`Ground delay at ${origin.iata}`);
+	if (taxiOut != null && taxiOut >= 18) ground.push(`${taxiOut} min taxi out`);
+	const ride = flightWeatherSummary({ route: { samples, progress }, weatherCoverage });
+	const arrival = [];
+	if (destLow) arrival.push(`Low weather into ${dest.iata}`);
+	if (destDelayed) arrival.push(`Ground delay at ${dest.iata}`);
+	if (taxiIn != null && taxiIn >= 12) arrival.push(times.taxiInKind === "measured" ? `${taxiIn} min taxi in` : `Est. ${taxiIn} min taxi in`);
+	const parts = [];
+	if (ground.length) parts.push(`${ground.join(". ")}.`);
+	parts.push(`${ride}.`);
+	if (arrival.length) parts.push(`${arrival.join(". ")}.`);
+	const why = parts.join(" ");
+	return {
+		score,
+		grade,
+		label,
+		summary: why,
+		reasons: reasons.slice(0, 5),
+		trend: "steady",
+		trendWhy: null
+	};
+}
+var gradeHistory = /* @__PURE__ */ new Map();
+function whyTrend(base, snap, trend) {
+	if (chopRank(snap.lateChop) > chopRank(base.lateChop)) return "Chop got worse on the remaining path.";
+	if (chopRank(snap.lateChop) < chopRank(base.lateChop)) return "The air along the path calmed down.";
+	if (catRank(snap.destCat) > catRank(base.destCat)) return "Arrival weather got worse.";
+	if (catRank(snap.destCat) < catRank(base.destCat)) return "Arrival weather improved.";
+	if (catRank(snap.originCat) > catRank(base.originCat)) return "Departure weather got worse.";
+	if (catRank(snap.originCat) < catRank(base.originCat)) return "Departure weather improved.";
+	if (snap.destNas && !base.destNas) return "A delay program showed up at arrival.";
+	if (!snap.destNas && base.destNas) return "The arrival delay program dropped off.";
+	if (snap.originNas && !base.originNas) return "A delay program showed up at departure.";
+	if (!snap.originNas && base.originNas) return "The departure delay program dropped off.";
+	if (snap.depDelay - base.depDelay >= 12) return "The posted push slipped further.";
+	if (base.depDelay - snap.depDelay >= 12) return "The posted push came back toward the original.";
+	if ((snap.taxiOut ?? 0) - (base.taxiOut ?? 0) >= 6) return "Taxi out got longer.";
+	if ((base.taxiOut ?? 0) - (snap.taxiOut ?? 0) >= 6) return "Taxi out shortened.";
+	return trend === "down" ? "The whole-trip grade dropped on the latest update." : "The whole-trip grade improved on the latest update.";
+}
+function applyGradeTrend(key, snap, comfort) {
+	const hist = (gradeHistory.get(key) ?? []).filter((h) => Date.now() - h.at < 15e5);
+	const baseline = hist.find((h) => Date.now() - h.at >= 9e4) ?? hist[0];
+	let trend = "steady";
+	let trendWhy = null;
+	if (baseline && snap.at - baseline.at >= 6e3) {
+		const dScore = snap.score - baseline.score;
+		const dLetter = letterRank(snap.grade) - letterRank(baseline.grade);
+		if (dLetter < 0 || dScore <= -5) trend = "down";
+		else if (dLetter > 0 || dScore >= 5) trend = "up";
+		if (trend !== "steady") trendWhy = whyTrend(baseline, snap, trend);
+	}
+	hist.push(snap);
+	if (hist.length > 12) hist.shift();
+	gradeHistory.set(key, hist);
+	return {
+		...comfort,
+		trend,
+		trendWhy
+	};
+}
+function ianaFromFa(raw) {
+	if (!raw || typeof raw !== "string") return null;
+	const t = raw.trim().replace(/^:+/, "");
+	if (t.includes("/")) {
+		try {
+			Intl.DateTimeFormat("en-US", { timeZone: t }).format(new Date());
+			return t;
+		} catch {
+			return null;
+		}
+	}
+	const u = t.toUpperCase().replace(/[^A-Z]/g, "");
+	const map = {
+		EDT: "America/New_York",
+		EST: "America/New_York",
+		CDT: "America/Chicago",
+		CST: "America/Chicago",
+		MDT: "America/Denver",
+		MST: "America/Denver",
+		PDT: "America/Los_Angeles",
+		PST: "America/Los_Angeles",
+		AKDT: "America/Anchorage",
+		AKST: "America/Anchorage",
+		HST: "Pacific/Honolulu",
+		HDT: "Pacific/Honolulu",
+		BST: "Europe/London",
+		GMT: "Europe/London",
+		WEST: "Europe/Lisbon",
+		CEST: "Europe/Paris",
+		CET: "Europe/Paris",
+		EEST: "Europe/Athens",
+		EET: "Europe/Athens",
+		JST: "Asia/Tokyo",
+		KST: "Asia/Seoul",
+		CSTCHINA: "Asia/Shanghai",
+		IST: "Asia/Kolkata",
+		GST: "Asia/Dubai",
+		AEDT: "Australia/Sydney",
+		AEST: "Australia/Sydney",
+		AWST: "Australia/Perth",
+		NZDT: "Pacific/Auckland",
+		NZST: "Pacific/Auckland"
+	};
+	return map[u] ?? null;
+}
+function faAirportTz(obj) {
+	if (!obj || typeof obj !== "object") return null;
+	return ianaFromFa(obj.TZ ?? obj.tz ?? obj.timeZone ?? obj.timezone ?? obj.olson ?? null);
+}
+function tzFromCoord(lat, lon) {
+	if (lat == null || lon == null || !Number.isFinite(lat) || !Number.isFinite(lon)) return "UTC";
+	if (lat >= 18 && lat <= 23 && lon <= -154 && lon >= -162) return "Pacific/Honolulu";
+	if (lat >= 51 && lat <= 72 && lon <= -129 && lon >= -172) return "America/Anchorage";
+	if (lat >= 24 && lat <= 50 && lon <= -66 && lon >= -125) {
+		if (lon > -85.5) return "America/New_York";
+		if (lon > -104.5) return "America/Chicago";
+		if (lat < 32 && lon > -114.8 && lon < -108.8) return "America/Phoenix";
+		if (lon > -114.5) return "America/Denver";
+		return "America/Los_Angeles";
+	}
+	if (lat >= 14 && lat < 24 && lon <= -86 && lon >= -118) return lon > -90 ? "America/Mexico_City" : "America/Tijuana";
+	if (lat >= 10 && lat < 28 && lon <= -59 && lon >= -86) return "America/Puerto_Rico";
+	if (lat >= 49 && lat <= 70 && lon <= -52 && lon >= -141) {
+		if (lon > -90) return "America/Toronto";
+		if (lon > -110) return "America/Winnipeg";
+		if (lon > -120) return "America/Edmonton";
+		return "America/Vancouver";
+	}
+	if (lat >= 49 && lat <= 61 && lon >= -11 && lon <= 2) return "Europe/London";
+	if (lat >= 35 && lat <= 71 && lon >= -10 && lon < 12) return "Europe/Paris";
+	if (lat >= 34 && lat <= 65 && lon >= 12 && lon <= 30) return "Europe/Athens";
+	if (lat >= 22 && lat <= 42 && lon >= 25 && lon <= 45) return "Asia/Dubai";
+	if (lat >= 6 && lat <= 37 && lon >= 68 && lon <= 90) return "Asia/Kolkata";
+	if (lat >= 18 && lat <= 54 && lon >= 100 && lon <= 125) return "Asia/Shanghai";
+	if (lat >= 30 && lat <= 46 && lon >= 129 && lon <= 146) return "Asia/Tokyo";
+	if (lat >= -48 && lat <= -10 && lon >= 112 && lon <= 155) return lon < 129 ? "Australia/Perth" : "Australia/Sydney";
+	if (lat >= -48 && lat <= -32 && lon >= 165 && lon <= 179) return "Pacific/Auckland";
+	const hours = Math.round(lon / 15);
+	const clamped = Math.max(-12, Math.min(14, hours));
+	return clamped <= 0 ? `Etc/GMT+${-clamped}` : `Etc/GMT-${clamped}`;
+}
+function tzOf(field) {
+	return field?.tz ?? airportByIcao(field?.icao)?.tz ?? airportByIata(field?.iata)?.tz ?? tzFromCoord(field?.lat, field?.lon);
+}
+function timesOf(aware, origin, dest) {
+	if (!aware) return {
+		push: null,
+		takeoff: null,
+		taxiOutMin: null,
+		land: null,
+		taxiInMin: null,
+		taxiOutKind: null,
+		taxiInKind: null,
+		originGate: null,
+		destGate: null,
+		pushWas: null,
+		takeoffWas: null,
+		landWas: null,
+		delayMin: null,
+		arriveDelayMin: null,
+		typicalDelayMin: null,
+		pushed: false,
+		airborne: false,
+		pushUnix: null,
+		takeoffUnix: null,
+		landUnix: null,
+		origPushUnix: null,
+		origTakeoffUnix: null,
+		origLandUnix: null,
+		pushKind: null,
+		pushSource: null,
+		takeoffKind: null,
+		landKind: null,
+		gateKind: null,
+		gate: null,
+		gateUnix: null
+	};
+	const otz = tzOf(origin);
+	const dtz = tzOf(dest);
+	const orig = rememberOrig(aware);
+	const gateOut = { ...aware.gateOut, actual: confirmedGateOutActual(aware.gateOut) };
+	const go = bestUnix(gateOut);
+	const to = bestUnix(aware.takeoff);
+	const ld = bestUnix(aware.landing);
+	const gi = bestUnix(aware.gateIn);
+	const origGo = orig.gateOut;
+	const origTo = orig.takeoff;
+	const origLd = orig.landing;
+	const delayMin = slipMin(go, origGo);
+	const arriveDelayMin = slipMin(ld, origLd);
+	const typicalSec = aware.averageDelaySec.departure;
+	const typicalDelayMin = typicalSec != null && typicalSec >= 1200 ? Math.round(typicalSec / 60) : null;
+	const late = (delayMin ?? 0) >= 5;
+	const arriveLate = (arriveDelayMin ?? 0) >= 5;
+	const taxiOut = pickTaxi(gateOut, aware.takeoff, aware.filedTaxiOutMin, aware.typicalTaxiOutMin);
+	const taxiIn = pickTaxi(aware.landing, aware.gateIn, aware.filedTaxiInMin, aware.typicalTaxiInMin);
+	const gateEta = !aware.gateIn.actual && ld && gi != null && gi <= ld
+		? ld + Math.max(1, taxiIn.min ?? 10) * 60
+		: gi;
+	return {
+		push: clockAt(go, otz),
+		takeoff: clockAt(to, otz),
+		taxiOutMin: taxiOut.min,
+		land: clockAt(ld, dtz),
+		taxiInMin: taxiIn.min,
+		taxiOutKind: taxiOut.kind,
+		taxiInKind: taxiIn.kind,
+		originGate: aware.originGate,
+		destGate: aware.destGate,
+		pushWas: late ? clockAt(origGo, otz) : null,
+		takeoffWas: late ? clockAt(origTo, otz) : null,
+		landWas: arriveLate ? clockAt(origLd, dtz) : null,
+		delayMin,
+		arriveDelayMin,
+		typicalDelayMin,
+		pushed: Boolean(gateOut.actual),
+		airborne: Boolean(aware.takeoff.actual),
+		pushUnix: go,
+		takeoffUnix: to,
+		landUnix: ld,
+		origPushUnix: origGo,
+		origTakeoffUnix: origTo,
+		origLandUnix: origLd,
+		pushKind: stampKind(gateOut) ?? (go ? "scheduled" : null),
+		pushSource: gateOut.actual ? "provider_actual" : null,
+		takeoffKind: stampKind(aware.takeoff) ?? (to ? "scheduled" : null),
+		landKind: stampKind(aware.landing) ?? (ld ? "scheduled" : null),
+		gateKind: gateEta !== gi ? "estimated" : stampKind(aware.gateIn) ?? (gi ? "scheduled" : null),
+		gate: clockAt(gateEta, dtz),
+		gateUnix: gateEta
+	};
+}
+function inboundLanded(inb) {
+	if (!inb) return false;
+	if (inb.landing?.actual) return true;
+	return /arrived|landed/i.test(inb.status ?? "");
+}
+function inboundAtGate(inb) {
+	if (!inb) return false;
+	if (inb.gateIn?.actual) return true;
+	return /arrived/i.test(inb.status ?? "");
+}
+function inboundServesOrigin(inb, originIata) {
+	if (!inb?.destIata || !originIata) return true;
+	return inb.destIata === originIata;
+}
+function inboundLiveFits(live, inb, origin, landed) {
+	if (!live || !origin) return false;
+	if (inb && inboundAtGate(inb)) return false;
+	if (inb && !inboundServesOrigin(inb, origin.iata)) return false;
+	const here = {
+		lat: live.lat,
+		lon: live.lon
+	};
+	const onField = haversineNm(here, origin) < 12;
+	if (landed || live.onGround) return onField;
+	if (haversineNm(here, origin) < 90) return true;
+	if (inb?.originLat != null && inb?.originLon != null) {
+		return distanceToSegmentNm(here, {
+			lat: inb.originLat,
+			lon: inb.originLon
+		}, origin) < 220;
+	}
+	return haversineNm(here, origin) < 280;
+}
+const inboundSnapByFlight = /* @__PURE__ */ new Map();
+const landedLatch = /* @__PURE__ */ new Map();
+const gateLatch = /* @__PURE__ */ new Map();
+// pushLatch / taxiOutLatch used to live here as module-scope Maps too. On
+// Vercel that memory isn't durable or shared across cold starts / concurrent
+// instances, which is why pushback and taxi-out detection could silently
+// "forget" a flight's progress depending on which instance handled a given
+// poll. They're now per-call local variables (see landKey below), seeded
+// from and written back to the flight_phase_state table via
+// loadPhaseState()/savePhaseState() -- see src/lib/flight-phase-state.server.ts.
+const parkByFlight = /* @__PURE__ */ new Map();
+const hexByIdent = /* @__PURE__ */ new Map();
+const hexRouteByIdent = /* @__PURE__ */ new Map();
+const lastKinByIdent = /* @__PURE__ */ new Map();
+const observePhase = createPhaseHistory();
+function inboundSnapKey(aware, origin, dest, query) {
+	if (aware) return origKey(aware);
+	const day = new Date(Date.now()).toISOString().slice(0, 10);
+	return `${String(query || "").toUpperCase()}|${origin?.iata ?? ""}|${dest?.iata ?? ""}|${day}`;
+}
+function rememberInboundSnap(key, patch) {
+	const prev = inboundSnapByFlight.get(key) ?? {};
+	if (prev.frozen) {
+		const keep = { ...prev };
+		if (!keep.gateUnix && patch.gateUnix) {
+			keep.gateUnix = patch.gateUnix;
+			keep.gateClock = patch.gateClock ?? keep.gateClock;
+		}
+		if (!keep.landUnix && patch.landUnix) {
+			keep.landUnix = patch.landUnix;
+			keep.landClock = patch.landClock ?? keep.landClock;
+		}
+		inboundSnapByFlight.set(key, keep);
+		return keep;
+	}
+	const next = {
+		ident: patch.ident ?? prev.ident ?? null,
+		flightId: patch.flightId ?? prev.flightId ?? null,
+		iataIdent: patch.iataIdent ?? prev.iataIdent ?? null,
+		fromIata: patch.fromIata ?? prev.fromIata ?? null,
+		fromCity: patch.fromCity ?? prev.fromCity ?? null,
+		type: patch.type ?? prev.type ?? null,
+		tail: patch.tail ?? prev.tail ?? null,
+		hex: patch.hex ?? prev.hex ?? null,
+		gate: patch.gate ?? prev.gate ?? null,
+		landUnix: prev.landUnix ?? patch.landUnix ?? null,
+		landClock: prev.landClock ?? patch.landClock ?? null,
+		gateUnix: prev.gateUnix ?? patch.gateUnix ?? null,
+		gateClock: prev.gateClock ?? patch.gateClock ?? null,
+		taxiing: patch.taxiing ?? prev.taxiing ?? false,
+		frozen: Boolean(prev.frozen)
+	};
+	if (patch.freeze || next.gateUnix) next.frozen = true;
+	if (next.frozen) next.taxiing = false;
+	inboundSnapByFlight.set(key, next);
+	return next;
+}
+function snapFromAware(inb, originTz) {
+	if (!inb) return {};
+	const landUnix = inb.landing?.actual ?? null;
+	const gateUnix = inb.gateIn?.actual ?? null;
+	return {
+		ident: inb.ident ?? null,
+		iataIdent: inb.iataIdent ?? null,
+		fromIata: inb.originIata ?? null,
+		fromCity: inb.originCity ?? inb.originIata ?? null,
+		type: inb.type ?? null,
+		tail: inb.tail ?? null,
+		hex: inb.hex ?? null,
+		gate: inb.destGate ?? null,
+		landUnix,
+		landClock: clockAt(landUnix, originTz),
+		gateUnix,
+		gateClock: clockAt(gateUnix, originTz),
+		freeze: Boolean(gateUnix)
+	};
+}
+async function adsbByHex(hex) {
+	const id = String(hex || "").toLowerCase();
+	if (!/^[0-9a-f]{6}$/.test(id)) return null;
+	return cached(`hex4:${id}`, 2000, async () => {
+		const packs = await fetchByHex(id);
+		return fusePacks(packs, false).find((a) => String(a.hex ?? "").toLowerCase() === id) ?? null;
+	});
+}
+function buildInbound(args) {
+	const { live, ourTakeoffActual, ourGateOutActual, origin, inboundIdent, inboundAware, inboundLive, snap } = args;
+	if (Boolean(ourTakeoffActual) || Boolean(live && !live.onGround)) return {
+		status: "complete",
+		headline: "You’re on this aircraft",
+		detail: "",
+		watch: []
+	};
+	const cs = (snap?.ident || inboundIdent || inboundAware?.ident || "").toUpperCase();
+	const iata = displayIata(cs || "INB", snap?.iataIdent ?? inboundAware?.iataIdent ?? null);
+	const fromCity = snap?.fromCity ?? inboundAware?.originCity ?? inboundAware?.originIata ?? snap?.fromIata ?? null;
+	const type = snap?.type ?? inboundLive?.type ?? inboundAware?.type ?? null;
+	const originTz = tzOf(origin);
+	const gate = snap?.gate ?? inboundAware?.destGate ?? null;
+	const landUnix = snap?.landUnix ?? inboundAware?.landing?.actual ?? null;
+	const gateInActual = snap?.gateUnix ?? inboundAware?.gateIn?.actual ?? null;
+	const gateEst = inboundAware ? bestUnix(inboundAware.gateIn) : snap?.gateUnix ?? null;
+	const landClock = snap?.landClock ?? clockAt(landUnix, originTz);
+	const gateClock = snap?.gateClock ?? clockAt(gateInActual ?? (snap?.frozen ? gateEst : null), originTz);
+	const gateEtaClock = clockAt(gateEst, originTz);
+	const now = Date.now() / 1e3;
+	const here = inboundLive ? {
+		lat: inboundLive.lat,
+		lon: inboundLive.lon
+	} : null;
+	let distNm = here ? haversineNm(here, origin) : 0;
+	if (!here && inboundAware && bestUnix(inboundAware.landing) && bestUnix(inboundAware.landing) > now) distNm = (bestUnix(inboundAware.landing) - now) / 60 * 7.5;
+	const parked = Boolean(inboundLive && inboundLive.onGround && (inboundLive.gsKt ?? 0) < 5 && distNm < 3);
+	const taxiingLive = Boolean(inboundLive && inboundLive.onGround && (inboundLive.gsKt ?? 0) >= 5 && distNm < 12);
+	const frozen = Boolean(snap?.frozen);
+	const atGate = frozen || Boolean(gateInActual) || Boolean(ourGateOutActual && (landUnix || inboundLanded(inboundAware)));
+	const arrived = Boolean(landUnix) || inboundLanded(inboundAware) || Boolean(inboundLive && inboundLive.onGround && distNm < 12) || taxiingLive;
+	const inboundAirborne = !arrived && (Boolean(inboundLive && !inboundLive.onGround) || Boolean(inboundAware?.takeoff.actual && !inboundAware.landing.actual) || /airborne/i.test(inboundAware?.status ?? ""));
+	let status;
+	if (atGate) status = "complete";
+	else if (arrived) status = "at_field";
+	else if (inboundAirborne) status = "airborne";
+	else if (cs) status = "watching";
+	else status = "unknown";
+	if (status === "unknown") {
+		if (live && live.onGround && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 12) {
+			return {
+				status: live.phase === "taxi" ? "at_field" : "complete",
+				headline: live.phase === "taxi" ? "Your aircraft is taxiing in" : "Your aircraft is on the field",
+				detail: live.phase === "taxi" ? `${live.registration ?? "The tail"} is taxiing at ${origin.iata}. Watching it to the gate.` : `${live.registration ?? "The tail"} is parked at ${origin.iata}. Inbound is done.`,
+				watch: []
+			};
+		}
+		return {
+			status: "unknown",
+			headline: "Inbound not posted yet",
+			detail: `No inbound aircraft posted for this flight yet. Ground delays at ${origin.iata} still apply.`,
+			watch: []
+		};
+	}
+	const taxiPosted = inboundAware && inboundAware.gateIn.estimated && inboundAware.landing.estimated ? Math.max(4, (inboundAware.gateIn.estimated - inboundAware.landing.estimated) / 60) : 10;
+	let taxiMin = null;
+	if (status === "complete" && landUnix && gateInActual && gateInActual > landUnix) taxiMin = Math.round((gateInActual - landUnix) / 60);
+	else if (status === "at_field" && landUnix) taxiMin = Math.max(1, Math.round((now - landUnix) / 60));
+	let etaMin = 0;
+	if (status === "airborne") {
+		const gs = inboundLive?.gsKt && inboundLive.gsKt > 80 ? inboundLive.gsKt : 420;
+		etaMin = (here ? distNm / gs * 60 : inboundAware && bestUnix(inboundAware.landing) ? Math.max(0, (bestUnix(inboundAware.landing) - now) / 60) : 0) + taxiPosted;
+	} else if (status === "at_field") {
+		etaMin = gateEst && gateEst > now ? Math.max(1, (gateEst - now) / 60) : Math.max(2, taxiPosted - (taxiMin ?? 0));
+	}
+	const watch = [{
+		callsign: cs || inboundLive?.hex || "inbound",
+		iata,
+		type,
+		distNm,
+		etaMin,
+		altFt: inboundLive?.altFt ?? null,
+		from: fromCity,
+		gate,
+		clock: gateClock ?? gateEtaClock,
+		landClock,
+		gateClock: atGate ? gateClock : null,
+		taxiing: status === "at_field",
+		locked: status === "complete",
+		taxiMin
+	}];
+	if (status === "airborne") return {
+		status,
+		headline: `${iata} is inbound to ${origin.iata}`,
+		detail: `${fromCity ? `From ${fromCity}. ` : ""}${type ? `${type}. ` : ""}${formatMiles(distNm)} out, about ${formatDuration(Math.max(1, etaMin - taxiPosted))} to the field${gate ? `, then taxi to posted gate ${gate}` : ""}${gateEtaClock ? ` — at the gate around ${gateEtaClock}` : ""}.`,
+		watch
+	};
+	if (status === "at_field") return {
+		status,
+		headline: `${iata} is taxiing in`,
+		detail: `Landed${landClock ? ` at ${landClock}` : ` at ${origin.iata}`}${fromCity ? ` from ${fromCity}` : ""}. Taxiing${gate ? ` to posted gate ${gate}` : " to the gate"}${etaMin ? ` — about ${formatDuration(etaMin)}` : parked ? " — should be at the gate any minute" : ""}${taxiMin != null ? ` (${taxiMin} min since landing)` : ""}.`,
+		watch
+	};
+	if (status === "complete") return {
+		status,
+		headline: "Inbound is at the gate",
+		detail: "",
+		watch
+	};
+	return {
+		status,
+		headline: `Inbound is ${iata}`,
+		detail: `${fromCity ? `Coming in from ${fromCity}` : "Inbound posted"}${gate ? ` to posted gate ${gate}` : ""}. Not on the radio yet${gateEtaClock ? ` — at the gate around ${gateEtaClock}` : ""}.`,
+		watch
+	};
+}
+function bearingToDestination(from, dest) {
+	if (!from || !dest) return null;
+	const lat1 = from.lat * Math.PI / 180;
+	const lat2 = dest.lat * Math.PI / 180;
+	const dLon = (dest.lon - from.lon) * Math.PI / 180;
+	const y = Math.sin(dLon) * Math.cos(lat2);
+	const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+	return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+export function finalApproachEvidence(live, dest, origin = null) {
+	if (!live || !dest || live.onGround) return { directNm: null, headingDelta: null, result: false };
+	const directNm = haversineNm({ lat: live.lat, lon: live.lon }, dest);
+	const bearing = bearingToDestination(live, dest);
+	const headingDelta = Number.isFinite(live.track) && bearing != null
+		? Math.abs(((live.track - bearing + 540) % 360) - 180)
+		: null;
+	const obviouslyHigh = Number.isFinite(live.altFt) && live.altFt > 10000;
+	const implausibleSpeed = Number.isFinite(live.gsKt) && (live.gsKt < 45 || live.gsKt > 350);
+	const closeIn = directNm <= 7.5;
+	const outerFinal = directNm <= 12;
+	const plausibleAltitude = !Number.isFinite(live.altFt) || live.altFt <= 9000;
+	const stageRate = live.phaseVertFpm === undefined ? live.vertFpm : live.phaseVertFpm;
+	const descending = Number.isFinite(stageRate) && stageRate <= -300;
+	const approachPhase = live.phase === "approach";
+	const trackingToward = headingDelta != null && headingDelta <= 60;
+	const result = destinationContext(live, { origin, dest }) && !obviouslyHigh && !implausibleSpeed &&
+		(closeIn || (outerFinal && plausibleAltitude && (descending || approachPhase || trackingToward)));
+	return { directNm, headingDelta, result };
+}
+
+export function isFinalApproach(live, dest, origin = null) {
+	return finalApproachEvidence(live, dest, origin).result;
+}
+
+export function currentStageOf(args) {
+	return takeoffFloorStage(baseCurrentStageOf(args), args.confirmedTakeoff);
+}
+function baseCurrentStageOf(args) {
+	const { live, remainingNm, dest, origin, ourTakeoffActual, inboundStatus, pushed, faAirborne, taxiHint, taxiOutLatched, distPark, currentFlightSurfaceConfirmed } = args;
+	// Preserve provider strength and the caller's clock when applying gate-in grace.
+	const postLanding = postLandingState(args);
+	if (postLanding === "gate") return "gate";
+	if (postLanding === "taxi_in") return "taxi_in";
+	if (postLanding === "landed") return "arrival";
+	// Departure progress is monotonic for a dated flight instance. Once taxi-out
+	// has been established, a stop, turn, stale fix, or provider handoff cannot
+	// demote the aircraft back to Pushback.
+	if (taxiOutLatched && !ourTakeoffActual && !faAirborne && !(live && !live.onGround)) return "taxi";
+	const atOrigin = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
+	// A fresh surface fix positively identified as this selected flight is
+	// stronger than the separate inbound-aircraft story. This prevents the
+	// current outbound flight from being labeled Inbound while it is parked.
+	if (!pushed && !faAirborne && !ourTakeoffActual && currentFlightSurfaceConfirmed && atOrigin) {
+		return "origin_gate";
+	}
+	// Otherwise a generic surface position can still belong to the identified
+	// inbound leg, so preserve Inbound until this flight has departure evidence.
+	if (!pushed && !faAirborne && !ourTakeoffActual
+		&& ["airborne", "watching", "at_field"].includes(inboundStatus)) return "inbound";
+	const begun = flightBegun(live, origin);
+	const freshSurface = Boolean(live && live.onGround && !live.extrapolated
+		&& (live.seenSec ?? 999) <= 30 && atOrigin);
+	const pushMovement = Boolean(freshSurface
+		&& ((live.gsKt ?? 0) >= 2 || (distPark ?? 0) >= 0.03));
+	const taxiMovement = Boolean(taxiOutLatched || taxiHint);
+	if (!begun && !faAirborne && !ourTakeoffActual) {
+		if (taxiMovement) return "taxi";
+		if (pushed || pushMovement) return "push";
+		if (atOrigin && live) return "origin_gate";
+		if (inboundStatus === "complete") return "origin_gate";
+	}
+	if (begun || faAirborne || Boolean(ourTakeoffActual)) {
+		if (live && !live.onGround) {
+			if (isFinalApproach(live, dest, origin)) return "final_approach";
+			const stageRate = live.phaseVertFpm === undefined ? live.vertFpm : live.phaseVertFpm;
+			if (destinationContext(live, { origin, dest }) &&
+				(live.phase === "approach" || live.phase === "descent" || remainingNm < 40
+					|| live.altFt != null && live.altFt < 8e3 && (stageRate ?? 0) <= -300)) return "arrival";
+			return "ride";
+		}
+		if (faAirborne || ourTakeoffActual) return "ride";
+		if (taxiMovement) return "taxi";
+		if (pushed || pushMovement) return "push";
+	}
+	if (taxiOutLatched || taxiHint) return "taxi";
+	if (pushed) return "push";
+	if (atOrigin && live) return pushMovement ? "push" : "origin_gate";
+	if (inboundStatus === "airborne" || inboundStatus === "watching" || inboundStatus === "at_field") return "inbound";
+	if (inboundStatus === "complete") return "origin_gate";
+	return "inbound";
+}
+export function postLandingState(args) {
+	const { ourLanded, ourLandingActual, gateInActual, weakGateInActual = false, parkedAtGate, live, dest,
+		nowSec = Date.now() / 1000 } = args;
+	const landedEvidence = Boolean(ourLanded || ourLandingActual || gateInActual || parkedAtGate);
+	if (!landedEvidence) return "airborne";
+	const freshDestinationSurface = Boolean(
+		live && dest && live.onGround && !live.extrapolated &&
+		(live.seenSec ?? 999) <= 60 &&
+		haversineNm(live, dest) < 10
+	);
+	const freshHighSpeedRollout = Boolean(freshDestinationSurface && (live.gsKt ?? 0) >= 40);
+	if (freshHighSpeedRollout) return "landed";
+	const freshTaxiing = Boolean(freshDestinationSurface
+		&& ((live.gsKt ?? 0) >= 3 || live.phase === "taxi"));
+	// Fresh physical movement beats a provider gate-in timestamp. Some schedule
+	// feeds stamp gate-in several minutes early while the aircraft is visibly
+	// still taxiing. Only settle at Gate once that contradiction disappears.
+	if (freshTaxiing) return "taxi_in";
+	if (parkedAtGate) return "gate";
+	// FlightStats public is a schedule/status fallback, not physical ramp
+	// evidence. Its "Actual" arrival can lead the aircraft by many minutes.
+	// Give stronger providers immediate credit, but require a conservative
+	// grace period before an uncorroborated FlightStats gate-in can finish the
+	// passenger journey.
+	const weakGateMature = Boolean(weakGateInActual && gateInActual
+		&& Number.isFinite(nowSec) && nowSec - gateInActual >= 20 * 60);
+	if (gateInActual && (!weakGateInActual || weakGateMature)) return "gate";
+	// Once landing is latched, taxi-in is the durable intermediate state.
+	// Missing or stale surface ADS-B must not revert the passenger view to Landed.
+	return "taxi_in";
+}
+async function hydrateField(base) {
+	const [{ metar }, nas, taf] = await Promise.all([loadMetar(base.icao), loadNas(base.iata), loadTaf(base.icao)]);
+	const decoded = metar ? decodeMetar(metar) : null;
+	const wd = typeof metar?.wdir === "number" ? metar.wdir : Number(metar?.wdir);
+	return {
+		...base,
+		decoded,
+		rawMetar: metar?.rawOb ?? null,
+		nas,
+		category: decoded?.category ?? "UNK",
+		windDir: Number.isFinite(wd) ? wd : null,
+		windKt: typeof metar?.wspd === "number" ? metar.wspd : null,
+		taf: decodeTafPassenger(taf, Date.now() / 1e3),
+		tafRaw: taf
+	};
+}
+function rampWx(decoded) {
+	const wx = (decoded?.wx ?? "").toUpperCase();
+	if (!wx || /NO SIGNIFICANT/.test(wx)) return null;
+	if (/\bTS\b|VCTS|LTG|LIGHTNING|\bFC\b|\+FC|\bSQ\b/.test(wx)) return "Thunderstorms on the field.";
+	if (/\bSN\b|BLSN|DRSN|SNOW/.test(wx)) return "Snow on the field.";
+	if (/\bFZ|\bPL\b|\bGR\b|\bGS\b|ICE/.test(wx)) return "Icing precip on the field.";
+	return null;
+}
+function buildStages(args) {
+	const { live, origin, dest, current, remainingNm, etaMin, comfort, inbound, samples, times, taxiHint, parkedAtGate } = args;
+	const conv = samples.find((s) => s.convective);
+	const order = [
+		"inbound",
+		"origin_gate",
+		"push",
+		"taxi",
+		"ride",
+		"arrival",
+		"final_approach",
+		"taxi_in",
+		"gate"
+	];
+	const idx = order.indexOf(current);
+	const state = (id) => {
+		const i = order.indexOf(id);
+		if (i < idx) return "done";
+		if (i === idx) return "now";
+		return "next";
+	};
+	const pushWatch = [];
+	if (origin.nas?.delayed) pushWatch.push(nasCopy(origin.nas, "origin"));
+	if ((times.delayMin ?? 0) < 12 && (times.typicalDelayMin ?? 0) >= 25) pushWatch.push(`This flight often leaves about ${times.typicalDelayMin} minutes late — even when the posted push still looks on time.`);
+	if (origin.decoded?.category === "IFR" || origin.decoded?.category === "LIFR") pushWatch.push("Low weather here often means de-ice, holds, and a slow taxi even when the inbound is on time.");
+	const inboundWatchouts = inbound.status === "complete"
+		? []
+		: inbound.status === "at_field"
+			? []
+			: inbound.watch.length > 0
+				? []
+				: ["Live position isn’t available yet."];
+	const rideWatch = [];
+	const arrivalWatch = [];
+	if (dest.decoded?.category === "IFR" || dest.decoded?.category === "LIFR") arrivalWatch.push("Low ceilings on arrival = holding, a long final, and a tired taxi. Budget extra.");
+	const gateWatch = [];
+	const ramp = rampWx(dest.decoded);
+	if (ramp) gateWatch.push(ramp);
+	const pushed = Boolean(times.pushed || times.airborne || current === "push" || current === "taxi" || current === "ride" || current === "arrival" || current === "final_approach" || current === "taxi_in" || current === "gate");
+	const taxiingNow = Boolean(taxiHint || (live?.onGround && (live.gsKt ?? 0) >= 2));
+	const inboundTitle = inbound.status === "complete" ? "Inbound is at the gate" : inbound.status === "at_field" ? "Inbound is taxiing in" : inbound.status === "airborne" ? "Inbound to the field" : "The inbound aircraft";
+	const arrivalBody = (() => {
+		if (times.landKind === "actual") {
+			const gateBit = times.gate
+				? times.gateKind === "actual"
+					? `At the gate ${times.gate}.`
+					: `At the gate around ${times.gate}.`
+				: times.destGate
+					? `Taxiing in to ${times.destGate}.`
+					: parkedAtGate
+						? "Parked at the gate."
+						: "Taxiing in to the gate.";
+			return `Landed${times.land ? ` at ${times.land}` : ""}. ${gateBit}`;
+		}
+		if (dest.nas?.delayed) return `${times.land ? `Landing around ${times.land}. ` : ""}${nasCopy(dest.nas, "dest")}`;
+		if (times.land) {
+			if ((times.arriveDelayMin ?? 0) >= 15 && times.landWas) return `Landing around ${times.land}, about ${times.arriveDelayMin} minutes later than ${times.landWas}.`;
+			return `Landing around ${times.land}.`;
+		}
+		return `Into ${dest.city}.`;
+	})();
+	const gateBody = "";
+	const inAir = current === "ride" || current === "arrival" || current === "final_approach";
+	const rideBody = live
+		? `${formatMiles(remainingNm)} still to run, about ${formatDuration(etaMin)}.`
+		: inAir
+			? `${formatMiles(remainingNm)} still to run, about ${formatDuration(etaMin)}. Live position unavailable right now.`
+			: current === "gate" || current === "taxi_in" || current === "final_approach" || current === "arrival"
+				? ""
+				: `Once you’re up, ${formatMiles(remainingNm)} on the filed path.`;
+	return {
+		origin_gate: {
+			state: state("origin_gate"),
+			title: `At the gate · ${origin.iata}`,
+			body: times.push ? `Pushback around ${times.push}.` : "Waiting for pushback.",
+			watchouts: []
+		},
+		push: {
+			state: state("push"),
+			title: "Pushback",
+			body: "The aircraft has begun moving away from the stand.",
+			watchouts: []
+		},
+		taxi: {
+			state: state("taxi"),
+			title: "Taxiing out",
+			body: times.taxiOutKind === "measured" && times.taxiOutMin != null
+				? `${times.taxiOutMin} min from gate departure to takeoff.`
+				: "Moving toward the runway for takeoff.",
+			watchouts: []
+		},
+		inbound: {
+			state: state("inbound"),
+			title: inbound.status === "complete" ? "Plane is at the gate" : inboundTitle,
+			body: inbound.detail,
+			watchouts: inboundWatchouts
+		},
+		ride: {
+			state: state("ride"),
+			title: live || inAir ? `${formatMiles(remainingNm)} remaining` : `To ${dest.iata}`,
+			body: rideBody,
+			watchouts: rideWatch.slice(0, 3)
+		},
+		arrival: {
+			state: state("arrival"),
+			title: current === "arrival" && times.landKind === "actual"
+				? `Landed · ${dest.iata}`
+				: `Into ${dest.iata}`,
+			body: arrivalBody,
+			watchouts: arrivalWatch.slice(0, 3)
+		},
+		final_approach: {
+			state: state("final_approach"),
+			title: "Final approach",
+			body: `Descending toward ${dest.iata} for landing.`,
+			watchouts: arrivalWatch.slice(0, 3)
+		},
+		taxi_in: {
+			state: state("taxi_in"),
+			title: "Taxiing in",
+			body: times.destGate ? `Taxiing to gate ${times.destGate}.` : "Taxiing to the arrival gate.",
+			watchouts: []
+		},
+		gate: {
+			state: state("gate"),
+			title: times.destGate ? `Gate ${times.destGate}` : "At the gate",
+			body: "",
+			watchouts: gateWatch.slice(0, 3)
+		}
+	};
+}
+export function liveFromAware(aware, context: PhaseContext = {}) {
+	const origin = airportByIcao(aware?.originIcao ?? "") ?? airportByIata(aware?.originIata ?? "");
+	const dest = airportByIcao(aware?.destIcao ?? "") ?? airportByIata(aware?.destIata ?? "");
+	context = { origin: origin ?? undefined, dest: dest ?? undefined, ...context };
+	const live = liveFromAwareTrack(aware, context);
+	if (!live) return null;
+	const type = live.type ?? aware?.type ?? null;
+	return {
+		...live,
+		seenAt: Date.now() / 1000 - Math.max(0, live.seenSec ?? 0),
+		source: "flightaware-public",
+		type,
+		typeName: airframeOf(type)?.name ?? type,
+		year: null,
+		operator: null,
+	};
+}
+
+function liveAgeSec(live) {
+	if (!live) return null;
+	if (Number.isFinite(live.seenAt)) return Math.max(0, Date.now() / 1000 - live.seenAt);
+	return Number.isFinite(live.seenSec) ? Math.max(0, live.seenSec) : null;
+}
+
+function providerDistance(a, b) {
+	return a && b ? haversineNm(a, b) : null;
+}
+function normalizedAdsb(live): NormalizedPosition | null {
+	if (!live || !Number.isFinite(live.lat) || !Number.isFinite(live.lon)) return null;
+	return {
+		provider: "adsb",
+		flightId: null,
+		callsign: live.callsign ?? null,
+		lat: live.lat,
+		lon: live.lon,
+		altFt: live.altFt ?? null,
+		vertFpm: live.arrivalVertFpm ?? live.vertFpm ?? null,
+		gsKt: live.gsKt ?? null,
+		track: live.track ?? null,
+		onGround: Boolean(live.onGround),
+		seenAt: Date.now() / 1000 - Math.max(0, live.seenSec ?? 0),
+		registration: live.registration ?? null,
+		type: live.type ?? null,
+		hex: live.hex ?? null,
+		confidence: live.extrapolated ? "low" : "high"
+	};
+}
+function officialAwareCompatible(base, official: NormalizedFlight | null) {
+	if (!official) return false;
+	if (!base) return true;
+	const baseId = typeof base.flightId === "string" ? base.flightId.trim() : "";
+	const officialId = typeof official.flightId === "string" ? official.flightId.trim() : "";
+	if (baseId && officialId && baseId !== officialId) return false;
+	const baseOrigin = String(base.originIata ?? base.originIcao ?? "").toUpperCase();
+	const baseDest = String(base.destIata ?? base.destIcao ?? "").toUpperCase();
+	const officialOrigin = String(official.origin?.iata ?? official.origin?.icao ?? "").toUpperCase();
+	const officialDest = String(official.destination?.iata ?? official.destination?.icao ?? "").toUpperCase();
+	if (baseOrigin && officialOrigin && baseOrigin !== officialOrigin) return false;
+	if (baseDest && officialDest && baseDest !== officialDest) return false;
+	return true;
+}
+function mergeOfficialAware(base, official: NormalizedFlight | null) {
+	if (!official || !officialAwareCompatible(base, official)) return base;
+	const out = base ? { ...base } : {};
+	const mergeTimes = (current, next) => ({
+		scheduled: next?.scheduled ?? current?.scheduled ?? null,
+		estimated: next?.estimated ?? current?.estimated ?? null,
+		actual: next?.actual ?? current?.actual ?? null
+	});
+	const takeoff = mergeTimes(out.takeoff, official.takeoff);
+	return {
+		...out,
+		ident: official.callsign ?? out.ident,
+		status: official.status ?? out.status,
+		originIata: official.origin?.iata ?? out.originIata,
+		originIcao: official.origin?.icao ?? out.originIcao,
+		originGate: official.origin?.gate ?? out.originGate,
+		destIata: official.destination?.iata ?? out.destIata,
+		destIcao: official.destination?.icao ?? out.destIcao,
+		destGate: official.destination?.gate ?? out.destGate,
+		gateOut: gateOutTimes(mergeTimes(out.gateOut, official.push)),
+		takeoff,
+		landing: mergeTimes(out.landing, official.landing),
+		gateIn: mergeTimes(out.gateIn, official.gateIn),
+		tail: official.registration ?? out.tail,
+		type: official.type ?? out.type,
+		hex: official.hex ?? out.hex,
+		waypoints: official.waypoints.length ? official.waypoints : out.waypoints ?? [],
+		faTrack: official.track.length ? official.track.map((p) => ({ t: p.seenAt, lat: p.lat, lon: p.lon, alt: p.altFt, gs: p.gsKt, track: p.track, ground: p.altFt === 0 })) : out.faTrack ?? [],
+		providerEta: official.providerEta
+	};
+}
+function awareFromLiveFr24(flight: NormalizedFlight | null) {
+	const position = flight?.position;
+	const nowSec = Date.now() / 1e3;
+	if (!flight || !position || !flight.origin || !flight.destination) return null;
+	if (nowSec - position.seenAt > 120 || position.seenAt > nowSec + 120) return null;
+	if (!(flight.origin.iata || flight.origin.icao) || !(flight.destination.iata || flight.destination.icao)) return null;
+	const none = { scheduled: null, estimated: null, actual: null };
+	const faTrack = (flight.track ?? []).map((p) => ({
+		t: p.seenAt,
+		lat: p.lat,
+		lon: p.lon,
+		alt: p.altFt,
+		gs: p.gsKt,
+		track: p.track,
+		ground: p.altFt === 0,
+	}));
+	return {
+		flightId: flight.flightId ?? null,
+		ident: flight.callsign ?? position.callsign ?? null,
+		iataIdent: null,
+		status: flight.status ?? "",
+		confirmedAt: Date.now(),
+		originIata: flight.origin.iata ?? null,
+		originIcao: flight.origin.icao ?? null,
 		originName: null,
 		originCity: null,
 		originTz: null,
