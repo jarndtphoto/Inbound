@@ -1249,9 +1249,10 @@ describe('public schedule fallback', () => {
     assert.equal(parseFlightStatsPublicSchedule('<html>Flight Status UA 3 Scheduled</html>', 'UAL3', '2026-10-01'), null);
   });
 
-  it('allows an exact FR24 leg up to 60 seconds old to establish origin-gate identity', () => {
+  it('keeps an identity-matched outbound surface fix on the departure side through 60 seconds', () => {
     const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
-    assert.match(source, /\(live\.seenSec \?\? 999\) <= \(exactFr24Leg \? 60 : 30\)/);
+    assert.match(source, /\(live\.seenSec \?\? 999\) <= 60/);
+    assert.match(source, /currentFlightSurfaceConfirmed/);
   });
 });
 
