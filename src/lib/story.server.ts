@@ -55,7 +55,7 @@ import {
 	wxDeltas,
 } from "./wx-brief";
 import { faAltFt, hasAirborneEvidence, liveFromAware as liveFromAwareTrack, parseJsonObject, timeFracOf } from "./fa-track";
-import { choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
+import { AIRBORNE_POSITION_FRESH_SEC, FR24_SURFACE_FRESH_SEC, choosePosition, normalizedToLive, passengerEtaMin, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
 import { arrivalEntryEvidence, updateArrivalProjection } from "./arrival-projection-state.ts";
 import { displayArrivalProjection } from "./arrival-display.ts";
 import { showDetailedArrivalGeometry } from "./arrival-pattern.ts";
@@ -602,28 +602,34 @@ export function liveFromTracePt(pt, hex, seed, context: PhaseContext = {}) {
 		vertFpm: Number.isFinite(pt.vertFpm) ? pt.vertFpm : trend.phaseVertFpm,
 		onGround: false,
 		phase: phaseOf({ ...sample, ...trend }, context),
-		extrapolated: c.age > 45,
+		extrapolated: c.age > AIRBORNE_POSITION_FRESH_SEC,
 		seenSec: c.age, seenAt: pt.t
 	};
 }
 function rememberKin(identKey, live) {
-	if (!live || live.onGround) return;
+	// Never refresh the outage clock with a projected point. Keep the timestamp
+	// of the last real observation so repeated polls cannot make stale data young.
+	if (!live || live.onGround || live.extrapolated) return;
 	if (live.altFt == null && live.gsKt == null) return;
 	lastKinByIdent.set(identKey, { ...live, at: Date.now() });
 }
 function restoreKin(identKey, live, dest, aware) {
 	const prev = lastKinByIdent.get(identKey);
 	if (!prev || Date.now() - prev.at > 20 * 60_000) return live;
+	const elapsedSinceRememberSec = Math.max(0, Date.now() - prev.at) / 1000;
+	const prevAgeSec = Number.isFinite(prev.seenAt)
+		? Math.max(0, Date.now() / 1000 - prev.seenAt)
+		: Math.max(0, prev.seenSec ?? 0) + elapsedSinceRememberSec;
 	// A remembered enroute point is useful through a transient outage, but is
 	// unsafe on approach: it can remain miles behind the aircraft at touchdown.
-	if (dest && haversineNm(prev, dest) < 80 && Date.now() - prev.at > 45_000) return live;
+	if (dest && haversineNm(prev, dest) < 80 && prevAgeSec > 45) return live;
 	if (destParkedLeftover(prev, dest, aware)) return live;
 	if (!live) {
-		const age = (Date.now() - prev.at) / 1000;
+		const age = prevAgeSec;
 		let lat = prev.lat;
 		let lon = prev.lon;
-		if (age > 0 && age <= 20 && (prev.gsKt ?? 0) > 80 && prev.track != null && Number.isFinite(prev.track)) {
-			const moved = destPoint(prev, prev.track, (prev.gsKt / 3600) * age);
+		if (elapsedSinceRememberSec > 0 && elapsedSinceRememberSec <= 20 && (prev.gsKt ?? 0) > 80 && prev.track != null && Number.isFinite(prev.track)) {
+			const moved = destPoint(prev, prev.track, (prev.gsKt / 3600) * elapsedSinceRememberSec);
 			lat = moved.lat;
 			lon = moved.lon;
 		}
@@ -3004,6 +3010,13 @@ function liveAgeSec(live) {
 	if (Number.isFinite(live.seenAt)) return Math.max(0, Date.now() / 1000 - live.seenAt);
 	return Number.isFinite(live.seenSec) ? Math.max(0, live.seenSec) : null;
 }
+export function livePositionNeedsRecovery(live) {
+	if (!live || live.extrapolated) return true;
+	const age = liveAgeSec(live);
+	if (age == null) return true;
+	if (live.onGround) return age > (live.source === "fr24" ? FR24_SURFACE_FRESH_SEC : 60);
+	return age > AIRBORNE_POSITION_FRESH_SEC;
+}
 
 function providerDistance(a, b) {
 	return a && b ? haversineNm(a, b) : null;
@@ -3536,6 +3549,19 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		else if (!identOk && dOrig < 15 && Boolean(aware?.takeoff?.actual)) live = null;
 		else if (!ourLanded && !identOk && !aware?.takeoff?.actual && dDest < 12 && dOrig > 20) live = null;
 	}
+	// A stale/projected object must not block the exact identity recovery below.
+	// Preserve its trusted hex as a lookup hint, then require a real current fix.
+	if (live && livePositionNeedsRecovery(live)) {
+		const identityOk = flightIdentOk(live.callsign, parsed, aware) ||
+			Boolean(aware?.tail && live.registration
+				&& String(live.registration).replace(/[-\s]/g, "").toUpperCase() === String(aware.tail).replace(/[-\s]/g, "").toUpperCase());
+		if (identityOk && live.hex) {
+			knownHex = String(live.hex).toLowerCase();
+			hexByIdent.set(stateIdent, knownHex);
+			hexRouteByIdent.set(stateIdent, routeKey);
+		}
+		live = null;
+	}
 	if (!live && origin && !ourLanded && !Boolean(aware?.takeoff?.actual)) {
 		const near = await safe(adsbAround(origin.lat, origin.lon, 48), []);
 		const match = pickAroundAircraft(near, parsed, aware, origin, dest, 48, knownHex);
@@ -3574,7 +3600,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	if (!ourLanded && Boolean(aware?.takeoff?.actual) && !aware?.landing?.actual) {
 		live = restoreKin(stateIdent, live, dest, aware);
 		if (!live) live = liveFromAware(aware);
-		const needTrace = !live || live.altFt == null || live.gsKt == null;
+		const needTrace = !live || live.extrapolated || (liveAgeSec(live) ?? Infinity) > AIRBORNE_POSITION_FRESH_SEC
+			|| live.altFt == null || live.gsKt == null;
 		const hexForTrace = String(live?.hex || hexByIdent.get(stateIdent) || aware?.hex || "").toLowerCase();
 		if (needTrace && /^[0-9a-f]{6}$/.test(hexForTrace)) {
 			const [full, recent] = await Promise.all([
