@@ -14,6 +14,7 @@ import {
   PROVIDERS,
   type AdsbRaw,
   STALE_AIR_SEC,
+  STALE_AIR_RECOVERY_SEC,
 } from "./adsb-fusion.ts";
 
 const HEX = "abc123";
@@ -52,6 +53,17 @@ describe("stale reject", () => {
     );
     assert.equal(fused.length, 1);
     assert.equal(fused[0]?.extrapolated, false);
+  });
+
+  it("keeps a real low-altitude airborne recovery fix through 90 seconds", () => {
+    const at60 = ac({ lat: 41.75, lon: -87.4, alt_baro: 7000, gs: 150, seen: 60, seen_pos: 60 });
+    const at90 = ac({ lat: 41.72, lon: -87.3, alt_baro: 6500, gs: 145, seen: STALE_AIR_RECOVERY_SEC, seen_pos: STALE_AIR_RECOVERY_SEC });
+    const stale91 = ac({ lat: 41.70, lon: -87.2, alt_baro: 6000, gs: 140, seen: STALE_AIR_RECOVERY_SEC + 1, seen_pos: STALE_AIR_RECOVERY_SEC + 1 });
+    assert.equal(fuseProviderLists([{ provider: "fi", ac: [at60] }], { now: T0, airside: false }).length, 1);
+    resetFusion();
+    assert.equal(fuseProviderLists([{ provider: "fi", ac: [at90] }], { now: T0, airside: false }).length, 1);
+    resetFusion();
+    assert.equal(fuseProviderLists([{ provider: "fi", ac: [stale91] }], { now: T0, airside: false }).length, 0);
   });
 });
 
