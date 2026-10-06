@@ -121,27 +121,10 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       if (wantedReg && reg === wantedReg) return true;
       return Boolean(cs && wantedCallsigns.has(cs));
     };
-    const aroundPacks = await fetchAround(airport.lat, airport.lon, 20).catch(() => []);
-    noteAdsbPacks(aroundPacks);
-    const around = fuseProviderLists(aroundPacks, { airside: true })
-      .filter(matchesIdentity)
-      .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
-    let aroundFallback: ReturnType<typeof usableAdsb> = null;
-    for (const candidate of around) {
-      const position = usableAdsb(candidate);
-      if (!position) continue;
-      const ageSec = Math.round(Date.now() / 1000 - position.seenAt);
-      if (ageSec <= 8) {
-        console.info("[ground-position]", { provider: "adsb-around", callsign: position.callsign, ageSec });
-        return finish(position);
-      }
-      aroundFallback = position;
-      break;
-    }
-
-    // Exact hex is the strongest free lookup for ground traffic and can be
-    // materially fresher than an airport-radius response. Prefer it whenever
-    // the broad hit is delayed, then registration, then callsign.
+    // Exact identity is both stronger and much cheaper than scanning the whole
+    // airport every five seconds. Try hex, registration, or the operating
+    // callsign first; only fall back to the radius feed when exact lookup is
+    // unavailable or delayed enough that a broad hit could materially help.
     const exactPacks = wantedHex
       ? await fetchByHex(wantedHex).catch(() => [])
       : resolvedRegistration
@@ -153,19 +136,42 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     const exact = fuseProviderLists(exactPacks, { airside: true })
       .filter(matchesIdentity)
       .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
+    let exactFallback: ReturnType<typeof usableAdsb> = null;
     for (const candidate of exact) {
       const position = usableAdsb(candidate);
-      if (position) {
-        if (!aroundFallback || position.seenAt > aroundFallback.seenAt) return finish(position);
+      if (!position) continue;
+      const ageSec = Math.round(Date.now() / 1000 - position.seenAt);
+      if (ageSec <= 12) {
+        console.info("[ground-position]", { provider: "adsb-exact", callsign: position.callsign, ageSec });
+        return finish(position);
       }
+      exactFallback = position;
+      break;
     }
-    if (aroundFallback) {
+
+    const aroundPacks = await fetchAround(airport.lat, airport.lon, 20).catch(() => []);
+    noteAdsbPacks(aroundPacks);
+    const around = fuseProviderLists(aroundPacks, { airside: true })
+      .filter(matchesIdentity)
+      .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
+    let aroundFallback: ReturnType<typeof usableAdsb> = null;
+    for (const candidate of around) {
+      const position = usableAdsb(candidate);
+      if (!position) continue;
+      aroundFallback = position;
+      break;
+    }
+
+    const selected = exactFallback && aroundFallback
+      ? exactFallback.seenAt >= aroundFallback.seenAt ? exactFallback : aroundFallback
+      : exactFallback ?? aroundFallback;
+    if (selected) {
       console.info("[ground-position]", {
-        provider: "adsb-around-delayed",
-        callsign: aroundFallback.callsign,
-        ageSec: Math.round(Date.now() / 1000 - aroundFallback.seenAt),
+        provider: selected === exactFallback ? "adsb-exact-delayed" : "adsb-around-fallback",
+        callsign: selected.callsign,
+        ageSec: Math.round(Date.now() / 1000 - selected.seenAt),
       });
-      return finish(aroundFallback);
+      return finish(selected);
     }
     return finish(null);
   });;
