@@ -2194,7 +2194,13 @@ function welcomeDisruptions(story: FlightStory) {
   const items: string[] = [];
   const departureDelay = story.times.delayMin ?? 0;
   const arrivalDelay = story.times.arriveDelayMin ?? 0;
-  if (departureDelay >= 5) items.push(`Departure delayed ${departureDelay} min`);
+  const stage = displayStage(story);
+  const departureUnderway = Boolean(story.times.pushed || [
+    "push", "taxi", "takeoff_roll", "ride", "arrival", "final_approach", "taxi_in", "gate",
+  ].includes(stage));
+  if (departureDelay >= 5 && !departureUnderway && !departureGroundUnconfirmed(story)) {
+    items.push(`Departure delayed ${departureDelay} min`);
+  }
   if (arrivalDelay >= 5) items.push(`Arrival delayed ${arrivalDelay} min`);
   if (story.cancelled) items.push("Flight cancelled");
   if (story.diversion) items.push(story.diversion.destination ? `Flight diverted to ${story.diversion.destination}` : "Flight diverted");
