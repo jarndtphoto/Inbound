@@ -149,14 +149,69 @@ test('overnight event clocks use each airport zone and mark the next local day a
 
     const head = render(ui.FlightHead, { story: shown, fetching: false, refreshing: false, onRefresh() {} });
     const details = render(ui.OverviewDetails, { story: shown, timing: h(ui.TimesStrip, { story: shown }) });
+    const welcome = render(ui.FlightWelcome, { open: true, onClose() {}, story: shown });
     const brief = composeBrief(ui.rideFacts({ ...shown, currentStage: 'arrival' }, 'UA203', 'arrival'));
     assert.match(head, /4:27 AM/); assert.match(head, /CDT \+1/);
     for (const value of ['4:16 PM HST', '4:27 PM HST', '4:16 AM CDT +1', '4:27 AM CDT +1']) assert.match(details, new RegExp(value.replace('+', '\\+')));
+    for (const value of ['4:16 PM HST', '4:27 PM HST', '4:16 AM CDT +1', '4:27 AM CDT +1']) assert.match(welcome, new RegExp(value.replace('+', '\\+')));
     assert.match(JSON.stringify(brief), /4:16 AM CDT \+1|4:27 AM CDT \+1/);
   } finally {
     if (oldStorage === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = oldStorage;
   }
+});
+
+test('Flight welcome shows red delay rows only at five minutes or more', () => {
+  const base = polishStory();
+  const onTime = { ...base, times: { ...base.times, delayMin: 4, arriveDelayMin: 0 } };
+  const onTimeHtml = render(ui.FlightWelcome, { open: true, onClose() {}, story: onTime });
+  assert.doesNotMatch(onTimeHtml, /data-flight-alerts|Departure delayed|Arrival delayed|On time/);
+
+  const delayed = { ...base, times: { ...base.times, delayMin: 5, arriveDelayMin: 18 } };
+  const delayedHtml = render(ui.FlightWelcome, { open: true, onClose() {}, story: delayed });
+  assert.match(delayedHtml, /class="[^"]*text-ifr[^"]*" data-flight-alerts/);
+  assert.match(delayedHtml, /Departure delayed 5 min/);
+  assert.match(delayedHtml, /Arrival delayed 18 min/);
+});
+
+test('Flight welcome distinguishes actual and estimated clocks and shares the Overview stage line', () => {
+  const base = polishStory();
+  const story = { ...base, times: { ...base.times,
+    pushKind: 'actual', pushSource: 'provider_actual',
+    takeoffKind: 'estimated', landKind: 'estimated', gateKind: 'estimated',
+  } };
+  const welcome = render(ui.FlightWelcome, { open: true, onClose() {}, story });
+  const overview = render(ui.FlightHead, { story, fetching: false, refreshing: false, onRefresh() {} });
+  assert.match(welcome, /Pushback[\s\S]*data-time-state="actual">Actual/);
+  assert.match(welcome, /Takeoff[\s\S]*data-time-state="estimated">Est\./);
+  assert.match(welcome, /data-flight-stage="true">In flight/);
+  assert.match(overview, />In flight</);
+});
+
+test('Flight welcome hides ride weather after landing and does not repeat the Briefing lead', () => {
+  const airborne = polishStory();
+  const airborneHtml = render(ui.FlightWelcome, { open: true, onClose() {}, story: airborne,
+    brief: { lead: 'LONG BRIEFING LEAD SHOULD STAY IN BRIEFING' } });
+  assert.match(airborneHtml, /data-flight-ride="true"/);
+  assert.doesNotMatch(airborneHtml, /LONG BRIEFING LEAD SHOULD STAY IN BRIEFING/);
+
+  const landedHtml = render(ui.FlightWelcome, { open: true, onClose() {}, story: actualOnlyStory() });
+  assert.doesNotMatch(landedHtml, /data-flight-ride|Route weather and ride conditions/);
+});
+
+test('Flight welcome keeps critical operations and compact weather alerts scannable', () => {
+  const base = polishStory();
+  const story = { ...base, cancelled: true,
+    diversion: { source: 'flightaware', reportedAt: base.fetchedAt, originalDestination: 'HNL', destination: 'LAX' },
+    inboundDiversion: { source: 'flightaware', reportedAt: base.fetchedAt, flightId: 'inbound-1', flight: 'UA100', aircraft: 'N100UA', destination: 'SFO', originalDestination: 'ORD', chain: [] },
+    hazards: [
+      { id: 'ice', kind: 'ice', label: 'Icing', detail: '', validity: '', remaining: true },
+      { id: 'ifr', kind: 'ifr', label: 'IFR', detail: '', validity: '', remaining: true },
+      { id: 'llws', kind: 'llws', label: 'LLWS', detail: '', validity: '', remaining: true },
+    ],
+  };
+  const html = render(ui.FlightWelcome, { open: true, onClose() {}, story });
+  for (const text of ['Flight cancelled', 'Flight diverted to LAX', 'Inbound aircraft diverted to SFO', 'Ice', 'Low visibility', 'Wind shear']) assert.match(html, new RegExp(text));
 });
 
 test('Weather timeline and map alerts agree on light at 11 minutes and moderate at 228', async () => {

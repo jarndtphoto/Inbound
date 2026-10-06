@@ -3,13 +3,12 @@ import { applyTakeoffFloor } from "@/lib/confirmed-takeoff";
 import { displayStage, flightAirborne, liveFix, elapsedFlight, flownDistance, remainingFlight, type RemainingFlightPresentation } from "@/lib/flight-presentation";
 import { FLIGHT_STAGES as STAGES, stageStepId, statusProgressIndex } from "@/lib/flight-stage";
 import { AppearanceControl } from "@/components/appearance-control";
-import { inboundDiversionText } from "@/lib/inbound-diversion";
 import { TravelerCompanion } from "@/components/traveler-companion";
 import { BaggageStatus, useBaggageStatus } from "@/components/baggage-status";
 import { baggageSummary } from "@/lib/baggage-copy";
 import { flightDepartureDate } from "@/lib/airline-status";
 import { storyLegDate } from "@/lib/flight-story-date";
-import { isLanded, nextStep } from "@/lib/traveler";
+import { isLanded } from "@/lib/traveler";
 import { briefRide } from "@/lib/brief";
 import { briefLogLabel, briefLogText, briefingRefreshOutcome, composeBrief, logManualRefresh, type CompiledBrief, type RideFacts } from "@/lib/brief-copy";
 import { agoLabel, delayPhrase, updatedAgoLabel } from "@/lib/format";
@@ -883,7 +882,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   return (
     <div className={cn("pwa-flight-shell", "inbound-redesign", "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg")} style={shellStyle}>
       <header className="journey-header"><div className="flex min-w-0 items-center gap-2"><button type="button" aria-label="Back to search" onClick={leaveFlight} className="flex size-11 shrink-0 items-center justify-center rounded-md text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><ChevronLeft className="size-6" aria-hidden="true" /></button>{story ? <p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p> : <p>{query || "Preparing your flight…"}</p>}</div><AppearanceControl /></header>
-      {story && <FlightWelcome open={briefPopupOpen} onClose={closeWelcome} story={story} brief={shownBrief} />}
+      {story && <FlightWelcome open={briefPopupOpen} onClose={closeWelcome} story={story} />}
       <ScreenErrorBoundary>
       <main
         ref={mainRef}
@@ -1017,6 +1016,7 @@ function departureUpdateDelayed(story: FlightStory, nowMs = Date.now()) {
 
 function stageHeadline(story: FlightStory) {
   const stage = displayStage(story);
+  if (stage === "ride") return "In flight";
   if (stage === "gate") return "At the gate";
   if (stage === "taxi_in") return "Taxiing in";
   if (stage === "final_approach") return "Final approach";
@@ -1126,7 +1126,7 @@ function FlightHead({
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2">
         <div className="min-w-0">
           <p className="summary-airline text-sm text-muted">{headStatus(story, remaining)}</p>
-          <h2 className="summary-stage font-display font-semibold leading-none">{displayStage(story) === "ride" ? "In flight" : stageHeadline(story)}</h2>
+          <h2 className="summary-stage font-display font-semibold leading-none">{stageHeadline(story)}</h2>
         </div>
         <div className="max-w-36 text-right">
           <p className="text-xs text-muted">{story.times.gateKind === "actual" ? "ARRIVED" : "ARRIVES"}</p>
@@ -2091,34 +2091,136 @@ function WeatherTimeline({ story }: { story: FlightStory }) {
 }
 
 
-function FlightWelcome({ open, onClose, story, brief }: { open: boolean; onClose: () => void; story: FlightStory; brief: CompiledBrief | null }) {
+function welcomeFlightNumber(story: FlightStory) {
+  const value = (story.iata || story.callsign).trim().toUpperCase();
+  const match = value.match(/^([A-Z]{2,3})(\d.*)$/);
+  return match ? `${match[1]} ${match[2]}` : value;
+}
+
+function welcomeEventTime(
+  story: FlightStory,
+  unix: number | null | undefined,
+  fallback: string | null | undefined,
+  zone: string | null | undefined,
+) {
+  return formatStoryEventTime(story, unix, zone) ?? fallback ?? null;
+}
+
+function WelcomeTimeCell({
+  label,
+  time,
+  actual,
+}: {
+  label: string;
+  time: string | null | undefined;
+  actual: boolean;
+}) {
+  return <div className="min-w-0">
+    <p className="text-xs font-medium text-muted">{label}</p>
+    <p className="mt-1 break-words font-display text-xl font-semibold leading-tight tabular-nums">
+      {time ? `${actual ? "" : "~"}${time}` : "—"}
+    </p>
+    <p className="mt-1 text-xs font-medium text-muted" data-time-state={actual ? "actual" : "estimated"}>{actual ? "Actual" : "Est."}</p>
+  </div>;
+}
+
+function welcomeDisruptions(story: FlightStory) {
+  const items: string[] = [];
+  const departureDelay = story.times.delayMin ?? 0;
+  const arrivalDelay = story.times.arriveDelayMin ?? 0;
+  if (departureDelay >= 5) items.push(`Departure delayed ${departureDelay} min`);
+  if (arrivalDelay >= 5) items.push(`Arrival delayed ${arrivalDelay} min`);
+  if (story.cancelled) items.push("Flight cancelled");
+  if (story.diversion) items.push(story.diversion.destination ? `Flight diverted to ${story.diversion.destination}` : "Flight diverted");
+  if (story.inboundDiversion) items.push(story.inboundDiversion.destination
+    ? `Inbound aircraft diverted to ${story.inboundDiversion.destination}`
+    : "Inbound aircraft diverted");
+  return items;
+}
+
+function welcomeWeatherWarnings(story: FlightStory) {
+  const labels = new Map<FlightStory["hazards"][number]["kind"], string>([
+    ["ice", "Ice"],
+    ["ifr", "Low visibility"],
+    ["llws", "Wind shear"],
+  ]);
+  return [...new Set(story.hazards
+    .filter((hazard) => hazard.remaining && labels.has(hazard.kind))
+    .map((hazard) => labels.get(hazard.kind)!))];
+}
+
+function FlightWelcome({ open, onClose, story }: { open: boolean; onClose: () => void; story: FlightStory }) {
   const ref = useRef<HTMLDialogElement>(null);
   const displayedWeather = flightWeatherSummary(story);
-  const otherWeatherWarnings = [...new Set(story.hazards
-    .filter((hazard) => hazard.remaining && (hazard.kind === "ice" || hazard.kind === "llws" || hazard.kind === "ifr"))
-    .map((hazard) => hazard.label))];
+  const disruptions = welcomeDisruptions(story);
+  const otherWeatherWarnings = welcomeWeatherWarnings(story);
+  const landed = isLanded(story);
+  const pushActual = story.times.pushKind === "actual";
+  const pushTime = welcomeEventTime(story, story.times.pushUnix, story.times.push, story.origin.tz);
+  const takeoffTime = welcomeEventTime(story, story.times.takeoffUnix, story.times.takeoff, story.origin.tz);
+  const landingTime = welcomeEventTime(story, story.times.landUnix, story.times.land, story.dest.tz);
+  const gateTime = welcomeEventTime(story, story.times.gateUnix, story.times.gate, story.dest.tz);
+  const airportNotes = [
+    story.origin.nas?.reason ? { label: `Departure · ${story.origin.iata}`, text: story.origin.nas.reason } : null,
+    story.dest.nas?.reason ? { label: `Arrival · ${story.dest.iata}`, text: story.dest.nas.reason } : null,
+  ].filter((note): note is { label: string; text: string } => Boolean(note));
   useEffect(() => {
     if (open && !ref.current?.open) ref.current?.showModal();
     if (!open && ref.current?.open) ref.current?.close();
   }, [open]);
   return <dialog aria-labelledby="flight-welcome-title" ref={ref} onCancel={onClose} onClose={onClose}
-    className="fixed left-1/2 top-1/2 m-0 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-5 text-fg backdrop:bg-black/70"
+    className="fixed left-1/2 top-1/2 m-0 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface p-0 text-fg shadow-2xl backdrop:bg-black/70"
     style={{ maxHeight: "calc(100dvh - max(2rem, env(safe-area-inset-top, 0px)) - max(2rem, env(safe-area-inset-bottom, 0px)))" }}>
-    <div className="flex items-start justify-between gap-3">
-      <h2 className="text-xl font-semibold" id="flight-welcome-title">Important information about your flight</h2>
-      <button type="button" autoFocus aria-label="Close flight briefing" onClick={onClose} className="flex size-11 shrink-0 items-center justify-center rounded-md border border-border text-xl">×</button>
+    <div className="p-5 pb-4" data-flight-welcome-card>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-display text-4xl font-bold leading-none tracking-tight" id="flight-welcome-title">{welcomeFlightNumber(story)}</h2>
+          <p className="mt-2 text-base font-medium text-muted">{story.origin.iata} <span className="mx-1 text-subtle">→</span> {story.dest.iata}</p>
+        </div>
+        <button type="button" autoFocus aria-label="Close flight briefing" onClick={onClose} className="flex size-11 shrink-0 items-center justify-center rounded-md border border-border text-2xl leading-none">×</button>
+      </div>
+      {disruptions.length > 0 && <div className="mt-4 space-y-1 text-sm font-semibold text-ifr" data-flight-alerts>
+        {disruptions.map((item) => <p key={item} data-flight-alert>{item}</p>)}
+      </div>}
     </div>
-    <p className="mt-2 text-sm text-muted">{story.iata || story.callsign} · {story.origin.iata} → {story.dest.iata}</p>
-    <div className="mt-4 space-y-3 text-sm leading-relaxed">
-      {story.inboundDiversion && <p><strong>Inbound aircraft was diverted:</strong> {inboundDiversionText(story.inboundDiversion)}</p>}
-      <p>{story.diversion ? nextStep(story, story.fetchedAt).title + ". " + nextStep(story, story.fetchedAt).body : brief?.lead || "The briefing is being prepared. Current flight information is below."}</p>
-      {(story.times.delayMin ?? 0) >= 5 && <p><strong>Departure delay:</strong> {story.times.delayMin} minutes.</p>}
-      {(story.currentStage === "inbound" || story.currentStage === "push") && <p><strong>Inbound aircraft:</strong> {story.inbound.detail || story.inbound.headline}</p>}
-      {!isLanded(story) && <p><strong>Route weather:</strong> {displayedWeather}</p>}
-      {!isLanded(story) && otherWeatherWarnings.length > 0 && <p><strong>Weather alerts:</strong> {otherWeatherWarnings.join(" · ")}</p>}
-      {!isLanded(story) && story.origin.nas?.delayed && <p><strong>Departure airport:</strong> {story.origin.nas.reason}</p>}
-      {story.dest.nas?.delayed && <p><strong>Arrival airport:</strong> {story.dest.nas.reason}</p>}
-    </div>
-    <p className="mt-4 text-xs text-muted">Data as of {formatClockTime(story.fetchedAt)}. Estimates may change. Full details remain in Briefing and Weather.</p>
+
+    <section className="border-t border-border px-5 py-4" aria-label="Current flight status">
+      <p className="text-xs font-medium uppercase tracking-wider text-muted">Current status</p>
+      <p className="mt-1 font-display text-2xl font-semibold leading-tight" data-flight-stage>{stageHeadline(story)}</p>
+    </section>
+
+    <section className="border-t border-border px-5 py-4" aria-label={`Departure times at ${story.origin.iata}`}>
+      <p className="mb-3 text-xs font-medium uppercase tracking-wider text-muted">Departure · {story.origin.iata}</p>
+      <div className="grid min-w-0 grid-cols-2 gap-4">
+        <WelcomeTimeCell label="Pushback" time={pushTime} actual={pushActual} />
+        <WelcomeTimeCell label="Takeoff" time={takeoffTime} actual={story.times.takeoffKind === "actual"} />
+      </div>
+    </section>
+
+    {!landed && <section className="border-t border-border px-5 py-4" aria-label="Route weather and ride conditions" data-flight-ride>
+      <p className="text-xs font-medium uppercase tracking-wider text-muted">Ride</p>
+      <p className="mt-1 text-sm font-medium leading-relaxed">{displayedWeather}</p>
+      {otherWeatherWarnings.length > 0 && <div className="mt-3 flex flex-wrap gap-2" aria-label="Weather alerts">
+        {otherWeatherWarnings.map((warning) => <span key={warning} className="rounded-full border border-ifr/40 bg-ifr/10 px-2.5 py-1 text-xs font-semibold text-ifr">{warning}</span>)}
+      </div>}
+    </section>}
+
+    <section className="border-t border-border px-5 py-4" aria-label={`Arrival times at ${story.dest.iata}`}>
+      <p className="mb-3 text-xs font-medium uppercase tracking-wider text-muted">Landing · {story.dest.iata}</p>
+      <div className="grid min-w-0 grid-cols-2 gap-4">
+        <WelcomeTimeCell label="Landing" time={landingTime} actual={story.times.landKind === "actual"} />
+        <WelcomeTimeCell label="Gate arrival" time={gateTime} actual={story.times.gateKind === "actual"} />
+      </div>
+      {story.times.destGate && <p className="mt-3 text-sm font-medium">Arrival gate <span className="font-display text-lg font-semibold">{story.times.destGate}</span></p>}
+    </section>
+
+    {airportNotes.length > 0 && <section className="border-t border-border px-5 py-4" aria-label="Airport delay notes">
+      <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted">Airport notes</p>
+      <ul className="space-y-2 text-xs leading-relaxed text-muted">
+        {airportNotes.map((note) => <li key={note.label}><span className="font-semibold text-fg">{note.label}:</span> {note.text}</li>)}
+      </ul>
+    </section>}
+
+    <p className="border-t border-border px-5 py-4 text-xs leading-relaxed text-muted">Data as of {formatClockTime(story.fetchedAt)}. Estimates may change.</p>
   </dialog>;
 }

@@ -61,6 +61,7 @@ import { emptyRouteMemory, mergeRouteMemory, mergeObservedTrack, routeLeg, valid
 import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
+import { showDetailedArrivalGeometry } from "./arrival-pattern.ts";
 import { loadOfficialFlightData } from "./official-flight-data.server.ts";
 import {
 	fetchAround,
@@ -3560,8 +3561,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		arrivalPersistence = saved.status;
 	}
 	expectedArrival = arrivalState.runway;
-	const showDetailedArrival = Boolean(arrivalState.startedAt
-		&& showDetailedArrivalGeometry(arrivalLive, end, arrivalInput.approachEvidence));
+	const detailedArrivalNow = showDetailedArrivalGeometry(arrivalLive, end, arrivalInput.approachEvidence);
+	const detailedArrivalContinuation = Boolean(arrivalState.detailedStartedAt && arrivalState.active && (
+		(arrivalLive && !arrivalLive.onGround && !arrivalLive.extrapolated
+			&& (arrivalLive.seenSec ?? Infinity) <= 120 && haversineNm(arrivalLive, end) <= 35)
+		|| (!arrivalLive && arrivalState.lastFixAt > 0 && Date.now() - arrivalState.lastFixAt <= 120_000)
+	));
+	const showDetailedArrival = Boolean(arrivalState.detailedStartedAt
+		&& (detailedArrivalNow || detailedArrivalContinuation));
 	const pattern = showDetailedArrival ? displayArrivalProjection(arrivalState, {
 		observation: routeObservation && Date.now() - routeObservation.seenAt <= 60_000 ? routeObservation : null,
 		live, lastObserved: routeObservation ?? routeMemory?.lastObserved ?? null, landed: ourLanded
@@ -4415,6 +4422,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		schedule: aware ? { status: resumed ? "saved" : "current", confirmedAt: aware.confirmedAt ?? Date.now(), serviceDate: aware._publicScheduleDate ?? null } : undefined,
 		resume: storyResume,
 		flightId: aware?.flightId ?? undefined,
+		cancelled: Boolean(aware?.cancelled),
 		diversion: aware?.diversion,
 		inboundDiversion,
 		query,
