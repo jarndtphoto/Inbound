@@ -20,7 +20,7 @@ test('five-minute airport cache coalesces calls and rejects stale/failed bulleti
 });
 
 
-test("non-actual provider reciprocal cannot override ORD east-flow ATIS", async () => {
+test("AA2343 SAN to ORD replay keeps east-flow west threshold despite reciprocal provider hint", async () => {
   clearArrivalAtisMemoryCache();
   const store = {
     loadAtis: async () => [{ airport: "KORD", type: "combined", datis: "ARR EXP VECTORS ILS RWY 9L APCH, ILS RWY 10C APCH, VISUAL APCH RWY 10R.", time: "1728Z" }],
@@ -35,9 +35,10 @@ test("non-actual provider reciprocal cannot override ORD east-flow ATIS", async 
   }, store);
 
   assert.ok(selected);
-  assert.match(selected!.runway, /^(9|10)/);
+  assert.equal(selected!.runway, "10R");
   assert.equal(selected!.heading, 90);
-  assert.ok(selected!.threshold.lon < -87.91, "east-flow arrivals use the west threshold");
+  assert.ok(Math.abs(selected!.threshold.lat - 41.95719909667969) < 1e-7);
+  assert.ok(Math.abs(selected!.threshold.lon - -87.92790222167969) < 1e-7, "10R east-flow uses the west threshold");
 });
 
 test("confirmed actual provider runway can still override ATIS", async () => {
