@@ -77,7 +77,7 @@ test("surface parser includes same-response coastline and multipolygon inland wa
   const parsed = parseAirportSurfaceElements([
     square(1, -0.03, -0.03, 0.03, 0.03, { aeroway: "aerodrome", icao: "KORD" }),
     line(2, [{ lat: 0, lon: -0.02 }, { lat: 0, lon: 0.02 }], { aeroway: "runway", ref: "10/28" }),
-    line(20, [{ lat: -0.08, lon: 0.04 }, { lat: 0.08, lon: 0.04 }], { natural: "coastline" }),
+    line(20, [{ lat: -0.60, lon: 0.04 }, { lat: 0.60, lon: 0.04 }], { natural: "coastline" }),
     {
       id: 30,
       type: "relation" as const,
@@ -105,4 +105,16 @@ test("ORD detailed geography reaches Lake Michigan while airport features stay t
   const exact = exactAirportSurfaceOverpassQuery("KORD", input);
   assert.ok(exact.includes(detail.east.toFixed(6)));
   assert.match(exact, /natural"="water"/);
+});
+
+
+test("open water ways are not promoted to polygons across the detail box", () => {
+  const parsed = parseAirportSurfaceElements([
+    square(101, -0.03, -0.03, 0.03, 0.03, { aeroway: "aerodrome", icao: "KDEN" }),
+    line(102, [{ lat: 0, lon: -0.02 }, { lat: 0, lon: 0.02 }], { aeroway: "runway", ref: "17/35" }),
+    line(103, [{ lat: -0.1, lon: 0.1 }, { lat: 0.1, lon: 0.1 }, { lat: 0.15, lon: 0.15 }], { natural: "water" }),
+  ], "KDEN", 123, { lat: 0, lon: 0 });
+  assert.equal(parsed.geography?.fallback, false);
+  assert.equal(parsed.geography?.base, "land");
+  assert.equal(parsed.geography?.water.length, 0);
 });
