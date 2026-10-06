@@ -69,13 +69,15 @@ test('airborne trace continuity stays observed through 90 seconds and then force
       knownHex: 'A12345',
       scheduleHex: 'a12345',
       tail: 'N-12345',
+      operatingCallsign: 'SKW5544',
       callsign: ' UAL123 ',
       scheduleIdent: 'UAL123',
     }), [
       { kind: 'hex', value: 'a12345' },
       { kind: 'registration', value: 'N12345' },
+      { kind: 'callsign', value: 'SKW5544' },
       { kind: 'callsign', value: 'UAL123' },
-    ], 'saved hex is tried first and duplicate identities are not requested twice');
+    ], 'saved hex and operating callsign are tried before duplicate passenger identities');
   } finally {
     Date.now = realNow;
     await rm(directory, { recursive: true, force: true });
