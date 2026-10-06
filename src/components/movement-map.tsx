@@ -316,7 +316,7 @@ function GroundMovementMap({
     ((storyAircraft.altFt ?? 9999) <= 250 && (storyAircraft.gsKt ?? 999) <= 80)
   ));
   const storyFast = storyAircraft && storyPhysicalProvider && storyNearAirport && storySurfaceLike
-    && storyPositionAge != null && storyPositionAge <= 12
+    && storyPositionAge != null && storyPositionAge <= 30
     ? {
         lat: storyAircraft.lat,
         lon: storyAircraft.lon,
@@ -359,7 +359,7 @@ function GroundMovementMap({
       airportLon: airport.lon,
     } }),
     enabled: groundPollingEnabled(active, pageVisible, flightPollingComplete(story), inFlight, Boolean(storyFast), Boolean(identityHex || identityRegistration || identityCallsign)),
-    refetchInterval: () => active && document.visibilityState === "visible" && !flightPollingComplete(story) ? 5_000 : false,
+    refetchInterval: () => active && document.visibilityState === "visible" && !flightPollingComplete(story) ? 8_000 : false,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
