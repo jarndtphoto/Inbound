@@ -96,6 +96,10 @@ test("paced ground map is free ADS-B only", async () => {
   assert.match(source, /ageSec > 90/);
   assert.match(source, /trace has no recent ground point/);
   assert.match(source, /provider: "adsb-around-fallback"/, "a broad scan remains available when exact lookup is healthy but empty");
+  assert.match(source, /const groundAroundCache = new Map/);
+  assert.match(source, /heldAround && Date\.now\(\) - heldAround\.at <= 30_000/);
+  assert.match(source, /const traced = wantedHex[\s\S]*?recentGroundTrace\(wantedHex/);
+  assert.match(source, /\[ground-position-miss\]/);
 });
 
 test("surface providers are paced and expose throttling instead of silently looking empty", async () => {
