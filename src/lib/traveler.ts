@@ -38,6 +38,26 @@ export function RideOutlookText({ story }: { story: FlightStory }) {
     createElement("span", { key: index, className: index ? "mt-1 block text-muted" : "block" }, line)));
 }
 
+function departureGroundUnconfirmed(s: FlightStory, now = Date.now()) {
+  if (s.currentStage !== "inbound" && s.currentStage !== "origin_gate") return false;
+  if (s.times.pushed || s.times.pushKind === "actual") return false;
+  const pushAt = s.times.pushUnix;
+  if (typeof pushAt !== "number" || !Number.isFinite(pushAt)) return false;
+  const nowSec = now / 1000;
+  if (nowSec < pushAt - 15 * 60 || nowSec > pushAt + 2 * 60 * 60) return false;
+  const ageSec = typeof s.providers?.chosenPositionAgeSec === "number"
+    ? s.providers.chosenPositionAgeSec
+    : typeof s.aircraft?.seenSec === "number"
+      ? s.aircraft.seenSec
+      : null;
+  const freshGround = Boolean(
+    s.live && s.aircraft && s.aircraft.onGround === true && !s.aircraft.extrapolated
+    && Number.isFinite(s.aircraft.lat) && Number.isFinite(s.aircraft.lon)
+    && ageSec != null && ageSec <= 30
+  );
+  return !freshGround;
+}
+
 export function nextStep(s: FlightStory, now = Date.now(), failed = false) {
   const age = Math.max(0, (now - s.fetchedAt) / 1000);
   const fixAge = (s.aircraft?.seenSec ?? Infinity) + age;
@@ -59,6 +79,13 @@ export function nextStep(s: FlightStory, now = Date.now(), failed = false) {
       title: "Takeoff roll underway",
       body: "The aircraft is accelerating on the runway. The flight will switch to airborne once takeoff is confirmed.",
       confidence,
+    };
+  }
+  if (departureGroundUnconfirmed(s, now)) {
+    return {
+      title: "Ground movement not confirmed",
+      body: "Live ground position is unavailable right now. Scheduled times do not confirm whether the aircraft is still at the gate, pushing back, or taxiing.",
+      confidence: "Position not confirmed",
     };
   }
   const event = passengerNextEvent(s);
