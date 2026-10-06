@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
-import { createFr24Guard } from "../src/lib/fr24-budget.server.ts";
+import { createFr24Guard, setFr24GuardForTests } from "../src/lib/fr24-budget.server.ts";
 import { fr24CreditsForResponse, fr24DailyCreditCap } from "../src/lib/fr24-budget.ts";
+import { loadFr24Flight } from "../src/lib/fr24.server.ts";
 
 async function testSql() {
   const pg = new PGlite({ parsers: { 20: Number } });
@@ -28,6 +29,49 @@ test("FR24 endpoint costs and emergency default cap match the account model", ()
   assert.equal(fr24DailyCreditCap(Date.UTC(2026, 9, 6, 12), {}), 1028);
   assert.equal(fr24DailyCreditCap(Date.UTC(2026, 9, 12, 12), {}), 1028, "the original remaining balance is not re-divided each morning");
   assert.equal(fr24DailyCreditCap(Date.UTC(2026, 9, 6, 12), { FR24_DAILY_CREDIT_CAP: "777" }), 777);
+  assert.equal(fr24DailyCreditCap(Date.UTC(2026, 9, 6, 12), {
+    FR24_REMAINING_CREDITS: "9000",
+    FR24_CREDIT_RESET_AT: "2026-10-12T12:00:00Z",
+  }), 1200, "a confirmed reset timestamp drives the remaining-credits calculation");
+  assert.equal(fr24DailyCreditCap(Date.UTC(2026, 9, 6, 12), {
+    FR24_CREDIT_RESET_AT: "2026-10-05T12:00:00Z",
+  }), 1600, "a past configured reset switches to the conservative monthly allowance");
+});
+
+test("missing guard tables or an unreachable Neon fail closed before any FR24 request", async () => {
+  const savedToken = process.env.FR24_API_TOKEN;
+  const savedEnv = process.env.VERCEL_ENV;
+  const realFetch = globalThis.fetch;
+  let fetches = 0;
+  process.env.FR24_API_TOKEN = "test-token";
+  process.env.VERCEL_ENV = "production";
+  globalThis.fetch = async () => {
+    fetches += 1;
+    return Response.json({ data: [] });
+  };
+  try {
+    for (const failure of [
+      new Error('relation "fr24_shared_cache" does not exist'),
+      new Error("Neon connection unavailable"),
+    ]) {
+      setFr24GuardForTests({
+        usage: async () => { throw failure; },
+        reserve: async () => { throw failure; },
+        finish: async () => { throw failure; },
+        cached: async () => { throw failure; },
+        acquire: async () => { throw failure; },
+        store: async () => { throw failure; },
+        release: async () => { throw failure; },
+      });
+      await assert.rejects(loadFr24Flight("AAL1007"), failure);
+    }
+    assert.equal(fetches, 0, "database failures must never fall through to paid FR24");
+  } finally {
+    setFr24GuardForTests(createFr24Guard());
+    globalThis.fetch = realFetch;
+    if (savedToken == null) delete process.env.FR24_API_TOKEN; else process.env.FR24_API_TOKEN = savedToken;
+    if (savedEnv == null) delete process.env.VERCEL_ENV; else process.env.VERCEL_ENV = savedEnv;
+  }
 });
 
 test("daily reservations are atomic and every upstream completion is logged", async () => {

@@ -1,8 +1,8 @@
 const DAY_MS = 24 * 60 * 60_000;
 const INITIAL_REMAINING_CREDITS = 9_000;
-const INITIAL_RESET_AT = Date.parse("2026-10-13T05:00:00Z");
 const INITIAL_DAYS_UNTIL_RESET = 7;
 const DEFAULT_MONTHLY_CREDITS = 60_000;
+const DEFAULT_BILLING_DAYS = 30;
 
 export type Fr24Endpoint =
   | "/live/flight-positions/full"
@@ -16,44 +16,28 @@ function positiveInt(value: string | undefined): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
 }
 
-function nextMonthlyReset(after: number): number {
-  const date = new Date(after);
-  let reset = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 13, 5);
-  if (reset <= after) reset = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 13, 5);
-  return reset;
-}
-
-function previousMonthlyReset(before: number): number {
-  const date = new Date(before);
-  let reset = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 13, 5);
-  if (reset > before) reset = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 13, 5);
-  return reset;
-}
-
-/** Emergency default from the Oct 6 account facts: 9,000 credits remain and
- * the subscription resets in about seven days. After that known reset, spread
- * the 60,000-credit plan across the next billing period. An explicit cap always
- * wins and can be changed without a code release. */
+/** Emergency default from the Oct 6 account snapshot: 9,000 credits remained
+ * and the portal said roughly seven days until renewal. The portal did not
+ * establish an exact timestamp, so there is deliberately no hard-coded reset
+ * date here. FR24_CREDIT_RESET_AT plus FR24_REMAINING_CREDITS can provide the
+ * exact rolling calculation once the account date is confirmed; an explicit
+ * FR24_DAILY_CREDIT_CAP always wins. */
 export function fr24DailyCreditCap(now = Date.now(), env: NodeJS.ProcessEnv = process.env): number {
   const explicit = positiveInt(env.FR24_DAILY_CREDIT_CAP);
   if (explicit) return explicit;
   const configuredReset = Date.parse(env.FR24_CREDIT_RESET_AT ?? "");
-  const resetAt = Number.isFinite(configuredReset)
-    ? configuredReset
-    : now < INITIAL_RESET_AT ? INITIAL_RESET_AT : nextMonthlyReset(now);
   const configuredRemaining = positiveInt(env.FR24_REMAINING_CREDITS);
-  if (configuredRemaining) {
-    const days = Math.max(1, Math.ceil((resetAt - now) / DAY_MS));
+  if (configuredRemaining && Number.isFinite(configuredReset) && configuredReset > now) {
+    const days = Math.max(1, Math.ceil((configuredReset - now) / DAY_MS));
     return Math.max(1, Math.floor((configuredRemaining / days) * 0.8));
   }
-  if (now < INITIAL_RESET_AT) {
-    // Keep the deployment-time allowance flat through this reset. Re-dividing
-    // the original 9,000 by fewer days every morning would spend the same
-    // "remaining" credits repeatedly and defeat the margin.
+  if (!Number.isFinite(configuredReset)) {
+    // Keep the emergency allowance flat. Re-dividing the original snapshot by
+    // fewer assumed days would spend the same "remaining" credits repeatedly.
     return Math.max(1, Math.floor((INITIAL_REMAINING_CREDITS / INITIAL_DAYS_UNTIL_RESET) * 0.8));
   }
   const monthly = positiveInt(env.FR24_MONTHLY_CREDIT_LIMIT) ?? DEFAULT_MONTHLY_CREDITS;
-  const billingDays = Math.max(1, Math.round((resetAt - previousMonthlyReset(now)) / DAY_MS));
+  const billingDays = positiveInt(env.FR24_BILLING_PERIOD_DAYS) ?? DEFAULT_BILLING_DAYS;
   return Math.max(1, Math.floor((monthly / billingDays) * 0.8));
 }
 
