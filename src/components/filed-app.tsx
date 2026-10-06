@@ -493,6 +493,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   const mainRef = useRef<HTMLElement>(null);
   const publishedLegDate = useRef<string | null>(null);
   const surfacePrefetchRef = useRef<{ flightKey: string; airports: Set<string> }>({ flightKey: "", airports: new Set() });
+  const pushConfirmRef = useRef<{ key: string; attempts: number }>({ key: "", attempts: 0 });
   const flightKey = normFlight(query);
   const pageVisible = usePageVisible();
   const storyQueryKey = flightStoryQueryKey(query, linkedDate);
@@ -596,6 +597,29 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
 
   const story = storyForQuery(storyQ.data, query, linkedDate);
   const remaining = story ? remainingFlight(story) : null;
+
+  useEffect(() => {
+    if (!story || story.currentStage !== "push" || storyQ.isFetching || !pageVisible) return;
+    const key = `${story.stateKey ?? flightKey}:${story.times.pushUnix ?? ""}`;
+    if (pushConfirmRef.current.key !== key) pushConfirmRef.current = { key, attempts: 0 };
+    if (pushConfirmRef.current.attempts >= 2) return;
+    const delayMs = pushConfirmRef.current.attempts === 0 ? 2_500 : 4_000;
+    const timer = window.setTimeout(() => {
+      if (leavingRef.current || storyQ.isFetching) return;
+      pushConfirmRef.current.attempts += 1;
+      void storyQ.refetch();
+    }, delayMs);
+    return () => window.clearTimeout(timer);
+  }, [
+    story?.stateKey,
+    story?.currentStage,
+    story?.times.pushUnix,
+    storyQ.isFetching,
+    storyQ.dataUpdatedAt,
+    storyQ.refetch,
+    pageVisible,
+    flightKey,
+  ]);
 
   useEffect(() => {
     if (!story) return;
@@ -753,6 +777,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
     setBriefFeedback(null);
     briefM.reset();
     setStage("auto");
+    pushConfirmRef.current = { key: "", attempts: 0 };
     setRefreshErr(null);
     setPullPx(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the flight changes
