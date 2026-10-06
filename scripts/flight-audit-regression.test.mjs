@@ -293,6 +293,7 @@ describe('zoom-stable route presentation', () => {
     assert.doesNotMatch(groundSource, /displayAircraft\.track \+ 180/);
     assert.match(groundSource, /delayed \$\{providerLabel\} position/);
     assert.match(groundSource, /storyPositionAge != null && storyPositionAge <= 90/);
+    assert.match(groundSource, /queriedFastAge \?\? Infinity\) <= 90/);
     assert.match(groundSource, /\? 8_000 : false/);
     assert.match(groundSource, /airportRunwayFallbackFeatures\(airport\.icao\)/);
     assert.match(groundSource, /Detailed taxiways unavailable; runways shown\./);
