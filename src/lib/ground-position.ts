@@ -15,6 +15,80 @@ type GroundPositionInput = {
   airportLon: number;
 };
 
+
+type GroundTracePosition = {
+  lat: number;
+  lon: number;
+  altFt: number | null;
+  gsKt: number | null;
+  track: number | null;
+  onGround: true;
+  seenAt: number;
+  registration: string | null;
+  callsign: string | null;
+  provider: "adsb";
+};
+
+const TRACE_HOSTS = [
+  "https://globe.theairtraffic.com",
+  "https://globe.adsb.fi",
+  "https://globe.airplanes.live",
+];
+const groundTraceCache = new Map<string, { at: number; value: GroundTracePosition | null }>();
+
+async function recentGroundTrace(
+  hex: string,
+  airport: { lat: number; lon: number },
+  registration: string | null,
+  callsign: string | null,
+  now = Date.now(),
+): Promise<GroundTracePosition | null> {
+  const id = hex.toLowerCase();
+  if (!/^[0-9a-f]{6}$/.test(id)) return null;
+  const cached = groundTraceCache.get(id);
+  if (cached && now - cached.at <= 8_000) return cached.value;
+
+  const attempts = TRACE_HOSTS.map(async (host) => {
+    const response = await fetch(`${host}/data/traces/${id.slice(-2)}/trace_recent_${id}.json`, {
+      signal: AbortSignal.timeout(2_200),
+      headers: { Accept: "application/json", "User-Agent": "Inbound/1.0 ground-trace-recovery" },
+    });
+    if (!response.ok) throw new Error(`trace HTTP ${response.status}`);
+    const payload = await response.json() as { timestamp?: number; trace?: unknown[][] };
+    const base = typeof payload.timestamp === "number" ? payload.timestamp : 0;
+    const rows = Array.isArray(payload.trace) ? payload.trace : [];
+    const candidates = rows.flatMap((row) => {
+      const offset = typeof row?.[0] === "number" ? row[0] : 0;
+      const lat = row?.[1], lon = row?.[2], altRaw = row?.[3], gsRaw = row?.[4], trackRaw = row?.[5];
+      if (typeof lat !== "number" || typeof lon !== "number" || Math.abs(lat) > 90 || Math.abs(lon) > 180) return [];
+      const seenAt = base + offset;
+      const ageSec = now / 1000 - seenAt;
+      if (!Number.isFinite(ageSec) || ageSec < -10 || ageSec > 90) return [];
+      const gsKt = typeof gsRaw === "number" ? gsRaw : null;
+      const ground = altRaw === "ground" || altRaw === 0 || altRaw === "0"
+        || (typeof altRaw === "number" && altRaw <= 50 && (gsKt ?? 999) <= 80);
+      if (!ground || haversineNm({ lat, lon }, airport) > 20) return [];
+      const altFt = typeof altRaw === "number" && altRaw > 0 ? altRaw : 0;
+      return [{
+        lat, lon, altFt, gsKt,
+        track: typeof trackRaw === "number" && trackRaw >= 0 && trackRaw <= 360 ? trackRaw : null,
+        onGround: true as const,
+        seenAt,
+        registration,
+        callsign,
+        provider: "adsb" as const,
+      }];
+    }).sort((a, b) => b.seenAt - a.seenAt);
+    const position = candidates[0] ?? null;
+    if (!position) throw new Error("trace has no recent ground point");
+    return position;
+  });
+
+  const value = await Promise.any(attempts).catch(() => null);
+  groundTraceCache.set(id, { at: now, value });
+  return value;
+}
+
 export const getGroundPosition = createServerFn({ method: "POST" })
   .validator((input: GroundPositionInput) => {
     const callsign = String(input?.callsign ?? "").trim().toUpperCase() || null;
@@ -148,6 +222,17 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     // airport scan would hit the same unavailable feeds and only make this
     // ground-map request slower. Let the next scheduled poll recover instead.
     if (exactPacks.length > 0 && exactPacks.every((pack) => pack.status && pack.status !== "ok")) {
+      const traced = wantedHex
+        ? await recentGroundTrace(wantedHex, airport, resolvedRegistration, callsigns[0] ?? data.callsign)
+        : null;
+      if (traced) {
+        console.info("[ground-position]", {
+          provider: "adsb-trace-recovery",
+          callsign: traced.callsign,
+          ageSec: Math.round(Date.now() / 1000 - traced.seenAt),
+        });
+        return finish(traced);
+      }
       return finish(null);
     }
 
