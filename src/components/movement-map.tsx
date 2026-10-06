@@ -661,8 +661,7 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
     || story.currentStage === "gate"
     || story.arrivalStatus === "landed"
     || story.arrivalStatus === "taxi_in"
-    || story.arrivalStatus === "gate"
-    || story.times.landKind === "actual";
+    || story.arrivalStatus === "gate";
   useEffect(() => {
     if (arrivalStageConfirmed && !autoArrivalSwitched.current) {
       autoArrivalSwitched.current = true;
