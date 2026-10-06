@@ -920,7 +920,7 @@ export function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, loc
 	let locked = null;
 	for (const a of near) {
 		if (typeof a.lat !== "number" || typeof a.lon !== "number") continue;
-		const ageSec = fusionSeen(a);
+		const ageSec = a._fusion?.ageSec ?? fusionSeen(a);
 		const rawOnGround = a.alt_baro === "ground" || a.alt_baro === 0;
 		if (ageSec > (rawOnGround ? 40 : AIRBORNE_POSITION_FRESH_SEC)) continue;
 		const here = { lat: a.lat, lon: a.lon };
