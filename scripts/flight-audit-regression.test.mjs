@@ -274,7 +274,7 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /fitGroundSurfaceView/);
     assert.match(groundSource, /filterAirportSurfaceFeatures/);
     assert.match(groundSource, /const surface = surfaceQ\.data as AirportSurface \| undefined/);
-    assert.match(groundSource, /surface\?\.features \?\? \[\]/);
+    assert.match(groundSource, /surface\?\.features\?\.length \? surface\.features : fallbackRunways/);
     assert.match(groundSource, /BoundaryShape/);
     assert.match(groundSource, /fitFeatures\.flatMap/);
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
