@@ -23,6 +23,18 @@ export function airportSurfaceBounds(input: { lat: number; lon: number }): Surfa
   };
 }
 
+/** Detailed geography covers roughly the 60-mile airport-detail viewport. */
+export function airportDetailGeographyBounds(input: { lat: number; lon: number }): SurfaceBounds {
+  const latPad = 0.45;
+  const lonPad = Math.min(0.8, latPad / Math.max(0.45, Math.cos(input.lat * Math.PI / 180)));
+  return {
+    south: Math.max(-85, input.lat - latPad),
+    west: Math.max(-180, input.lon - lonPad),
+    north: Math.min(85, input.lat + latPad),
+    east: Math.min(180, input.lon + lonPad),
+  };
+}
+
 export function surfaceBoundsBox(bounds: SurfaceBounds): GeoPoint[] {
   return [
     { lat: bounds.south, lon: bounds.west },
