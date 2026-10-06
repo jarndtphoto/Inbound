@@ -60,6 +60,7 @@ test("exact airport surface query targets the requested aerodrome before any bro
   assert.match(query, /natural"="water"/);
   assert.match(query, /water"~"\^\(lake\|lagoon\|reservoir\|bay\)\$"/);
   assert.match(query, /32\.283800/);
+  assert.match(query, /out geom\(32\.283800/);
 });
 
 test("boxed airport surface query remains available as a bounded fallback", () => {
@@ -70,6 +71,7 @@ test("boxed airport surface query remains available as a bounded fallback", () =
   assert.match(query, /aeroway"="aerodrome"/);
   assert.match(query, /natural"="coastline"/);
   assert.match(query, /natural"="water"/);
+  assert.match(query, /out geom\(32\.283800/);
 });
 
 

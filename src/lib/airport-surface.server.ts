@@ -23,7 +23,7 @@ type OverpassMember = {
   type?: "node" | "way" | "relation";
   ref?: number;
   role?: string;
-  geometry?: OverpassGeometryPoint[];
+  geometry?: Array<OverpassGeometryPoint | null>;
 };
 type OverpassElement = {
   id: number;
@@ -31,7 +31,7 @@ type OverpassElement = {
   lat?: number;
   lon?: number;
   tags?: Record<string, string>;
-  geometry?: OverpassGeometryPoint[];
+  geometry?: Array<OverpassGeometryPoint | null>;
   members?: OverpassMember[];
 };
 
@@ -342,10 +342,10 @@ function samePoint(a: SurfacePoint | undefined, b: SurfacePoint | undefined) {
   return Boolean(a && b && Math.abs(a.lat - b.lat) < 1e-7 && Math.abs(a.lon - b.lon) < 1e-7);
 }
 
-function validGeometry(points: OverpassGeometryPoint[] | undefined): SurfacePoint[] {
+function validGeometry(points: Array<OverpassGeometryPoint | null> | undefined): SurfacePoint[] {
   if (!Array.isArray(points)) return [];
   return points
-    .filter((p) => validCoord(p.lat, -90, 90) && validCoord(p.lon, -180, 180))
+    .filter((p): p is OverpassGeometryPoint => p != null && validCoord(p.lat, -90, 90) && validCoord(p.lon, -180, 180))
     .map((p) => ({ lat: p.lat, lon: p.lon }));
 }
 
@@ -498,15 +498,18 @@ function overpassGeographyBox(input: { lat: number; lon: number }) {
   return overpassBounds(airportDetailGeographyBounds(input));
 }
 
-function detailedGeographyOverpassClauses(input: { lat: number; lon: number }) {
+function detailedGeographyOverpassQuery(input: { lat: number; lon: number }) {
   const box = overpassGeographyBox(input);
-  return [
+  const clauses = [
     `way["natural"="coastline"](${box});`,
     `way["natural"="water"](${box});`,
     `relation["natural"="water"](${box});`,
     `way["water"~"^(lake|lagoon|reservoir|bay)$"](${box});`,
     `relation["water"~"^(lake|lagoon|reservoir|bay)$"](${box});`,
   ].join("");
+  // Keep this in the same HTTP request/cache as the airport surface, but ask
+  // Overpass to clip enormous coast/lake relation geometry to the detail box.
+  return `(${clauses});out geom(${box});`;
 }
 
 export function exactAirportSurfaceOverpassQuery(airport: string, input?: { lat: number; lon: number }) {
@@ -521,13 +524,13 @@ export function exactAirportSurfaceOverpassQuery(airport: string, input?: { lat:
     clauses.push(`way["aeroway"="aerodrome"]["ref"="${value}"];`);
     clauses.push(`relation["aeroway"="aerodrome"]["ref"="${value}"];`);
   }
-  const geography = input ? detailedGeographyOverpassClauses(input) : "";
-  return `[out:json][timeout:7];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];${geography});out geom;`;
+  const geography = input ? detailedGeographyOverpassQuery(input) : "";
+  return `[out:json][timeout:7];(${clauses.join("")})->.target;.target map_to_area -> .airportArea;(.target;way(area.airportArea)["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"];way(area.airportArea)["area:aeroway"="taxiway"];relation(area.airportArea)["aeroway"~"^(apron|terminal)$"];relation(area.airportArea)["area:aeroway"="taxiway"];);out geom;${geography}`;
 }
 
 export function boxedAirportSurfaceOverpassQuery(input: { lat: number; lon: number }) {
   const box = overpassSurfaceBox(input);
-  return `[out:json][timeout:8];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${box});way["area:aeroway"="taxiway"](${box});relation["aeroway"~"^(apron|terminal)$"](${box});relation["area:aeroway"="taxiway"](${box});way["aeroway"="aerodrome"](${box});relation["aeroway"="aerodrome"](${box});${detailedGeographyOverpassClauses(input)});out geom;`;
+  return `[out:json][timeout:8];(way["aeroway"~"^(runway|taxiway|taxilane|parking_position|apron|terminal)$"](${box});way["area:aeroway"="taxiway"](${box});relation["aeroway"~"^(apron|terminal)$"](${box});relation["area:aeroway"="taxiway"](${box});way["aeroway"="aerodrome"](${box});relation["aeroway"="aerodrome"](${box}););out geom;${detailedGeographyOverpassQuery(input)}`;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
