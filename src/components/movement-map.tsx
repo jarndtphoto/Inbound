@@ -6,6 +6,7 @@ import { airportSurfaceQueryOptions as surfaceQueryOptions } from "@/lib/airport
 import type { AirportSurface, SurfaceFeature, SurfacePoint } from "@/lib/airport-surface.server";
 import { haversineNm } from "@/lib/geo";
 import { filterAirportSurfaceFeatures } from "@/lib/airport-surface-filter";
+import { airportRunwayFallbackFeatures } from "@/lib/airport-runway-fallback";
 import { flightPollingComplete, groundPollingEnabled } from "@/lib/flight-polling";
 import { usePageVisible } from "@/lib/use-page-visible";
 import { getGroundPosition } from "@/lib/ground-position";
@@ -316,7 +317,7 @@ function GroundMovementMap({
     ((storyAircraft.altFt ?? 9999) <= 250 && (storyAircraft.gsKt ?? 999) <= 80)
   ));
   const storyFast = storyAircraft && storyPhysicalProvider && storyNearAirport && storySurfaceLike
-    && storyPositionAge != null && storyPositionAge <= 30
+    && storyPositionAge != null && storyPositionAge <= 90
     ? {
         lat: storyAircraft.lat,
         lon: storyAircraft.lon,
@@ -450,13 +451,14 @@ function GroundMovementMap({
     y: H / 2 - ((p.lat - airport.lat) / latHalf) * (H / 2 - 28),
   });
   const surface = surfaceQ.data as AirportSurface | undefined;
+  const fallbackRunways = useMemo(() => airportRunwayFallbackFeatures(airport.icao), [airport.icao]);
   const boundary = useMemo(() => surface?.boundary ?? [], [surface]);
   const features = useMemo(() =>
     filterAirportSurfaceFeatures(
-      surface?.features ?? [],
+      surface?.features?.length ? surface.features : fallbackRunways,
       { lat: airport.lat, lon: airport.lon },
     ),
-  [surface, airport.lat, airport.lon]);
+  [surface, fallbackRunways, airport.lat, airport.lon]);
   const taxiwayLabels = useMemo(() => {
     const unique = new Map<string, SurfaceFeature>();
     for (const feature of features) {
@@ -507,7 +509,7 @@ function GroundMovementMap({
   const coverageNotice = groundCoverageNotice({
     kind: mode.kind,
     airportIata: airport.iata,
-    hasReliableLiveGroundPosition: Boolean(fast),
+    hasReliableLiveGroundPosition: Boolean(fast && (fastAge ?? Infinity) <= 30),
   });
 
   return (
@@ -580,12 +582,12 @@ function GroundMovementMap({
           <button type="button" onClick={zoom.zoomOut} disabled={zoom.view.scale <= MIN_GROUND_ZOOM + 0.01} className="flex size-11 items-center justify-center rounded-md border border-border bg-surface text-xl font-semibold disabled:opacity-40">−</button>
         </div>
         {zoom.view.scale > MIN_GROUND_ZOOM + 0.01 ? <button type="button" onClick={zoom.reset} className="absolute bottom-3 left-3 rounded-md border border-border bg-surface px-3 py-2 text-xs font-medium">Reset</button> : null}
-        {surfaceQ.isPending ? <div className="absolute top-24 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Loading airport surface…</div> : null}
-        {surfaceQ.isError ? <div className="absolute top-24 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">Surface detail unavailable.</div> : null}
+        {surfaceQ.isPending ? <div className="absolute top-24 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">{fallbackRunways.length ? "Loading taxiways and terminals…" : "Loading airport surface…"}</div> : null}
+        {surfaceQ.isError ? <div className="absolute top-24 left-3 rounded bg-bg/85 px-2 py-1 text-xs text-muted">{fallbackRunways.length ? "Detailed taxiways unavailable; runways shown." : "Surface detail unavailable."}</div> : null}
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-[10px] leading-tight text-muted">
         <span>Pinch to zoom · drag to pan</span>
-        <span className="shrink-0">Airport surface · {(surfaceQ.data as AirportSurface | undefined)?.source ?? "loading"}</span>
+        <span className="shrink-0">Airport surface · {(surfaceQ.data as AirportSurface | undefined)?.source ?? (fallbackRunways.length ? "runway fallback" : "loading")}</span>
       </div>
     </div>
   );
@@ -654,14 +656,21 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
 
   const airborneNow = clearlyAirborne(story);
   const arrivedGroundNow = clearlyArrivedOnGround(story);
+  const arrivalStageConfirmed = arrivedGroundNow
+    || story.currentStage === "taxi_in"
+    || story.currentStage === "gate"
+    || story.arrivalStatus === "landed"
+    || story.arrivalStatus === "taxi_in"
+    || story.arrivalStatus === "gate"
+    || story.times.landKind === "actual";
   useEffect(() => {
-    if (arrivedGroundNow && !autoArrivalSwitched.current) {
+    if (arrivalStageConfirmed && !autoArrivalSwitched.current) {
       autoArrivalSwitched.current = true;
       setTab("arrival");
       return;
     }
     if (!autoArrivalSwitched.current && !userSelectedTab.current && airborneNow && tab !== "flight") setTab("flight");
-  }, [airborneNow, arrivedGroundNow, tab]);
+  }, [airborneNow, arrivalStageConfirmed, tab]);
 
   useEffect(() => {
     const ac = story.aircraft;
