@@ -243,6 +243,7 @@ export type WxBrief = {
 };
 
 export type FlightStory = {
+  build?: import("./build-info.ts").BuildInfo;
   stateKey?: string | null;
   confirmedTakeoff?: import("./confirmed-takeoff.ts").TakeoffDiagnostic | null;
   takeoffRevocations?: import("./flight-phase-state-logic.ts").TakeoffRevocation[];

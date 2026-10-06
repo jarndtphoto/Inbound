@@ -9,6 +9,7 @@ import { withStoryRequest, noteStoryCache, noteStorySchedule, noteStoryFallback 
 import { loadPhaseState, savePhaseState, phaseStateEqual } from "./flight-phase-state.server";
 import { confirmTakeoff, reconcileTakeoff, takeoffFloorStage, takeoffDiagnostic, hasOriginSurfaceFix } from "./confirmed-takeoff.ts";
 import { activeConfirmedTakeoff, mergeConfirmedTakeoff } from "./flight-phase-state-logic.ts";
+import { BUILD_INFO } from "./build-info.ts";
 // Only server-validated evidence enters this bounded outage continuity memo.
 // Durable state remains authoritative across cold instances.
 const takeoffContinuity = new Map();
@@ -1532,17 +1533,23 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 	const header = section.slice(0, departureIndex);
 	const departureSection = section.slice(departureIndex, arrivalIndex);
 	const arrivalSection = section.slice(arrivalIndex);
+	// FlightStats exposes IATA codes in the route header even when an airport is
+	// not in our curated display directory. Keep those identities so the field
+	// resolver can obtain coordinates from AviationWeather instead of dropping
+	// the entire schedule. Route codes are the final uppercase triplets before
+	// the departure section; status/timezone tokens are excluded explicitly.
+	const ignoredCodes = new Set(["ARR", "DEP", "ETA", "ETD", "EST", "UTC", "GMT", "TBD"]);
+	const candidates = [...header.matchAll(/\b([A-Z]{3})\b/g)]
+		.map((m) => m[1])
+		.filter((code) => !ignoredCodes.has(code));
 	const codes = [];
-	for (const m of header.matchAll(/\b([A-Z]{3})\b/g)) {
-		const code = m[1];
-		if (!airportByIata(code) || codes.includes(code)) continue;
-		codes.push(code);
-		if (codes.length >= 2) break;
+	for (let i = candidates.length - 1; i >= 0 && codes.length < 2; i--) {
+		const code = candidates[i];
+		if (!codes.includes(code)) codes.unshift(code);
 	}
 	if (codes.length < 2 || codes[0] === codes[1]) return null;
 	const origin = airportByIata(codes[0]);
 	const dest = airportByIata(codes[1]);
-	if (!origin || !dest) return null;
 	const gateOut = flightStatsTimes(departureSection);
 	const gateIn = flightStatsTimes(arrivalSection);
 	const none = { scheduled: null, estimated: null, actual: null };
@@ -1554,22 +1561,22 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 		iataIdent,
 		status: cancelled ? "cancelled" : arrived ? "arrived" : departed ? "departed" : /\bScheduled\b/i.test(header) ? "scheduled" : "",
 		confirmedAt: Date.now(),
-		originIata: origin.iata,
-		originIcao: origin.icao,
-		originName: origin.name,
-		originCity: origin.city,
-		originLat: origin.lat,
-		originLon: origin.lon,
+		originIata: origin?.iata ?? codes[0],
+		originIcao: origin?.icao ?? null,
+		originName: origin?.name ?? codes[0],
+		originCity: origin?.city ?? "",
+		originLat: origin?.lat ?? null,
+		originLon: origin?.lon ?? null,
 		originGate: null,
-		originTz: origin.tz ?? null,
-		destIata: dest.iata,
-		destIcao: dest.icao,
-		destName: dest.name,
-		destCity: dest.city,
-		destLat: dest.lat,
-		destLon: dest.lon,
+		originTz: origin?.tz ?? null,
+		destIata: dest?.iata ?? codes[1],
+		destIcao: dest?.icao ?? null,
+		destName: dest?.name ?? codes[1],
+		destCity: dest?.city ?? "",
+		destLat: dest?.lat ?? null,
+		destLon: dest?.lon ?? null,
 		destGate: null,
-		destTz: dest.tz ?? null,
+		destTz: dest?.tz ?? null,
 		takeoff: { ...none },
 		landing: { ...none },
 		gateOut,
@@ -1767,8 +1774,36 @@ function fieldFromKnown(iata, icao, lat, lon, name, city, tzHint) {
 		category: "UNK"
 	};
 }
+async function loadAirportInfo(iata, icao) {
+	const normalizedIata = String(iata ?? "").toUpperCase();
+	const normalizedIcao = String(icao ?? "").toUpperCase();
+	const candidates = [...new Set([
+		/^[A-Z0-9]{4}$/.test(normalizedIcao) ? normalizedIcao : null,
+		/^[A-Z]{3}$/.test(normalizedIata) ? `K${normalizedIata}` : null,
+	].filter(Boolean))];
+	for (const candidate of candidates) {
+		const row = await cached(`airport-info-v1:${candidate}`, 24 * 60 * 60_000, async () => {
+			const rows = await safe(fetchJson(`https://aviationweather.gov/api/data/airport?ids=${encodeURIComponent(candidate)}&format=json`, 5e3), []);
+			return Array.isArray(rows) ? rows[0] ?? null : null;
+		});
+		if (!row || !Number.isFinite(row.lat) || !Number.isFinite(row.lon)) continue;
+		const rowIata = String(row.iataId ?? "").toUpperCase();
+		const rowIcao = String(row.icaoId ?? "").toUpperCase();
+		if (normalizedIata && rowIata !== normalizedIata) continue;
+		if (normalizedIcao && rowIcao !== normalizedIcao) continue;
+		return {
+			iata: rowIata || normalizedIata,
+			icao: rowIcao || normalizedIcao,
+			lat: row.lat,
+			lon: row.lon,
+			name: row.name ?? row.site ?? normalizedIata,
+			city: row.city ?? "",
+		};
+	}
+	return null;
+}
 /** Resolve coordinates without replacing a current flight's airport identity. */
-async function resolveFlightField(aware, side, fallback) {
+export async function resolveFlightField(aware, side, fallback) {
   const prefix = side === "origin" ? "origin" : "dest";
   const iata = aware?.[prefix + "Iata"] ?? null;
   const icao = aware?.[prefix + "Icao"] ?? null;
@@ -1776,6 +1811,12 @@ async function resolveFlightField(aware, side, fallback) {
     aware?.[prefix + "Name"], aware?.[prefix + "City"], aware?.[prefix + "Tz"]);
   const known = make(aware?.[prefix + "Lat"], aware?.[prefix + "Lon"]);
   if (known) return known;
+  const airportInfo = await loadAirportInfo(iata, icao);
+  if (airportInfo) {
+	const resolved = fieldFromKnown(airportInfo.iata, airportInfo.icao, airportInfo.lat, airportInfo.lon,
+		aware?.[prefix + "Name"] || airportInfo.name, aware?.[prefix + "City"] || airportInfo.city, aware?.[prefix + "Tz"]);
+	if (resolved) return resolved;
+  }
   if (icao && /^[A-Z0-9]{4}$/.test(icao)) {
     const { metar } = await safe(loadMetar(icao), {metar:null});
     if (Number.isFinite(metar?.lat) && Number.isFinite(metar?.lon)) return make(metar.lat, metar.lon);
@@ -4406,6 +4447,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		routeMemoryPersistence = savedRoute.status;
 	}
 	return {
+		build: BUILD_INFO,
 		fetchedAt: Date.now(),
 		stateKey,
 		confirmedTakeoff: takeoffDiagnostic(confirmedTakeoff),

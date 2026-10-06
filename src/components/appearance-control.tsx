@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
+import { BUILD_INFO, formatBuildTime } from "@/lib/build-info";
 
 type Appearance = "auto" | "light" | "dark";
 const KEY = "inbound-appearance";
@@ -47,6 +48,7 @@ export function AppearanceControl() {
         setOpen(false);
       }}>{value[0].toUpperCase() + value.slice(1)}</button>)}
       <p>Auto: Light 7 AM–7 PM<br />Device local time</p>
+      <p className="appearance-build" title={BUILD_INFO.deployedAt}>Build {BUILD_INFO.commit}<br />Deployed {formatBuildTime(BUILD_INFO.deployedAt)}</p>
     </div>}
   </div>;
 }

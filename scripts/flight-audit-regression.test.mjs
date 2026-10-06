@@ -23,7 +23,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint, resolveFlightField } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 let loadFlightStory;
 let storyInstance = 0;
 async function coldStoryFixture() {
@@ -942,13 +942,55 @@ describe('public schedule fallback', () => {
     assert.equal(record.gateIn.actual, null);
   });
 
-  it('loads an exact route from a FlightStats-style public status page', { todo: "Held #6: unknown-airport route support — https://github.com/jarndtphoto/Inbound/blob/codex/test-suite-cleanup/docs/test-cleanup-held-bugs.md#6-zrh--unknown-airport-public-route-support" }, () => {
+  it('loads an exact route from a FlightStats-style public status page', () => {
     const html = `<html><body><h1>Flight Status</h1><div>UA 3 United Airlines ORD Chicago ZRH Zurich Scheduled On time</div><div>Flight Departure Times Scheduled 15:50 CDT</div><div>Flight Arrival Times Scheduled 07:45 CEST</div></body></html>`;
     const record = parseFlightStatsPublicSchedule(html, 'UAL3', '2026-10-01');
     assert.equal(record?.iataIdent, 'UA3');
     assert.equal(record?.originIata, 'ORD');
     assert.equal(record?.destIata, 'ZRH');
     assert.equal(record?.status, 'scheduled');
+  });
+
+  it('preserves every affected PHL route when the other airport is not curated', () => {
+    const cases = [
+      ['OH5427', 'GSP', 'PHL'],
+      ['AA1834', 'RSW', 'PHL'],
+      ['F91989', 'PHL', 'BNA'],
+      ['AA714', 'PHL', 'VNC'],
+    ];
+    for (const [flight, origin, dest] of cases) {
+      const carrier = flight.match(/^[A-Z0-9]{2}/)?.[0];
+      const number = flight.slice(2);
+      const html = `<html><body><h1>Flight Status</h1><div>${carrier} ${number} Airline ${origin} Origin ${dest} Destination Scheduled On time</div><div>Flight Departure Times 05-Oct-2026 Scheduled 18:00 EDT</div><div>Flight Arrival Times 05-Oct-2026 Scheduled 20:00 EDT</div></body></html>`;
+      const record = parseFlightStatsPublicSchedule(html, flight, '2026-10-05');
+      assert.equal(record?.originIata, origin, `${flight} origin`);
+      assert.equal(record?.destIata, dest, `${flight} destination`);
+    }
+  });
+
+  it('resolves an uncatalogued domestic endpoint through AviationWeather airport data', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests = [];
+    globalThis.fetch = async (input) => {
+      requests.push(String(input));
+      return new Response(JSON.stringify([{
+        icaoId: 'KABE', iataId: 'ABE', name: 'Lehigh Valley International',
+        lat: 40.6521, lon: -75.4408,
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    try {
+      const field = await resolveFlightField({
+        destIata: 'ABE', destIcao: null, destName: 'Lehigh Valley International',
+        destCity: 'Allentown', destLat: null, destLon: null, destTz: null,
+      }, 'dest', null);
+      assert.equal(field?.iata, 'ABE');
+      assert.equal(field?.icao, 'KABE');
+      assert.equal(field?.lat, 40.6521);
+      assert.equal(field?.lon, -75.4408);
+      assert.deepEqual(requests, ['https://aviationweather.gov/api/data/airport?ids=KABE&format=json']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('parses public scheduled and actual gate times when FlightStats exposes them', () => {
