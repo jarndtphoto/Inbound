@@ -39,6 +39,7 @@ export type NormalizedFlight = {
 
 const PROVIDER_WEIGHT: Record<FlightProvider, number> = { fr24: 24, adsb: 20, flightaware: 16 };
 export const FR24_SURFACE_FRESH_SEC = 30;
+export const AIRBORNE_POSITION_FRESH_SEC = 90;
 export function positionAgeSec(position: NormalizedPosition, now = Date.now() / 1000): number { return Math.max(0, now - position.seenAt); }
 export function identityCompatible(position: { callsign?: string | null; registration?: string | null; hex?: string | null }, expected: { callsigns?: string[]; registration?: string | null; hex?: string | null }): boolean {
   const norm = (v: string | null | undefined) => String(v ?? "").replace(/[-\s]/g, "").toUpperCase();
@@ -59,7 +60,7 @@ export function choosePosition(positions: Array<NormalizedPosition | null | unde
   // Use the same FR24 surface freshness limit as the story wrapper. Retaining
   // an older ground fix here would exclude a fresh airborne fix from scoring.
   const usable = positions.filter((p): p is NormalizedPosition => Boolean(p && identityCompatible(p, expected)
-    && positionAgeSec(p, now) <= (p.onGround ? p.provider === "fr24" ? FR24_SURFACE_FRESH_SEC : 60 : 45)));
+    && positionAgeSec(p, now) <= (p.onGround ? p.provider === "fr24" ? FR24_SURFACE_FRESH_SEC : 60 : AIRBORNE_POSITION_FRESH_SEC)));
   const candidates: Partial<Record<FlightProvider, NormalizedPosition>> = {};
   for (const p of usable) if (!candidates[p.provider] || positionAgeSec(p, now) < positionAgeSec(candidates[p.provider]!, now)) candidates[p.provider] = p;
   let disagreementNm: number | null = null;
