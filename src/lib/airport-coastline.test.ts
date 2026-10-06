@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assembleAirportGeography, airportGeographyWaterFraction, type GeoPoint, type SurfaceBounds } from "./airport-coastline.ts";
+import { assembleAirportGeography, airportGeographyIsWater, airportGeographyWaterFraction, type GeoPoint, type SurfaceBounds } from "./airport-coastline.ts";
 
 const bounds: SurfaceBounds = { south: 0, west: 0, north: 10, east: 10 };
 
@@ -63,6 +63,29 @@ test("inland airport defaults to land and keeps clipped lake polygons", () => {
   assert.equal(geography.fallback, false);
   assert.equal(geography.base, "land");
   assert.equal(geography.water.length, 1);
+});
+
+test("clockwise closed coastline encloses water with land outside", () => {
+  const ring = [{ lat: 3, lon: 3 }, { lat: 7, lon: 3 }, { lat: 7, lon: 7 }, { lat: 3, lon: 7 }, { lat: 3, lon: 3 }];
+  const geography = assembleAirportGeography({ bounds, coastlineWays: [ring], waterPolygons: [] });
+  assert.equal(geography.fallback, false);
+  assert.equal(geography.base, "land");
+  assert.equal(geography.water.length, 1);
+  assert.equal(airportGeographyIsWater(geography, { lat: 5, lon: 5 }), true);
+  assert.equal(airportGeographyIsWater(geography, { lat: 1, lon: 1 }), false);
+  assert.equal(assembleAirportGeography({ bounds, coastlineWays: [ring], waterPolygons: [],
+    runwaySamples: [{ lat: 5, lon: 5 }] }).fallbackReason, "water-covers-runways");
+});
+
+test("clockwise water inside a counter-clockwise island retains ocean and inland water", () => {
+  const island = [{ lat: 1, lon: 1 }, { lat: 1, lon: 9 }, { lat: 9, lon: 9 }, { lat: 9, lon: 1 }, { lat: 1, lon: 1 }];
+  const lake = [{ lat: 3, lon: 3 }, { lat: 7, lon: 3 }, { lat: 7, lon: 7 }, { lat: 3, lon: 7 }, { lat: 3, lon: 3 }];
+  const geography = assembleAirportGeography({ bounds, coastlineWays: [island, lake], waterPolygons: [] });
+  assert.equal(geography.fallback, false);
+  assert.equal(geography.base, "water");
+  assert.equal(airportGeographyIsWater(geography, { lat: 0, lon: 0 }), true);
+  assert.equal(airportGeographyIsWater(geography, { lat: 2, lon: 2 }), false);
+  assert.equal(airportGeographyIsWater(geography, { lat: 5, lon: 5 }), true);
 });
 
 test("water over 95 percent of the box falls back to plain land", () => {

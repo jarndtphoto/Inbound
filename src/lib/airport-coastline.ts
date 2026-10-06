@@ -310,9 +310,15 @@ export function assembleAirportGeography(input: {
     if (samePoint(way[0], way.at(-1))) {
       const ring = simplify(clipRingToBounds(way, bounds));
       if (!ring.length) continue;
-      coastIntersections += 1;
-      if (signedArea(ring) <= 0) return fallback(bounds, "reversed-closed-coastline");
-      land.push(ring);
+      const area = signedArea(ring);
+      if (Math.abs(area) < 1e-12) return fallback(bounds, "coastline-assembly-orientation");
+      // OSM land stays on the left: a clockwise closed coast encloses water,
+      // while a counter-clockwise one encloses an island.
+      if (area < 0) water.push({ outer: ring.slice().reverse() });
+      else {
+        coastIntersections += 1;
+        land.push(ring);
+      }
       continue;
     }
 
