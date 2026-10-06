@@ -2199,7 +2199,6 @@ function FlightWelcome({ open, onClose, story }: { open: boolean; onClose: () =>
   ].filter((note): note is { label: string; text: string } => Boolean(note));
   const departureZone = welcomeTimeParts(takeoffTime).zone ?? welcomeTimeParts(pushTime).zone;
   const arrivalZone = welcomeTimeParts(gateTime).zone ?? welcomeTimeParts(landingTime).zone;
-  const rideCopy = [displayedWeather, ...otherWeatherWarnings].filter(Boolean).join(" · ");
   useEffect(() => {
     if (open && !ref.current?.open) ref.current?.showModal();
     if (!open && ref.current?.open) ref.current?.close();
@@ -2233,7 +2232,9 @@ function FlightWelcome({ open, onClose, story }: { open: boolean; onClose: () =>
     </section>
 
     {!landed && <section className="border-t border-border px-4 py-2.5" aria-label="Route weather and ride conditions" data-flight-ride>
-      <p className="line-clamp-2 text-[13px] font-medium leading-snug"><span className="text-[11px] text-muted">Ride · </span>{rideCopy}</p>
+      <p className="line-clamp-2 text-[13px] font-medium leading-snug"><span className="text-[11px] text-muted">Ride · </span>{displayedWeather}
+        {otherWeatherWarnings.length > 0 ? <span aria-label="Weather alerts"> · {otherWeatherWarnings.join(" · ")}</span> : null}
+      </p>
     </section>}
 
     <section className="border-t border-border px-4 py-2.5" aria-label={`Arrival times at ${story.dest.iata}`} data-flight-time-row="arrival">
