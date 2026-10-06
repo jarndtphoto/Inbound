@@ -49,13 +49,16 @@ test("airport surface can choose a matching aerodrome boundary even when another
 
 
 test("exact airport surface query targets the requested aerodrome before any broad box", () => {
-  const query = exactAirportSurfaceOverpassQuery("KSAN");
+  const query = exactAirportSurfaceOverpassQuery("KSAN", { lat: 32.7338, lon: -117.1933 });
   assert.match(query, /aeroway"="aerodrome"/);
   assert.match(query, /"icao"="KSAN"/);
   assert.match(query, /"iata"="SAN"/);
   assert.match(query, /map_to_area/);
   assert.match(query, /area\.airportArea/);
-  assert.doesNotMatch(query, /32\.7/);
+  assert.match(query, /natural"="coastline"/);
+  assert.match(query, /natural"="water"/);
+  assert.match(query, /water"~"\^\(lake\|lagoon\|reservoir\|bay\)\$"/);
+  assert.match(query, /32\.658800/);
 });
 
 test("boxed airport surface query remains available as a bounded fallback", () => {
@@ -64,4 +67,29 @@ test("boxed airport surface query remains available as a bounded fallback", () =
   assert.match(query, /32\.658800/);
   assert.match(query, /32\.808800/);
   assert.match(query, /aeroway"="aerodrome"/);
+  assert.match(query, /natural"="coastline"/);
+  assert.match(query, /natural"="water"/);
+});
+
+
+test("surface parser includes same-response coastline and multipolygon inland water", () => {
+  const parsed = parseAirportSurfaceElements([
+    square(1, -0.03, -0.03, 0.03, 0.03, { aeroway: "aerodrome", icao: "KORD" }),
+    line(2, [{ lat: 0, lon: -0.02 }, { lat: 0, lon: 0.02 }], { aeroway: "runway", ref: "10/28" }),
+    line(20, [{ lat: -0.08, lon: 0.04 }, { lat: 0.08, lon: 0.04 }], { natural: "coastline" }),
+    {
+      id: 30,
+      type: "relation" as const,
+      tags: { natural: "water", water: "lake", type: "multipolygon" },
+      members: [
+        { type: "way" as const, role: "outer", geometry: [{ lat: -0.04, lon: 0.05 }, { lat: -0.04, lon: 0.07 }, { lat: 0.04, lon: 0.07 }] },
+        { type: "way" as const, role: "outer", geometry: [{ lat: 0.04, lon: 0.07 }, { lat: 0.04, lon: 0.05 }, { lat: -0.04, lon: 0.05 }] },
+      ],
+    },
+  ], "KORD", 123, { lat: 0, lon: 0 });
+
+  assert.ok(parsed.geography);
+  assert.equal(parsed.geography?.fallback, false);
+  assert.equal(parsed.geography?.base, "water");
+  assert.equal(parsed.geography?.water.length, 1);
 });
