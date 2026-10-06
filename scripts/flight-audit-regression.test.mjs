@@ -148,7 +148,7 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /fitFeatures\.flatMap/);
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
     assert.match(groundSource, /resetViewRef\.current = next/);
-    assert.match(groundSource, /updateMotionSource\("story", storyFast\)/);
+    assert.match(groundSource, /updateMotionSource\("story", storyCandidate\)/);
     assert.match(groundSource, /updateMotionSource\("ground", queriedCandidate\)/);
     assert.match(motionSource, /fix\.seenAt - point\.seenAt <= 45/);
     assert.match(motionSource, /dt >= 6 && dt <= 35 && haversineNm\(point, latest\) >= 0\.015/);
@@ -156,6 +156,8 @@ describe('zoom-stable route presentation', () => {
     assert.match(motionSource, /recentMoved >= 0\.008 \? initialBearing\(recentAnchor, latest\) : overall/);
     assert.match(motionSource, /bearingDelta\(overall, recentTrack\) <= 55/);
     assert.match(groundSource, /motionTracksRef\.current\[selectedFast\.source\]\?\.confirmedTrack/);
+    assert.match(groundSource, /newestAircraftPosition\(storyAircraftPosition\(story\), groundPosition\)/);
+    assert.match(groundSource, /<FlightRadar story=\{sharedStory\}/);
     assert.match(groundSource, /track: motionTrack/);
     assert.match(groundSource, /!displayFrozen && Number\.isFinite\(displayAircraft\.track\) \? \(/);
     assert.match(groundSource, /rotate\(\$\{displayAircraft\.track\}\)/);

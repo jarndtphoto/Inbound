@@ -26,12 +26,12 @@ after(async () => { if (directory) await rm(directory, { recursive: true, force:
 
 const arrow = /M0 -31 L12 17 L0 11 L-12 17 Z/;
 const dot = /<circle[^>]*class="fill-accent"/;
-function groundMarkup(track, provider = 'flightaware-public', patch = {}) {
+function groundMarkup(track, provider = 'flightaware-public', patch = {}, ageSec = 1) {
   const base = polishStory();
   const origin = { ...base.origin, iata: 'MCO', icao: 'KMCO', lat: 28.4312, lon: -81.3081 };
   const aircraft = { ...base.aircraft, ...origin, onGround: true, altFt: 0, gsKt: 0, track, ...patch };
   const story = { ...base, origin, aircraft, currentStage: 'origin_gate',
-    times: { ...base.times, airborne: false }, providers: { chosenPosition: provider, chosenPositionAgeSec: 1 } };
+    times: { ...base.times, airborne: false }, providers: { chosenPosition: provider, chosenPositionAgeSec: ageSec } };
   const restoreClock = freezeTestClock(story.fetchedAt);
   const realFetch = globalThis.fetch;
   const client = new QueryClient();
@@ -91,4 +91,9 @@ test('airborne story fallback retains its provider heading', () => {
   const html = groundMarkup(123, 'flightaware-public', { onGround: false, altFt: 3000, gsKt: 180 });
   assert.match(html, arrow);
   assert.match(html, /rotate\(123\)/);
+});
+test('a seven-minute-old ground position is labeled Last seen, never live movement', () => {
+  const html = groundMarkup(270, 'flightaware-public', { seenSec: 7 * 60 }, 7 * 60);
+  assert.match(html, /MCO · Last seen 7 min ago/);
+  assert.doesNotMatch(html, /live movement/i);
 });
