@@ -3561,8 +3561,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		arrivalPersistence = saved.status;
 	}
 	expectedArrival = arrivalState.runway;
-	const showDetailedArrival = Boolean(arrivalState.startedAt
-		&& showDetailedArrivalGeometry(arrivalLive, end, arrivalInput.approachEvidence));
+	const detailedArrivalNow = showDetailedArrivalGeometry(arrivalLive, end, arrivalInput.approachEvidence);
+	const detailedArrivalContinuation = Boolean(arrivalState.detailedStartedAt && arrivalState.active && (
+		(arrivalLive && !arrivalLive.onGround && !arrivalLive.extrapolated
+			&& (arrivalLive.seenSec ?? Infinity) <= 120 && haversineNm(arrivalLive, end) <= 35)
+		|| (!arrivalLive && arrivalState.lastFixAt > 0 && Date.now() - arrivalState.lastFixAt <= 120_000)
+	));
+	const showDetailedArrival = Boolean(arrivalState.detailedStartedAt
+		&& (detailedArrivalNow || detailedArrivalContinuation));
 	const pattern = showDetailedArrival ? displayArrivalProjection(arrivalState, {
 		observation: routeObservation && Date.now() - routeObservation.seenAt <= 60_000 ? routeObservation : null,
 		live, lastObserved: routeObservation ?? routeMemory?.lastObserved ?? null, landed: ourLanded
