@@ -32,6 +32,25 @@ test("airport surface prefetch fires once per airport for one flight open and no
   assert.equal(calls.length, 2);
 });
 
+test("airport surface prefetch finishes origin before starting destination", async () => {
+  const calls: string[] = [];
+  let releaseOrigin!: () => void;
+  const originDone = new Promise<void>((resolve) => { releaseOrigin = resolve; });
+  const client = {
+    async prefetchQuery(options: { queryKey: readonly unknown[] }) {
+      const airport = String(options.queryKey[1]);
+      calls.push(airport);
+      if (airport === "KBWI") await originDone;
+    },
+  };
+  const work = prefetchFlightAirportSurfacesOnce(client as never, story(), new Set());
+  await Promise.resolve();
+  assert.deepEqual(calls, ["KBWI"]);
+  releaseOrigin();
+  await work;
+  assert.deepEqual(calls, ["KBWI", "KORD"]);
+});
+
 test("airport surface prefetch deduplicates a same-airport leg", async () => {
   let calls = 0;
   const client = { prefetchQuery() { calls += 1; return Promise.resolve(); } };
