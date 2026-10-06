@@ -306,10 +306,12 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /setTab\("arrival"\)/);
   });
 
-  it('bounds cold airport-surface fallback instead of serially waiting about twelve seconds', () => {
+  it('races cold airport-surface fallbacks instead of serially waiting through two OSM timeouts', () => {
     assert.match(surfaceServer, /const OVERPASS_TIMEOUT_MS = 4_000/);
+    assert.match(surfaceServer, /const exactOsm = requireSurface/);
+    assert.match(surfaceServer, /const boxedOsm = requireSurface/);
+    assert.match(surfaceServer, /Promise\.any\(\[\s*exactOsm,\s*boxedOsm,/);
     assert.match(surfaceServer, /await sleep\(1_000\)/);
-    assert.match(surfaceServer, /exactAirportSurfaceOverpassQuery\(airport\), 4_000/);
     assert.match(surfaceServer, /loadFaaAirportSurface[\s\S]*?, 6_000, "FAA surface"/);
   });
 });
