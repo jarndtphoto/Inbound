@@ -136,17 +136,19 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     const exact = fuseProviderLists(exactPacks, { airside: true })
       .filter(matchesIdentity)
       .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
-    let exactFallback: ReturnType<typeof usableAdsb> = null;
     for (const candidate of exact) {
       const position = usableAdsb(candidate);
       if (!position) continue;
       const ageSec = Math.round(Date.now() / 1000 - position.seenAt);
-      if (ageSec <= 12) {
-        console.info("[ground-position]", { provider: "adsb-exact", callsign: position.callsign, ageSec });
-        return finish(position);
-      }
-      exactFallback = position;
-      break;
+      console.info("[ground-position]", { provider: "adsb-exact", callsign: position.callsign, ageSec });
+      return finish(position);
+    }
+
+    // If every exact provider is already rate-limited/backing off, a broad
+    // airport scan would hit the same unavailable feeds and only make this
+    // ground-map request slower. Let the next scheduled poll recover instead.
+    if (exactPacks.length > 0 && exactPacks.every((pack) => pack.status && pack.status !== "ok")) {
+      return finish(null);
     }
 
     const aroundPacks = await fetchAround(airport.lat, airport.lon, 20).catch(() => []);
@@ -162,16 +164,13 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       break;
     }
 
-    const selected = exactFallback && aroundFallback
-      ? exactFallback.seenAt >= aroundFallback.seenAt ? exactFallback : aroundFallback
-      : exactFallback ?? aroundFallback;
-    if (selected) {
+    if (aroundFallback) {
       console.info("[ground-position]", {
-        provider: selected === exactFallback ? "adsb-exact-delayed" : "adsb-around-fallback",
-        callsign: selected.callsign,
-        ageSec: Math.round(Date.now() / 1000 - selected.seenAt),
+        provider: "adsb-around-fallback",
+        callsign: aroundFallback.callsign,
+        ageSec: Math.round(Date.now() / 1000 - aroundFallback.seenAt),
       });
-      return finish(selected);
+      return finish(aroundFallback);
     }
     return finish(null);
   });;
