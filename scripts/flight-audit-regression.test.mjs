@@ -77,6 +77,30 @@ describe('same-number leg lock replays', () => {
     assert.equal(chooseFlightStatsScheduleCandidate([reverse, correct], now, { aircraft }), correct);
   });
 
+  it('AA1007 on the ground at RSW selects RSW→ORD, never the arrived reverse leg', () => {
+    const departing = leg('RSW', 'ORD', now + 8 * 60, now + 3 * 3600);
+    const arrived = leg('ORD', 'RSW', now - 3 * 3600, now - 15 * 60, 'arrived');
+    arrived.landing.actual = now - 25 * 60;
+    arrived.gateIn.actual = now - 15 * 60;
+    const aircraft = { lat: 26.5362, lon: -81.7552, onGround: true, track: 0 };
+    assert.equal(chooseFlightStatsScheduleCandidate([arrived, departing], now, { aircraft }), departing);
+  });
+
+  it('AA1007 with no position follows FlightAware’s last confirmed RSW→ORD leg', () => {
+    const departing = leg('RSW', 'ORD', now + 8 * 60, now + 3 * 3600);
+    const arrived = leg('ORD', 'RSW', now - 3 * 3600, now - 5 * 60, 'arrived');
+    arrived.gateIn.actual = now - 5 * 60;
+    const primaryRecord = { originIata: 'RSW', destIata: 'ORD' };
+    assert.equal(chooseFlightStatsScheduleCandidate([arrived, departing], now, { primaryRecord }), departing);
+  });
+
+  it('with no position or primary record, an upcoming leg beats its arrived reverse', () => {
+    const departing = leg('RSW', 'ORD', now + 20 * 60, now + 3 * 3600);
+    const arrived = leg('ORD', 'RSW', now - 3 * 3600, now - 2 * 60, 'arrived');
+    arrived.gateIn.actual = now - 2 * 60;
+    assert.equal(chooseFlightStatsScheduleCandidate([arrived, departing], now), departing);
+  });
+
   it('rejects a route flip after the dated origin and destination are locked', () => {
     const correct = leg('ALB', 'MCO', now - 150 * 60, now + 8 * 60);
     const reverse = leg('MCO', 'ALB', now + 2 * 60, now + 170 * 60);
@@ -1001,6 +1025,15 @@ describe('stage and ground-map position identity', () => {
 
 describe('public schedule fallback', () => {
   const datedPage = (departure, arrival) => `<html><body><h1>Flight Status</h1><div>AA 536 American Airlines CLT Charlotte ORD Chicago Arrived</div><div>Flight Departure Times ${departure}</div><div>Flight Arrival Times ${arrival}</div></body></html>`;
+
+  it('AA1007 keeps RSW→ORD when FlightStats repeats the origin before departure times', () => {
+    const html = `<html><body><h1>Flight Status</h1><div>AA 1007 American Airlines RSW Fort Myers ORD Chicago Departed RSW Fort Myers, FL, US Southwest Florida International Airport</div><div>Flight Departure Times 06-Oct-2026 Scheduled 08:18 EDT Actual 08:17 EDT</div><div>Flight Arrival Times 06-Oct-2026 Scheduled 10:40 CDT Estimated 10:14 CDT</div></body></html>`;
+    const record = parseFlightStatsPublicSchedule(html, 'AAL1007', '2026-10-06');
+    assert.equal(record.originIata, 'RSW');
+    assert.equal(record.destIata, 'ORD');
+    assert.equal(record.gateOut.actual, Date.UTC(2026, 9, 6, 12, 17) / 1000);
+    assert.equal(record.gateIn.estimated, Date.UTC(2026, 9, 6, 15, 14) / 1000);
+  });
 
   it('shares each section date across Scheduled, Estimated and Actual labels', () => {
     const record = parseFlightStatsPublicSchedule(datedPage(

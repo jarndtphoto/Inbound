@@ -1549,16 +1549,17 @@ export function parseFlightStatsPublicSchedule(html, callsign, dateKey) {
 	// FlightStats exposes IATA codes in the route header even when an airport is
 	// not in our curated display directory. Keep those identities so the field
 	// resolver can obtain coordinates from AviationWeather instead of dropping
-	// the entire schedule. Route codes are the final uppercase triplets before
-	// the departure section; status/timezone tokens are excluded explicitly.
+	// the entire schedule. The first two distinct codes are the route banner.
+	// The origin is repeated later in the airport detail immediately before
+	// "Flight Departure Times"; taking the final two codes reverses the leg.
 	const ignoredCodes = new Set(["ARR", "DEP", "ETA", "ETD", "EST", "UTC", "GMT", "TBD"]);
 	const candidates = [...header.matchAll(/\b([A-Z]{3})\b/g)]
 		.map((m) => m[1])
 		.filter((code) => !ignoredCodes.has(code));
 	const codes = [];
-	for (let i = candidates.length - 1; i >= 0 && codes.length < 2; i--) {
-		const code = candidates[i];
-		if (!codes.includes(code)) codes.unshift(code);
+	for (const code of candidates) {
+		if (!codes.includes(code)) codes.push(code);
+		if (codes.length === 2) break;
 	}
 	if (codes.length < 2 || codes[0] === codes[1]) return null;
 	const origin = airportByIata(codes[0]);
@@ -1630,6 +1631,14 @@ function recordAirport(record, side) {
 	const icao = String(side === "origin" ? record?.originIcao ?? "" : record?.destIcao ?? "").trim().toUpperCase();
 	return airportByIata(iata) ?? scheduledAirportByIata(iata) ?? airportByIcao(icao) ?? null;
 }
+function flightStatsLegFinished(record) {
+	return Boolean(record?.landing?.actual || record?.gateIn?.actual
+		|| /\b(?:arrived|landed)\b/i.test(String(record?.status ?? "")));
+}
+function flightStatsLegDeparted(record) {
+	return Boolean(record?.gateOut?.actual || record?.takeoff?.actual
+		|| /\b(?:departed|airborne|arrived|landed)\b/i.test(String(record?.status ?? "")));
+}
 /** Rank a same-number leg by the physical aircraft. Impossible off-route
  * matches are rejected; opposite directions on the same corridor are split
  * by the aircraft heading instead of the schedule clock. */
@@ -1642,11 +1651,15 @@ export function flightStatsAircraftLegFit(record, aircraft) {
 	const direct = Math.max(1, haversineNm(origin, destination));
 	const offRoute = distanceToSegmentNm(aircraft, origin, destination);
 	if (aircraft.onGround) {
-		if (dOrigin <= 30) return { possible: true, score: dOrigin * 120 };
-		// A destination-surface fix can still be the just-arrived leg, but the
-		// same fix is much stronger evidence for an out-and-back whose origin is
-		// this airport.
-		if (dDestination <= 30) return { possible: true, score: 20_000 + dDestination * 120 };
+		if (dOrigin <= 5) return { possible: true, score: dOrigin * 120 };
+		// Once the aircraft has landed at this record's destination, that sector
+		// is finished. It cannot outrank the next departure from the same field.
+		if (dDestination <= 5 && flightStatsLegFinished(record))
+			return { possible: false, score: Number.POSITIVE_INFINITY };
+		// Preserve an unfinished taxi-in only when there is no departure leg from
+		// the airport; chooseFlightStatsScheduleCandidate gives origin matches
+		// absolute priority before reaching this fallback.
+		if (dDestination <= 5) return { possible: true, score: 20_000 + dDestination * 120 };
 		return { possible: false, score: Number.POSITIVE_INFINITY };
 	}
 	if (offRoute > Math.max(120, direct * 0.32) && dOrigin > 90 && dDestination > 90)
@@ -1677,8 +1690,32 @@ export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() 
 	// A confirmed leg is a hard boundary, not a ranking hint. If the provider
 	// temporarily returns only the opposite/same-number sector, the caller must
 	// retain the saved schedule instead of silently switching routes.
-	const pool = context.lockedLeg ? locked : usable;
+	let pool = context.lockedLeg ? locked : usable;
 	if (!pool.length) return null;
+	const aircraft = context.aircraft;
+	const reliablePosition = Boolean(aircraft && Number.isFinite(aircraft.lat) && Number.isFinite(aircraft.lon)
+		&& !aircraft.extrapolated && (!Number.isFinite(aircraft.seenSec) || aircraft.seenSec <= 120));
+	if (reliablePosition && aircraft.onGround) {
+		const departingHere = pool.filter((record) => {
+			const origin = recordAirport(record, "origin");
+			return origin && haversineNm(aircraft, origin) <= 5;
+		});
+		if (departingHere.length) pool = departingHere;
+	} else if (!reliablePosition) {
+		const primaryLeg = flightStatsLeg(context.primaryRecord);
+		const primaryMatches = primaryLeg ? pool.filter((record) => flightStatsLegMatches(record, primaryLeg)) : [];
+		if (primaryMatches.length) {
+			pool = primaryMatches;
+		} else {
+			const active = pool.filter((record) => flightStatsLegDeparted(record) && !flightStatsLegFinished(record));
+			if (active.length) pool = active;
+			else {
+				const upcoming = pool.filter((record) => !flightStatsLegDeparted(record)
+					&& (bestUnix(record.gateOut) == null || bestUnix(record.gateOut) >= nowSec - 15 * 60));
+				if (upcoming.length) pool = upcoming;
+			}
+		}
+	}
 	const score = (record) => {
 		const depart = bestUnix(record.gateOut);
 		const arrive = bestUnix(record.gateIn);
@@ -1692,7 +1729,7 @@ export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() 
 		const day = Date.parse(`${record._publicScheduleDate ?? ""}T12:00:00Z`) / 1000;
 		return Number.isFinite(day) ? Math.abs(day - nowSec) + 36 * 3600 : Number.POSITIVE_INFINITY;
 	};
-	const physicallyPossible = pool.map((record) => ({ record, fit: flightStatsAircraftLegFit(record, context.aircraft) }))
+	const physicallyPossible = pool.map((record) => ({ record, fit: flightStatsAircraftLegFit(record, aircraft) }))
 		.filter(({ fit }) => fit.possible);
 	if (!physicallyPossible.length) return null;
 	return physicallyPossible.sort((a, b) => score(a.record) + a.fit.score - score(b.record) - b.fit.score)[0]?.record ?? null;
@@ -1794,7 +1831,13 @@ export function scheduleHasRoute(record) {
 async function loadAware(callsign, selection = {}) {
 	const apiRecord = await loadAeroFlight(callsign);
 	if (apiRecord) return { ...apiRecord, _scheduleSource: "flightaware_api" };
-	const fallbackSelection = async () => ({ ...selection, aircraft: await selection.aircraft });
+	const fallbackSelection = async () => ({
+		...selection,
+		aircraft: await selection.aircraft,
+		// The last successful FlightAware record remains the best route identity
+		// during a temporary public-page failure, even after its short cache TTL.
+		primaryRecord: cache.get(`aware:${callsign}`)?.value ?? null,
+	});
 	if (Date.now() < awarePublicBlockedUntil) {
 		const fallback = await loadFlightStatsPublic(callsign, await fallbackSelection());
 		noteStoryFallback(fallback ? "flightstats_used" : "flightstats_unavailable");
