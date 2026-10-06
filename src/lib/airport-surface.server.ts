@@ -402,8 +402,9 @@ function isWaterElement(element: OverpassElement) {
 
 function waterPolygonFromWay(element: OverpassElement): SurfacePolygon | null {
   const ring = validGeometry(element.geometry);
-  if (ring.length < 3) return null;
-  if (!samePoint(ring[0], ring.at(-1))) ring.push(ring[0]!);
+  // Open water ways are not polygons. Do not invent a closing segment across
+  // a bay, lake, or reservoir just because the requested box cuts it.
+  if (ring.length < 4 || !samePoint(ring[0], ring.at(-1))) return null;
   return { outer: ring };
 }
 
