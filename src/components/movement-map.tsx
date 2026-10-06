@@ -694,8 +694,7 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
 
     const arrivalSurfaceLike = destNm <= 6 && (
       ac.onGround === true ||
-      story.currentStage === "taxi_in" ||
-      story.currentStage === "gate"
+      ((altFt == null || altFt <= 250) && (gsKt == null || gsKt <= 80))
     );
     if (arrivalSurfaceLike) {
       const snapshot = { ...ac };
@@ -724,7 +723,8 @@ export function MovementMap({ story, active = true }: { story: FlightStory; acti
     ((current.altFt == null || current.altFt <= 1200) && (current.gsKt == null || current.gsKt <= 165))
   ));
   const arrivalLive = Boolean(current && currentDestNm <= 6 && (
-    current.onGround === true || story.currentStage === "taxi_in" || story.currentStage === "gate"
+    current.onGround === true ||
+    ((current.altFt == null || current.altFt <= 250) && (current.gsKt == null || current.gsKt <= 80))
   ));
   const planeInFlight = airborneNow || ["ride", "arrival", "final_approach"].includes(story.currentStage);
 
