@@ -218,3 +218,32 @@ that connector, and ask `Open the invented Inbound Live Radar near Chicago.`
 Stop for this manual host retest. Part 3B.4 is not host-approved, and no
 subsequent stage has started. The Inbound application, main, and production
 remain untouched.
+
+## 2026-10-06 resumed verification checkpoint
+
+Work remains plugin-only. The corrected SYN105 chooser re-entry Preview is still
+the isolated `inbound-live-fixture-dev` deployment
+`dpl_A6qfuUj1MLWbUG9uV3w9xjX1Mnnm` at
+`inbound-live-fixture-eqhshvwuc-jarndtphoto.vercel.app`.
+
+The exact deployment URL now has an alias-protection override for host testing.
+Project-wide Vercel Authentication / Require Log In was not disabled. An
+authenticated GET to `/mcp` returned HTTP 405 with `Allow: POST`,
+`Cache-Control: no-store`, `x-inbound-fixture-only: true`, and
+`x-inbound-egress: static-isolation`.
+
+An isolated fresh clone at branch head
+`79f1fc5724eaa4f2ebaa0f30cbfb5e598a65d131` regenerated both fixture and Radar
+Preview artifacts. Handoff/service coverage passed, including independent
+workers, both SYN105 dated choices, exact-instance reconstruction, tamper/kind
+rejection, expiry, Radar deployment isolation, and MCP read-only boundaries.
+The broad plugin test run reached 146 passing tests; its only remaining failure
+was a sandbox `SIGKILL` while running the fixture-preview isolation file, not
+an assertion failure. The browser return-proof could not be rerun in that
+disposable Vercel sandbox because its minimal Linux image lacks Chromium runtime
+libraries and has no package manager. No repository or production workaround
+was made for that infrastructure limitation.
+
+The authoritative next gate remains the real ChatGPT host retest against the
+exact MCP endpoint below. Part 3B.4 remains unapproved until that passes.
+
