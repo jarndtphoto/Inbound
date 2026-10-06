@@ -23,7 +23,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, flightStatsLegMatches, flightStatsScheduleAirborne, departureSurfaceLocationHint, loadAirportInfo, resolveFlightField, scheduleHasRoute } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, flightStatsLegMatches, activeFlightStatsLegLock, flightStatsScheduleAirborne, departureSurfaceLocationHint, loadAirportInfo, resolveFlightField, scheduleHasRoute } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 let loadFlightStory;
 let storyInstance = 0;
 async function coldStoryFixture() {
@@ -85,6 +85,53 @@ describe('same-number leg lock replays', () => {
     assert.equal(flightStatsLegMatches(reverse, lockedLeg), false);
     assert.equal(chooseFlightStatsScheduleCandidate([reverse], now, { lockedLeg }), null);
     assert.equal(chooseFlightStatsScheduleCandidate([reverse, correct], now, { lockedLeg }), correct);
+  });
+
+  const resume = ({ date = '2026-10-06', landingActual = null, gateActual = null,
+    arrival = now - 60 * 60 } = {}) => ({
+    stateKey: `leg:v1:SWA4775|${date}|ALB|MCO`,
+    originIata: 'ALB', originIcao: 'KALB', originTz: 'America/New_York',
+    destIata: 'MCO', destIcao: 'KMCO',
+    landing: { scheduled: arrival - 10 * 60, estimated: null, actual: landingActual },
+    gateIn: { scheduled: arrival, estimated: null, actual: gateActual },
+  });
+
+  it('releases WN4775 at confirmed gate arrival so the afternoon MCO→ALB leg loads', () => {
+    const morning = leg('ALB', 'MCO', now - 3 * 3600, now - 60 * 60);
+    morning.gateIn.actual = now - 30;
+    const afternoon = leg('MCO', 'ALB', now + 10 * 60, now + 3 * 3600);
+    const lockedLeg = activeFlightStatsLegLock(resume({ gateActual: now - 30 }), now);
+    assert.equal(lockedLeg, null);
+    assert.equal(chooseFlightStatsScheduleCandidate([morning, afternoon], now, {
+      lockedLeg, aircraft: { lat: 28.43, lon: -81.31, onGround: true, track: 0 },
+    }), afternoon);
+  });
+
+  it('releases WN4775 after the landing grace so the afternoon MCO→ALB leg loads', () => {
+    const morning = leg('ALB', 'MCO', now - 3 * 3600, now - 60 * 60);
+    const afternoon = leg('MCO', 'ALB', now + 10 * 60, now + 3 * 3600);
+    const lockedLeg = activeFlightStatsLegLock(resume({ landingActual: now - 46 * 60 }), now);
+    assert.equal(lockedLeg, null);
+    assert.equal(chooseFlightStatsScheduleCandidate([morning, afternoon], now, {
+      lockedLeg, aircraft: { lat: 28.43, lon: -81.31, onGround: true, track: 0 },
+    }), afternoon);
+  });
+
+  it('keeps WN4775 locked during the post-landing taxi-in grace period', () => {
+    assert.deepEqual(activeFlightStatsLegLock(resume({ landingActual: now - 20 * 60 }), now), {
+      originIata: 'ALB', originIcao: 'KALB', destIata: 'MCO', destIcao: 'KMCO', date: '2026-10-06',
+    });
+  });
+
+  it('never carries a locked leg into a brand-new service date', () => {
+    const nextDayNow = Date.parse('2026-10-07T14:10:00Z') / 1000;
+    const newFlight = { ...leg('MCO', 'ALB', nextDayNow + 10 * 60, nextDayNow + 3 * 3600),
+      _publicScheduleDate: '2026-10-07' };
+    const lockedLeg = activeFlightStatsLegLock(resume({
+      date: '2026-10-06', arrival: Date.parse('2026-10-06T22:00:00Z') / 1000,
+    }), nextDayNow);
+    assert.equal(lockedLeg, null);
+    assert.equal(chooseFlightStatsScheduleCandidate([newFlight], nextDayNow, { lockedLeg }), newFlight);
   });
 
   it('always resolves an out-and-back pair to the direction the aircraft is flying', () => {

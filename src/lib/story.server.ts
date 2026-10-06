@@ -3094,6 +3094,33 @@ function lockedLegFromResume(resume) {
 	return { originIata: resume.originIata, originIcao: resume.originIcao,
 		destIata: resume.destIata, destIcao: resume.destIcao, date: keyDate };
 }
+const COMPLETED_LEG_GRACE_SEC = 45 * 60;
+function localDateKey(unix, timeZone) {
+	try {
+		return new Intl.DateTimeFormat("en-CA", {
+			timeZone: timeZone || "UTC", year: "numeric", month: "2-digit", day: "2-digit",
+		}).format(new Date(unix * 1000));
+	} catch {
+		return new Date(unix * 1000).toISOString().slice(0, 10);
+	}
+}
+/** Keep a confirmed leg sticky only while it can still be the active leg.
+ * A provider gate-in closes it immediately; a landing closes it after enough
+ * time for taxi-in. An old service date also expires after its planned arrival
+ * plus the same grace, so a stale resume cannot capture a brand-new flight. */
+export function activeFlightStatsLegLock(resume, nowSec = Date.now() / 1000) {
+	const leg = lockedLegFromResume(resume);
+	if (!leg) return null;
+	const gateActual = resume?.gateIn?.actual;
+	if (Number.isFinite(gateActual) && gateActual <= nowSec) return null;
+	const landingActual = resume?.landing?.actual;
+	if (Number.isFinite(landingActual) && nowSec - landingActual >= COMPLETED_LEG_GRACE_SEC) return null;
+	const plannedArrival = bestUnix(resume?.gateIn) ?? bestUnix(resume?.landing);
+	if (leg.date && Number.isFinite(plannedArrival)
+		&& localDateKey(nowSec, resume?.originTz) > leg.date
+		&& nowSec - plannedArrival >= COMPLETED_LEG_GRACE_SEC) return null;
+	return leg;
+}
 async function buildStory(query, resumed = null, progressResume = null) {
 	const parsed = parseFlightQuery(query);
 	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
@@ -3107,7 +3134,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		: parsed.registration
 			? safe(adsbByReg(parsed.registration), null)
 			: safe(adsbByCallsign(parsed.callsign), null);
-	const lockedLeg = lockedLegFromResume(progressResume);
+	const lockedLeg = activeFlightStatsLegLock(progressResume);
 	const [rawAc0, loadedAware, route] = await Promise.all([
 		rawAcP,
 		(resumed ? Promise.resolve(awareFromResume(resumed.resume, resumed.scope)) : loadAware(parsed.callsign, {
