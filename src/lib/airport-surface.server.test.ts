@@ -131,3 +131,28 @@ test("open water ways are not promoted to polygons across the detail box", () =>
   assert.equal(parsed.geography?.base, "land");
   assert.equal(parsed.geography?.water.length, 0);
 });
+
+test("bounded coastline gaps cannot invent a segment across the airport", () => {
+  const parsed = parseAirportSurfaceElements([{
+    id: 201, type: "way", tags: { natural: "coastline" },
+    geometry: [
+      { lat: -0.6, lon: -0.2 }, { lat: 0, lon: -0.2 }, null,
+      { lat: 0, lon: 0.2 }, { lat: 0.6, lon: 0.2 },
+    ],
+  }], "KSAN", 123, { lat: 0, lon: 0 });
+  assert.equal(parsed.geography?.fallback, true);
+  assert.equal(parsed.geography?.fallbackReason, "open-coastline-not-on-box-edge");
+});
+
+test("bounded water ways and incomplete relation members never receive invented closing edges", () => {
+  const geometry = [
+    { lat: -0.1, lon: -0.1 }, { lat: -0.1, lon: 0.1 }, null,
+    { lat: 0.1, lon: 0.1 }, { lat: 0.1, lon: -0.1 }, { lat: -0.1, lon: -0.1 },
+  ];
+  const parsed = parseAirportSurfaceElements([
+    { id: 202, type: "way", tags: { natural: "water" }, geometry },
+    { id: 203, type: "relation", tags: { natural: "water", type: "multipolygon" },
+      members: [{ type: "way", role: "outer", geometry }] },
+  ], "KORD", 123, { lat: 0, lon: 0 });
+  assert.equal(parsed.geography?.water.length, 0);
+});

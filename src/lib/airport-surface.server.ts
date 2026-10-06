@@ -369,10 +369,27 @@ function validGeometry(points: Array<OverpassGeometryPoint | null> | undefined):
     .map((p) => ({ lat: p.lat, lon: p.lon }));
 }
 
-function relationRings(element: OverpassElement, role: "outer" | "inner"): SurfacePoint[][] {
+// Bounded Overpass output uses nulls for omitted nodes. Keep those breaks:
+// removing them would draw a new segment across an unobserved part of a bay.
+function geometrySegments(points: Array<OverpassGeometryPoint | null> | undefined): SurfacePoint[][] {
+  const segments: SurfacePoint[][] = [];
+  let current: SurfacePoint[] = [];
+  for (const point of points ?? []) {
+    if (point && validCoord(point.lat, -90, 90) && validCoord(point.lon, -180, 180)) {
+      current.push({ lat: point.lat, lon: point.lon });
+    } else {
+      if (current.length >= 2) segments.push(current);
+      current = [];
+    }
+  }
+  if (current.length >= 2) segments.push(current);
+  return segments;
+}
+
+function relationRings(element: OverpassElement, role: "outer" | "inner", requireClosed = false): SurfacePoint[][] {
   const segments = (element.members ?? [])
     .filter((member) => member.type === "way" && (role === "outer" ? member.role === "outer" || !member.role : member.role === "inner"))
-    .map((member) => validGeometry(member.geometry))
+    .flatMap((member) => requireClosed ? geometrySegments(member.geometry) : [validGeometry(member.geometry)])
     .filter((points) => points.length >= 2);
   const rings: SurfacePoint[][] = [];
 
@@ -400,6 +417,7 @@ function relationRings(element: OverpassElement, role: "outer" | "inner"): Surfa
       }
     }
     if (ring.length >= 3) {
+      if (requireClosed && !samePoint(ring[0], ring.at(-1))) continue;
       if (!samePoint(ring[0], ring.at(-1))) ring.push(ring[0]!);
       rings.push(ring);
     }
@@ -411,16 +429,13 @@ function relationOuterRings(element: OverpassElement) {
   return relationRings(element, "outer");
 }
 
-function relationInnerRings(element: OverpassElement) {
-  return relationRings(element, "inner");
-}
-
 function isWaterElement(element: OverpassElement) {
   return element.tags?.natural === "water"
     || ["lake", "lagoon", "reservoir", "bay"].includes(element.tags?.water ?? "");
 }
 
 function waterPolygonFromWay(element: OverpassElement): SurfacePolygon | null {
+  if (geometrySegments(element.geometry).length !== 1 || element.geometry?.some((point) => point == null)) return null;
   const ring = validGeometry(element.geometry);
   // Open water ways are not polygons. Do not invent a closing segment across
   // a bay, lake, or reservoir just because the requested box cuts it.
@@ -429,8 +444,8 @@ function waterPolygonFromWay(element: OverpassElement): SurfacePolygon | null {
 }
 
 function waterPolygonsFromRelation(element: OverpassElement): SurfacePolygon[] {
-  const outers = relationOuterRings(element);
-  const inners = relationInnerRings(element);
+  const outers = relationRings(element, "outer", true);
+  const inners = relationRings(element, "inner", true);
   return outers.map((outer) => {
     const holes = inners.filter((inner) => pointInRing(centroid(inner), outer));
     return { outer, ...(holes.length ? { holes } : {}) };
@@ -480,7 +495,7 @@ export function parseAirportSurfaceElements(elements: OverpassElement[], airport
   const bounds = airportDetailGeographyBounds(fieldPoint);
   const coastlineWays = elements
     .filter((element) => element.type === "way" && element.tags?.natural === "coastline")
-    .map((element) => validGeometry(element.geometry))
+    .flatMap((element) => geometrySegments(element.geometry))
     .filter((points) => points.length >= 2);
   const waterPolygons: SurfacePolygon[] = [];
   for (const element of elements) {
