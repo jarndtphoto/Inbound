@@ -41,6 +41,26 @@ test("AA2343 SAN to ORD replay keeps east-flow west threshold despite reciprocal
   assert.ok(Math.abs(selected!.threshold.lon - -87.92790222167969) < 1e-7, "10R east-flow uses the west threshold");
 });
 
+test("ORD west-flow replay keeps west-flow east threshold despite reciprocal provider hint", async () => {
+  clearArrivalAtisMemoryCache();
+  const store = {
+    loadAtis: async () => [{ airport: "KORD", type: "combined", datis: "ARR EXP VECTORS ILS RWY 27L APCH, ILS RWY 28R APCH.", time: "1728Z" }],
+    saveAtis: async () => {},
+  };
+  const selected = await expectedArrivalRunway("KORD", {
+    aircraft: { lat: 41.98, lon: -87.55 },
+    providerRunway: "10R",
+    actualLanding: false,
+  }, store);
+
+  assert.ok(selected);
+  assert.equal(selected!.runway, "27L");
+  assert.equal(selected!.heading, 270);
+  assert.ok(Math.abs(selected!.threshold.lat - 41.98389816) < 1e-7);
+  assert.ok(Math.abs(selected!.threshold.lon - -87.88905334) < 1e-7, "27L west-flow uses the east threshold");
+  assert.equal(selected!.source, "ATIS");
+});
+
 test("confirmed actual provider runway can still override ATIS", async () => {
   clearArrivalAtisMemoryCache();
   const store = {
