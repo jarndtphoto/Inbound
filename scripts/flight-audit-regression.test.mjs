@@ -23,7 +23,7 @@ await build({ configFile: false, logLevel: 'silent', build: {
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
 after(async () => rm(storyBundleDir, { recursive: true, force: true }));
-const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint, resolveFlightField } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
+const { motionFromTrace, pushEvidenceFromTrack, choosePushEvidence, reconcilePushLatch, currentStageOf, finalApproachEvidence, isFinalApproach, postLandingState, fetchAwarePage, pickTaxi, canonicalLiveDisplayPath, selectCurrentTraceLeg, operatingIdentFromSchedule, pushLatchFromResume, parseFlightStatsPublicSchedule, chooseFlightStatsScheduleCandidate, departureSurfaceLocationHint, resolveFlightField, scheduleHasRoute } = await import(pathToFileURL(join(storyBundleDir, 'story.mjs')).href);
 let loadFlightStory;
 let storyInstance = 0;
 async function coldStoryFixture() {
@@ -1053,6 +1053,14 @@ describe('public schedule fallback', () => {
     assert.match(source, /awarePublicBlockedUntil = Math\.max\(awarePublicBlockedUntil, Date\.now\(\) \+ 60_000\)/);
     assert.match(source, /const detailPages = bestPage \? \[bestPage\] : pages/);
     assert.match(source, /detailRequests\.length >= 12/);
+  });
+
+  it('falls back when FlightAware returns a truthy shell without a route', () => {
+    assert.equal(scheduleHasRoute({ ident: 'AAL6582', originIata: null, destIata: null }), false);
+    assert.equal(scheduleHasRoute({ originIata: 'PHL', destIcao: 'KABE' }), true);
+    const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
+    assert.match(source, /record && !scheduleHasRoute\(record\)/);
+    assert.match(source, /const fallback = await loadFlightStatsPublic\(callsign\)/);
   });
 
   it('fails closed when the page does not identify two known airports', () => {
