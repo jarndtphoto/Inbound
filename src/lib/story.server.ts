@@ -20,6 +20,7 @@ import { routeWeatherEvents } from "./weather-events";
 import { flightWeatherSummary } from "./weather-presentation";
 import { airframeOf, airlineOf, isVehicleType } from "./aircraft";
 import { AIRPORT_BY_ICAO, airportByIata, airportByIcao } from "./airports";
+import { scheduledAirportByIata } from "./scheduled-airports.ts";
 import { IATA_TO_ICAO, displayIata, parseFlightQuery } from "./flight-parse";
 import {
   densifyPath,
@@ -1787,23 +1788,33 @@ function fieldFromKnown(iata, icao, lat, lon, name, city, tzHint) {
 		category: "UNK"
 	};
 }
-async function loadAirportInfo(iata, icao) {
+export async function loadAirportInfo(iata, icao) {
 	const normalizedIata = String(iata ?? "").toUpperCase();
 	const normalizedIcao = String(icao ?? "").toUpperCase();
-	const candidates = [...new Set([
-		/^[A-Z0-9]{4}$/.test(normalizedIcao) ? normalizedIcao : null,
-		/^[A-Z]{3}$/.test(normalizedIata) ? `K${normalizedIata}` : null,
-	].filter(Boolean))];
-	for (const candidate of candidates) {
-		const row = await safe(cached(`airport-info-v2:${candidate}`, 24 * 60 * 60_000, async () => {
+	const scheduled = scheduledAirportByIata(normalizedIata);
+	if (scheduled && (!normalizedIcao || !scheduled.icao || normalizedIcao === scheduled.icao)) {
+		return scheduled.icao ? scheduled : { ...scheduled, icao: normalizedIcao };
+	}
+
+	// AviationWeather is a coordinate fallback only. Never manufacture a US
+	// ICAO identifier from an IATA code; non-US airports such as VCE do not use
+	// a K prefix. Missing and failed responses throw inside cached(), so they
+	// are not retained as negative cache entries.
+	const candidate = /^[A-Z0-9]{4}$/.test(normalizedIcao)
+		? normalizedIcao
+		: /^[A-Z]{3}$/.test(normalizedIata) ? normalizedIata : null;
+	if (candidate) {
+		const row = await safe(cached(`airport-info-v3:${candidate}`, 24 * 60 * 60_000, async () => {
 			const rows = await fetchJson(`https://aviationweather.gov/api/data/airport?ids=${encodeURIComponent(candidate)}&format=json`, 10e3);
-			return Array.isArray(rows) ? rows[0] ?? null : null;
+			const found = Array.isArray(rows) ? rows[0] ?? null : null;
+			if (!found || !Number.isFinite(found.lat) || !Number.isFinite(found.lon)) throw new Error("airport not found");
+			return found;
 		}), null);
-		if (!row || !Number.isFinite(row.lat) || !Number.isFinite(row.lon)) continue;
+		if (!row) return null;
 		const rowIata = String(row.iataId ?? "").toUpperCase();
 		const rowIcao = String(row.icaoId ?? "").toUpperCase();
-		if (normalizedIata && rowIata !== normalizedIata) continue;
-		if (normalizedIcao && rowIcao !== normalizedIcao) continue;
+		if (normalizedIata && rowIata && rowIata !== normalizedIata) return null;
+		if (normalizedIcao && rowIcao !== normalizedIcao) return null;
 		return {
 			iata: rowIata || normalizedIata,
 			icao: rowIcao || normalizedIcao,
@@ -1811,6 +1822,7 @@ async function loadAirportInfo(iata, icao) {
 			lon: row.lon,
 			name: row.name ?? row.site ?? normalizedIata,
 			city: row.city ?? "",
+			tz: null,
 		};
 	}
 	return null;
@@ -1827,7 +1839,8 @@ export async function resolveFlightField(aware, side, fallback) {
   const airportInfo = await loadAirportInfo(iata, icao);
   if (airportInfo) {
 	const resolved = fieldFromKnown(airportInfo.iata, airportInfo.icao, airportInfo.lat, airportInfo.lon,
-		aware?.[prefix + "Name"] || airportInfo.name, aware?.[prefix + "City"] || airportInfo.city, aware?.[prefix + "Tz"]);
+		aware?.[prefix + "Name"] || airportInfo.name, aware?.[prefix + "City"] || airportInfo.city,
+		airportInfo.tz || aware?.[prefix + "Tz"]);
 	if (resolved) return resolved;
   }
   if (icao && /^[A-Z0-9]{4}$/.test(icao)) {
@@ -3615,8 +3628,14 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		arrivalPersistence = saved.status;
 	}
 	expectedArrival = arrivalState.runway;
-	const showDetailedArrival = Boolean(arrivalState.startedAt
-		&& showDetailedArrivalGeometry(arrivalLive, end, arrivalInput.approachEvidence));
+	const detailedArrivalNow = showDetailedArrivalGeometry(arrivalLive, end, arrivalInput.approachEvidence);
+	const detailedArrivalContinuation = Boolean(arrivalState.detailedStartedAt && arrivalState.active && (
+		(arrivalLive && !arrivalLive.onGround && !arrivalLive.extrapolated
+			&& (arrivalLive.seenSec ?? Infinity) <= 120 && haversineNm(arrivalLive, end) <= 35)
+		|| (!arrivalLive && arrivalState.lastFixAt > 0 && Date.now() - arrivalState.lastFixAt <= 120_000)
+	));
+	const showDetailedArrival = Boolean(arrivalState.detailedStartedAt
+		&& (detailedArrivalNow || detailedArrivalContinuation));
 	const pattern = showDetailedArrival ? displayArrivalProjection(arrivalState, {
 		observation: routeObservation && Date.now() - routeObservation.seenAt <= 60_000 ? routeObservation : null,
 		live, lastObserved: routeObservation ?? routeMemory?.lastObserved ?? null, landed: ourLanded
