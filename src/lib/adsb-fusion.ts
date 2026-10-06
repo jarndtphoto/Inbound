@@ -66,7 +66,7 @@ export const GAP_EXTRAPOLATE_ENROUTE_SEC = 20;
 export const STALE_KEEP_SEC = 45;
 export const STALE_KEEP_ENROUTE_SEC = 15 * 60;
 
-const UA = "Inbound/1.0 (passenger flight companion)";
+const UA = "Inbound/1.0 (+https://github.com/jarndtphoto/Inbound)";
 
 export const PROVIDERS: Record<
   ProviderId,
@@ -82,7 +82,7 @@ export const PROVIDERS: Record<
   fi: {
     id: "fi",
     timeoutMs: 4000,
-    around: (lat, lon, dist) => `https://opendata.adsb.fi/api/v2/lat/${lat}/lon/${lon}/dist/${dist}`,
+    around: (lat, lon, dist) => `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${dist}`,
     hex: (id) => `https://opendata.adsb.fi/api/v2/hex/${encodeURIComponent(id)}`,
     callsign: (id) => `https://opendata.adsb.fi/api/v2/callsign/${encodeURIComponent(id)}`,
     registration: (id) => `https://opendata.adsb.fi/api/v2/registration/${encodeURIComponent(id)}`,
@@ -105,7 +105,10 @@ export const PROVIDERS: Record<
   },
 };
 
-const PROVIDER_ORDER: ProviderId[] = ["fi", "lol", "al"];
+// Airplanes.live's anonymous live API is access-gated in Production (HTTP 403).
+// Keep its endpoint definition for a future authenticated/feeder integration, but
+// do not spend every passenger poll on a provider that currently rejects it.
+const PROVIDER_ORDER: ProviderId[] = ["fi", "lol"];
 
 type Health = { fails: number; until: number; lastOk: number };
 const health = new Map<ProviderId, Health>();
@@ -131,10 +134,16 @@ export function markProviderOk(id: ProviderId, now = Date.now()) {
   health.set(id, { fails: 0, until: 0, lastOk: now });
 }
 
-export function markProviderFail(id: ProviderId, now = Date.now()) {
+export function markProviderFail(id: ProviderId, status: ProviderFetchStatus = "error", now = Date.now()) {
   const prev = health.get(id);
   const fails = (prev?.fails ?? 0) + 1;
-  const wait = fails === 1 ? 6_000 : fails === 2 ? 15_000 : 40_000;
+  // Respect upstream rate/access signals instead of immediately trying again on
+  // the next passenger poll. Generic network failures retain the short retry.
+  const wait = status === "429"
+    ? fails === 1 ? 60_000 : fails === 2 ? 120_000 : 300_000
+    : status === "403"
+      ? 30 * 60_000
+      : fails === 1 ? 6_000 : fails === 2 ? 15_000 : 40_000;
   health.set(id, { fails, until: now + wait, lastOk: prev?.lastOk ?? 0 });
 }
 
@@ -359,7 +368,7 @@ export function chooseBest(
   return null;
 }
 
-export type ProviderFetchStatus = "ok" | "429" | "timeout" | "error" | "backoff";
+export type ProviderFetchStatus = "ok" | "403" | "429" | "timeout" | "error" | "backoff";
 export type ProviderPack = { provider: ProviderId; ac: AdsbRaw[]; status?: ProviderFetchStatus };
 
 export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; airside?: boolean }): AdsbRaw[] {
@@ -433,6 +442,7 @@ async function fetchJson(url: string, ms: number): Promise<unknown> {
 
 function providerFetchStatus(error: unknown): ProviderFetchStatus {
   const message = error instanceof Error ? error.message : String(error);
+  if (/\b403\b/.test(message)) return "403";
   if (/\b429\b/.test(message)) return "429";
   if (/timeout|timed out|abort/i.test(message) || (error instanceof Error && /TimeoutError|AbortError/.test(error.name))) return "timeout";
   return "error";
@@ -457,8 +467,8 @@ async function fetchProviderPack(id: ProviderId, url: string, now = Date.now()):
     markProviderOk(id, now);
     return { provider: id, ac: acList(json), status: "ok" };
   } catch (error) {
-    markProviderFail(id, now);
     const status = providerFetchStatus(error);
+    markProviderFail(id, status, now);
     const h = health.get(id);
     const key = `${id}:fail`;
     if (now - (providerLogAt.get(key) ?? 0) >= 5_000) {
