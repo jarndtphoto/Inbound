@@ -103,6 +103,9 @@ function simplify(points: GeoPoint[], toleranceM = 12): GeoPoint[] {
     }
   }
   const result = [...keep].sort((a, b) => a - b).map((i) => work[i]!);
+  // A small island/pond must remain a polygon even below the tolerance.
+  // Otherwise one collapsed ring can reject the entire airport coastline.
+  if (closed && result.length < 3) return points;
   if (closed && result.length >= 3) result.push(result[0]!);
   return result;
 }

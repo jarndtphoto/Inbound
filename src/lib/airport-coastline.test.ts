@@ -88,6 +88,20 @@ test("clockwise water inside a counter-clockwise island retains ocean and inland
   assert.equal(airportGeographyIsWater(geography, { lat: 5, lon: 5 }), true);
 });
 
+test("sub-tolerance closed islands and ponds stay polygons without rejecting the whole shoreline", () => {
+  const tiny = [{ lat: 32.85, lon: -117.27 }, { lat: 32.85, lon: -117.26995 },
+    { lat: 32.850025, lon: -117.26995 }, { lat: 32.85005, lon: -117.26995 },
+    { lat: 32.85005, lon: -117.27 }, { lat: 32.85, lon: -117.27 }];
+  const geography = assembleAirportGeography({ bounds: { south: 32.28, west: -117.73, north: 33.18, east: -116.66 },
+    coastlineWays: [[{ lat: 32, lon: -117.1 }, { lat: 33.5, lon: -117.1 }], tiny],
+    waterPolygons: [{ outer: tiny }], runwaySamples: [{ lat: 32.73, lon: -117.19 }] });
+  assert.equal(geography.fallback, false);
+  assert.equal(geography.land.length, 2);
+  assert.ok(geography.land.every((ring) => ring.length >= 4));
+  assert.equal(geography.water.length, 1);
+  assert.equal(airportGeographyIsWater(geography, { lat: 32.850025, lon: -117.269975 }), true);
+});
+
 test("water over 95 percent of the box falls back to plain land", () => {
   const geography = assembleAirportGeography({
     bounds,
