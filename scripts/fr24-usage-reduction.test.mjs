@@ -74,13 +74,13 @@ test("visibility and Map selection are wired through to the ground observer", as
   assert.match(movement, /enabled: groundPollingEnabled\(active, pageVisible/);
   assert.doesNotMatch(movement, /refetchIntervalInBackground:\s*true/);
   assert.match(movement, /document.visibilityState === "visible"/);
-  assert.match(movement, /\? 5_000 : false/, "ground ADS-B polling is paced to five seconds");
+  assert.match(movement, /\? 8_000 : false/, "ground ADS-B polling is paced to eight seconds");
   const hook = await read("src/lib/use-page-visible.ts");
   assert.match(hook, /useSyncExternalStore/);
   assert.match(hook, /removeEventListener\("visibilitychange", onChange\)/);
 });
 
-test("five-second ground map is free ADS-B only", async () => {
+test("paced ground map is free ADS-B only", async () => {
   const source = await readFile(resolve("src/lib/ground-position.ts"), "utf8");
   assert.doesNotMatch(source, /from "\.\/fr24\.server"/);
   assert.doesNotMatch(source, /loadFr24|FR24_API_TOKEN/, "ground polling cannot reach paid FR24");
@@ -89,8 +89,9 @@ test("five-second ground map is free ADS-B only", async () => {
   const aroundIndex = source.indexOf("const aroundPacks = await fetchAround");
   assert.ok(exactIndex >= 0 && aroundIndex > exactIndex, "ground polling tries exact identity before an airport-radius scan");
   assert.match(source, /wantedHex[\s\S]*?fetchByHex\(wantedHex\)/, "known hex remains the strongest free ground identity");
-  assert.match(source, /if \(ageSec <= 12\)/, "a genuinely recent exact fix avoids the extra airport scan");
-  assert.match(source, /exactFallback\.seenAt >= aroundFallback\.seenAt/, "when both paths are needed, the newest real observation wins");
+  assert.match(source, /return finish\(position\);/, "any usable exact fix avoids the extra airport scan");
+  assert.match(source, /exactPacks\.every\(\(pack\) => pack\.status && pack\.status !== "ok"\)/, "provider cooldown skips a redundant broad scan");
+  assert.match(source, /provider: "adsb-around-fallback"/, "a broad scan remains available when exact lookup is healthy but empty");
 });
 
 test("surface providers are paced and expose throttling instead of silently looking empty", async () => {
