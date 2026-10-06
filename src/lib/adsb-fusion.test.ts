@@ -9,6 +9,9 @@ import {
   rawToObservation,
   resetFusion,
   stickyPick,
+  markProviderFail,
+  providerHealthy,
+  PROVIDERS,
   type AdsbRaw,
   STALE_AIR_SEC,
 } from "./adsb-fusion.ts";
@@ -180,5 +183,24 @@ describe("extrapolated flag", () => {
     assert.equal(second[0]?._fusion?.ageSec, 30);
     const fix = fuseProviderLists([{ provider: "lol", ac: [ac({ lat: 30.25, lon: -139.2, gs: 480 })] }], { now: T0 + 31_000 });
     assert.equal(fix[0]?.lon, -139.2);
+  });
+});
+
+
+describe("provider access and rate-limit resilience", () => {
+  it("uses adsb.fi's current v3 radius endpoint", () => {
+    assert.match(PROVIDERS.fi.around(41.9742, -87.9073, 12), /\/api\/v3\/lat\//);
+  });
+
+  it("backs off a 429 long enough to stop repeated passenger polls from hammering it", () => {
+    markProviderFail("fi", "429", T0);
+    assert.equal(providerHealthy("fi", T0 + 59_999), false);
+    assert.equal(providerHealthy("fi", T0 + 60_000), true);
+  });
+
+  it("backs off a forbidden provider for a long access-policy window", () => {
+    markProviderFail("al", "403", T0);
+    assert.equal(providerHealthy("al", T0 + 29 * 60_000), false);
+    assert.equal(providerHealthy("al", T0 + 30 * 60_000), true);
   });
 });
