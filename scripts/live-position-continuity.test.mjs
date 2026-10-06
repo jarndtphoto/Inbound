@@ -46,6 +46,36 @@ test('airborne trace continuity stays observed through 90 seconds and then force
     assert.equal(stale91.extrapolated, true);
     assert.equal(story.livePositionNeedsRecovery(stale91), true);
     assert.equal(story.livePositionNeedsRecovery({ ...observed60, extrapolated: true }), true);
+
+    const origin = context.origin;
+    const dest = context.dest;
+    const parsed = { callsign: 'UAL123' };
+    const aware = { ident: 'UAL123', tail: 'N12345' };
+    const aroundBase = {
+      hex: seed.hex, flight: 'UAL123', r: 'N12345',
+      lat: 41.8, lon: -87.0, gs: 420, track: 95,
+    };
+    const airborne60 = { ...aroundBase, alt_baro: 18_000, _fusion: { ageSec: 60, extrapolated: false } };
+    const airborne91 = { ...aroundBase, alt_baro: 18_000, _fusion: { ageSec: 91, extrapolated: false } };
+    const ground41 = { ...aroundBase, alt_baro: 'ground', gs: 12, _fusion: { ageSec: 41, extrapolated: false } };
+    assert.equal(story.pickAroundAircraft([airborne60], parsed, aware, origin, dest, 90, seed.hex), airborne60,
+      'broad airborne recovery accepts a real 60-second fix');
+    assert.equal(story.pickAroundAircraft([airborne91], parsed, aware, origin, dest, 90, seed.hex), null,
+      'broad airborne recovery rejects a fix older than 90 seconds');
+    assert.equal(story.pickAroundAircraft([ground41], parsed, aware, origin, dest, 90, seed.hex), null,
+      'broad surface recovery keeps the stricter 40-second cutoff');
+
+    assert.deepEqual(story.exactRecoveryLookupPlan({
+      knownHex: 'A12345',
+      scheduleHex: 'a12345',
+      tail: 'N-12345',
+      callsign: ' UAL123 ',
+      scheduleIdent: 'UAL123',
+    }), [
+      { kind: 'hex', value: 'a12345' },
+      { kind: 'registration', value: 'N12345' },
+      { kind: 'callsign', value: 'UAL123' },
+    ], 'saved hex is tried first and duplicate identities are not requested twice');
   } finally {
     Date.now = realNow;
     await rm(directory, { recursive: true, force: true });
