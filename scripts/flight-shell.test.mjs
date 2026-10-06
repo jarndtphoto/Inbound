@@ -50,11 +50,13 @@ test('welcome dialog does not reopen from asynchronous briefing enrichment in th
   assert.doesNotMatch(flightPages,/welcomeSummaryVersion|welcomeVersion/);
 });
 
-test('overdue departures without fresh position do not claim the aircraft is still at the gate',()=>{
-  assert.match(source,/function departureUpdateDelayed/);
-  assert.match(source,/nowMs \/ 1000 - pushAt >= 10 \* 60/);
-  assert.match(source,/Departure update delayed/);
+test('near-departure flights without fresh ground evidence do not claim inbound, gate, or a current delay',()=>{
+  assert.match(source,/function departureGroundUnconfirmed/);
+  assert.match(source,/pushAt - 15 \* 60/);
+  assert.match(source,/ageSec <= 30/);
+  assert.match(source,/Ground movement not confirmed/);
   assert.match(source,/Movement not confirmed/);
+  assert.match(source,/!departureUnderway && !departureGroundUnconfirmed\(story\)/);
   assert.match(source,/\["Status", \.\.\.STATUS_PROGRESS\.slice\(1\)\]/);
 });
 
