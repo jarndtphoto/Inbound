@@ -1,0 +1,338 @@
+{
+  "ok": true,
+  "expected": "baseline-gap",
+  "policyTimeline": {
+    "clientDeadlineArmedAt": "2026-10-04T09:00:00.000Z",
+    "publicationAt": "2026-10-04T09:00:00.800Z",
+    "scheduledRequestAt": "2026-10-04T09:00:20.000Z",
+    "retryOpportunityAt": "2026-10-04T09:00:23.000Z",
+    "originalMotionCapAt": "2026-10-04T09:00:25.800Z"
+  },
+  "captures": [
+    {
+      "label": "T+0 client deadline armed",
+      "at": "2026-10-04T09:00:00.000Z",
+      "frameCount": 0,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 1,
+      "collectionVersion": 1,
+      "generatedAt": "2026-10-04T09:00:00.000Z",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104420000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 2,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": null,
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 0
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 0
+      }
+    },
+    {
+      "label": "T+0.8 fresh collection published without changing client deadline",
+      "at": "2026-10-04T09:00:00.800Z",
+      "frameCount": 50,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 1,
+      "collectionVersion": 2,
+      "generatedAt": "2026-10-04T09:00:00.800Z",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104420000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 3,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": null,
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 0
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 0
+      }
+    },
+    {
+      "label": "T+20 same collection returned just before backend eligibility",
+      "at": "2026-10-04T09:00:20.000Z",
+      "frameCount": 1250,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 2,
+      "collectionVersion": 2,
+      "generatedAt": "2026-10-04T09:00:00.800Z",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 19.2,
+          "extrapolatedSeconds": 19.2,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 19.2,
+          "extrapolatedSeconds": 19.2,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 19.2,
+          "extrapolatedSeconds": 19.2,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104440000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 4,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": null,
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 1
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 20
+      }
+    },
+    {
+      "label": "T+22.9 before bounded retry",
+      "at": "2026-10-04T09:00:22.900Z",
+      "frameCount": 1431,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 2,
+      "collectionVersion": 2,
+      "generatedAt": "2026-10-04T09:00:00.800Z",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 22.1,
+          "extrapolatedSeconds": 22.096,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 22.1,
+          "extrapolatedSeconds": 22.096,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 22.1,
+          "extrapolatedSeconds": 22.096,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104440000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 4,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": null,
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 1
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 22
+      }
+    },
+    {
+      "label": "T+23.1 retry opportunity",
+      "at": "2026-10-04T09:00:23.100Z",
+      "frameCount": 1443,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 2,
+      "collectionVersion": 2,
+      "generatedAt": "2026-10-04T09:00:00.800Z",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 22.3,
+          "extrapolatedSeconds": 22.288,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 22.3,
+          "extrapolatedSeconds": 22.288,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 22.3,
+          "extrapolatedSeconds": 22.288,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104440000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 4,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": null,
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 1
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 23
+      }
+    },
+    {
+      "label": "T+25.9 motion boundary",
+      "at": "2026-10-04T09:00:25.900Z",
+      "frameCount": 1618,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 2,
+      "collectionVersion": 2,
+      "generatedAt": "2026-10-04T09:00:00.800Z",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 25.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 25.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.800Z",
+          "liveAge": 25.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        }
+      ],
+      "nextPollAt": 1791104440000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 4,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": null,
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 1
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 25
+      }
+    }
+  ],
+  "remainingScriptedResults": 1
+}

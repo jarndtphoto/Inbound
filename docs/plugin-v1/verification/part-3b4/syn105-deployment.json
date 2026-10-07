@@ -1,0 +1,78 @@
+{
+  "verifiedAt": "2026-10-05T14:23:29.356Z",
+  "source": {
+    "repository": "jarndtphoto/Inbound",
+    "branch": "plugin-v1-flight-handoff",
+    "sha": "6e4d1fc8dde3164c15f913bb6aa6428237f83b3a"
+  },
+  "fixture": {
+    "repository": "jarndtphoto/inbound-live-fixture-dev",
+    "branch": "part-3b4-syn105-return-20261005",
+    "sha": "3c92ffee0c1070287003569843ed3ab9f6264b03",
+    "tree": "24c8aea7ab0de4f12fc618ecf1d7ccb9e43ea864",
+    "files": [
+      {
+        "path": "api/mcp.js",
+        "bytes": 409053,
+        "sha": "11fa1b808535cc44f06a07f5e94cf648d3e0c30b"
+      },
+      {
+        "path": "package.json",
+        "bytes": 120,
+        "sha": "5a72ca6ab87906c8a10d5658406fd0267b76d59e"
+      },
+      {
+        "path": "vercel.json",
+        "bytes": 317,
+        "sha": "391598e900c4d30730011948e38cc1a84e0968fb"
+      }
+    ]
+  },
+  "deployment": {
+    "id": "dpl_2UgGXdN3DxvvW3VZhb6iubd7SRar",
+    "readyState": "READY",
+    "target": null,
+    "url": "inbound-live-fixture-ra6kolsml-jarndtphoto.vercel.app",
+    "dashboardUrl": "https://vercel.com/jarndtphoto/inbound-live-fixture-dev/2UgGXdN3DxvvW3VZhb6iubd7SRar"
+  },
+  "protection": {
+    "globalRequireLogin": true,
+    "globalMode": "Standard Protection",
+    "connector": {
+      "enabled": true,
+      "deploymentType": "all_except_custom_domains"
+    },
+    "newExceptionAdded": true,
+    "previousHostnamesChanged": false,
+    "exactExceptionHostname": "inbound-live-fixture-ra6kolsml-jarndtphoto.vercel.app",
+    "verifiedAt": "2026-10-05T15:12:46.150Z",
+    "evidence": "syn105-protection.json"
+  },
+  "checks": {
+    "total": 971,
+    "passed": 970,
+    "failed": 0,
+    "todo": 1,
+    "returnProofGroups": 7,
+    "replayProofGroups": 5,
+    "lifecycleProofGroups": 20,
+    "browserErrors": 0,
+    "providerCalls": 0,
+    "productionApiCalls": 0,
+    "productionDbAccess": 0
+  },
+  "publicMcpVerified": true,
+  "actualChatGptHostApproved": false,
+  "publicVerification": {
+    "verifiedAt": "2026-10-05T15:13:07.759Z",
+    "rpcRequests": 29,
+    "assertionGroups": 13,
+    "failures": 0,
+    "evidence": "syn105-public-verification.json",
+    "exactMatchToTestedCompiledWidgetScript": true,
+    "widgetScriptSha256": [
+      "7b737d25e3193ab7be2dac8db6691125e40080b4294e42ceac40b6047d55b73f"
+    ]
+  },
+  "nextGate": "Manual ChatGPT retest with a brand-new connector and new chat; no subsequent stage"
+}

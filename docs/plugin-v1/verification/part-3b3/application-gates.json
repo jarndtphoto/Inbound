@@ -1,0 +1,69 @@
+{
+  "baselineRemoteSha": "b35959a924ea7ec2b4f18b26740b339a66608aea",
+  "baselineTree": "d112b544f58befae651d4d5dc857482d67be27f2",
+  "sourceFixCommit": "3bd726164b841d0b93b1df54b415268833d6408e",
+  "sourceFixTree": "b6f74cf0f7d2b5f130c19dc78a3074852915a509",
+  "branch": "plugin-v1-radar-transport",
+  "finalSequential": true,
+  "check": {
+    "command": "env -u DATABASE_URL -u POSTGRES_URL -u POSTGRES_PRISMA_URL -u POSTGRES_URL_NON_POOLING -u NEON_DATABASE_URL -u VERCEL_POSTGRES_URL -u NEARBY_VERIFY_DATABASE_URL npm run check",
+    "exitCode": 0,
+    "tests": 957,
+    "suites": 92,
+    "pass": 956,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 1,
+    "existingTodo": {
+      "test": "loads an exact route from a FlightStats-style public status page",
+      "reason": "Held #6: unknown-airport route support"
+    }
+  },
+  "build": {
+    "command": "env -u DATABASE_URL -u POSTGRES_URL -u POSTGRES_PRISMA_URL -u POSTGRES_URL_NON_POOLING -u NEON_DATABASE_URL -u VERCEL_POSTGRES_URL -u NEARBY_VERIFY_DATABASE_URL npm run build",
+    "exitCode": 0,
+    "productionMigrator": "skipped: DATABASE_URL not set"
+  },
+  "browser": {
+    "sourceAssertionGroups": 19,
+    "compiledAssertionGroups": 19,
+    "lifecycleSnapshots": 22,
+    "mcpRequestsEach": 23,
+    "maxPendingAnimationFrames": 1,
+    "maxPendingPollingTimers": 1,
+    "maxPendingAgingIntervals": 1,
+    "externalRequests": 0,
+    "consoleOrPageErrors": 0,
+    "actualChatGptVerified": false,
+    "realPipVerified": false
+  },
+  "focusedPluginTests": {
+    "tests": 135,
+    "suites": 4,
+    "pass": 135,
+    "fail": 0
+  },
+  "initialUnconstrainedCheck": {
+    "tests": 959,
+    "passed": 954,
+    "failedChildProcesses": 4,
+    "todo": 1,
+    "signalsUnknown": true,
+    "resourcePressurePlausibleNotProven": true
+  },
+  "unchangedReplayDiagnostic": {
+    "tests": 7,
+    "pass": 7,
+    "fail": 0
+  },
+  "deploymentArtifact": {
+    "files": 3,
+    "mcpBytes": 366645,
+    "mcpSha256": "c630e2993b362ad4104c8f60840e9908d8a027c0fd95d387e970c1730b13c80c"
+  },
+  "providerApiCalls": 0,
+  "productionApiCalls": 0,
+  "productionDbAccess": 0,
+  "realAircraftExposed": 0
+}

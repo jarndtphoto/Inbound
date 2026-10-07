@@ -1,0 +1,426 @@
+{
+  "ok": true,
+  "verifiedAt": "2026-10-05T13:39:43.064Z",
+  "root": "https://inbound-live-fixture-ngc64c094-jarndtphoto.vercel.app",
+  "mcp": "https://inbound-live-fixture-ngc64c094-jarndtphoto.vercel.app/mcp",
+  "totals": {
+    "assertions": 13,
+    "rpcRequests": 30,
+    "failures": 0
+  },
+  "tools": [
+    "get_nearby_flights",
+    "resolve_nearby_flight",
+    "get_flight"
+  ],
+  "resource": "ui://inbound/radar-v1.html",
+  "nearby": {
+    "firstPublicRadar": 39,
+    "verifiedHealthyRadar": 39,
+    "refreshedRadar": 39,
+    "featuredMaximumObserved": 4,
+    "certifiedRadarMaximum": 100,
+    "certifiedFeaturedMaximum": 5,
+    "areas": [
+      "preset:chicago",
+      "airport:KORD",
+      "airport:KMDW"
+    ]
+  },
+  "handoff": {
+    "direct": "SYN101",
+    "ambiguous": "SYN105",
+    "candidateCount": 2,
+    "expired": "SYN102"
+  },
+  "protection": {
+    "exactExceptionHostname": "inbound-live-fixture-ngc64c094-jarndtphoto.vercel.app",
+    "globalRequireLogin": true,
+    "globalMode": "Standard Protection"
+  },
+  "isolation": {
+    "fixtureOnly": true,
+    "cacheControl": "no-store",
+    "egress": "static-isolation",
+    "providerCalls": 0,
+    "productionApiCalls": 0,
+    "productionDbAccess": 0
+  },
+  "assertions": [
+    "Exact MCP URL is public without an SSO redirect and rejects GET with 405",
+    "MCP initialize negotiates 2025-11-25 with the Part 3B.4 fake handoff server",
+    "tools/list exposes exactly three read-only, closed-world tools and no mutation/production-like tool",
+    "resources/list and resources/read return one self-contained fixture widget with a closed CSP",
+    "Chicago returns the bounded invented Radar board, at most five Featured flights, exact shared selections, and a <=64 KiB envelope",
+    "SYN101 resolves from its opaque selection to one exact dated occurrence, reusable only by exact instance ID",
+    "SYN105 stays ambiguous until one opaque dated candidate is explicitly chosen",
+    "Unconfirmed, identity-changed, backend-unavailable, unsupported-aircraft, missing-date, and unsupported-query paths all fail closed",
+    "Explicit fake lookup requires and preserves the requested service date and route",
+    "ORD and MDW return independently bounded projections from the fixture-only Nearby surface",
+    "Opaque-token-only resolution, unknown methods/tools, mutation attempts, and hostile origins are rejected; ChatGPT origin is accepted",
+    "A real public T+20 refresh advances the authoritative collection and the fixture remains at its deterministic post-retirement count of 39",
+    "An originally valid opaque observation handle expires publicly and cannot be extended or reused"
+  ],
+  "calls": [
+    {
+      "method": "initialize",
+      "status": 200,
+      "bytes": 287,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/list",
+      "status": 200,
+      "bytes": 114951,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "resources/list",
+      "status": 200,
+      "bytes": 237,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "resources/read",
+      "status": 200,
+      "bytes": 221844,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 26407,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 4174,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 4174,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 985,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 4174,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 514,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 510,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 516,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 517,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 503,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 515,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 4175,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 26451,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 26454,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 490,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 100,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 100,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "resources/templates/list",
+      "status": 200,
+      "bytes": 89,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "initialize",
+      "status": 403,
+      "bytes": 52,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 403
+      }
+    },
+    {
+      "method": "initialize",
+      "status": 200,
+      "bytes": 288,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 26403,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "ping",
+      "status": 200,
+      "bytes": 37,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "ping",
+      "status": 200,
+      "bytes": 37,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "ping",
+      "status": 200,
+      "bytes": 37,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "ping",
+      "status": 200,
+      "bytes": 37,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    },
+    {
+      "method": "tools/call",
+      "status": 200,
+      "bytes": 539,
+      "headers": {
+        "cacheControl": "no-store",
+        "fixtureOnly": "true",
+        "egress": "static-isolation",
+        "contentType": "application/json",
+        "status": 200
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "sourceSha": "cd9dbf611ed95e5a734d7173c9aefea93285b88d",
+  "checkStartedAt": "2026-10-04T02:42:42.663331+00:00",
+  "databaseUrlUnset": true,
+  "nearbyVerifyDatabaseUrlUnset": true,
+  "sequential": true,
+  "checkExitCode": 0,
+  "checkFinishedObservedAt": "2026-10-04T02:44:45.341014+00:00",
+  "checkTotals": {
+    "tests": 909,
+    "suites": 88,
+    "pass": 908,
+    "fail": 0,
+    "todo": 1,
+    "skipped": 0,
+    "cancelled": 0,
+    "durationMs": 78973.104946
+  },
+  "buildStartedAt": "2026-10-04T02:44:45.341030+00:00",
+  "buildExitCode": 0,
+  "buildFinishedObservedAt": "2026-10-04T02:46:46.283368+00:00",
+  "buildDatabaseMigratorSkipped": true
+}

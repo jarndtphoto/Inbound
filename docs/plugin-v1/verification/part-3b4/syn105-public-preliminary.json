@@ -1,0 +1,23 @@
+{
+  "verifiedAt": "2026-10-05T15:11:15.206Z",
+  "mcp": "https://inbound-live-fixture-ra6kolsml-jarndtphoto.vercel.app/mcp",
+  "status": 200,
+  "preliminaryRun": {
+    "completed": false,
+    "failedAssertion": "Initial Chicago health: stale !== ok after three one-second retries",
+    "finalFailureCount": null
+  },
+  "followupBoard": {
+    "health": "ok",
+    "radarCount": 39,
+    "collectionVersion": 2,
+    "fields": [
+      "area",
+      "collectionVersion",
+      "health",
+      "generatedAt",
+      "radarTargets",
+      "featuredFlights"
+    ]
+  }
+}

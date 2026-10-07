@@ -1,0 +1,17 @@
+{
+  "DateNow": 1790983651844,
+  "DateNowISO": "2026-10-02T23:27:31.844Z",
+  "noArgumentDateISO": "2026-10-04T01:30:52.691Z",
+  "actualSearchDates": [
+    "2026-10-04",
+    "2026-10-03",
+    "2026-10-05"
+  ],
+  "intendedReplaySearchDates": [
+    "2026-10-02",
+    "2026-10-01",
+    "2026-10-03"
+  ],
+  "mockAcceptsOnly": "2026-10-02",
+  "mockDatePresentInActualSearch": false
+}

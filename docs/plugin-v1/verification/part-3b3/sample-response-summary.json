@@ -1,0 +1,78 @@
+{
+  "radar": 40,
+  "featured": 4,
+  "publicBytes": 19540,
+  "radarBytes": 17498,
+  "routes": [
+    {
+      "ident": "SYN102",
+      "route": {
+        "originIata": "MDW",
+        "destinationIata": "DEN",
+        "verification": "confirmed",
+        "checkedAt": "2026-10-04T03:00:06.000Z"
+      }
+    },
+    {
+      "ident": "SYN101",
+      "route": {
+        "originIata": "ORD",
+        "destinationIata": "BOS",
+        "verification": "confirmed",
+        "checkedAt": "2026-10-04T03:00:06.000Z"
+      }
+    },
+    {
+      "ident": "SYN104",
+      "route": {
+        "originIata": null,
+        "destinationIata": null,
+        "verification": "unknown",
+        "checkedAt": null
+      }
+    },
+    {
+      "ident": "SYN103",
+      "route": {
+        "originIata": "ORD",
+        "destinationIata": "BOS",
+        "verification": "hint",
+        "checkedAt": "2026-10-04T03:00:06.000Z"
+      }
+    }
+  ],
+  "diagnostics": {
+    "scenario": "ok",
+    "startedAt": "2026-10-04T03:00:06.000Z",
+    "fakeAircraftCount": 40,
+    "fakeAcquisitions": 1,
+    "successfulFakeAcquisitions": 1,
+    "fakeRouteLookups": 2,
+    "explicitConstructionTasks": 1,
+    "viewerRequests": 1,
+    "providerApiCalls": 0,
+    "productionApiCalls": 0,
+    "productionDbAccess": 0,
+    "authoritativeCadenceMs": 20000,
+    "routeStarts": [
+      {
+        "callsign": "SYN104",
+        "atMs": 1791082806000
+      },
+      {
+        "callsign": "SYN103",
+        "atMs": 1791082806000
+      }
+    ],
+    "collectionRows": 1,
+    "collectionVersion": 1,
+    "acceptedObservations": 40,
+    "rankedViews": 1,
+    "routeRows": 2,
+    "cycleStarts": 2,
+    "recentStarts": 2,
+    "leaseWinners": 1,
+    "chargedRouteStarts": 2,
+    "historyRows": 0
+  }
+}

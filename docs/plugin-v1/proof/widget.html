@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Inbound Live — static Radar and Flights fixture</title>
+  <style nonce="__PROOF_NONCE__">
+    :root { color-scheme:light dark; --bg:#fff; --fg:#1c252b; --muted:#53616a; --line:#dbe1e5; --soft:#f4f6f7; --accent:#215c77; --chosen:#edf5f9; --radius:12px; --radar-bg:#101d27; --radar-lake:#193747; --radar-line:#334955; --radar-text:#b4c6d0; --radar-ink:#f0f6f9; --radar-accent:#8fd7e9; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:680px; margin:0 auto; padding:16px; }
+    main[data-display-mode="fullscreen"] { max-width:1280px; padding:24px; }
+    header { display:flex; gap:12px; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
+    h1 { font-size:21px; line-height:1.2; margin:0 0 4px; letter-spacing:-.025em; font-weight:650; }
+    h2 { margin:0; font-size:21px; line-height:1.3; letter-spacing:-.02em; }
+    p { margin:0; } .muted { color:var(--muted); } .kicker { font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin-bottom:5px; }
+    .fixture { font-size:10px; font-weight:650; border:1px solid var(--line); border-radius:6px; padding:5px 8px; white-space:nowrap; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; align-items:center; }
+    button,select { min-height:44px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); padding:8px 12px; font:inherit; cursor:pointer; }
+    button:hover { background:var(--soft); } button:disabled { color:var(--muted); opacity:.6; cursor:default; }
+    button:focus-visible,select:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+    .navigation { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+    .tabs { display:flex; gap:4px; padding:3px; border-radius:10px; background:var(--soft); }
+    .tabs button { min-width:88px; border-color:transparent; padding:7px 16px; font-size:12px; font-weight:650; letter-spacing:.06em; }
+    .tabs button[aria-selected="true"] { background:var(--bg); border-color:var(--line); color:var(--accent); box-shadow:0 1px 2px #0001; }
+    #view-count { font-size:12px; color:var(--muted); }
+    .content { display:grid; gap:12px; align-items:start; }
+    #cards { display:grid; gap:8px; }
+    .card { text-align:left; width:100%; min-width:0; border:1px solid var(--line); border-radius:var(--radius); padding:10px 12px; background:var(--bg); }
+    .card[aria-pressed="true"] { background:var(--chosen); border-color:var(--accent); box-shadow:inset 3px 0 var(--accent); }
+    .card-top,.card-bottom { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .ident { font-size:16px; font-weight:650; letter-spacing:.005em; } .altitude { font-size:15px; font-weight:550; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .route { display:block; margin:3px 0 6px; color:var(--muted); font-size:13px; }
+    .card-bottom { color:var(--muted); font-size:12px; flex-wrap:wrap; gap:4px; }
+    .card[aria-pressed="true"] .ident::after { content:" · Selected"; font-size:11px; font-weight:550; }
+    .static-warning { font-size:12px; color:var(--muted); margin-top:12px; }
+    .notice { color:var(--muted); font-size:12px; padding:8px 0; }
+    #selection-note { font-size:12px; color:var(--muted); margin-bottom:12px; }
+    #radar-panel { min-width:0; border-radius:var(--radius); overflow:hidden; background:var(--radar-bg); color:var(--radar-ink); }
+    .radar-heading { display:flex; justify-content:space-between; gap:8px; padding:14px 16px 0; align-items:center; }
+    .radar-heading strong { font-size:12px; font-weight:550; } .radar-heading span { font-size:11px; color:var(--radar-text); }
+    #radar-surface { position:relative; width:100%; height:340px; overflow:hidden; }
+    #radar-map { display:block; width:100%; height:100%; position:absolute; inset:0; }
+    .lake { fill:var(--radar-lake); stroke:var(--radar-line); stroke-width:1.5; }
+    .range-ring { fill:none; stroke:var(--radar-line); stroke-width:1; stroke-dasharray:3 6; }
+    .map-grid { stroke:var(--radar-line); stroke-width:.5; opacity:.4; }
+    .map-label { fill:var(--radar-text); font:11px system-ui,sans-serif; letter-spacing:.04em; }
+    .city-label { fill:var(--radar-text); font:13px system-ui,sans-serif; }
+    .reference-point { fill:var(--radar-text); }
+    .airport-shape { fill:var(--radar-bg); stroke:var(--radar-text); stroke-width:1.5; }
+    .airport-label { fill:var(--radar-ink); font:600 12px system-ui,sans-serif; }
+    .airport-primary { stroke:var(--radar-accent); stroke-width:2.5; }
+    .north { position:absolute; right:14px; top:12px; color:var(--radar-text); font-size:11px; text-align:center; pointer-events:none; }
+    #radar-markers { position:absolute; inset:0; }
+    .aircraft-marker { position:absolute; width:44px; height:44px; padding:0; border:0; border-radius:50%; transform:translate(-50%,-50%); color:var(--radar-accent); background:transparent; z-index:1; }
+    .aircraft-marker:hover { background:var(--radar-line); }
+    .aircraft-marker:focus-visible { outline-color:var(--radar-ink); z-index:4; }
+    .aircraft-marker[aria-pressed="true"] { box-shadow:inset 0 0 0 2px var(--radar-ink),0 0 0 3px var(--radar-line); color:var(--radar-ink); background:var(--radar-lake); z-index:3; }
+    .aircraft-glyph { width:22px; height:22px; display:block; margin:auto; fill:currentColor; }
+    .marker-label { position:absolute; left:42px; top:8px; background:var(--radar-bg); border-radius:4px; padding:2px 5px; color:var(--radar-ink); font-size:11px; font-weight:550; white-space:nowrap; pointer-events:none; }
+    .marker-label small { display:block; color:var(--radar-text); font-size:10px; font-weight:400; }
+    .marker-check { display:none; } .aircraft-marker[aria-pressed="true"] .marker-check { display:inline; }
+    .radar-footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; padding:0 16px 12px; font-size:10px; color:var(--radar-text); }
+    #radar-empty { position:absolute; inset:45% 24px auto; text-align:center; color:var(--radar-text); font-size:13px; }
+    .selection { min-width:0; padding:16px; border:1px solid var(--line); border-radius:var(--radius); background:var(--soft); }
+    .selection .route { margin:6px 0 12px; font-size:14px; }
+    #selected-altitude { font-size:22px; font-weight:550; font-variant-numeric:tabular-nums; }
+    #selected-motion { margin:3px 0 12px; } #selected-distance,#selected-age,#selected-heading { font-size:12px; color:var(--muted); margin-top:5px; }
+    #track-flight { width:100%; margin-top:16px; } .track-notice { font-size:11px; color:var(--muted); margin-top:6px; }
+    .host-controls { margin-top:4px; }
+    details { margin-top:8px; border-top:1px solid var(--line); padding-top:8px; color:var(--muted); font-size:12px; }
+    summary { min-height:32px; cursor:pointer; } details p + p { margin-top:6px; }
+    [hidden] { display:none !important; }
+    @media(min-width:820px) { main[data-display-mode="fullscreen"] .content[data-view="radar"] { grid-template-columns:minmax(0,1fr) 264px; } main[data-display-mode="fullscreen"] #radar-surface { height:clamp(420px,60vh,620px); } }
+    @media(max-width:540px) { .marker-label { display:none; } }
+    @media(max-width:420px) { main,main[data-display-mode="fullscreen"] { padding:12px; } h1 { font-size:19px; } #reference { font-size:12px; } .fixture { font-size:9px; padding:4px 6px; } .navigation { gap:8px; } .tabs button { min-width:76px; padding:6px 12px; } .controls { gap:6px; } .controls button,.controls select { padding:8px 10px; font-size:13px; } .card-top { gap:8px; } .ident { font-size:14px; } .altitude { font-size:14px; } .card[aria-pressed="true"] .ident::after { content:" ✓"; } #radar-surface { height:340px; } }
+    @media(prefers-color-scheme:dark) { :root { --bg:#171c20; --fg:#edf1f3; --muted:#abb7c0; --line:#35414a; --soft:#222b32; --accent:#82b6cb; --chosen:#213a47; } }
+  </style>
+</head>
+<body>
+<main id="proof" data-display-mode="inline">
+  <header><div><p class="kicker">Inbound Live</p><h1 id="area-title">Near Chicago</h1><p id="reference" class="muted">Distances from Chicago area center</p></div><span class="fixture">STATIC FIXTURES</span></header>
+  <nav class="navigation" aria-label="Aircraft views"><div class="tabs" role="tablist" aria-label="View"><button id="view-radar" role="tab" aria-controls="radar-panel" aria-selected="false" tabindex="-1">RADAR</button><button id="view-flights" role="tab" aria-controls="flights-panel" aria-selected="true">FLIGHTS</button></div><span id="view-count">4 invented aircraft</span></nav>
+  <div class="controls"><label for="area" class="muted">Area</label><select id="area"><option value="preset:chicago">Chicago</option><option value="airport:KORD">ORD</option><option value="airport:KMDW">MDW</option></select><button id="refresh">Refresh fixture</button><button id="pause">Pause</button></div>
+  <div id="content" class="content" data-view="flights">
+    <section id="radar-panel" role="tabpanel" aria-labelledby="view-radar" hidden><div class="radar-heading"><strong id="radar-reference">Chicago area center</strong><span id="radar-range"></span></div><div id="radar-surface" aria-label="Static Chicago fixture radar"><svg id="radar-map" aria-hidden="true"></svg><div id="radar-markers" role="group" aria-label="Select a fixture aircraft"></div><span class="north" aria-hidden="true">▲<br>N</span><p id="radar-empty" hidden></p></div><div class="radar-footer"><span>North up · Local geographic sketch</span><span>Fixed observations · Heading unavailable</span></div></section>
+    <section id="flights-panel" role="tabpanel" aria-labelledby="view-flights"><div id="cards" aria-label="Fixture aircraft"></div></section>
+    <aside id="selected" class="selection" aria-label="Focused aircraft" hidden><p class="kicker">Focused aircraft · Fixture</p><h2 id="selected-ident">Select an aircraft</h2><p id="selected-route" class="route">Tap a marker to see its observation.</p><p id="selected-altitude"></p><p id="selected-motion"></p><p id="selected-distance"></p><p id="selected-age"></p><p id="selected-heading"></p><button id="track-flight" disabled title="Not available in this static fixture">Track flight</button><p class="track-notice">Detailed tracking is not available in this fixture.</p></aside>
+  </div>
+  <p class="static-warning">Static fixture — invented aircraft. Positions never move.</p>
+  <p id="board-notice" class="notice" role="status"></p>
+  <p id="selection-note" aria-live="polite">Select an aircraft to focus it locally.</p>
+  <div class="controls host-controls"><button id="pip" disabled>Request PiP</button><button id="fullscreen" disabled>Expand</button><button id="dismiss">Dismiss proof</button></div>
+  <details><summary>About this proof</summary><p>Invented test aircraft and routes. No live providers or detailed flight resolution. No map tiles or external resources.</p><p>Available coverage; not all aircraft. Distances refer to the named area or airport, never your location. Radar fits the returned fixture observations and airport references. Out-of-view observations remain in Flights.</p><p id="host-status">Local inline fallback. ChatGPT Radar host behavior is unverified for this version.</p><p id="proof-status">Fixture refresh calls: 0. This UI sends no chat messages or model requests.</p><p>Refreshing the static fixture does not reset observation ages. Aircraft disappear after the fixture's 120-second safety window.</p></details>
+</main>
+<script nonce="__PROOF_NONCE__">
+(() => {
+  const initial = __INITIAL_FIXTURE__;
+  const airports = __RADAR_AIRPORTS__;
+  const $ = id => document.getElementById(id);
+  const openai = () => window.openai;
+  const persisted = openai()?.widgetState;
+  let saved = persisted && typeof persisted === 'object' ? persisted : {};
+  if (!persisted) { try { saved = JSON.parse(sessionStorage.getItem('inbound-fixture-proof') || '{}'); } catch {} }
+  const validView = value => ['radar','flights'].includes(value);
+  const state = { version:2, areaId:['preset:chicago','airport:KORD','airport:KMDW'].includes(saved.areaId) ? saved.areaId : 'preset:chicago', selectedCardId:typeof saved.selectedCardId === 'string' ? saved.selectedCardId : null, views:{inline:validView(saved.views?.inline) ? saved.views.inline : 'flights',fullscreen:validView(saved.views?.fullscreen) ? saved.views.fullscreen : 'radar',pip:validView(saved.views?.pip) ? saved.views.pip : 'flights'}, paused:saved.paused === true, fixtureStartedAtEpochMs:Number.isFinite(saved.fixtureStartedAtEpochMs) ? saved.fixtureStartedAtEpochMs : Date.now() };
+  const fixturePositions = new Map(initial.flights.filter(c=>c.position).map(c=>[c.cardId,c.position]));
+  let board = initial, timer = null, ageTimer = null, dismissed = false, busy = false, requestGeneration = 0, refreshCalls = 0, abort = null, fixtureReadId = null, fixtureReadSequence = null, mapKey = '';
+  let hostReady = false, hostContext = { displayMode:'inline', availableDisplayModes:[] }, hostOrigin = null, sequence = 0;
+  const pending = new Map();
+  const targetOrigin = () => hostOrigin && hostOrigin !== 'null' ? hostOrigin : '*';
+  function save() { try { if (openai()?.setWidgetState) openai().setWidgetState({...state,views:{...state.views}}); else sessionStorage.setItem('inbound-fixture-proof',JSON.stringify(state)); } catch {} }
+  function notify(method,params={}) { if (window.parent !== window) window.parent.postMessage({jsonrpc:'2.0',method,params},targetOrigin()); }
+  function rpc(method,params) { return new Promise((resolve,reject) => { const id=++sequence; const timeout=setTimeout(()=>{pending.delete(id);reject(new Error('Host request timed out'));},5000);pending.set(id,{resolve,reject,timeout});window.parent.postMessage({jsonrpc:'2.0',id,method,params},targetOrigin()); }); }
+  const displayMode = () => ['inline','pip','fullscreen'].includes(hostContext.displayMode) ? hostContext.displayMode : 'inline';
+  const currentView = () => state.views[displayMode()];
+  function hostControls() {
+    $('proof').dataset.displayMode=displayMode();
+    $('pip').disabled = dismissed || !hostReady || !hostContext.availableDisplayModes.includes('pip');
+    $('fullscreen').disabled = dismissed || !hostReady || !hostContext.availableDisplayModes.includes('fullscreen');
+    $('fullscreen').textContent=displayMode()==='fullscreen' ? 'Return inline' : 'Expand';
+    $('host-status').textContent = hostReady ? `Host bridge connected; display mode: ${displayMode()}. ChatGPT Radar host behavior is unverified for this version.` : 'Local inline fallback. ChatGPT PiP/fullscreen is unverified; display controls are unavailable.';
+  }
+  function elapsedSeconds() { return Math.max(0,Math.floor((Date.now()-state.fixtureStartedAtEpochMs)/1000)); }
+  function liveAge(card) { return card.freshness.ageSeconds + elapsedSeconds(); }
+  const trendText = card => ({rising:'rising',falling:'falling',level:'level',unknown:'vertical direction unavailable'}[card.motion.verticalTrend]);
+  const altitudeText = card => `${Math.round(card.altitudeFt).toLocaleString('en-US')} ft ${{rising:'↑',falling:'↓',level:'→',unknown:''}[card.motion.verticalTrend]}`;
+  const routeText = card => card.route.verification==='unknown' ? 'Route unavailable' : `${card.route.originIata || 'Unknown'} → ${card.route.destinationIata || 'Unknown'}${card.route.verification==='hint' ? ' · Route hint' : ''}`;
+  const distanceText = card => `${(card.proximity.distanceNm*1.150779448).toFixed(1)} mi from ${board.resolvedArea.reference.label}`;
+
+  // BEGIN FIXTURE RADAR MATH — pure local functions; also exercised by Node tests.
+  function projectFixturePoint(point,reference,width,height,radiusNm) {
+    if(![point?.latitude,point?.longitude,reference?.latitude,reference?.longitude,width,height,radiusNm].every(Number.isFinite) || width<=0 || height<=0 || radiusNm<=0) return null;
+    const deltaLongitude=((point.longitude-reference.longitude+540)%360)-180;
+    const eastNm=deltaLongitude*60.04046*Math.cos(reference.latitude*Math.PI/180);
+    const northNm=(point.latitude-reference.latitude)*60.04046;
+    const scale=Math.max(1,Math.min(width,height)-80)/(2*radiusNm);
+    const x=width/2+eastNm*scale, y=height/2-northNm*scale;
+    return {x,y,eastNm,northNm,scale,inView:x>=24 && x<=width-24 && y>=24 && y<=height-24};
+  }
+  function fixtureRadarRadius(reference,points,requestedRadius) {
+    const distances=points.map(p=>projectFixturePoint(p,reference,100,100,1)).filter(Boolean).map(p=>Math.hypot(p.eastNm,p.northNm)).filter(d=>d<=requestedRadius);
+    return Math.min(requestedRadius,Math.max(12,Math.ceil(Math.max(0,...distances)*1.25/2)*2));
+  }
+  function fixtureHeading(position) {
+    return Number.isFinite(position?.groundTrackDeg) ? ((position.groundTrackDeg%360)+360)%360 : null;
+  }
+  // END FIXTURE RADAR MATH
+
+  function selectAircraft(cardId) { state.selectedCardId=cardId;save();render(); }
+  function setView(view) { if(!validView(view) || dismissed)return;state.views[displayMode()]=view;save();render(); }
+  function svgElement(tag,attributes={},text='') {
+    const node=document.createElementNS($('radar-map').namespaceURI,tag);
+    for(const [name,value] of Object.entries(attributes))node.setAttribute(name,String(value));
+    if(text)node.textContent=text;return node;
+  }
+  function paintMap(reference,width,height,radius,areaId) {
+    const map=$('radar-map');map.replaceChildren();map.setAttribute('viewBox',`0 0 ${width} ${height}`);
+    const project=p=>projectFixturePoint(p,reference,width,height,radius);
+    const point=p=>{const c=project({latitude:p[0],longitude:p[1]});return `${c.x},${c.y}`;};
+    // Bundled approximate shoreline, solely geographic context; never map tiles.
+    const shoreline=[[42.6,-87.85],[42.28,-87.825],[42.1,-87.71],[41.93,-87.63],[41.88,-87.61],[41.7,-87.52],[41.5,-87.20],[41.2,-86.95],[41.2,-85.5],[42.6,-85.5]];
+    map.append(svgElement('polygon',{class:'lake',points:shoreline.map(point).join(' ')}));
+    for(const fraction of [.5,1]) map.append(svgElement('circle',{class:'range-ring',cx:width/2,cy:height/2,r:(Math.min(width,height)-80)/2*fraction}));
+    map.append(svgElement('line',{class:'map-grid',x1:0,y1:height/2,x2:width,y2:height/2}),svgElement('line',{class:'map-grid',x1:width/2,y1:0,x2:width/2,y2:height}));
+    const city=project({latitude:41.8819,longitude:-87.6278});
+    if(city.inView) map.append(svgElement('circle',{class:'reference-point',cx:city.x,cy:city.y,r:2}),svgElement('text',{class:'city-label',x:city.x+7,y:city.y+18},'Chicago'));
+    const lake=project({latitude:42.06,longitude:-87.35});
+    if(lake.inView) map.append(svgElement('text',{class:'map-label',x:lake.x,y:lake.y,'text-anchor':'middle'},'LAKE MICHIGAN'));
+    if(areaId==='preset:chicago') map.append(svgElement('circle',{class:'reference-point',cx:width/2,cy:height/2,r:3}));
+    for(const airport of airports) {
+      const p=project(airport);if(!p.inView)continue;
+      const group=svgElement('g',{'data-airport':airport.code,'data-primary':String(airport.areaId===areaId),transform:`translate(${p.x} ${p.y})`});
+      group.append(svgElement('rect',{class:`airport-shape${airport.areaId===areaId ? ' airport-primary' : ''}`,x:-5,y:-5,width:10,height:10,rx:2}),svgElement('text',{class:'airport-label',x:9,y:4},airport.code));map.append(group);
+    }
+  }
+  function renderRadar(visible) {
+    const reference=board.resolvedArea?.reference;if(!reference)return;
+    const surface=$('radar-surface'), width=surface.clientWidth,height=surface.clientHeight;if(!width || !height)return;
+    const radius=fixtureRadarRadius(reference,[...airports,...board.flights.map(c=>c.position).filter(Boolean)],board.resolvedArea.radiusNm);
+    const key=JSON.stringify([reference,width,height,radius,board.resolvedArea.id]);
+    if(key!==mapKey){mapKey=key;paintMap(reference,width,height,radius,board.resolvedArea.id);}
+    const projected=visible.map(card=>({card,p:card.position && projectFixturePoint(card.position,reference,width,height,radius)}));
+    const shown=projected.filter(({p})=>p?.inView && Math.hypot(p.eastNm,p.northNm)<=board.resolvedArea.radiusNm);
+    const markers=$('radar-markers');
+    for(const button of [...markers.children]) if(!shown.some(({card})=>card.cardId===button.dataset.cardId))button.remove();
+    for(const {card,p} of shown) {
+      let button=[...markers.children].find(b=>b.dataset.cardId===card.cardId);
+      if(!button) {
+        button=document.createElement('button');button.className='aircraft-marker';button.dataset.cardId=card.cardId;
+        const glyph=svgElement('svg',{class:'aircraft-glyph',viewBox:'-12 -12 24 24','aria-hidden':'true'});glyph.append(svgElement('path',{d:'M0 -9 7 0 0 9 -7 0Z'}));
+        const label=document.createElement('span');label.className='marker-label';
+        const ident=document.createElement('span'),check=document.createElement('span'),alt=document.createElement('small');check.className='marker-check';check.textContent=' ✓';label.append(ident,check,alt);
+        button.append(glyph,label);button.onclick=()=>selectAircraft(card.cardId);markers.append(button);
+      }
+      const heading=fixtureHeading(card.position),picked=card.cardId===state.selectedCardId;
+      button.style.left=`${p.x/width*100}%`;button.style.top=`${p.y/height*100}%`;button.setAttribute('aria-pressed',String(picked));
+      button.setAttribute('aria-label',`${card.identity.displayIdent}, ${Math.round(card.altitudeFt).toLocaleString('en-US')} feet, ${trendText(card)}, ${card.motion.label}, ${distanceText(card)}, ${heading===null ? 'heading unavailable' : `heading ${Math.round(heading)} degrees`}`);
+      const glyph=button.querySelector('.aircraft-glyph');glyph.style.transform=heading===null ? '' : `rotate(${heading}deg)`;
+      glyph.firstChild.setAttribute('d',heading===null ? 'M0 -9 7 0 0 9 -7 0Z' : 'M0 -11 3 -2 10 3 10 5 3 3 2 8 5 10 5 11 0 9 -5 11 -5 10 -2 8 -3 3 -10 5 -10 3 -3 -2Z');
+      button.querySelector('.marker-label span').textContent=card.identity.displayIdent;button.querySelector('small').textContent=`${(card.altitudeFt/1000).toFixed(1)}k ft`;
+    }
+    $('radar-reference').textContent=reference.label;$('radar-range').textContent=`${radius} nm view`;
+    $('radar-surface').setAttribute('aria-label',`Static invented aircraft radar around ${reference.label}`);
+    $('radar-empty').hidden=shown.length>0;$('radar-empty').textContent=visible.length ? 'No returned observations inside this view. See Flights.' : 'Fixture observations expired. No live data is connected.';
+  }
+  function render() {
+    hostControls();const area=board.resolvedArea,view=currentView();
+    $('area-title').textContent=area?.id==='airport:KORD' ? 'Near ORD' : area?.id==='airport:KMDW' ? 'Near MDW' : 'Near Chicago';
+    $('reference').textContent=area ? `Distances from ${area.reference.label}` : 'Choose an area'; $('area').value=state.areaId;
+    $('pause').textContent=state.paused ? 'Resume' : 'Pause';
+    $('pause').disabled=dismissed;$('refresh').disabled=dismissed || busy;$('area').disabled=dismissed;
+    for(const name of ['radar','flights']){const tab=$(`view-${name}`);tab.setAttribute('aria-selected',String(view===name));tab.tabIndex=view===name ? 0 : -1;tab.disabled=dismissed;$(`${name}-panel`).hidden=dismissed || view!==name;}
+    $('content').dataset.view=view;$('selected').hidden=dismissed || view!=='radar';$('selection-note').hidden=dismissed || view==='flights';
+    const visible=board.flights.filter(c=>liveAge(c)<=120);
+    $('view-count').textContent=`${visible.length} invented aircraft`;
+    const cards=$('cards');cards.hidden=dismissed;
+    for(const button of [...cards.children]) if(!visible.some(c=>c.cardId===button.dataset.cardId))button.remove();
+    for(const [index,card] of visible.entries()) {
+      let button=[...cards.children].find(b=>b.dataset.cardId===card.cardId);
+      if(!button) {
+        button=document.createElement('button'); button.className='card'; button.dataset.cardId=card.cardId;
+        const top=document.createElement('span');top.className='card-top';
+        for(const name of ['ident','altitude']) { const span=document.createElement('span');span.className=name;top.append(span); }
+        const route=document.createElement('span');route.className='route';
+        const bottom=document.createElement('span');bottom.className='card-bottom';
+        for(let i=0;i<3;i++)bottom.append(document.createElement('span'));
+        button.append(top,route,bottom);button.onclick=()=>selectAircraft(card.cardId);
+      }
+      button.setAttribute('aria-pressed',String(state.selectedCardId===card.cardId));
+      button.setAttribute('aria-label',`${card.identity.displayIdent}, ${routeText(card)}, ${Math.round(card.altitudeFt).toLocaleString('en-US')} feet, ${trendText(card)}, ${card.motion.label}, ${distanceText(card)}, updated ${liveAge(card)} seconds ago`);
+      button.querySelector('.ident').textContent=card.identity.displayIdent;button.querySelector('.altitude').textContent=altitudeText(card);button.querySelector('.route').textContent=routeText(card);
+      const texts=[card.motion.label,distanceText(card),`Updated ${liveAge(card)} sec ago`];
+      [...button.querySelector('.card-bottom').children].forEach((span,i)=>{span.textContent=texts[i];});
+      if(cards.children[index]!==button)cards.insertBefore(button,cards.children[index] || null);
+    }
+    const picked=board.flights.find(c=>c.cardId===state.selectedCardId),expired=picked && liveAge(picked)>120;
+    $('selection-note').textContent=picked ? `Focused: ${picked.identity.displayIdent}${expired ? ' — observation expired' : ''}. Selection stays with you in Radar and Flights.` : state.selectedCardId ? 'The focused fixture is no longer in this area.' : 'Select an aircraft to focus it locally.';
+    $('selected-ident').textContent=picked ? picked.identity.displayIdent : 'Select an aircraft';
+    $('selected-route').textContent=picked ? routeText(picked) : 'Tap a marker to see its observation.';
+    $('selected-altitude').textContent=picked ? altitudeText(picked) : '';
+    $('selected-altitude').setAttribute('aria-label',picked ? `${Math.round(picked.altitudeFt)} feet, ${trendText(picked)}` : 'No aircraft selected');
+    $('selected-motion').textContent=picked ? `${picked.motion.label} · ${trendText(picked)}` : '';
+    $('selected-distance').textContent=picked ? distanceText(picked) : '';
+    $('selected-age').textContent=picked ? expired ? 'Observation expired. Static fixture only.' : `Updated ${liveAge(picked)} sec ago` : '';
+    $('selected-heading').textContent=picked ? fixtureHeading(picked.position)===null ? 'Heading unavailable' : `Heading ${Math.round(fixtureHeading(picked.position))}°` : '';
+    if(view==='radar' && !dismissed)renderRadar(visible);
+    $('board-notice').textContent=dismissed ? 'Proof dismissed. Refresh stopped.' : state.paused || document.hidden ? 'Paused. Fixture refresh stopped.' : !visible.length && board.status==='ok' ? 'Fixture observations expired. No live data is connected.' : board.status==='empty' ? 'No eligible nearby aircraft right now — fixture.' : board.status==='unavailable' ? 'Fixture aircraft are temporarily unavailable.' : board.status==='invalid_request' ? board.error.message : board.stale || visible.some(c=>liveAge(c)>45) ? 'Last known fixture — observations are aging.' : 'Observation ages advance locally; aircraft positions stay fixed.';
+    $('proof-status').textContent=`Fixture refresh calls: ${refreshCalls}. Server read: ${fixtureReadSequence ?? 'pending'} · ${fixtureReadId ?? 'pending'}. This UI sends no chat messages or model requests.`;
+  }
+  function wanted() { return !dismissed && !state.paused && !document.hidden; }
+  function stop() { clearTimeout(timer);clearInterval(ageTimer);timer=null;ageTimer=null;requestGeneration++;abort?.abort();abort=null; }
+  function schedule() { stop();if(dismissed || document.hidden)return;ageTimer=setInterval(render,1000);if(!wanted())return;timer=setTimeout(async()=>{await refresh();schedule();},(board.refreshAfterSeconds || 20)*1000); }
+  function accept(result) {
+    const meta=result?._meta;
+    if(meta?.fixtureOnly===true && typeof meta.fixtureReadId==='string' && /^[a-f0-9]{18}$/.test(meta.fixtureReadId) && Number.isSafeInteger(meta.fixtureReadSequence)) { fixtureReadId=meta.fixtureReadId;fixtureReadSequence=meta.fixtureReadSequence; }
+    const value=result?.structuredContent || result;
+    if(value?.schemaVersion==='1.0' && ['ok','empty','unavailable','invalid_request'].includes(value.status) && Array.isArray(value.flights) && value.flights.length<=5) {
+      // Missing optional positions reuse only these same invented fixture IDs.
+      board={...value,flights:value.flights.map(c=>({...c,position:c.position || fixturePositions.get(c.cardId) || null}))};
+      if(value.resolvedArea){state.areaId=value.resolvedArea.id;save();}render();
+    }
+  }
+  async function refresh() {
+    if(!wanted() || busy)return;
+    busy=true;$('refresh').disabled=true;const generation=requestGeneration;
+    const area=state.areaId==='preset:chicago' ? {kind:'preset',nameOrId:'chicago'} : {kind:'airport',code:state.areaId==='airport:KORD' ? 'ORD' : 'MDW'};
+    try {
+      let result;
+      if(hostReady) result=await rpc('tools/call',{name:'fixture_get_nearby_flights',arguments:{area,limit:4,includePosition:true}});
+      else if(openai()?.callTool) result=await openai().callTool('fixture_get_nearby_flights',{area,limit:4,includePosition:true});
+      else if(window.parent===window && ['127.0.0.1','localhost'].includes(location.hostname)) { abort=new AbortController(); const response=await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json, text/event-stream'},signal:abort.signal,body:JSON.stringify({jsonrpc:'2.0',id:++sequence,method:'tools/call',params:{name:'fixture_get_nearby_flights',arguments:{area,limit:4,includePosition:true}}})}); if(!response.ok)throw new Error('Fixture refresh failed'); result=(await response.json()).result; }
+      else { $('host-status').textContent='No callable host bridge. Inline fixture only; periodic refresh is unverified.';return; }
+      refreshCalls++;if(generation===requestGeneration && wanted())accept(result);
+    } catch { if(wanted())$('board-notice').textContent='Fixture refresh unavailable. Preserved observation ages remain visible.'; }
+    finally { busy=false;abort=null;$('refresh').disabled=dismissed; }
+  }
+  async function display(mode) { if(!hostReady || !hostContext.availableDisplayModes.includes(mode))return;try { const result=await rpc('ui/request-display-mode',{mode});hostContext.displayMode=result.mode;render();schedule(); }catch { $('host-status').textContent='Host declined the display request. Inline fallback remains.'; } }
+  $('view-radar').onclick=()=>setView('radar');$('view-flights').onclick=()=>setView('flights');
+  for(const view of ['radar','flights'])$(`view-${view}`).onkeydown=event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home' ? 'radar' : event.key==='End' ? 'flights' : view==='radar' ? 'flights' : 'radar';setView(next);$(`view-${next}`).focus();}};
+  $('pip').onclick=()=>display('pip');$('fullscreen').onclick=()=>display(displayMode()==='fullscreen' ? 'inline' : 'fullscreen');
+  $('refresh').onclick=async()=>{await refresh();schedule();};
+  $('pause').onclick=async()=>{state.paused=!state.paused;save();render();if(!state.paused)await refresh();schedule();};
+  $('area').onchange=async()=>{state.areaId=$('area').value;save();stop();await refresh();schedule();};
+  $('dismiss').onclick=()=>{dismissed=true;stop();render();if(openai()?.requestClose)openai().requestClose();};
+  document.addEventListener('visibilitychange',async()=>{render();stop();if(wanted())await refresh();schedule();});
+  window.addEventListener('pagehide',()=>{dismissed=true;stop();save();});
+  window.addEventListener('openai:set_globals',event=>{ const g=event.detail?.globals || {};if(g.toolOutput)accept(g.toolOutput);if(g.widgetState && typeof g.widgetState==='object'){if(typeof g.widgetState.selectedCardId==='string')state.selectedCardId=g.widgetState.selectedCardId;for(const mode of ['inline','fullscreen','pip'])if(validView(g.widgetState.views?.[mode]))state.views[mode]=g.widgetState.views[mode];render();} });
+  window.addEventListener('message',event=>{
+    if(event.source!==window.parent || event.data?.jsonrpc!=='2.0' || hostOrigin && event.origin!==hostOrigin)return;
+    const message=event.data;
+    if(pending.has(message.id) && (message.result || message.error)) { const p=pending.get(message.id);pending.delete(message.id);clearTimeout(p.timeout);if(!hostOrigin)hostOrigin=event.origin;message.error ? p.reject(new Error('Host request failed')) : p.resolve(message.result);return; }
+    if(!hostReady)return;
+    if(message.method==='ui/notifications/tool-result') { if(wanted())accept(message.params); }
+    if(message.method==='ui/notifications/host-context-changed') { hostContext={...hostContext,...message.params};render();schedule(); }
+    if(message.method==='ui/resource-teardown') { dismissed=true;stop();save();render();window.parent.postMessage({jsonrpc:'2.0',id:message.id,result:{}},targetOrigin()); }
+  });
+  const resizeObserver=new ResizeObserver(()=>{if(currentView()==='radar' && !dismissed)renderRadar(board.flights.filter(c=>liveAge(c)<=120));});resizeObserver.observe($('radar-surface'));
+  save();accept(openai()?.toolOutput || initial);render();schedule();
+  if(window.parent!==window) rpc('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'Inbound static fixture proof',version:'0.2.0'},appCapabilities:{availableDisplayModes:['inline','pip','fullscreen']}}).then(result=>{hostReady=true;hostContext={...hostContext,...result.hostContext};notify('ui/notifications/initialized');render();schedule();}).catch(()=>{hostControls();});
+  if(state.areaId!=='preset:chicago')refresh();
+  // Diagnostics are local fixture-only state, not real flight resolution.
+  window.inboundFixtureProof={read:()=>({selectedCardId:state.selectedCardId,selectedView:currentView(),views:{...state.views},areaId:board.resolvedArea?.id,radarReference:board.resolvedArea?.reference,positions:board.flights.map(c=>({cardId:c.cardId,position:c.position,observedAt:c.freshness.observedAt})),paused:state.paused,dismissed,refreshCalls,pollScheduled:timer!==null,displayMode:displayMode(),hostReady}),refresh};
+})();
+</script>
+</body>
+</html>

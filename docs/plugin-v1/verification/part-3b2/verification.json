@@ -1,0 +1,167 @@
+{
+  "stage": "Part 3B.2",
+  "repository": "jarndtphoto/Inbound",
+  "branch": "plugin-v1-route-enrichment",
+  "startingSha": "d6ef464a4d5c80fe70aa8191e3d1d664e759ac5b",
+  "implementationSha": "11abfb4896658f22525433a40d3e1ac637e2cecb",
+  "implementationParentSha": "d6ef464a4d5c80fe70aa8191e3d1d664e759ac5b",
+  "excludedSha": "df2082de76ad6f0c05153419154a702320236ba0",
+  "excludedShaIsAncestor": false,
+  "mainRefBeforeAndAfter": "4f8ab6a09cab7335dddc6283e16d1a214ce4197c",
+  "nearbyBranchRefUnmodifiedByThisWork": "df2082de76ad6f0c05153419154a702320236ba0",
+  "unchangedPathsCheckedAgainstBase": [
+    "src/lib/plugin-v1",
+    "src/lib/nearby-v1/acquisition.server.ts",
+    "src/lib/nearby-v1/collection.ts",
+    "src/lib/nearby-v1/model.ts",
+    "src/lib/nearby-v1/motion.ts",
+    "src/lib/nearby-v1/normalize.ts",
+    "src/lib/nearby-v1/store.server.ts",
+    "src/lib/nearby-v1/views.ts",
+    "scripts/plugin-v1-preview-build.mjs",
+    "src/lib/story.server.ts"
+  ],
+  "database": {
+    "kind": "disposable local PGlite",
+    "neonConnected": false,
+    "independentRealPostgresSessions": 0,
+    "migrationsForNewRouteTests": [
+      "0006_nearby_collection.sql",
+      "0007_route_hint.sql"
+    ],
+    "newTables": [
+      "inbound_plugin_v1.route_hint",
+      "inbound_plugin_v1.route_construction_budget"
+    ]
+  },
+  "policy": {
+    "pool": 12,
+    "newLookupsPerCollectionCycle": 2,
+    "newLookupsPerRollingMinute": 6,
+    "rollingWindowMs": 60000,
+    "positiveTtlMs": 1800000,
+    "negativeAndFailureTtlMs": 60000,
+    "leaseMs": 10000,
+    "lookupTimeoutMs": 2000,
+    "maxHintRowsPerEnvironment": 192
+  },
+  "fakeScenarios": {
+    "coldViewers": {
+      "independentEngineAndStoreInstances": 100,
+      "fakeAcquisitions": 1,
+      "coldWarmingContenders": 99,
+      "routeLookups": 0
+    },
+    "warmViewers": {
+      "instances": 100,
+      "additionalFakeAcquisitions": 0,
+      "routeLookups": 0
+    },
+    "explicitWorkers": {
+      "instances": 100,
+      "firstCollectionFakeRouteLookups": 2,
+      "firstCollectionPublications": 2,
+      "cumulativeFakeRouteLookupsAt40Seconds": 6,
+      "newFakeRouteLookupsAt59Seconds": 0,
+      "newFakeRouteLookupsAt60Seconds": 2,
+      "cumulativeFakeRouteLookupsAt60Seconds": 8,
+      "UAL1PositiveCalls": 1,
+      "UAL2NegativeCalls": 2,
+      "mutableHintRowsAfterEightLookups": 7
+    },
+    "sameCallsignStoreClaims": {
+      "contenders": 100,
+      "leaseWinners": 1,
+      "chargedStarts": 1
+    },
+    "failureScenario": {
+      "initialFakeCalls": 2,
+      "immediateRetryFakeCalls": 0,
+      "retryFakeCallsAt60Seconds": 2,
+      "cumulativeFakeCalls": 4
+    },
+    "areas": {
+      "areas": [
+        "Chicago",
+        "ORD",
+        "MDW"
+      ],
+      "sharedCollections": 1,
+      "fakeAcquisitions": 1,
+      "fakeRouteLookups": 2
+    }
+  },
+  "liveAviationProviderCalls": 0,
+  "newRouteTests": {
+    "total": 51,
+    "pass": 51,
+    "fail": 0,
+    "model": 17,
+    "store": 12,
+    "enrichment": 17,
+    "engine": 5
+  },
+  "applicationGates": {
+    "order": [
+      "npm run check",
+      "npm run build"
+    ],
+    "unsetEnvironment": [
+      "DATABASE_URL",
+      "NEARBY_VERIFY_DATABASE_URL"
+    ],
+    "typecheck": {
+      "exitCode": 0
+    },
+    "check": {
+      "exitCode": 1,
+      "tests": 907,
+      "suites": 88,
+      "pass": 904,
+      "fail": 2,
+      "todo": 1,
+      "skipped": 0,
+      "cancelled": 0,
+      "durationMs": 60587.94
+    },
+    "baselineDateReplays": {
+      "sourceApplicationUnchanged": true,
+      "tests": 2,
+      "pass": 0,
+      "fail": 2,
+      "todo": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "exitCode": 1
+    },
+    "baselineFailures": [
+      "scripts/route-memory-replay.test.mjs",
+      "scripts/takeoff-floor-replay.test.mjs"
+    ],
+    "existingTodo": "Held #6 unknown-airport public route support, scripts/flight-audit-regression.test.mjs",
+    "build": {
+      "exitCode": 0,
+      "productionMigrationSkipped": true
+    }
+  },
+  "safety": {
+    "productionDatabaseReadOrWritten": false,
+    "mainChangedByThisWork": false,
+    "fixtureMcpChanged": false,
+    "radarDevChanged": false,
+    "realAircraftPubliclyExposed": false,
+    "providerCredentialsRequested": false,
+    "providerContacted": false,
+    "pushed": false,
+    "merged": false,
+    "deployed": false,
+    "trackFlightStarted": false,
+    "part3B3Started": false,
+    "part3B4Started": false
+  },
+  "sha256": {
+    "check.log": "0fcdc4c9989f3d010a2f8831d59f0f92ac5b4b004042761db92af6913ca1cfba",
+    "build.log": "306951f3381429072eaf1767941dd03db867ccd0b38599875063658898942957",
+    "baseline-date-replays.log": "135cb541ba169503b6ee892d97cd3bcda6458ae5eabb0f6853eac8722c25c7fa"
+  }
+}

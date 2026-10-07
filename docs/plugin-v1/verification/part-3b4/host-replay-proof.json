@@ -1,0 +1,83 @@
+{
+  "mode": "source-replay-proof",
+  "assertions": 5,
+  "failures": 0,
+  "errors": [],
+  "timeline": [
+    {
+      "label": "Radar before retained SYN101 replay",
+      "handoffMode": "nearby",
+      "handoffStatus": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "activeHandoffRequest": null,
+      "ignoredHandoffReplays": 0,
+      "appliedHandoffResponses": 0
+    },
+    {
+      "label": "Retained SYN101 via openai:set_globals",
+      "handoffMode": "nearby",
+      "handoffStatus": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "activeHandoffRequest": null,
+      "ignoredHandoffReplays": 1,
+      "appliedHandoffResponses": 0
+    },
+    {
+      "label": "Direct correlated SYN101 Track flight response",
+      "handoffMode": "detail",
+      "handoffStatus": "resolved",
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "activeHandoffRequest": null,
+      "ignoredHandoffReplays": 2,
+      "appliedHandoffResponses": 1
+    },
+    {
+      "label": "Duplicate SYN101 replays after detail",
+      "handoffMode": "detail",
+      "handoffStatus": "resolved",
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "activeHandoffRequest": null,
+      "ignoredHandoffReplays": 4,
+      "appliedHandoffResponses": 1
+    },
+    {
+      "label": "Back remains authoritative after duplicate SYN101 replays",
+      "handoffMode": "nearby",
+      "handoffStatus": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "activeHandoffRequest": null,
+      "ignoredHandoffReplays": 6,
+      "appliedHandoffResponses": 1
+    },
+    {
+      "label": "Late SYN101 A after SYN105 B started",
+      "handoffMode": "loading",
+      "handoffStatus": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e84",
+      "activeHandoffRequest": {
+        "id": 6,
+        "type": "instance",
+        "expectedRadarId": "00000000-0000-4000-8000-000000003e84",
+        "startedAt": 1791082806000
+      },
+      "ignoredHandoffReplays": 12,
+      "appliedHandoffResponses": 4
+    },
+    {
+      "label": "Correlated SYN105 B accepted after late SYN101 A ignored",
+      "handoffMode": "detail",
+      "handoffStatus": "resolved",
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e84",
+      "activeHandoffRequest": null,
+      "ignoredHandoffReplays": 12,
+      "appliedHandoffResponses": 5
+    }
+  ],
+  "assertionText": [
+    "Retained SYN101 is ignored through both globals and generic tool-result before any explicit action",
+    "Explicit SYN101 Track opens exactly once; duplicate replay cannot reapply or reopen after Back",
+    "A new explicit Track action creates a new correlated request and may reopen SYN101 detail",
+    "SYN105 selection stays Radar; explicit Track opens ambiguity; only the direct choice response opens detail; stale ambiguity/choice replays stay ignored",
+    "Late request A cannot override newer request B; only the current request may complete navigation"
+  ]
+}

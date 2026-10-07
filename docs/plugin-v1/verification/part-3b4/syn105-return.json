@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "before": false,
+  "compiled": true,
+  "workerCount": 3,
+  "actualChatGptHostApproved": false,
+  "scope": "Simulated host; malformed-context case is fault injection, not a proven actual-host cause",
+  "assertions": [
+    "Dated-choice button and keyboard focus survive the age render",
+    "Back from invalid choice returns visibly to Radar despite malformed optional host context",
+    "SYN105 second dated choice resolves across alternating workers; Back ignores retained ambiguity/detail/error replays",
+    "Back entered from Flights opens the Radar map and retains the selected aircraft",
+    "Back cancels an in-flight exact-instance read; its later direct response cannot reopen detail",
+    "Radar tab also exits detail locally without losing the selection",
+    "Automatic Nearby refresh and bounded motion remain active with singleton timers and no browser errors"
+  ],
+  "errors": [],
+  "timeline": [
+    {
+      "label": "Candidate focus across age render",
+      "retained": true
+    },
+    {
+      "label": "Back after invalid choice and malformed optional context",
+      "visible": true,
+      "mode": "nearby"
+    }
+  ]
+}

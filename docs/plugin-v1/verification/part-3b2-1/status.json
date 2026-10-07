@@ -1,0 +1,70 @@
+{
+  "stage": "Part 3B.2.1",
+  "status": "certified_local_commit_push_blocked",
+  "branch": "plugin-v1-route-enrichment",
+  "implementationSha": "11abfb4896658f22525433a40d3e1ac637e2cecb",
+  "applicationGatesPassed": true,
+  "check": {
+    "tests": 909,
+    "pass": 908,
+    "fail": 0,
+    "todo": 1,
+    "suites": 88,
+    "skipped": 0,
+    "cancelled": 0,
+    "exitCode": 0
+  },
+  "build": {
+    "exitCode": 0,
+    "databaseMigrationSkipped": true
+  },
+  "neon": {
+    "projectName": "inbound-db",
+    "projectId": "withered-water-48367194",
+    "requestedBranchName": "plugin-v1-3b2-1-verification-20261004",
+    "creationModeSelected": "schema-only",
+    "autoDeleteSelected": "After 1 day",
+    "excludedProductionBranchId": "br-late-forest-au7csk9x",
+    "attempts": 4,
+    "mainParentAttempts": 2,
+    "isolatedPreviewParentAttempts": 2,
+    "lastSelectedParentName": "preview/plugin-v1-3b1-5-verification",
+    "lastSelectedParentId": "br-round-breeze-augnsxmu",
+    "branchCreationVerified": true,
+    "newBranchId": "br-fragrant-sun-auv7swsu",
+    "directEndpoint": "ep-long-silence-auec2kal.c-10.us-east-1.aws.neon.tech",
+    "migrationsApplied": [
+      "0006_nearby_collection.sql",
+      "0007_route_hint.sql"
+    ],
+    "sqlConnections": 101,
+    "additionalAttemptsThisResume": 1,
+    "rootCause": "root branches limit exceeded",
+    "exactUiError": "Request failed: root branches limit exceeded",
+    "database": "neondb",
+    "automaticDeletionAt": "2026-10-05T02:33:04Z",
+    "deletedDisposableBranchId": "br-calm-star-aualangq",
+    "retainedDisposableBranchId": "br-cold-resonance-aud9ey98",
+    "rootQuotaResolved": true,
+    "sqlConnectionsScope": "Successful certification run: 100 independent worker sessions plus one separate control session; the earlier harness-error attempt is preserved separately.",
+    "productionSqlConnections": 0
+  },
+  "realPostgresCertification": "passed14/14",
+  "independentPostgresSessions": 100,
+  "aviationProviderCalls": 0,
+  "realAircraftExposed": 0,
+  "newCommitOrPush": {
+    "committed": true,
+    "pushed": false
+  },
+  "reason": "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+  "noProductionOrMainOrFixtureChanges": true,
+  "part3B3Started": false,
+  "part3B4Started": false,
+  "resumeDiagnostic": "neon-resume-diagnostic.json",
+  "finalPostNeonApplicationGates": "check909/908pass/0fail/1TODO, buildPASS",
+  "retryEvidence": "neon-retry-result.json",
+  "verifiedWorktreeHead": "cd9dbf611ed95e5a734d7173c9aefea93285b88d",
+  "deliveryEvidence": "delivery.json",
+  "resumeEvidenceAudit": "Corrected the stale pre-certification SQL connection count only. Runtime, migrations, test clocks, final gate logs and Postgres results are unchanged."
+}

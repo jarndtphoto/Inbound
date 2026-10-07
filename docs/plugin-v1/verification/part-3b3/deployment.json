@@ -1,0 +1,135 @@
+{
+  "stage": "Part 3B.3",
+  "status": "new_isolated_preview_ready_protection_exception_pending",
+  "inspectedAt": "2026-10-04T03:56:00.564Z",
+  "publicationMethod": "Authenticated GitHub Git Data APIs; exact audited artifact blobs/tree/commit, then one new ref triggers existing Vercel Git integration",
+  "sourceBaseSha": "7277994ccbb921382849c5e1e30cae8388ee68bd",
+  "fixtureRepository": "jarndtphoto/inbound-live-fixture-dev",
+  "proofBranch": "part-3b3-radar-proof-20261004",
+  "proofCommitSha": "b3151e0b019fceaee336b044f362e13204b0c0fe",
+  "proofParentSha": "cd2fbb4d7b88fe5e7cd6b666d4810a217d0a9e90",
+  "exactArtifactTreeSha": "0c968066097514d6047a4ed95fc016c79be0fb39",
+  "exactRemoteTreeMatch": true,
+  "files": [
+    {
+      "path": "api/mcp.js",
+      "bytes": 364215,
+      "sha256": "0714909fd31cdff2cc60d17bfc599e5a5904ca5a8c36daab8a11d980973a4c16",
+      "gitBlobSha": "2854309bb196e4f5a0ac5c6acddeeae7256709c2"
+    },
+    {
+      "path": "package.json",
+      "bytes": 120,
+      "sha256": "d0c4dbd616cdd9749c6b81b6de2f6784410f557fde69826a478ca1ca05556842",
+      "gitBlobSha": "5a72ca6ab87906c8a10d5658406fd0267b76d59e"
+    },
+    {
+      "path": "vercel.json",
+      "bytes": 317,
+      "sha256": "79cbaec4140200bd874ab5f2afa1faf477626b43da51ef6b3b6a69ebf5b143f2",
+      "gitBlobSha": "391598e900c4d30730011948e38cc1a84e0968fb"
+    }
+  ],
+  "deployment": {
+    "id": "dpl_3QCUsdCSpiqfk3DvppKqkdbQ42Rz",
+    "hostname": "inbound-live-fixture-rf27hpb80-jarndtphoto.vercel.app",
+    "mcpUrl": "https://inbound-live-fixture-rf27hpb80-jarndtphoto.vercel.app/mcp",
+    "state": "READY",
+    "readyState": "READY",
+    "target": null,
+    "environment": "preview",
+    "source": "git",
+    "projectId": "prj_J4TIKK2XniE63LqljmrGpU6ypvRd",
+    "projectName": "inbound-live-fixture-dev",
+    "teamId": "team_sMdivohsmgPyJ0kE0pIiwskR",
+    "gitBranch": "part-3b3-radar-proof-20261004",
+    "gitCommitSha": "b3151e0b019fceaee336b044f362e13204b0c0fe",
+    "createdAt": "2026-10-04T03:54:22.398Z",
+    "readyAt": "2026-10-04T03:54:29.392Z",
+    "regions": [
+      "iad1"
+    ],
+    "branchAlias": "inbound-live-fixture-dev-git-part-3b3-radar-5fbd18-jarndtphoto.vercel.app",
+    "gitStatus": [
+      {
+        "context": "Vercel",
+        "state": "success",
+        "targetUrl": "https://vercel.com/jarndtphoto/inbound-live-fixture-dev/3QCUsdCSpiqfk3DvppKqkdbQ42Rz"
+      }
+    ]
+  },
+  "isolation": {
+    "configuredEnvironmentVariables": 0,
+    "hiddenProductionEnvironmentVariables": 0,
+    "globalSsoProtection": {
+      "enabled": true,
+      "deploymentType": "all_except_custom_domains"
+    },
+    "projectSettingsUpdatedAtUnchanged": true,
+    "providerApiCalls": 0,
+    "productionApiCalls": 0,
+    "productionDbConnections": 0,
+    "realAircraftExposed": 0,
+    "publicAccessExceptionAdded": false,
+    "exceptionStatus": "Not added or changed by this deployment task; exact immutable-host public access requires separately authorized UI step and direct MCP inspection.",
+    "noProviderOrDatabaseCredentialRequest": true,
+    "noManualAliasOrProjectSettingsMutation": true,
+    "noProductionDeployment": true
+  },
+  "unchangedFixtureBaseline": {
+    "mainSha": "fb00761e127778714f57aadcf4d8a63360375155",
+    "previewHostTestSha": "cd2fbb4d7b88fe5e7cd6b666d4810a217d0a9e90",
+    "approvedDeploymentId": "dpl_4PPrHVSC5msykCWdh2MzGXP3d4Nq",
+    "approvedHostname": "inbound-live-fixture-qfln7wi7t-jarndtphoto.vercel.app",
+    "approvedState": "READY",
+    "approvedTarget": null,
+    "approvedCommitSha": "cd2fbb4d7b88fe5e7cd6b666d4810a217d0a9e90",
+    "aliases": [
+      {
+        "hostname": "inbound-live-fixture-dev-git-preview-host-test-jarndtphoto.vercel.app",
+        "deploymentId": "dpl_4PPrHVSC5msykCWdh2MzGXP3d4Nq",
+        "updatedAt": 1791062827089
+      },
+      {
+        "hostname": "inbound-live-fixture-dev-jarndtphoto.vercel.app",
+        "deploymentId": "dpl_8dniZiaHyVG7ouVq366qEyL2ubj6",
+        "updatedAt": 1791053441049
+      },
+      {
+        "hostname": "inbound-live-fixture-dev.vercel.app",
+        "deploymentId": "dpl_8dniZiaHyVG7ouVq366qEyL2ubj6",
+        "updatedAt": 1791053441048
+      },
+      {
+        "hostname": "inbound-live-fixture-dev-git-main-jarndtphoto.vercel.app",
+        "deploymentId": "dpl_8dniZiaHyVG7ouVq366qEyL2ubj6",
+        "updatedAt": 1791053433016
+      }
+    ]
+  },
+  "gateAuthorization": {
+    "finalCheck": {
+      "tests": 957,
+      "suites": 92,
+      "passed": 956,
+      "failed": 0,
+      "todo": 1,
+      "exitCode": 0
+    },
+    "finalBuild": {
+      "exitCode": 0,
+      "databaseUrlsUnset": true,
+      "migratorSkipped": true
+    },
+    "browserSource": {
+      "passed": 17,
+      "externalRequests": 0,
+      "errors": 0
+    },
+    "browserCompiled": {
+      "passed": 17,
+      "externalRequests": 0,
+      "errors": 0
+    }
+  }
+}

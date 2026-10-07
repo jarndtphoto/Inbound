@@ -1,0 +1,30 @@
+{
+  "scope": "Two independent fixture handlers, matching serverless worker separation",
+  "sameWorker": "ambiguous",
+  "acrossSelection": {
+    "schemaVersion": "1.0",
+    "status": "invalid_request",
+    "responseAt": "2026-10-05T13:55:19.890Z",
+    "refreshAfterSeconds": null,
+    "flightInstanceId": null,
+    "flight": null,
+    "candidates": [],
+    "error": {
+      "code": "invalid_token",
+      "message": "The selection handle is invalid."
+    }
+  },
+  "acrossChoice": {
+    "schemaVersion": "1.0",
+    "status": "invalid_request",
+    "responseAt": "2026-10-05T13:55:19.894Z",
+    "refreshAfterSeconds": null,
+    "flightInstanceId": null,
+    "flight": null,
+    "candidates": [],
+    "error": {
+      "code": "invalid_token",
+      "message": "The candidate handle is invalid."
+    }
+  }
+}

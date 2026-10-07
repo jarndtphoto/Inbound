@@ -316,6 +316,7 @@ export function chooseBest(
   hex: string,
   now: number,
   airside = false,
+  preferObserved = false,
 ): AdsbRaw | null {
   const list = observations.get(hex) ?? [];
   const prev = tracks.get(hex) ?? null;
@@ -333,13 +334,14 @@ export function chooseBest(
     const raw = fusedRaw(best.obs, { extrapolated: false, ageSec: age, lat: best.obs.lat, lon: best.obs.lon });
     return commitTrack(hex, raw, best.obs.provider, now, false);
   }
-  if (prev) {
+  if (prev && !preferObserved) {
     const extra = maybeExtrapolate(prev, now, airside);
     if (extra) return extra;
   }
   if (bestAny) {
     const age = ageOf(bestAny.obs, now);
     const raw = fusedRaw(bestAny.obs, { extrapolated: false, ageSec: age, lat: bestAny.obs.lat, lon: bestAny.obs.lon });
+    if (preferObserved) return commitTrack(hex, raw, bestAny.obs.provider, now, false);
     return {
       ...raw,
       _fusion: { provider: bestAny.obs.provider, extrapolated: false, ageSec: age },
@@ -359,16 +361,16 @@ export function chooseBest(
   return null;
 }
 
-export type ProviderFetchStatus = "ok" | "429" | "timeout" | "error" | "backoff";
-export type ProviderPack = { provider: ProviderId; ac: AdsbRaw[]; status?: ProviderFetchStatus };
+export type ProviderFetchStatus = "ok" | "429" | "timeout" | "error" | "failed" | "backoff";
+export type ProviderPack = { provider: ProviderId; ac: AdsbRaw[]; status?: ProviderFetchStatus; receivedAt?: number };
 
-export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; airside?: boolean }): AdsbRaw[] {
+export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; airside?: boolean; preferObserved?: boolean }): AdsbRaw[] {
   const now = opts?.now ?? Date.now();
   const airside = Boolean(opts?.airside);
   const hexes = new Set<string>();
   for (const pack of packs) {
     for (const raw of pack.ac ?? []) {
-      const obs = rawToObservation(raw, pack.provider, now);
+      const obs = rawToObservation(raw, pack.provider, pack.receivedAt ?? now);
       if (!obs) continue;
       rememberObs(obs);
       hexes.add(obs.hex);
@@ -382,7 +384,7 @@ export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; 
   }
   const out: AdsbRaw[] = [];
   for (const hex of hexes) {
-    const chosen = chooseBest(hex, now, airside);
+    const chosen = chooseBest(hex, now, airside, Boolean(opts?.preferObserved));
     if (chosen) out.push(chosen);
   }
   return out;
@@ -450,12 +452,12 @@ async function fetchProviderPack(id: ProviderId, url: string, now = Date.now()):
         failures: h?.fails ?? 0,
       });
     }
-    return { provider: id, ac: [], status: "backoff" };
+    return { provider: id, ac: [], status: "backoff", receivedAt: now };
   }
   try {
     const json = await fetchJson(url, PROVIDERS[id].timeoutMs);
     markProviderOk(id, now);
-    return { provider: id, ac: acList(json), status: "ok" };
+    return { provider: id, ac: acList(json), status: "ok", receivedAt: Date.now() };
   } catch (error) {
     markProviderFail(id, now);
     const status = providerFetchStatus(error);
@@ -473,7 +475,7 @@ async function fetchProviderPack(id: ProviderId, url: string, now = Date.now()):
         failures: h?.fails ?? 0,
       });
     }
-    return { provider: id, ac: [], status };
+    return { provider: id, ac: [], status, receivedAt: Date.now() };
   }
 }
 
@@ -486,6 +488,40 @@ export async function fetchAround(lat: number, lon: number, dist: number): Promi
   return Promise.all(
     PROVIDER_ORDER.map((id) => fetchProviderPack(id, PROVIDERS[id].around(lat, lon, dist), now)),
   );
+}
+
+/** Status-preserving view for shared Nearby collection acquisition. Existing
+ * callers keep the richer provider fetch statuses; plugin acquisition only
+ * needs ok / failed / backoff plus whether a request was attempted. */
+export type ProviderAcquisitionPack = ProviderPack & {
+  status: "ok" | "failed" | "backoff";
+  attempted: boolean;
+  receivedAt: number;
+};
+
+export async function fetchAroundWithStatus(lat: number, lon: number, dist: number): Promise<ProviderAcquisitionPack[]> {
+  const startedAt = Date.now();
+  return Promise.all(PROVIDER_ORDER.map(async (provider): Promise<ProviderAcquisitionPack> => {
+    if (!providerHealthy(provider, startedAt)) {
+      return { provider, ac: [], status: "backoff", attempted: false, receivedAt: startedAt };
+    }
+    try {
+      const json = await fetchJson(PROVIDERS[provider].around(lat, lon, dist), PROVIDERS[provider].timeoutMs);
+      const receivedAt = Date.now();
+      // Plugin collection semantics: malformed payload is provider failure,
+      // never evidence of a successful empty sky.
+      const payload = json as { ac?: unknown; aircraft?: unknown } | null;
+      if (!payload || typeof payload !== "object" || !Array.isArray(payload.ac ?? payload.aircraft)) {
+        throw new Error("invalid aircraft payload");
+      }
+      markProviderOk(provider, receivedAt);
+      return { provider, ac: acList(json), status: "ok", attempted: true, receivedAt };
+    } catch {
+      const receivedAt = Date.now();
+      markProviderFail(provider, receivedAt);
+      return { provider, ac: [], status: "failed", attempted: true, receivedAt };
+    }
+  }));
 }
 
 export async function fetchByHex(hex: string): Promise<ProviderPack[]> {

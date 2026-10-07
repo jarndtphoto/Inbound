@@ -1,0 +1,2219 @@
+{
+  "ok": true,
+  "expected": "motion-watchdog-fix",
+  "policyTimeline": {
+    "clientDeadlineArmedAt": "2026-10-04T09:00:00.000Z",
+    "publicationAt": "2026-10-04T09:00:00.800Z",
+    "scheduledRequestAt": "2026-10-04T09:00:20.000Z",
+    "retryOpportunityAt": "2026-10-04T09:00:23.000Z",
+    "originalMotionCapAt": "2026-10-04T09:00:25.000Z"
+  },
+  "captures": [
+    {
+      "label": "T+0 client deadline armed",
+      "at": "2026-10-04T09:00:00.000Z",
+      "frameCount": 0,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 1,
+      "collectionVersion": 1,
+      "generatedAt": "2026-10-04T09:00:00.000Z",
+      "trajectoryKey": "[1,1791104400000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104403000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 2,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": null,
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "short-retry",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[1,1791104400000]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104385000,
+      "shortRetrySchedules": 1,
+      "shortRetryFires": 0,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 0
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 0
+      }
+    },
+    {
+      "label": "T+0 fresh collection clears retry state and arms normal cadence",
+      "at": "2026-10-04T09:00:00.000Z",
+      "frameCount": 0,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 1,
+      "collectionVersion": 2,
+      "generatedAt": "2026-10-04T09:00:00.000Z",
+      "trajectoryKey": "[2,1791104400000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104420000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 3,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": null,
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "normal",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[2,1791104400000]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104425000,
+      "shortRetrySchedules": 1,
+      "shortRetryFires": 0,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 0
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 0
+      }
+    },
+    {
+      "label": "T+19 selection leaves the imminent deadline unchanged",
+      "at": "2026-10-04T09:00:19.000Z",
+      "frameCount": 1187,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 1,
+      "collectionVersion": 2,
+      "generatedAt": "2026-10-04T09:00:00.000Z",
+      "trajectoryKey": "[2,1791104400000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 19,
+          "extrapolatedSeconds": 19,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 19,
+          "extrapolatedSeconds": 19,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 19,
+          "extrapolatedSeconds": 19,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104420000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 3,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "normal",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[2,1791104400000]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104425000,
+      "shortRetrySchedules": 1,
+      "shortRetryFires": 0,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 0
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 19
+      }
+    },
+    {
+      "label": "T+20 same collection returned just before backend eligibility",
+      "at": "2026-10-04T09:00:20.000Z",
+      "frameCount": 1250,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 2,
+      "collectionVersion": 2,
+      "generatedAt": "2026-10-04T09:00:00.000Z",
+      "trajectoryKey": "[2,1791104400000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 20,
+          "extrapolatedSeconds": 20,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 20,
+          "extrapolatedSeconds": 20,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 20,
+          "extrapolatedSeconds": 20,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104423000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 4,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "short-retry",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[2,1791104400000]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104425000,
+      "shortRetrySchedules": 2,
+      "shortRetryFires": 0,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 1
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 20
+      }
+    },
+    {
+      "label": "T+22.9 before bounded retry",
+      "at": "2026-10-04T09:00:22.900Z",
+      "frameCount": 1431,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 2,
+      "collectionVersion": 2,
+      "generatedAt": "2026-10-04T09:00:00.000Z",
+      "trajectoryKey": "[2,1791104400000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 22.9,
+          "extrapolatedSeconds": 22.896,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 22.9,
+          "extrapolatedSeconds": 22.896,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:00.000Z",
+          "liveAge": 22.9,
+          "extrapolatedSeconds": 22.896,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104423000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 4,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "short-retry",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[2,1791104400000]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104425000,
+      "shortRetrySchedules": 2,
+      "shortRetryFires": 0,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 1
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 22
+      }
+    },
+    {
+      "label": "T+23.1 retry opportunity",
+      "at": "2026-10-04T09:00:23.100Z",
+      "frameCount": 1443,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 3,
+      "collectionVersion": 3,
+      "generatedAt": "2026-10-04T09:00:23.000Z",
+      "trajectoryKey": "[3,1791104423000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 0.1,
+          "extrapolatedSeconds": 0.088,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 0.1,
+          "extrapolatedSeconds": 0.088,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 0.1,
+          "extrapolatedSeconds": 0.088,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104443000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 5,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "normal",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[3,1791104423000]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104448000,
+      "shortRetrySchedules": 2,
+      "shortRetryFires": 1,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 2
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 23
+      }
+    },
+    {
+      "label": "T+24 selection leaves the fresh normal deadline unchanged",
+      "at": "2026-10-04T09:00:24.000Z",
+      "frameCount": 1500,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 3,
+      "collectionVersion": 3,
+      "generatedAt": "2026-10-04T09:00:23.000Z",
+      "trajectoryKey": "[3,1791104423000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 1,
+          "extrapolatedSeconds": 1,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 1,
+          "extrapolatedSeconds": 1,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 1,
+          "extrapolatedSeconds": 1,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104443000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 5,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "normal",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[3,1791104423000]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104448000,
+      "shortRetrySchedules": 2,
+      "shortRetryFires": 1,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 2
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 24
+      }
+    },
+    {
+      "label": "T+25.9 motion boundary",
+      "at": "2026-10-04T09:00:25.900Z",
+      "frameCount": 1618,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 3,
+      "collectionVersion": 3,
+      "generatedAt": "2026-10-04T09:00:23.000Z",
+      "trajectoryKey": "[3,1791104423000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 2.9,
+          "extrapolatedSeconds": 2.888,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 2.9,
+          "extrapolatedSeconds": 2.888,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 2.9,
+          "extrapolatedSeconds": 2.888,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104443000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 5,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "normal",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[3,1791104423000]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104448000,
+      "shortRetrySchedules": 2,
+      "shortRetryFires": 1,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 2
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 25
+      }
+    }
+  ],
+  "remainingScriptedResults": 0,
+  "boundedSameRetry": {
+    "youngSame": {
+      "label": "Same version with young anchors keeps normal cadence",
+      "at": "2026-10-04T09:00:26.000Z",
+      "frameCount": 1625,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 4,
+      "collectionVersion": 3,
+      "generatedAt": "2026-10-04T09:00:23.000Z",
+      "trajectoryKey": "[3,1791104423000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 3,
+          "extrapolatedSeconds": 3,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 3,
+          "extrapolatedSeconds": 3,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 3,
+          "extrapolatedSeconds": 3,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104446000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 6,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "normal",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[3,1791104423000]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104448000,
+      "shortRetrySchedules": 2,
+      "shortRetryFires": 1,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 2
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 26
+      }
+    },
+    "nearSame": {
+      "label": "Same version near the cap schedules exactly one short retry",
+      "at": "2026-10-04T09:00:46.000Z",
+      "frameCount": 2875,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 5,
+      "collectionVersion": 3,
+      "generatedAt": "2026-10-04T09:00:23.000Z",
+      "trajectoryKey": "[3,1791104423000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 23,
+          "extrapolatedSeconds": 23,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 23,
+          "extrapolatedSeconds": 23,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 23,
+          "extrapolatedSeconds": 23,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104449000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 7,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "short-retry",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[3,1791104423000]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104448000,
+      "shortRetrySchedules": 3,
+      "shortRetryFires": 1,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 3
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 46
+      }
+    },
+    "retryOneStillSame": {
+      "label": "First watchdog retry still same schedules the second bounded retry",
+      "at": "2026-10-04T09:00:49.100Z",
+      "frameCount": 3068,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 6,
+      "collectionVersion": 3,
+      "generatedAt": "2026-10-04T09:00:23.000Z",
+      "trajectoryKey": "[3,1791104423000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 26.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 26.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 26.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        }
+      ],
+      "nextPollAt": 1791104453000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 8,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "short-retry",
+      "shortRetryUsed": true,
+      "shortRetryTrajectoryKey": "[3,1791104423000]",
+      "motionRetryCount": 1,
+      "motionRetryBudgetRemaining": 2,
+      "lastMotionRetryAt": 1791104449000,
+      "motionCapDeadline": 1791104448000,
+      "shortRetrySchedules": 4,
+      "shortRetryFires": 2,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 4
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 49
+      }
+    },
+    "retryTwoStillSame": {
+      "label": "Second watchdog retry still same schedules the final bounded retry",
+      "at": "2026-10-04T09:00:53.100Z",
+      "frameCount": 3318,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 7,
+      "collectionVersion": 3,
+      "generatedAt": "2026-10-04T09:00:23.000Z",
+      "trajectoryKey": "[3,1791104423000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 30.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 30.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 30.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        }
+      ],
+      "nextPollAt": 1791104457000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 9,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "short-retry",
+      "shortRetryUsed": true,
+      "shortRetryTrajectoryKey": "[3,1791104423000]",
+      "motionRetryCount": 2,
+      "motionRetryBudgetRemaining": 1,
+      "lastMotionRetryAt": 1791104453000,
+      "motionCapDeadline": 1791104448000,
+      "shortRetrySchedules": 5,
+      "shortRetryFires": 3,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 5
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 53
+      }
+    },
+    "retryBudgetExhausted": {
+      "label": "Third watchdog retry exhausts the bounded budget and returns to normal cadence",
+      "at": "2026-10-04T09:00:57.100Z",
+      "frameCount": 3568,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 8,
+      "collectionVersion": 3,
+      "generatedAt": "2026-10-04T09:00:23.000Z",
+      "trajectoryKey": "[3,1791104423000]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 34.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 34.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:00:23.000Z",
+          "liveAge": 34.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        }
+      ],
+      "nextPollAt": 1791104477000,
+      "requestGeneration": 0,
+      "activeRequestGeneration": null,
+      "acceptedResults": 10,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "requestedAreaId": "preset:chicago",
+      "areaId": "preset:chicago",
+      "health": "ok",
+      "nextPollKind": "normal",
+      "shortRetryUsed": true,
+      "shortRetryTrajectoryKey": "[3,1791104423000]",
+      "motionRetryCount": 3,
+      "motionRetryBudgetRemaining": 0,
+      "lastMotionRetryAt": 1791104457000,
+      "motionCapDeadline": 1791104448000,
+      "shortRetrySchedules": 5,
+      "shortRetryFires": 4,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 6
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 57
+      }
+    },
+    "callsFiveSecondsLater": 8,
+    "maximumShortRetriesPerTrajectory": 3
+  },
+  "hostLike90Seconds": {
+    "durationMs": 90100,
+    "timeline": [
+      {
+        "label": "T+0 fresh authoritative Chicago board",
+        "at": "2026-10-04T09:01:02.100Z",
+        "frameCount": 0,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 0,
+        "collectionVersion": 100,
+        "generatedAt": "2026-10-04T09:01:02.100Z",
+        "trajectoryKey": "[100,1791104462100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 0,
+            "extrapolatedSeconds": 0,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 0,
+            "extrapolatedSeconds": 0,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 0,
+            "extrapolatedSeconds": 0,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104482100,
+        "requestGeneration": 0,
+        "activeRequestGeneration": null,
+        "acceptedResults": 2,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": null,
+        "requestedAreaId": "preset:chicago",
+        "areaId": "preset:chicago",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[100,1791104462100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104487100,
+        "shortRetrySchedules": 0,
+        "shortRetryFires": 0,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 0
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 0
+        }
+      },
+      {
+        "label": "T+5 select aircraft A",
+        "at": "2026-10-04T09:01:07.100Z",
+        "frameCount": 312,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 0,
+        "collectionVersion": 100,
+        "generatedAt": "2026-10-04T09:01:02.100Z",
+        "trajectoryKey": "[100,1791104462100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 5,
+            "extrapolatedSeconds": 5,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 5,
+            "extrapolatedSeconds": 5,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 5,
+            "extrapolatedSeconds": 5,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104482100,
+        "requestGeneration": 0,
+        "activeRequestGeneration": null,
+        "acceptedResults": 2,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+        "requestedAreaId": "preset:chicago",
+        "areaId": "preset:chicago",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[100,1791104462100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104487100,
+        "shortRetrySchedules": 0,
+        "shortRetryFires": 0,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 0
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 5
+        }
+      },
+      {
+        "label": "T+10 Chicago to ORD with shared trajectory",
+        "at": "2026-10-04T09:01:12.100Z",
+        "frameCount": 625,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 1,
+        "collectionVersion": 100,
+        "generatedAt": "2026-10-04T09:01:12.100Z",
+        "trajectoryKey": "[100,1791104462100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 10,
+            "extrapolatedSeconds": 10,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 10,
+            "extrapolatedSeconds": 10,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e83",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 10,
+            "extrapolatedSeconds": 10,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104482100,
+        "requestGeneration": 1,
+        "activeRequestGeneration": null,
+        "acceptedResults": 3,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+        "requestedAreaId": "airport:KORD",
+        "areaId": "airport:KORD",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[100,1791104462100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104487100,
+        "shortRetrySchedules": 0,
+        "shortRetryFires": 0,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 0
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 10
+        }
+      },
+      {
+        "label": "T+20 normal request returns the unchanged trajectory",
+        "at": "2026-10-04T09:01:22.100Z",
+        "frameCount": 1250,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 2,
+        "collectionVersion": 100,
+        "generatedAt": "2026-10-04T09:01:22.100Z",
+        "trajectoryKey": "[100,1791104462100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 20,
+            "extrapolatedSeconds": 20,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 20,
+            "extrapolatedSeconds": 20,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e83",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 20,
+            "extrapolatedSeconds": 20,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104485100,
+        "requestGeneration": 1,
+        "activeRequestGeneration": null,
+        "acceptedResults": 4,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+        "requestedAreaId": "airport:KORD",
+        "areaId": "airport:KORD",
+        "health": "ok",
+        "nextPollKind": "short-retry",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[100,1791104462100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104487100,
+        "shortRetrySchedules": 1,
+        "shortRetryFires": 0,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 1
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 20
+        }
+      },
+      {
+        "label": "T+23 first short retry also returns the unchanged trajectory",
+        "at": "2026-10-04T09:01:25.200Z",
+        "frameCount": 1444,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 3,
+        "collectionVersion": 100,
+        "generatedAt": "2026-10-04T09:01:25.100Z",
+        "trajectoryKey": "[100,1791104462100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 23.1,
+            "extrapolatedSeconds": 23.1,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 23.1,
+            "extrapolatedSeconds": 23.1,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e83",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 23.1,
+            "extrapolatedSeconds": 23.1,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104489100,
+        "requestGeneration": 1,
+        "activeRequestGeneration": null,
+        "acceptedResults": 5,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+        "requestedAreaId": "airport:KORD",
+        "areaId": "airport:KORD",
+        "health": "ok",
+        "nextPollKind": "short-retry",
+        "shortRetryUsed": true,
+        "shortRetryTrajectoryKey": "[100,1791104462100]",
+        "motionRetryCount": 1,
+        "motionRetryBudgetRemaining": 2,
+        "lastMotionRetryAt": 1791104485100,
+        "motionCapDeadline": 1791104487100,
+        "shortRetrySchedules": 2,
+        "shortRetryFires": 1,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 2
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 23
+        }
+      },
+      {
+        "label": "T+25.1 unchanged trajectory reaches the motion cap",
+        "at": "2026-10-04T09:01:27.200Z",
+        "frameCount": 1569,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 3,
+        "collectionVersion": 100,
+        "generatedAt": "2026-10-04T09:01:25.100Z",
+        "trajectoryKey": "[100,1791104462100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 25.1,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 25.1,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e83",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 25.1,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          }
+        ],
+        "nextPollAt": 1791104489100,
+        "requestGeneration": 1,
+        "activeRequestGeneration": null,
+        "acceptedResults": 5,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+        "requestedAreaId": "airport:KORD",
+        "areaId": "airport:KORD",
+        "health": "ok",
+        "nextPollKind": "short-retry",
+        "shortRetryUsed": true,
+        "shortRetryTrajectoryKey": "[100,1791104462100]",
+        "motionRetryCount": 1,
+        "motionRetryBudgetRemaining": 2,
+        "lastMotionRetryAt": 1791104485100,
+        "motionCapDeadline": 1791104487100,
+        "shortRetrySchedules": 2,
+        "shortRetryFires": 1,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 2
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 25
+        }
+      },
+      {
+        "label": "T+27 second bounded watchdog retry remains unchanged",
+        "at": "2026-10-04T09:01:29.200Z",
+        "frameCount": 1694,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 4,
+        "collectionVersion": 100,
+        "generatedAt": "2026-10-04T09:01:29.100Z",
+        "trajectoryKey": "[100,1791104462100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 27.1,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 27.1,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e83",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 27.1,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          }
+        ],
+        "nextPollAt": 1791104493100,
+        "requestGeneration": 1,
+        "activeRequestGeneration": null,
+        "acceptedResults": 6,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+        "requestedAreaId": "airport:KORD",
+        "areaId": "airport:KORD",
+        "health": "ok",
+        "nextPollKind": "short-retry",
+        "shortRetryUsed": true,
+        "shortRetryTrajectoryKey": "[100,1791104462100]",
+        "motionRetryCount": 2,
+        "motionRetryBudgetRemaining": 1,
+        "lastMotionRetryAt": 1791104489100,
+        "motionCapDeadline": 1791104487100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 2,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 3
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 27
+        }
+      },
+      {
+        "label": "T+30 ORD to MDW returns the same shared trajectory",
+        "at": "2026-10-04T09:01:32.100Z",
+        "frameCount": 1875,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 5,
+        "collectionVersion": 100,
+        "generatedAt": "2026-10-04T09:01:32.100Z",
+        "trajectoryKey": "[100,1791104462100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 30,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 30,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 30,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          }
+        ],
+        "nextPollAt": 1791104493100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 7,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "short-retry",
+        "shortRetryUsed": true,
+        "shortRetryTrajectoryKey": "[100,1791104462100]",
+        "motionRetryCount": 2,
+        "motionRetryBudgetRemaining": 1,
+        "lastMotionRetryAt": 1791104489100,
+        "motionCapDeadline": 1791104487100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 2,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 3
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 30
+        }
+      },
+      {
+        "label": "T+30.5 select aircraft immediately after area change",
+        "at": "2026-10-04T09:01:32.600Z",
+        "frameCount": 1906,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 5,
+        "collectionVersion": 100,
+        "generatedAt": "2026-10-04T09:01:32.100Z",
+        "trajectoryKey": "[100,1791104462100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 30.5,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 30.5,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:01:02.100Z",
+            "liveAge": 30.5,
+            "extrapolatedSeconds": 25,
+            "stopped": true
+          }
+        ],
+        "nextPollAt": 1791104493100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 7,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "short-retry",
+        "shortRetryUsed": true,
+        "shortRetryTrajectoryKey": "[100,1791104462100]",
+        "motionRetryCount": 2,
+        "motionRetryBudgetRemaining": 1,
+        "lastMotionRetryAt": 1791104489100,
+        "motionCapDeadline": 1791104487100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 2,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 3
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 30
+        }
+      },
+      {
+        "label": "T+31 bounded watchdog accepts a newer trajectory without manual Refresh",
+        "at": "2026-10-04T09:01:33.200Z",
+        "frameCount": 1944,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 6,
+        "collectionVersion": 101,
+        "generatedAt": "2026-10-04T09:01:33.100Z",
+        "trajectoryKey": "[101,1791104493100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 0.1,
+            "extrapolatedSeconds": 0.1,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 0.1,
+            "extrapolatedSeconds": 0.1,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 0.1,
+            "extrapolatedSeconds": 0.1,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104513100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 8,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[101,1791104493100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104518100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 3,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 4
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 31
+        }
+      },
+      {
+        "label": "T+35 select aircraft C",
+        "at": "2026-10-04T09:01:37.100Z",
+        "frameCount": 2187,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 6,
+        "collectionVersion": 101,
+        "generatedAt": "2026-10-04T09:01:33.100Z",
+        "trajectoryKey": "[101,1791104493100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 4,
+            "extrapolatedSeconds": 4,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 4,
+            "extrapolatedSeconds": 4,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 4,
+            "extrapolatedSeconds": 4,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104513100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 8,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e82",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[101,1791104493100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104518100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 3,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 4
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 35
+        }
+      },
+      {
+        "label": "T+40 Radar to Flights",
+        "at": "2026-10-04T09:01:42.100Z",
+        "frameCount": 2500,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 6,
+        "collectionVersion": 101,
+        "generatedAt": "2026-10-04T09:01:33.100Z",
+        "trajectoryKey": "[101,1791104493100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 9,
+            "extrapolatedSeconds": 9,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 9,
+            "extrapolatedSeconds": 9,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 9,
+            "extrapolatedSeconds": 9,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104513100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 8,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e82",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[101,1791104493100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104518100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 3,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 4
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 40
+        }
+      },
+      {
+        "label": "T+42 Flights to Radar",
+        "at": "2026-10-04T09:01:44.100Z",
+        "frameCount": 2625,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 6,
+        "collectionVersion": 101,
+        "generatedAt": "2026-10-04T09:01:33.100Z",
+        "trajectoryKey": "[101,1791104493100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 11,
+            "extrapolatedSeconds": 11,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 11,
+            "extrapolatedSeconds": 11,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:01:33.100Z",
+            "liveAge": 11,
+            "extrapolatedSeconds": 11,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104513100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 8,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e82",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[101,1791104493100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104518100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 3,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 4
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 42
+        }
+      },
+      {
+        "label": "T+51 normal cadence accepts fresh trajectory",
+        "at": "2026-10-04T09:01:53.200Z",
+        "frameCount": 3194,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 7,
+        "collectionVersion": 102,
+        "generatedAt": "2026-10-04T09:01:53.100Z",
+        "trajectoryKey": "[102,1791104513100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:53.100Z",
+            "liveAge": 0.1,
+            "extrapolatedSeconds": 0.1,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:53.100Z",
+            "liveAge": 0.1,
+            "extrapolatedSeconds": 0.1,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:01:53.100Z",
+            "liveAge": 0.1,
+            "extrapolatedSeconds": 0.1,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104533100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 9,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e82",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[102,1791104513100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104538100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 3,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 5
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 51
+        }
+      },
+      {
+        "label": "T+56 select aircraft D",
+        "at": "2026-10-04T09:01:58.100Z",
+        "frameCount": 3500,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 7,
+        "collectionVersion": 102,
+        "generatedAt": "2026-10-04T09:01:53.100Z",
+        "trajectoryKey": "[102,1791104513100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:01:53.100Z",
+            "liveAge": 5,
+            "extrapolatedSeconds": 5,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:01:53.100Z",
+            "liveAge": 5,
+            "extrapolatedSeconds": 5,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:01:53.100Z",
+            "liveAge": 5,
+            "extrapolatedSeconds": 5,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104533100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 9,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e83",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[102,1791104513100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104538100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 3,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 5
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 56
+        }
+      },
+      {
+        "label": "T+70 manual Refresh control accepts fresh trajectory",
+        "at": "2026-10-04T09:02:12.100Z",
+        "frameCount": 4375,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 8,
+        "collectionVersion": 103,
+        "generatedAt": "2026-10-04T09:02:12.100Z",
+        "trajectoryKey": "[103,1791104532100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:02:12.100Z",
+            "liveAge": 0,
+            "extrapolatedSeconds": 0,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:02:12.100Z",
+            "liveAge": 0,
+            "extrapolatedSeconds": 0,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:02:12.100Z",
+            "liveAge": 0,
+            "extrapolatedSeconds": 0,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104552100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 10,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e83",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[103,1791104532100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104557100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 3,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 5
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 70
+        }
+      },
+      {
+        "label": "T+75 select aircraft A again",
+        "at": "2026-10-04T09:02:17.100Z",
+        "frameCount": 4687,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 8,
+        "collectionVersion": 103,
+        "generatedAt": "2026-10-04T09:02:12.100Z",
+        "trajectoryKey": "[103,1791104532100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:02:12.100Z",
+            "liveAge": 5,
+            "extrapolatedSeconds": 5,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:02:12.100Z",
+            "liveAge": 5,
+            "extrapolatedSeconds": 5,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:02:12.100Z",
+            "liveAge": 5,
+            "extrapolatedSeconds": 5,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104552100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 10,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[103,1791104532100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104557100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 3,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 5
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 75
+        }
+      },
+      {
+        "label": "T+90 normal cadence remains healthy",
+        "at": "2026-10-04T09:02:32.200Z",
+        "frameCount": 5631,
+        "animationScheduled": true,
+        "pollScheduled": true,
+        "refreshInFlight": false,
+        "refreshCalls": 9,
+        "collectionVersion": 104,
+        "generatedAt": "2026-10-04T09:02:32.100Z",
+        "trajectoryKey": "[104,1791104552100]",
+        "aircraft": [
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e81",
+            "observedAt": "2026-10-04T09:02:32.100Z",
+            "liveAge": 0.1,
+            "extrapolatedSeconds": 0.092,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e80",
+            "observedAt": "2026-10-04T09:02:32.100Z",
+            "liveAge": 0.1,
+            "extrapolatedSeconds": 0.092,
+            "stopped": false
+          },
+          {
+            "radarId": "00000000-0000-4000-8000-000000003e82",
+            "observedAt": "2026-10-04T09:02:32.100Z",
+            "liveAge": 0.1,
+            "extrapolatedSeconds": 0.092,
+            "stopped": false
+          }
+        ],
+        "nextPollAt": 1791104572100,
+        "requestGeneration": 2,
+        "activeRequestGeneration": null,
+        "acceptedResults": 11,
+        "rejectedResults": 0,
+        "lastRejectedReason": null,
+        "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+        "requestedAreaId": "airport:KMDW",
+        "areaId": "airport:KMDW",
+        "health": "ok",
+        "nextPollKind": "normal",
+        "shortRetryUsed": false,
+        "shortRetryTrajectoryKey": "[104,1791104552100]",
+        "motionRetryCount": 0,
+        "motionRetryBudgetRemaining": 3,
+        "lastMotionRetryAt": null,
+        "motionCapDeadline": 1791104577100,
+        "shortRetrySchedules": 3,
+        "shortRetryFires": 3,
+        "pollTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 6
+        },
+        "ageTimers": {
+          "pending": 1,
+          "maxPending": 1,
+          "fired": 90
+        }
+      }
+    ],
+    "safetyCap": {
+      "label": "T+25.1 unchanged trajectory reaches the motion cap",
+      "at": "2026-10-04T09:01:27.200Z",
+      "frameCount": 1569,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 3,
+      "collectionVersion": 100,
+      "generatedAt": "2026-10-04T09:01:25.100Z",
+      "trajectoryKey": "[100,1791104462100]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:01:02.100Z",
+          "liveAge": 25.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:01:02.100Z",
+          "liveAge": 25.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e83",
+          "observedAt": "2026-10-04T09:01:02.100Z",
+          "liveAge": 25.1,
+          "extrapolatedSeconds": 25,
+          "stopped": true
+        }
+      ],
+      "nextPollAt": 1791104489100,
+      "requestGeneration": 1,
+      "activeRequestGeneration": null,
+      "acceptedResults": 5,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e81",
+      "requestedAreaId": "airport:KORD",
+      "areaId": "airport:KORD",
+      "health": "ok",
+      "nextPollKind": "short-retry",
+      "shortRetryUsed": true,
+      "shortRetryTrajectoryKey": "[100,1791104462100]",
+      "motionRetryCount": 1,
+      "motionRetryBudgetRemaining": 2,
+      "lastMotionRetryAt": 1791104485100,
+      "motionCapDeadline": 1791104487100,
+      "shortRetrySchedules": 2,
+      "shortRetryFires": 1,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 2
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 25
+      }
+    },
+    "resumedBy": "automatic-watchdog",
+    "resumed": {
+      "label": "T+31 bounded watchdog accepts a newer trajectory without manual Refresh",
+      "at": "2026-10-04T09:01:33.200Z",
+      "frameCount": 1944,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 6,
+      "collectionVersion": 101,
+      "generatedAt": "2026-10-04T09:01:33.100Z",
+      "trajectoryKey": "[101,1791104493100]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:01:33.100Z",
+          "liveAge": 0.1,
+          "extrapolatedSeconds": 0.1,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:01:33.100Z",
+          "liveAge": 0.1,
+          "extrapolatedSeconds": 0.1,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e82",
+          "observedAt": "2026-10-04T09:01:33.100Z",
+          "liveAge": 0.1,
+          "extrapolatedSeconds": 0.1,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104513100,
+      "requestGeneration": 2,
+      "activeRequestGeneration": null,
+      "acceptedResults": 8,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "requestedAreaId": "airport:KMDW",
+      "areaId": "airport:KMDW",
+      "health": "ok",
+      "nextPollKind": "normal",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[101,1791104493100]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104518100,
+      "shortRetrySchedules": 3,
+      "shortRetryFires": 3,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 4
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 31
+      }
+    },
+    "manualRefreshControl": {
+      "label": "T+70 manual Refresh control accepts fresh trajectory",
+      "at": "2026-10-04T09:02:12.100Z",
+      "frameCount": 4375,
+      "animationScheduled": true,
+      "pollScheduled": true,
+      "refreshInFlight": false,
+      "refreshCalls": 8,
+      "collectionVersion": 103,
+      "generatedAt": "2026-10-04T09:02:12.100Z",
+      "trajectoryKey": "[103,1791104532100]",
+      "aircraft": [
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e81",
+          "observedAt": "2026-10-04T09:02:12.100Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e80",
+          "observedAt": "2026-10-04T09:02:12.100Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        },
+        {
+          "radarId": "00000000-0000-4000-8000-000000003e82",
+          "observedAt": "2026-10-04T09:02:12.100Z",
+          "liveAge": 0,
+          "extrapolatedSeconds": 0,
+          "stopped": false
+        }
+      ],
+      "nextPollAt": 1791104552100,
+      "requestGeneration": 2,
+      "activeRequestGeneration": null,
+      "acceptedResults": 10,
+      "rejectedResults": 0,
+      "lastRejectedReason": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e83",
+      "requestedAreaId": "airport:KMDW",
+      "areaId": "airport:KMDW",
+      "health": "ok",
+      "nextPollKind": "normal",
+      "shortRetryUsed": false,
+      "shortRetryTrajectoryKey": "[103,1791104532100]",
+      "motionRetryCount": 0,
+      "motionRetryBudgetRemaining": 3,
+      "lastMotionRetryAt": null,
+      "motionCapDeadline": 1791104557100,
+      "shortRetrySchedules": 3,
+      "shortRetryFires": 3,
+      "pollTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 5
+      },
+      "ageTimers": {
+        "pending": 1,
+        "maxPending": 1,
+        "fired": 70
+      }
+    },
+    "authoritativeVersions": [
+      100,
+      101,
+      102,
+      103,
+      104
+    ],
+    "meaningfulDeadlineUnchangedBySelections": true,
+    "maxPendingRaf": 1,
+    "maxPendingPollTimers": 1,
+    "maxPendingAgeTimers": 1
+  },
+  "isolation": {
+    "aviationProviderCalls": 0,
+    "productionApiCalls": 0,
+    "productionDbAccess": 0,
+    "serviceProviderApiCalls": 0,
+    "serviceProductionApiCalls": 0,
+    "serviceProductionDbAccess": 0
+  }
+}

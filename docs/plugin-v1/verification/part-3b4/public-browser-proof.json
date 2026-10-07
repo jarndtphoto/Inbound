@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "verifiedAt": "2026-10-05T01:06:31.078Z",
+  "url": "https://inbound-live-fixture-pdqumlqfx-jarndtphoto.vercel.app/widget",
+  "durationMs": 96432,
+  "manualRefreshUsed": false,
+  "initialFixtureSequence": {
+    "firstPublicWidgetRadar": 40,
+    "firstPublicWidgetFeatured": 4,
+    "postRetirementRadar": 39,
+    "postRetirementFeatured": 4
+  },
+  "handoffUi": {
+    "directSYN101": "resolved exact occurrence",
+    "ambiguousSYN105Candidates": 2,
+    "explicitCandidateChosen": "2026-10-05",
+    "backToRadar": true
+  },
+  "interactions": {
+    "chicagoToOrd": true,
+    "ordToMdw": true,
+    "selectionImmediatelyAfterMdw": true,
+    "multipleAircraftSelections": true,
+    "radarToFlightsToRadar": true
+  },
+  "motion": {
+    "boundedStopObservedAtMs": 51849,
+    "boundedStopStatus": "Last accepted observations are aging. Bounded motion has stopped.",
+    "automaticRecoveryObservedAtMs": 64202,
+    "automaticRecoveryStatus": "Available coverage · Invented aircraft",
+    "automaticRecoveryWithoutManualRefresh": true,
+    "motionContinuedThroughMs": 96409
+  },
+  "samples": [
+    { "t": 0, "area": "Chicago", "radar": 39, "style": "left: 303.572px; top: 128.461px;", "status": "Available coverage · Invented aircraft" },
+    { "t": 13667, "area": "Chicago", "radar": 39, "style": "left: 301.195px; top: 130.234px;", "status": "Available coverage · Invented aircraft" },
+    { "t": 25856, "area": "Chicago", "radar": 39, "style": "left: 295.467px; top: 130.955px;", "status": "Available coverage · Invented aircraft" },
+    { "t": 37683, "area": "ORD", "radar": 39, "style": "left: 333.063px; top: 196.814px;", "status": "Available coverage · Invented aircraft" },
+    { "t": 39185, "area": "MDW", "radar": 39, "style": "left: 294.287px; top: 131.404px;", "status": "Available coverage · Invented aircraft", "selected": true },
+    { "t": 51849, "area": "MDW", "radar": 39, "style": "left: 294.287px; top: 131.404px;", "status": "Last accepted observations are aging. Bounded motion has stopped." },
+    { "t": 64202, "area": "MDW", "radar": 39, "style": "left: 282.561px; top: 128.335px;", "status": "Available coverage · Invented aircraft" },
+    { "t": 79564, "area": "MDW", "radar": 39, "style": "left: 278.251px; top: 125.173px;", "status": "Available coverage · Invented aircraft" },
+    { "t": 96409, "area": "MDW", "radar": 39, "style": "left: 274.492px; top: 121.079px;", "status": "Available coverage · Invented aircraft" }
+  ],
+  "browserErrors": 0,
+  "providerCalls": 0,
+  "productionApiCalls": 0,
+  "productionDbAccess": 0
+}

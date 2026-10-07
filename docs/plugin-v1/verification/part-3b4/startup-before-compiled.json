@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "compiled": true,
+  "before": true,
+  "scope": "Simulated delayed-resource host only",
+  "actualChatGptVerified": false,
+  "errors": [],
+  "timeline": [
+    {
+      "ageSeconds": 30,
+      "refreshCalls": 0,
+      "nextPollAt": 1791082856000,
+      "generatedAt": "2026-10-04T03:00:06.000Z",
+      "syn101": {
+        "radarId": "00000000-0000-4000-8000-000000003e80",
+        "latitude": 42.04394818481907,
+        "longitude": -87.83929309012763,
+        "altitudeFt": 7800,
+        "extrapolatedSeconds": 25,
+        "stopped": true
+      },
+      "handoffMode": "nearby"
+    }
+  ]
+}
