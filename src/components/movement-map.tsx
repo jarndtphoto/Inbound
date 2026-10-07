@@ -303,8 +303,8 @@ function GroundMovementMap({
 }) {
   const pageVisible = usePageVisible();
   const airport = mode.airport;
-  const groundTimingQueryLoggedRef = useRef(false);
-  const groundTimingFixLoggedRef = useRef(false);
+  const groundTimingQueryLoggedRef = useRef<string | null>(null);
+  const groundTimingFixLoggedRef = useRef<string | null>(null);
   const surfaceQ = useQuery(surfaceQueryOptions(airport));
   const storyAircraft = story.aircraft;
   const storyPositionAge = typeof story.providers?.chosenPositionAgeSec === "number"
@@ -362,8 +362,8 @@ function GroundMovementMap({
   const groundQ = useQuery({
     queryKey: groundQueryKey,
     queryFn: () => {
-      if (!groundTimingQueryLoggedRef.current) {
-        groundTimingQueryLoggedRef.current = true;
+      if (groundTimingQueryLoggedRef.current !== identityKey) {
+        groundTimingQueryLoggedRef.current = identityKey;
         console.info("[ground-ttfp]", {
           event: "ground_query_sent",
           flight: story.iata,
@@ -555,8 +555,8 @@ function GroundMovementMap({
   const delayedFast = Boolean(fast && (fastAge ?? Infinity) > 12);
   const displayFrozen = lastSeen || (frozen && !(fast && (fastAge ?? Infinity) <= 30));
   useEffect(() => {
-    if (!active || !displayAircraft || groundTimingFixLoggedRef.current) return;
-    groundTimingFixLoggedRef.current = true;
+    if (!active || !displayAircraft || groundTimingFixLoggedRef.current === identityKey) return;
+    groundTimingFixLoggedRef.current = identityKey;
     console.info("[ground-ttfp]", {
       event: "first_fix_shown",
       flight: story.iata,
