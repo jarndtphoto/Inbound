@@ -27,6 +27,7 @@ import { prefetchFlightAirportSurfacesOnce, scheduleLowPrioritySurfacePrefetch }
 import { getGroundBootstrap } from "@/lib/ground-bootstrap";
 import { getGroundPosition } from "@/lib/ground-position";
 import { groundPositionQueryKey } from "@/lib/ground-position-key";
+import { logGroundTiming } from "@/lib/ground-timing";
 import { getFlightStory } from "@/lib/story";
 import type { Chop, Comfort, FlightStory, PilotReportObservation, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -534,6 +535,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
 
   useEffect(() => {
     console.info("[ground-ttfp]", { event: "page_open", flight: flightKey, atMs: groundTimingOpenAtRef.current });
+    void logGroundTiming({ data: { event: "page_open", flight: flightKey, atMs: groundTimingOpenAtRef.current } }).catch(() => undefined);
   }, [flightKey]);
 
 
@@ -567,6 +569,10 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
       atMs: Date.now(),
       bootstrap: true,
     });
+    void logGroundTiming({ data: {
+      event: "ground_query_sent", flight: flightKey, airport: bootstrap.airportIata,
+      movement: bootstrap.movementKind, atMs: Date.now(),
+    } }).catch(() => undefined);
     void queryClient.prefetchQuery({
       queryKey: key,
       queryFn: () => getGroundPosition({ data: {
@@ -669,6 +675,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
       stage: story.currentStage,
       hasAircraft: Boolean(story.aircraft),
     });
+    void logGroundTiming({ data: { event: "story_loaded", flight: flightKey, atMs: Date.now() } }).catch(() => undefined);
   }, [story, flightKey]);
 
 
