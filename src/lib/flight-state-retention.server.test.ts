@@ -16,7 +16,7 @@ import { createRouteMemoryStore } from "./route-memory-store.server.ts";
 import { emptyArrivalState } from "./arrival-projection-state.ts";
 import { emptyRouteMemory } from "./route-memory.ts";
 
-const flightTables = ["flight_phase_state", "arrival_projection_state", "flight_route_state"] as const;
+const flightTables = ["flight_phase_state", "arrival_projection_state", "flight_route_state", "flight_ground_state"] as const;
 const tables = [...flightTables, "arrival_atis_cache"] as const;
 type Table = typeof tables[number];
 const now = Date.parse("2026-10-04T02:00:00.000Z");
@@ -36,7 +36,7 @@ function toSql(run: <T>(query: string, values: unknown[]) => Promise<T[]>): Sql 
 
 async function database() {
   const pg = new PGlite();
-  for (const file of ["0002_flight_phase_state.sql", "0003_arrival_projection_state.sql", "0004_confirmed_takeoff.sql", "0005_route_geometry_state.sql"])
+  for (const file of ["0002_flight_phase_state.sql", "0003_arrival_projection_state.sql", "0004_confirmed_takeoff.sql", "0005_route_geometry_state.sql", "0007_flight_ground_state.sql"])
     await pg.exec(readFileSync(new URL(`../../migrations/${file}`, import.meta.url), "utf8"));
   const sql = toSql(async <T>(query: string, values: unknown[]) => (await pg.query<T>(query, values)).rows);
   return { pg, sql };
@@ -45,6 +45,11 @@ async function database() {
 async function seed(pg: PGlite, table: Table, key: string, at: number) {
   if (table === "arrival_atis_cache") {
     await pg.query("insert into arrival_atis_cache (airport, entries, fetched_at) values ($1, '[]'::jsonb, $2)", [key, at]);
+  } else if (table === "flight_ground_state") {
+    await pg.query(`insert into flight_ground_state
+      (land_key, requested_ident, origin_iata, dest_iata, airport_iata, airport_lat, airport_lon, movement_kind, updated_at)
+      values ($1, 'TEST1', 'ORD', 'HNL', 'ORD', 41.98, -87.90, 'departure', $2::timestamptz)`,
+      [key, new Date(at).toISOString()]);
   } else {
     const stateColumn = table === "flight_phase_state" ? "" : ", state";
     const stateValue = table === "flight_phase_state" ? "" : ", '{}'::jsonb";
@@ -97,7 +102,7 @@ test("retention deletes expired rows, keeps recent/boundary/future and refreshed
       return (await pg.query<T>(query, values)).rows;
     });
     await createFlightStateCleanup({ now: () => now })(observingSql);
-    assert.deepEqual([...deleted].sort(), [...tables].sort(), "only the four permitted tables receive deletes");
+    assert.deepEqual([...deleted].sort(), [...tables].sort(), "only the five permitted tables receive deletes");
     for (const table of tables)
       assert.deepEqual(await keys(pg, table), ["active", "boundary", "future", "recent"], table);
     const after = await Promise.all(untouchedTables.map(table => pg.query(`select * from "${table}"`)));
@@ -111,11 +116,19 @@ test("each table deletes at most 1000 oldest rows per run without looping over i
   const cleanup = createFlightStateCleanup({ now: () => clock });
   try {
     for (const table of flightTables) {
-      const stateColumn = table === "flight_phase_state" ? "" : ", state";
-      const stateValue = table === "flight_phase_state" ? "" : ", '{}'::jsonb";
-      await pg.query(`insert into ${table} (land_key, updated_at${stateColumn})
-        select 'expired-' || n, $1::timestamptz + n * interval '1 millisecond'${stateValue}
-        from generate_series(1, 1001) as n`, [new Date(now - FLIGHT_STATE_RETENTION_MS - 60_000).toISOString()]);
+      if (table === "flight_ground_state") {
+        await pg.query(`insert into flight_ground_state
+          (land_key, requested_ident, origin_iata, dest_iata, airport_iata, airport_lat, airport_lon, movement_kind, updated_at)
+          select 'expired-' || n, 'TEST1', 'ORD', 'HNL', 'ORD', 41.98, -87.90, 'departure',
+            $1::timestamptz + n * interval '1 millisecond'
+          from generate_series(1, 1001) as n`, [new Date(now - FLIGHT_STATE_RETENTION_MS - 60_000).toISOString()]);
+      } else {
+        const stateColumn = table === "flight_phase_state" ? "" : ", state";
+        const stateValue = table === "flight_phase_state" ? "" : ", '{}'::jsonb";
+        await pg.query(`insert into ${table} (land_key, updated_at${stateColumn})
+          select 'expired-' || n, $1::timestamptz + n * interval '1 millisecond'${stateValue}
+          from generate_series(1, 1001) as n`, [new Date(now - FLIGHT_STATE_RETENTION_MS - 60_000).toISOString()]);
+      }
     }
     await pg.query("insert into arrival_atis_cache (airport, entries, fetched_at) select 'expired-' || n, '[]'::jsonb, $1::bigint + n from generate_series(1, 1001) as n", [now - ATIS_RETENTION_MS - 60_000]);
     await cleanup(sql);
@@ -145,13 +158,13 @@ test("concurrent writes share one cleanup run, the six-hour boundary is exact, a
     await Promise.all(Array.from({ length: 12 }, () => cleanup(sql)));
     assert.equal(queries, 1, "throttle is reserved before the first query settles");
     release(); await first;
-    assert.equal(queries, 4);
+    assert.equal(queries, 5);
     clock += CLEANUP_INTERVAL_MS - 1;
-    await cleanup(sql); assert.equal(queries, 4);
+    await cleanup(sql); assert.equal(queries, 5);
     clock++;
-    await cleanup(sql); assert.equal(queries, 8);
+    await cleanup(sql); assert.equal(queries, 10);
     await createFlightStateCleanup({ now: () => clock })(sql);
-    assert.equal(queries, 12, "an independently injected factory has its own throttle");
+    assert.equal(queries, 15, "an independently injected factory has its own throttle");
   } finally { release(); await pg.close(); }
 });
 
@@ -171,14 +184,14 @@ test("one table failure logs and continues the other three deletes, then throttl
       await seed(pg, table, "expired", now - (table === "arrival_atis_cache" ? ATIS_RETENTION_MS : FLIGHT_STATE_RETENTION_MS) - 1);
     await assert.doesNotReject(cleanup(sql));
     assert.deepEqual(errors.map(entry => entry.table), ["flight_phase_state"]);
-    assert.match(String(errors[0]!.error), /Simulated cleanup failure/); assert.equal(attempts, 4);
+    assert.match(String(errors[0]!.error), /Simulated cleanup failure/); assert.equal(attempts, 5);
     assert.deepEqual(await keys(pg, "flight_phase_state"), ["expired"]);
     for (const table of tables.filter(table => table !== "flight_phase_state"))
       assert.deepEqual(await keys(pg, table), [], table);
     await Promise.all(Array.from({ length: 12 }, () => cleanup(sql)));
-    assert.equal(attempts, 4); assert.equal(errors.length, 1);
+    assert.equal(attempts, 5); assert.equal(errors.length, 1);
     clock += CLEANUP_INTERVAL_MS;
-    await cleanup(sql); assert.equal(attempts, 8); assert.equal(errors.length, 2);
+    await cleanup(sql); assert.equal(attempts, 10); assert.equal(errors.length, 2);
   } finally { await pg.close(); }
 });
 
@@ -204,7 +217,7 @@ test("a cleanup outage never changes a successful phase poll or stops subsequent
     assert.equal((await routeStore.save(key, route, 0)).status, "ok");
     await arrivalStore.saveAtis("KORD", atis, now);
     assert.deepEqual(await arrivalStore.loadAtis("KORD", now), atis);
-    assert.equal(errors.length, 4, "subsequent normal writes do not cause a cleanup error storm");
+    assert.equal(errors.length, 5, "subsequent normal writes do not cause a cleanup error storm");
   } finally { await pg.close(); }
 });
 
