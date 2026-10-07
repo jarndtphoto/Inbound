@@ -74,7 +74,7 @@ test("visibility and Map selection are wired through to the ground observer", as
   assert.match(movement, /enabled: groundPollingEnabled\(active, pageVisible/);
   assert.doesNotMatch(movement, /refetchIntervalInBackground:\s*true/);
   assert.match(movement, /document.visibilityState === "visible"/);
-  assert.match(movement, /\? 8_000 : false/, "ground ADS-B polling is paced to eight seconds");
+  assert.match(movement, /startupMs < 30_000 \? 2_500 : 8_000/, "ground ADS-B polling retries every 2.5 seconds during startup, then returns to eight seconds");
   const hook = await read("src/lib/use-page-visible.ts");
   assert.match(hook, /useSyncExternalStore/);
   assert.match(hook, /removeEventListener\("visibilitychange", onChange\)/);
@@ -85,24 +85,17 @@ test("paced ground map is free ADS-B only", async () => {
   assert.doesNotMatch(source, /from "\.\/fr24\.server"/);
   assert.doesNotMatch(source, /loadFr24|FR24_API_TOKEN/, "ground polling cannot reach paid FR24");
   assert.match(source, /fr24KeyType: "disabled-ground-map"/);
-  const exactIndex = source.indexOf("const exactPacks = traceHex");
-  const aroundIndex = source.indexOf("const aroundPacks = await fetchAround");
-  assert.ok(exactIndex >= 0 && aroundIndex > exactIndex, "ground polling tries exact identity before an airport-radius scan");
+  assert.match(source, /const paths: Promise/);
+  assert.match(source, /validPath\("hex", fetchByHex\(traceHex, signal\)\)/);
+  assert.match(source, /validPath\("registration", fetchByReg\(resolvedRegistration, signal\)\)/);
+  assert.match(source, /fetchByCallsign\(callsign, signal\)/);
+  assert.match(source, /validPath\("area", fetchAround\(airport\.lat, airport\.lon, 20, signal\)\)/);
+  assert.match(source, /const winner = await Promise\.any\(paths\)/, "hex, registration, callsign, and area race in parallel");
+  assert.match(source, /controller\.abort\(\)/, "winning ground lookup cancels the remaining routes");
   assert.match(source, /const traceHex = wantedHex \|\| usRegistrationHex\(resolvedRegistration\)/);
-  assert.match(source, /traceHex[\s\S]*?fetchByHex\(traceHex\)/, "known or derived hex remains the strongest free ground identity");
-  assert.match(source, /if \(traceHex && hex === traceHex\) return true/);
-  assert.match(source, /return finish\(position\);/, "any usable exact fix avoids the extra airport scan");
-  assert.match(source, /const exactUnavailable = exactPacks\.length > 0/, "provider cooldown is identified explicitly");
-  assert.match(source, /if \(exactUnavailable && traceHex\)/, "provider cooldown can recover a recent ground point before the held airport scan");
-  assert.match(source, /recentGroundTrace\(traceHex/, "trace recovery can use a known or registration-derived hex");
-  assert.match(source, /provider: "adsb-trace-recovery"/);
-  assert.match(source, /ageSec > 90/);
-  assert.match(source, /trace has no recent ground point/);
-  assert.match(source, /provider: "adsb-around-fallback"/, "a broad scan remains available when exact lookup is healthy but empty");
-  assert.match(source, /const groundAroundCache = new Map/);
-  assert.match(source, /heldAround && Date\.now\(\) - heldAround\.at <= 90_000/);
-  assert.match(source, /const traceHex = wantedHex \|\| usRegistrationHex\(resolvedRegistration\)/);
-  assert.match(source, /const traced = traceHex[\s\S]*?recentGroundTrace\(traceHex/);
+  assert.match(source, /heldAround && Date\.now\(\) - heldAround\.at <= 120_000/);
+  assert.match(source, /recentGroundTrace\(traceHex/, "trace recovery remains after live lookup misses");
+  assert.match(source, /flightGroundStateStore/, "ground lookup reads and persists durable Neon identity");
   assert.match(source, /\[ground-position-miss\]/);
 });
 
@@ -147,7 +140,8 @@ test("MCO/TPA ground diagnostics emit one compact free-provider summary", async 
   assert.match(fr24, /probe\.upstream = "fresh"/);
   assert.match(fr24, /probe\.rowsReturned = rows\.length/);
 
-  assert.match(fusion, /ProviderFetchStatus = "ok" \| "403" \| "429" \| "timeout" \| "error" \| "backoff"/);
+  assert.match(fusion, /ProviderFetchStatus = "ok" \| "403" \| "429" \| "timeout" \| "error" \| "backoff" \| "cancelled"/);
+  assert.match(fusion, /if \(signal\?\.aborted\) return \{ provider: id, ac: \[\], status: "cancelled" \}/);
   assert.match(fusion, /status: "backoff"/);
   assert.match(fusion, /status: "ok"/);
 });
