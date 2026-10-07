@@ -4,13 +4,30 @@ import type { FlightScheduleSource } from "./types.ts";
 
 type CacheStatus = "hit" | "miss" | "inflight";
 type FallbackOutcome = "not_needed" | "flightstats_used" | "flightstats_unavailable" | "fr24_used" | "resume_used" | "unavailable" | "not_found";
-type RequestTrace = { cacheStatus?: CacheStatus; scheduleSource: FlightScheduleSource; fallbackOutcome: FallbackOutcome };
+type RequestTrace = { cacheStatus?: CacheStatus; scheduleSource: FlightScheduleSource; fallbackOutcome: FallbackOutcome;
+  phases?: Record<string, { startMs: number; durationMs: number }>; };
+type ActiveRequestTrace = RequestTrace & { startedAt: number };
 export type StoryRequestLog = RequestTrace & {
   event: "story_request"; requested: string; fresh: boolean; durationMs: number;
   outcome: "ok" | "error"; errorCategory: "not_found" | "timeout" | "aborted" | "source_unavailable" | "unexpected" | null;
 };
 type WeatherFailureEmitter = (sources: string[]) => void;
-const requests = new AsyncLocalStorage<RequestTrace>();
+const requests = new AsyncLocalStorage<ActiveRequestTrace>();
+
+/** Times the existing promise without changing ownership, cancellation, or retries.
+ * Elapsed spans and blocking waits have distinct names at their call sites. */
+export async function timeStoryPhase<T>(name: string, work: Promise<T>): Promise<T> {
+  const trace = requests.getStore();
+  const start = performance.now();
+  try { return await work; }
+  finally {
+    if (trace) {
+      trace.phases ??= {};
+      trace.phases[name] = { startMs: Math.max(0, Math.round(start - trace.startedAt)),
+        durationMs: Math.max(0, Math.round(performance.now() - start)) };
+    }
+  }
+}
 
 export function noteStoryCache(status: CacheStatus) {
   const trace = requests.getStore();
@@ -40,8 +57,8 @@ function errorCategory(error: unknown): StoryRequestLog["errorCategory"] {
 export async function withStoryRequest<T>(query: string, fresh: boolean, load: () => Promise<T>,
   emit: (record: StoryRequestLog) => void = record => console.info("[story-request] " + JSON.stringify(record)),
   emitWeatherFailures: WeatherFailureEmitter = sources => console.info("[weather-coverage] " + sources.join(","))): Promise<T> {
-  const trace: RequestTrace = { scheduleSource: "unknown", fallbackOutcome: "not_needed" };
   const started = performance.now();
+  const trace: ActiveRequestTrace = { scheduleSource: "unknown", fallbackOutcome: "not_needed", startedAt: started };
   return requests.run(trace, async () => {
     let category: StoryRequestLog["errorCategory"] = null;
     try {
@@ -61,7 +78,8 @@ export async function withStoryRequest<T>(query: string, fresh: boolean, load: (
       if (category === "not_found") trace.fallbackOutcome = "not_found";
       throw error;
     } finally {
-      emit({ ...trace, cacheStatus: trace.cacheStatus ?? "miss", event: "story_request",
+      const { startedAt: _startedAt, ...record } = trace;
+      emit({ ...record, cacheStatus: trace.cacheStatus ?? "miss", event: "story_request",
         requested: String(query ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0,16), fresh,
         durationMs: Math.max(0, Math.round(performance.now() - started)), outcome: category ? "error" : "ok", errorCategory: category });
     }

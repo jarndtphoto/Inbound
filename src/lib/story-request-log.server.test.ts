@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { withStoryRequest, noteStoryCache, noteStorySchedule, noteStoryFallback, type StoryRequestLog } from "./story-request-log.server.ts";
+import { withStoryRequest, timeStoryPhase, noteStoryCache, noteStorySchedule, noteStoryFallback, type StoryRequestLog } from "./story-request-log.server.ts";
 
 test("each cache hit/miss/coalesced request logs duration, schedule source, fallback outcome and category", async () => {
   const logs: StoryRequestLog[] = [];
@@ -59,4 +59,16 @@ test("weather diagnostics never break a successful flight poll", async () => {
     weatherCoverage: { failedSources: ["Local advisories"] }, ok: true,
   }), () => {}, () => { throw new Error("log sink unavailable"); });
   assert.equal(result.ok, true);
+});
+
+test("phase timing keeps overlapping requests isolated and preserves operation errors", async () => {
+  const logs: StoryRequestLog[]=[];
+  let release!:()=>void;
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  const first=withStoryRequest("AA3362",false,async()=>{await timeStoryPhase("schedule_elapsed",held);return {ok:true};},row=>logs.push(row));
+  await assert.rejects(withStoryRequest("UA219",false,async()=>{await timeStoryPhase("route_hint_elapsed",Promise.reject(new Error("route unavailable")));},row=>logs.push(row)),/route unavailable/);
+  release();await first;
+  assert.deepEqual(Object.keys(logs[0].phases??{}),["route_hint_elapsed"]);
+  assert.deepEqual(Object.keys(logs[1].phases??{}),["schedule_elapsed"]);
+  for(const log of logs) {assert.equal("startedAt" in log,false);for(const phase of Object.values(log.phases??{})){assert(phase.startMs>=0);assert(phase.durationMs>=0);}}
 });

@@ -6,7 +6,7 @@ import { findInboundDiversion } from "./inbound-diversion.ts";
 import { createHash } from "node:crypto";
 import { readFlightResume } from "./flight-resume";
 import { flightNotFound, verifiedFlightNotFoundPage } from "./flight-search.ts";
-import { withStoryRequest, noteStoryCache, noteStorySchedule, noteStoryFallback } from "./story-request-log.server.ts";
+import { timeStoryPhase, withStoryRequest, noteStoryCache, noteStorySchedule, noteStoryFallback } from "./story-request-log.server.ts";
 import { loadPhaseState, savePhaseState, phaseStateEqual } from "./flight-phase-state.server";
 import { confirmTakeoff, reconcileTakeoff, takeoffFloorStage, takeoffDiagnostic, hasOriginSurfaceFix } from "./confirmed-takeoff.ts";
 import { activeConfirmedTakeoff, mergeConfirmedTakeoff } from "./flight-phase-state-logic.ts";
@@ -874,6 +874,8 @@ function flightIdentOk(fl, parsed, aware) {
 	const u = String(fl || "").replace(/\s/g, "").toUpperCase();
 	if (!u || !parsed) return false;
 	const vars = new Set(callsignVariants(parsed.callsign));
+	const selectedOperating = String(aware?._operatingFlightIdIdent ?? "").replace(/\s/g, "").toUpperCase();
+	if (selectedOperating) vars.add(selectedOperating);
 	const atc = String(aware?.atcIdent ?? "").replace(/\s/g, "").toUpperCase();
 	if (atc) vars.add(atc);
 	const faIdent = String(aware?.ident ?? "").replace(/\s/g, "").toUpperCase();
@@ -890,6 +892,9 @@ function rawMatchesQuery(raw, parsed, aware) {
 	const tail = String(aware?.tail ?? "").replace(/[-\s]/g, "").toUpperCase();
 	// A reused or incorrect callsign cannot override the assigned aircraft.
 	if (tail && r && r !== tail) return false;
+	// The added operating alias cannot override an explicitly assigned hex.
+	const assignedHex = String(aware?.hex ?? "").toLowerCase();
+	if (fl === aware?._operatingFlightIdIdent && assignedHex && raw.hex && String(raw.hex).toLowerCase() !== assignedHex) return false;
 	if (flightIdentOk(fl, parsed, aware)) return true;
 	if (tail && r === tail) return true;
 	return false;
@@ -910,6 +915,8 @@ function liveFitsLeg(live, aware, origin) {
 export function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, lockedHex) {
 	if (!near?.length || !origin) return null;
 	const vars = new Set(callsignVariants(parsed.callsign));
+	const selectedOperating = String(aware?._operatingFlightIdIdent ?? "").replace(/\s/g, "").toUpperCase();
+	if (selectedOperating) vars.add(selectedOperating);
 	const atc = String(aware?.atcIdent ?? "").replace(/\s/g, "").toUpperCase();
 	if (atc) vars.add(atc);
 	const faIdent = String(aware?.ident ?? "").replace(/\s/g, "").toUpperCase();
@@ -933,6 +940,7 @@ export function pickAroundAircraft(near, parsed, aware, origin, dest, maxNm, loc
 		const r = String(a.r ?? "").replace(/[-\s]/g, "").toUpperCase();
 		if (tail && r && r !== tail) continue;
 		const hex = String(a.hex ?? "").toLowerCase();
+		if (fl === aware?._operatingFlightIdIdent && aware?.hex && hex && hex !== String(aware.hex).toLowerCase()) continue;
 		if (lockedHex && hex === String(lockedHex).toLowerCase() && rawMatchesQuery(a, parsed, aware)) locked = a;
 		if (vars.has(fl)) return a;
 		if (tail && r === tail) return a;
@@ -3251,7 +3259,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const identKey = parsed.callsign.toUpperCase();
 	const stateIdent = `${resumed?.scope ?? ""}${identKey}`;
 	let knownHex = hexByIdent.get(stateIdent) || null;
-	const hazardsP = loadHazards();
+	const hazardsP = timeStoryPhase("hazards_elapsed", loadHazards());
 	let scheduleError = null;
 	const rawAcP = knownHex
 		? safe(adsbByHex(knownHex), null)
@@ -3259,12 +3267,12 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			? safe(adsbByReg(parsed.registration), null)
 			: safe(adsbByCallsign(parsed.callsign), null);
 	const lockedLeg = activeFlightStatsLegLock(progressResume);
-	const [rawAc0, loadedAware, route] = await Promise.all([
-		rawAcP,
-		(resumed ? Promise.resolve(awareFromResume(resumed.resume, resumed.scope)) : loadAware(parsed.callsign, {
+	const [rawAc0, loadedAware, route] = await timeStoryPhase("initial_inputs_wait", Promise.all([
+		timeStoryPhase("initial_position_elapsed", rawAcP),
+		timeStoryPhase("schedule_elapsed", (resumed ? Promise.resolve(awareFromResume(resumed.resume, resumed.scope)) : loadAware(parsed.callsign, {
 			lockedLeg,
 			aircraft: rawAcP.then((raw) => raw ? toLive(raw) : null),
-		})).catch((err) => {
+		}))).catch((err) => {
 			scheduleError = err;
 			console.warn("[schedule-fallback-unavailable]", {
 				callsign: parsed.callsign,
@@ -3272,8 +3280,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			});
 			return null;
 		}),
-		safe(loadRoute(parsed.callsign), null),
-	]);
+		timeStoryPhase("route_hint_elapsed", safe(loadRoute(parsed.callsign), null)),
+	]));
 	let scheduleHeldByLegLock = false;
 	let publicAware = loadedAware;
 	if (!resumed && progressResume && publicAware?._publicScheduleSource === "flightstats"
@@ -3314,7 +3322,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	);
 	const fr24Completed = Boolean(Number.isFinite(publicAware?.gateIn?.actual)
 		|| (Number.isFinite(publicAware?.landing?.actual) && nowSec - publicAware.landing.actual >= FR24_COMPLETED_AFTER_LANDING_SEC));
-	const official = await loadOfficialFlightData(parsed.callsign, {
+	const official = await timeStoryPhase("official_provider_wait", loadOfficialFlightData(parsed.callsign, {
 		fr24FlightNumber: parsed.iata,
 		fr24OriginIata: publicAware?.originIata ?? null,
 		fr24DestIata: publicAware?.destIata ?? null,
@@ -3323,7 +3331,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		fr24SurfaceDeparture,
 		fr24AllowRouteOverride: !scheduleLiveConfirmed,
 		fr24Allowed: !fr24Completed,
-	});
+	}));
 	const liveFr24Aware = awareFromLiveFr24(official.fr24);
 	let fr24Aware = publicAware ? null : liveFr24Aware;
 	if (publicAware && liveFr24Aware && !flightStatsLegMatches(liveFr24Aware, flightStatsLeg(publicAware))
@@ -3375,7 +3383,13 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			officialRoute: [official.flightaware.origin?.iata ?? official.flightaware.origin?.icao ?? null, official.flightaware.destination?.iata ?? official.flightaware.destination?.icao ?? null]
 		});
 	}
-	const aware = mergeOfficialAware(currentLegAware, flightawareOfficial);
+	let aware = mergeOfficialAware(currentLegAware, flightawareOfficial);
+	// Only the selected live schedule record may add this exact operating alias.
+	// Never promote an opaque flightId supplied by device resume or a prior leg.
+	if (!resumed && !scheduleHeldByLegLock && publicAware && currentLegAware === publicAware
+		&& scheduleSource === "flightaware_public") {
+		aware = { ...aware, _operatingFlightIdIdent: operatingIdentFromSchedule(publicAware, parsed.callsign) };
+	}
 	// Flight-number route databases retain old assignments after a number moves
 	// to a different city pair. A fresh aircraft at the old origin cannot
 	// establish the destination or service date. Require a current schedule
@@ -3411,12 +3425,12 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const surfaceField = frGround?.onGround === true && haversineNm(frGround, dest) < haversineNm(frGround, origin) ? dest : origin;
 	const positionChoice = choosePosition(
 		[normalizedAdsb(adsbLive), official.fr24?.position, flightawareOfficial?.position],
-		{ callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean), registration: aware?.tail ?? null, hex: knownHex ?? aware?.hex ?? null },
+		{ callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent, aware?._operatingFlightIdIdent].filter(Boolean), registration: aware?.tail ?? null, hex: knownHex ?? aware?.hex ?? null },
 		Date.now() / 1000, fieldElev(surfaceField)
 	);
 	const phaseContext = { origin: { ...origin, elevationFt: fieldElev(origin) }, dest: { ...dest, elevationFt: fieldElev(dest) } };
 	let live = positionChoice.chosen ? normalizedToLive(positionChoice.chosen, phaseContext) : adsbLive ?? liveFromAware(aware, phaseContext);
-	const fieldsP = Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]);
+	const fieldsP = timeStoryPhase("airport_weather_elapsed", Promise.all([hydrateField(origin), hydrateField(dest), hazardsP]));
 	const inboundAlreadyDone = Boolean(aware?.takeoff?.actual) || Boolean(aware?.landing?.actual);
 	live = asOnGround(live, origin);
 	const routeKey = `${origin.iata}|${dest.iata}`;
@@ -3505,7 +3519,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		const match = pickAroundAircraft(nearDest, parsed, aware, dest, origin, 45, knownHex || live?.hex);
 		if (match) {
 			const cand = asOnGround(toLive(match), dest);
-			if (cand) live = cand;
+			// Arrival recovery must meet the same dated-leg fit as the initial fix
+			// before it can create durable takeoff evidence below.
+			if (cand && liveFitsLeg(cand, aware, origin)) live = cand;
 		}
 	}
 	const faLanded = Boolean(aware?.landing?.actual) || /arrived|landed/i.test(aware?.status ?? "");
@@ -3529,10 +3545,10 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// src/lib/flight-phase-state.server.ts for why this replaced module-scope
 	// Maps). Loaded once here, mutated locally exactly as the old Maps were,
 	// written back once near the end of this function.
-	const loadedPhase = await loadPhaseState(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys);
-	const loadedArrival = await arrivalStateStore.load(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys);
+	const loadedPhase = await timeStoryPhase("phase_state_read", loadPhaseState(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys));
+	const loadedArrival = await timeStoryPhase("arrival_state_read", arrivalStateStore.load(stateKey ?? "", legacyKeys, stateIdentity.recentLegacyKeys));
 	const memoryLeg = routeLeg(stateKey ?? "", origin.iata, dest.iata);
-	const loadedRoute = memoryLeg ? await routeMemoryStore.load(stateKey, memoryLeg, canPersistState ? legacyKeys : []) : null;
+	const loadedRoute = memoryLeg ? await timeStoryPhase("route_memory_read", routeMemoryStore.load(stateKey, memoryLeg, canPersistState ? legacyKeys : [])) : null;
 	let routeMemory = loadedRoute?.state ?? null;
 	let routeMemoryPersistence = loadedRoute?.status ?? "unavailable";
 	let pushNotBeforeUnix = loadedPhase.state.pushNotBeforeUnix ?? null;
@@ -3541,7 +3557,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	let phaseStatePersistence = loadedPhase.status;
 	const evidenceArgs = { schedule: aware, key: stateKey, reason: stateIdentity.reason,
 		now: Date.now() / 1000, deviceOnly: Boolean(resumed), origin, groundElevationFt: fieldElev(origin),
-		expected: { callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent].filter(Boolean),
+		expected: { callsigns: [parsed.callsign, aware?.ident, aware?.iataIdent, aware?._operatingFlightIdIdent].filter(Boolean),
 			registration: aware?.tail ?? null, hex: aware?.hex ?? knownHex ?? null } };
 	let takeoffEvidence = loadedPhase.state.confirmedTakeoff;
 	const memo = takeoffContinuity.get(stateKey);
@@ -3695,7 +3711,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			: inboundIdent && !inboundLocked
 				? safe(loadAware(inboundIdent), null)
 				: Promise.resolve(inboundAware);
-	const [[hydOrigin, hydDest, hazardsPack], inboundFetched] = await Promise.all([fieldsP, inboundFetch]);
+	const [[hydOrigin, hydDest, hazardsPack], inboundFetched] = await timeStoryPhase("weather_inbound_wait", Promise.all([fieldsP, inboundFetch]));
 	origin = hydOrigin;
 	dest = hydDest;
 	if (inboundFetched && (!inboundFetched.routeOnly || !inboundAware)) inboundAware = inboundFetched;
@@ -4224,7 +4240,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		openTrace = mergeTraces(full, recent);
 		motion = motionFromTrace(openTrace, origin);
 	}
-	const pirepPacks = await pirepPacksP;
+	const pirepPacks = await timeStoryPhase("pirep_remaining_wait", pirepPacksP);
 	const pirepNow = Date.now();
 	for (const f of pirepPacks.flatMap(pack => pack ?? [])) {
 		const coords = f.geometry?.type === "Point" ? f.geometry.coordinates : null;
@@ -4540,7 +4556,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		...(takeoffEvidence ? { confirmedTakeoff: takeoffEvidence } : {}),
 		...(pushNotBeforeUnix != null ? { pushNotBeforeUnix } : {}) };
 	if (canPersistState && !phaseStateEqual(loadedPhase.state, nextPhase)) {
-		const saveStatus = await savePhaseState(stateKey, nextPhase, loadedPhase.version);
+		const saveStatus = await timeStoryPhase("phase_state_write", savePhaseState(stateKey, nextPhase, loadedPhase.version));
 		if (saveStatus !== "ok") phaseStatePersistence = saveStatus;
 		if (saveStatus === "conflict_resolved" || saveStatus === "conflict_dropped") {
 			const winner = await loadPhaseState(stateKey);
@@ -4791,7 +4807,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		} : null;
 		const groundHex = String(live?.hex || aware?.hex || hexByIdent.get(stateIdent) || "").replace(/^~+/, "").toLowerCase() || null;
 		const groundRegistration = live?.registration ?? aware?.tail ?? aircraft?.registration ?? null;
-		const groundCallsign = live?.callsign ?? liveCs ?? aware?.ident ?? null;
+			const groundCallsign = live?.callsign ?? operatingIdent ?? liveCs ?? aware?.ident ?? null;
 		void (await import("./flight-ground-state.server.ts")).flightGroundStateStore.save({
 			landKey: stateKey,
 			requestedIdent: String(parsed.iata ?? parsed.callsign).replace(/\s/g, "").toUpperCase(),
@@ -4820,7 +4836,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 
 		const corridor = [];
 		if (corridorAps.length) {
-			const mets = await corridorMetsP;
+			const mets = await timeStoryPhase("corridor_weather_remaining_wait", corridorMetsP);
 			for (let i = 0; i < corridorAps.length; i++) {
 				const m = mets[i]?.metar;
 				if (!m) continue;
