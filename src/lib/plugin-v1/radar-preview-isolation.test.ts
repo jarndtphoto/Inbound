@@ -44,10 +44,12 @@ test("Radar proof deploys exactly three audited files byte-identical to its sepa
   // The application Preview inherits a production-capable DATABASE_URL. This
   // proof branch must deploy only through the separately audited fake project;
   // preserve the existing foundation guard without changing global settings.
-  assert.deepEqual(JSON.parse(await readFile("vercel.json", "utf8")), {
-    $schema: "https://openapi.vercel.sh/vercel.json",
-    git: { deploymentEnabled: { "plugin-v1-foundation": false, "plugin-v1-radar-transport": false, "plugin-v1-flight-handoff": false } },
-  });
+  const appVercel = JSON.parse(await readFile("vercel.json", "utf8"));
+  assert.equal(appVercel.$schema, "https://openapi.vercel.sh/vercel.json");
+  assert.equal(appVercel.git?.deploymentEnabled?.["**"], false);
+  assert.equal(appVercel.git?.deploymentEnabled?.main, true);
+  assert.equal(appVercel.git?.deploymentEnabled?.["preview/inbound-qa"], true);
+  assert.notEqual(appVercel.git?.deploymentEnabled?.["plugin-v1-live-airborne"], true);
 });
 
 test("Radar isolation rejects server egress, provider/production URLs, credentials and dynamic capabilities", () => {
