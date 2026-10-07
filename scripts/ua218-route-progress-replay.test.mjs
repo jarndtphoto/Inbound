@@ -1,3 +1,4 @@
+import { acquisitionFixture } from "./helpers/acquisition-fixture.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -54,7 +55,7 @@ test('UA218 Production prefix drops the previous HNL arrival, persists the curre
       if (url.hostname === 'api.adsbdb.com') return Response.json({ response: { flightroute: null } });
       throw Error('Unexpected mocked provider: ' + url);
     };
-    await build({ configFile: false, logLevel: 'silent', plugins: [{ name: 'test-ua218-route-db', enforce: 'pre', transform(code, id) {
+    await build({ configFile: false, logLevel: 'silent', plugins: [acquisitionFixture(), { name: 'test-ua218-route-db', enforce: 'pre', transform(code, id) {
       if (id === resolve('src/lib/story.server.ts')) return code + '\nexport { getSql } from "./db.ts";';
     } }], build: { ssr: resolve('src/lib/story.server.ts'), outDir: dir,
       rollupOptions: { output: { entryFileNames: 'story.mjs' } } } });

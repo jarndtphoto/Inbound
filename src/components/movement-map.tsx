@@ -1,6 +1,7 @@
 import { groundObservationAge, groundStoryObservation } from "@/lib/ground-story-position";
 import { resolveGroundIdentity } from "@/lib/ground-position-identity";
-import { groundHistoryKey } from "@/lib/ground-history-key";
+import { groundHistoryKey, groundHistoryLegKey } from "@/lib/ground-history-key";
+import { compatibleGroundContinuity, retainedGroundFix, retainNewestGroundFix, type GroundContinuity, type GroundDisplayFix } from "@/lib/ground-continuity";
 import { advanceGroundMotion, type GroundMotionState } from "@/lib/ground-motion";
 import { phaseOf } from "@/lib/aircraft-phase";
 import { groundCoverageNotice } from "@/lib/ground-coverage";
@@ -16,7 +17,7 @@ import { getGroundPosition } from "@/lib/ground-position";
 import { groundPositionQueryKey } from "@/lib/ground-position-key";
 import { logGroundTiming } from "@/lib/ground-timing";
 import type { FlightStory } from "@/lib/types";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const W = 800;
@@ -305,6 +306,7 @@ function GroundMovementMap({
   active?: boolean;
 }) {
   const pageVisible = usePageVisible();
+  const queryClient = useQueryClient();
   const airport = mode.airport;
   const groundTimingQueryLoggedRef = useRef<string | null>(null);
   const groundTimingFixLoggedRef = useRef<string | null>(null);
@@ -349,7 +351,7 @@ function GroundMovementMap({
   // especially when the same flight number continues on another segment.
   // Keep using the leg-specific resume tail/hex as an identity hint for the
   // arrival ground lookup; it is never used as a position by itself.
-  const identity = resolveGroundIdentity({
+  const currentIdentity = resolveGroundIdentity({
     registration: storyAircraft?.registration,
     hex: storyAircraft?.hex,
     callsign: storyAircraft?.callsign ?? story.callsign,
@@ -358,6 +360,14 @@ function GroundMovementMap({
     hex: aircraft?.hex ?? story.resume?.hex,
     callsign: aircraft?.callsign,
   });
+  const continuityLeg = groundHistoryLegKey(story);
+  const continuityKey = useMemo(() => ["ground-observed-continuity-v1", continuityLeg, airport.iata, mode.kind] as const,
+    [continuityLeg, airport.iata, mode.kind]);
+  const retained = compatibleGroundContinuity(queryClient.getQueryData<GroundContinuity>(continuityKey), {
+    legKey: continuityLeg, airportIata: airport.iata, movementKind: mode.kind,
+    lat: airport.lat, lon: airport.lon, identity: currentIdentity,
+  });
+  const identity = resolveGroundIdentity(currentIdentity, retained);
   const identityRegistration = identity.registration;
   const identityHex = identity.hex?.replace(/^~+/, "").toLowerCase() || null;
   const identityCallsign = identity.callsign;
@@ -447,7 +457,7 @@ function GroundMovementMap({
   // can report the same aircraft at slightly different timestamps/positions in
   // those two streams; mixing them can manufacture a reciprocal heading.
   type MotionSource = "story" | "ground";
-  type FastFix = NonNullable<typeof storyFast> | NonNullable<typeof queriedCandidate>;
+  type FastFix = GroundDisplayFix;
   const motionTracksRef = useRef<{ key: string; story: GroundMotionState | null; ground: GroundMotionState | null }>({
     key: identityKey,
     story: null,
@@ -469,7 +479,7 @@ function GroundMovementMap({
   if (queriedCandidate) candidates.push({ fix: queriedCandidate, source: "ground" });
   candidates.sort((a, b) => b.fix.seenAt - a.fix.seenAt);
   const lastFastRef = useRef<{ key: string; fix: FastFix } | null>(null);
-  const previousFast = lastFastRef.current?.key === identityKey ? lastFastRef.current.fix : null;
+  const previousFast = lastFastRef.current?.key === identityKey ? lastFastRef.current.fix : retainedGroundFix(retained, nowMs);
   const newestCandidate = candidates[0] ?? null;
   // A miss in the newer feed must not move the aircraft back to an older
   // cached story. Hold the newest actual observation until it expires.
@@ -480,11 +490,22 @@ function GroundMovementMap({
   const motionTrack = selectedFast ? motionTracksRef.current[selectedFast.source]?.confirmedTrack ?? null : null;
 
   if (fast) lastFastRef.current = { key: fastKey, fix: fast };
+  useEffect(() => {
+    if (!fast || !continuityLeg) return;
+    // This observation cache belongs to the existing QueryClient, outside the
+    // tab's mount lifetime. Misses never replace it, and reads never re-date it.
+    const previous = queryClient.getQueryData<GroundContinuity>(continuityKey);
+    const next = retainNewestGroundFix(previous, {
+      legKey: continuityLeg, airportIata: airport.iata, movementKind: mode.kind,
+      registration: fast.registration ?? identityRegistration, hex: identityHex, fix: fast,
+    });
+    if (next !== previous) queryClient.setQueryData<GroundContinuity>(continuityKey, next);
+  }, [queryClient, continuityKey, continuityLeg, airport.iata, mode.kind, identityRegistration, identityHex, fast]);
 
-  const heldFast = !fast && lastFastRef.current?.key === fastKey ? lastFastRef.current.fix : null;
+  const heldFast = !fast ? previousFast : null;
   const fastFix = fast ?? heldFast;
   const fastAge = fastFix?.seenAt ? Math.max(0, Date.now() / 1000 - fastFix.seenAt) : null;
-  const hasEverFast = lastFastRef.current?.key === fastKey;
+  const hasEverFast = lastFastRef.current?.key === fastKey || Boolean(retained);
   const showHeldFast = Boolean(fastFix && (fast || (fastAge ?? Infinity) <= 120));
 
   const displayAircraft: AircraftSnapshot | null = showHeldFast && fastFix ? {

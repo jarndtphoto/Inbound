@@ -128,9 +128,9 @@ async function safe(p, fallback) {
 	}
 }
 const TRACE_HOSTS = [
-	"https://globe.theairtraffic.com",
-	"https://globe.adsb.fi",
-	"https://globe.airplanes.live",
+	{ provider: "trace-airtraffic", host: "https://globe.theairtraffic.com" },
+	{ provider: "trace-fi", host: "https://globe.adsb.fi" },
+	{ provider: "trace-al", host: "https://globe.airplanes.live" },
 ];
 function parseTraceJson(data) {
 	const base = data?.timestamp ?? 0;
@@ -161,25 +161,25 @@ function parseTraceJson(data) {
 	return out;
 }
 async function fetchTrace(hex, kind) {
-	const id = hex.toLowerCase();
+	const id = String(hex ?? "").toLowerCase();
+	if (!/^[0-9a-f]{6}$/.test(id) || (kind !== "trace_full" && kind !== "trace_recent")) return [];
 	return cached(`trace3:${kind}:${id}`, kind === "trace_recent" ? 8e3 : 25e3, async () => {
-		const attempts = TRACE_HOSTS.map(async (host) => {
+		const { acquireFreeAdsb } = await import("./adsb-acquisition.server.ts");
+		const attempts = TRACE_HOSTS.map(async ({ provider, host }) => {
 			const url = `${host}/data/traces/${id.slice(-2)}/${kind}_${id}.json`;
-			const res = await fetch(url, {
-				headers: {
-					"User-Agent": UA,
-					Accept: "application/json"
-				},
-				signal: AbortSignal.timeout(2800)
-			});
-			if (!res.ok) throw new Error("trace miss");
-			const parsed = parseTraceJson(await res.json());
+			// The shared family gate owns dispatch spacing, coalescing and HTTP
+			// cancellation. A story viewer must never bypass or abort that work.
+			const acquired = await acquireFreeAdsb({ provider, url, timeoutMs: 2800 });
+			// Retained payloads preserve absolute source timestamps; reading them
+			// during backoff must not manufacture fresh observations.
+			const parsed = parseTraceJson(acquired.data);
 			if (!parsed.length) throw new Error("trace empty");
 			return parsed;
 		});
 		return await Promise.any(attempts).catch(() => []);
 	});
 }
+
 function uniqueTrack(points, minNm = 6) {
 	const out = [];
 	const gap = Math.max(0.4, minNm);

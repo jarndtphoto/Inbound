@@ -5,17 +5,19 @@ import { PGlite } from '@electric-sql/pglite';
 import { acquireFreeAdsb, createAdsbAcquirer, createAdsbAcquisitionStore, retryAfterMs, waitForAdsbViewer } from '../src/lib/adsb-acquisition.server.ts';
 import { fuseProviderLists, resetFusion } from '../src/lib/adsb-fusion.ts';
 
-async function fixture() {
+async function fixture(now, seedLegacy) {
   const pg = new PGlite({ parsers: { 20: Number } });
   await pg.waitReady;
   await pg.exec(await readFile(new URL('../migrations/0008_adsb_acquisition.sql', import.meta.url), 'utf8'));
+  if (seedLegacy) await seedLegacy(pg);
+  await pg.exec(await readFile(new URL('../migrations/0009_adsb_dispatch_spacing.sql', import.meta.url), 'utf8'));
   const sql = async (strings, ...values) => {
     let text = strings[0];
     values.forEach((_, i) => { text += `$${i + 1}${strings[i + 1]}`; });
     return (await pg.query(text, values)).rows;
   };
   sql.query = async (text, values = []) => (await pg.query(text, values)).rows;
-  return { pg, sql, store: createAdsbAcquisitionStore(async () => sql) };
+  return { pg, sql, store: createAdsbAcquisitionStore(async () => sql, { now }) };
 }
 const request = (suffix = 'abc123', provider = 'fi') => ({ provider,
   url: `https://${provider === 'fi' ? 'opendata.adsb.fi' : 'api.adsb.lol'}/api/v2/hex/${suffix}`, timeoutMs: 4000 });
@@ -37,28 +39,42 @@ test('many concurrent viewers and two cold acquirers share one request and immut
   } finally { await pg.close(); }
 });
 
-test('distinct keys have a shared two-admission window ceiling, without a global in-flight lease', async () => {
-  const { pg, store } = await fixture();
+test('cross-instance distinct keys require 1250ms between admissions without boundary bursts', async () => {
+  let now = Date.now();
+  const { pg, sql, store } = await fixture(() => now);
+  const other = createAdsbAcquisitionStore(async () => sql, { now: () => now });
   try {
-    const attempts = await Promise.all(Array.from({ length: 12 }, (_, i) => store.acquire(`key-${i}`, 'fi', `owner-${i}`)));
-    assert.equal(attempts.filter(v => v != null).length, 2);
-    assert.ok(await store.admissionRetryAt('fi') > Date.now());
-    await pg.exec('update adsb_provider_gate set window_at=0');
-    assert.ok(await store.acquire('key-new', 'fi', 'new-owner'), 'new window permits another key while earlier HTTP may remain in flight');
+    const initial = await Promise.all(Array.from({ length: 12 }, (_, i) =>
+      (i % 2 ? store : other).acquire(`key-${i}`, 'fi', `owner-${i}`)));
+    assert.equal(initial.filter(v => v != null).length, 1);
+    const winner = initial.findIndex(v => v != null);
+    const first = initial[winner];
+    await store.release(`key-${winner}`, `owner-${winner}`);
+    assert.equal(await other.admissionRetryAt('fi'), first + 1250);
+    now = first + 999;
+    assert.equal(await other.acquire('at-boundary-minus-one', 'fi', 'x'), null);
+    now = first + 1000;
+    assert.equal(await other.acquire('at-old-boundary', 'fi', 'y'), null);
+    now = first + 1249;
+    assert.equal(await other.acquire('at-margin-minus-one', 'fi', 'z'), null);
+    now = first + 1250;
+    assert.equal(await other.acquire('next', 'fi', 'next'), now);
+    assert.equal(await store.acquire('same-tick', 'fi', 'same'), null);
   } finally { await pg.close(); }
 });
 
-test('concurrent different-key viewers cannot exceed the admitted upstream burst', async () => {
-  const { pg, store } = await fixture();
+test('concurrent different-key cold viewers cannot emit a provider burst', async () => {
+  const now = Date.now();
+  const { pg, sql } = await fixture(() => now);
   try {
-    await pg.query("insert into adsb_provider_gate(provider, window_at) values ('fi', $1)", [Date.now() + 60_000]);
     let calls = 0;
     const fetch = async () => { calls++; return Response.json({ ac: [] }); };
-    const viewers = Array.from({ length: 12 }, () => createAdsbAcquirer(store, { fetch, wait: async () => {} }));
+    const viewers = Array.from({ length: 12 }, () => createAdsbAcquirer(
+      createAdsbAcquisitionStore(async () => sql, { now: () => now }), { fetch, now: () => now, wait: async () => {} }));
     const results = await Promise.all(viewers.map((acquire, i) => acquire(request(`distinct-${i}`))));
-    assert.equal(calls, 2);
-    assert.equal(results.filter(r => r.status === 'ok').length, 2);
-    assert.ok(results.filter(r => r.status !== 'ok').every(r => r.status === 'busy' && r.retryAt > Date.now()));
+    assert.equal(calls, 1);
+    assert.equal(results.filter(r => r.status === 'ok').length, 1);
+    assert.ok(results.filter(r => r.status !== 'ok').every(r => r.status === 'busy' && r.retryAt > now));
   } finally { await pg.close(); }
 });
 
@@ -104,14 +120,14 @@ test('expired owner cannot overwrite or release a reacquired lease; freshness bl
   const { pg, store } = await fixture();
   try {
     await store.acquire('one', 'fi', 'old');
-    await pg.exec("update adsb_shared_cache set refresh_expires_at=0; update adsb_provider_gate set window_at=0");
+    await pg.exec("update adsb_shared_cache set refresh_expires_at=0; update adsb_provider_gate set admitted_at=0, dispatch_expires_at=0, next_dispatch_at=0");
     const started = await store.acquire('one', 'fi', 'new');
     await store.complete('one', 'fi', 'old', { ac: ['old'] }, Date.now(), started);
     await store.release('one', 'old');
     assert.equal((await store.read('one')).payload, null);
     assert.ok((await store.read('one')).refresh_expires_at > Date.now());
     await store.complete('one', 'fi', 'new', { ac: ['new'] }, Date.now(), started);
-    await pg.exec('update adsb_provider_gate set window_at=0');
+    await pg.exec('update adsb_provider_gate set admitted_at=0, dispatch_expires_at=0, next_dispatch_at=0');
     assert.equal(await store.acquire('one', 'fi', 'redundant'), null);
     assert.deepEqual((await store.read('one')).payload, { ac: ['new'] });
   } finally { await pg.close(); }
@@ -251,5 +267,176 @@ test('bounded cleanup exceeds maximum per-minute admission rate and retains live
     await store.cleanup();
     const rows = (await pg.query('select cache_key from adsb_shared_cache')).rows;
     assert.deepEqual(rows, [{ cache_key: 'live' }]);
+  } finally { await pg.close(); }
+});
+
+
+test('429 retries after cooldown expiry escalate until a valid newer success', async () => {
+  let now = Date.now();
+  const { pg, store } = await fixture(() => now);
+  try {
+    const fetch = async () => new Response('', { status: 429 });
+    for (const [index, expected] of [60000, 120000, 300000].entries()) {
+      const acquired = createAdsbAcquirer(store, { fetch, now: () => now, wait: async () => {} });
+      const result = await acquired(request(`rate-${index}`));
+      assert.equal(result.status, '429');
+      assert.equal(result.retryAt, now + expected);
+      now = result.retryAt + 1;
+    }
+  } finally { await pg.close(); }
+});
+
+test('expired or wrong-token success never resets failures; valid newer success does', async () => {
+  let now = Date.now();
+  const { pg, store } = await fixture(() => now);
+  try {
+    const old = await store.acquire('old', 'fi', 'old-token');
+    now += 1;
+    await store.fail('fi', '429');
+    now = await store.cooldown('fi') + 1;
+    const later = await store.acquire('later', 'fi', 'later-token');
+    await store.complete('old', 'fi', 'old-token', { ac: [] }, now, later);
+    await store.complete('later', 'fi', 'wrong-token', { ac: [] }, now, later);
+    assert.equal((await pg.query("select failures from adsb_provider_gate where provider='fi'")).rows[0].failures, 1);
+    await store.complete('later', 'fi', 'later-token', { ac: [] }, now, later);
+    assert.equal((await pg.query("select failures from adsb_provider_gate where provider='fi'")).rows[0].failures, 0);
+    await store.release('later', 'later-token');
+    now += 1250;
+    assert.ok(await store.acquire('next', 'fi', 'next-token'));
+    await store.fail('fi', '429');
+    assert.equal(await store.cooldown('fi'), now + 120000, "valid success must not erase the independent 429 streak");
+    assert.ok(old < later);
+  } finally { await pg.close(); }
+});
+
+test('malformed HTTP200 payload cannot reset a prior rate-limit failure', async () => {
+  let now = Date.now();
+  const { pg, store } = await fixture(() => now);
+  try {
+    await store.acquire('first', 'fi', 'first-token');
+    await store.fail('fi', '429');
+    now = await store.cooldown('fi') + 1;
+    const acquire = createAdsbAcquirer(store, { fetch: async () => Response.json({ error: 'rate limited' }), now: () => now });
+    const result = await acquire(request('malformed'));
+    assert.equal(result.status, 'error');
+    assert.equal((await pg.query("select failures from adsb_provider_gate where provider='fi'")).rows[0].failures, 2);
+  } finally { await pg.close(); }
+});
+
+test('a slow dispatch retains its provider slot across cold instances and live/trace hosts', async () => {
+  let now = Date.now();
+  const { pg, sql, store } = await fixture(() => now);
+  let release, started;
+  const hold = new Promise(resolve => { release = resolve; });
+  const reachedFetch = new Promise(resolve => { started = resolve; });
+  let calls = 0;
+  try {
+    const first = createAdsbAcquirer(store, { now: () => now, wait: async () => {}, fetch: async () => {
+      calls++; started(); await hold; return Response.json({ ac: [] });
+    } })(request('slow'));
+    await reachedFetch;
+    now += 2000;
+    const otherStore = createAdsbAcquisitionStore(async () => sql, { now: () => now });
+    const second = createAdsbAcquirer(otherStore, { now: () => now, wait: async () => {}, fetch: async () => {
+      calls++; return Response.json({ timestamp: now / 1000, trace: [] });
+    } });
+    const trace = { provider: 'trace-fi', url: 'https://globe.adsb.fi/data/traces/23/trace_recent_abc123.json', timeoutMs: 2200 };
+    assert.equal((await second(trace)).status, 'busy');
+    assert.equal(calls, 1, 'no overlapping cold-instance dispatch while first HTTP is still active');
+    release(); assert.equal((await first).status, 'ok');
+    now += 1249;
+    assert.equal((await second(trace)).status, 'busy');
+    assert.equal(calls, 1);
+    now += 1;
+    assert.equal((await second(trace)).status, 'ok');
+    assert.equal(calls, 2);
+  } finally { release(); await pg.close(); }
+});
+
+test('a grant too close to lease expiry cannot begin an HTTP request longer than its remaining lease', async () => {
+  let now = Date.now();
+  const { pg, store } = await fixture(() => now);
+  let calls = 0;
+  try {
+    const delayed = { ...store, acquire: async (...args) => {
+      const result = await store.acquire(...args); now += 9500; return result;
+    } };
+    const result = await createAdsbAcquirer(delayed, { now: () => now, fetch: async () => {
+      calls++; return Response.json({ ac: [] });
+    } })(request('delayed'));
+    assert.equal(result.status, 'busy'); assert.equal(calls, 0);
+  } finally { await pg.close(); }
+});
+
+test('intermittent trace success retains API429 streak; quiet period permits recovery', async () => {
+  let now = Date.now();
+  const { pg, store } = await fixture(() => now);
+  try {
+    const invoke = (req, response) => createAdsbAcquirer(store, { now: () => now, wait: async () => {}, fetch: async () => response })(req);
+    let result = await invoke(request('first429'), new Response('', { status: 429 }));
+    assert.equal(result.retryAt, now + 60000);
+    now = result.retryAt + 1;
+    const trace = { provider: 'trace-fi', url: 'https://globe.adsb.fi/data/traces/23/trace_recent_abc123.json', timeoutMs: 2200 };
+    assert.equal((await invoke(trace, Response.json({ timestamp: now / 1000, trace: [] }))).status, 'ok');
+    now += 1250;
+    result = await invoke(request('second429'), new Response('', { status: 429 }));
+    assert.equal(result.retryAt, now + 120000);
+    now += 15 * 60000;
+    result = await invoke(request('quiet429'), new Response('', { status: 429, headers: { 'retry-after': '600' } }));
+    assert.equal(result.retryAt, now + 600000, 'quiet reset cannot shorten server Retry-After');
+    assert.equal((await pg.query("select rate_limit_failures from adsb_provider_gate where provider='fi'")).rows[0].rate_limit_failures, 1);
+  } finally { await pg.close(); }
+});
+
+test('a delayed dispatch-check reply cannot turn an expired grant into an HTTP call', async () => {
+  let now = Date.now();
+  const { pg, store } = await fixture(() => now);
+  let calls = 0;
+  try {
+    const delayed = { ...store, canDispatch: async (...args) => {
+      const result = await store.canDispatch(...args); now += 9500; return result;
+    } };
+    const result = await createAdsbAcquirer(delayed, { now: () => now, fetch: async () => {
+      calls++; return Response.json({ ac: [] });
+    } })(request('delayed-check'));
+    assert.equal(result.status, 'busy'); assert.equal(calls, 0);
+  } finally { await pg.close(); }
+});
+
+test('trace403 stays service-local while liveAPI remains permitted and429 remains family-wide', async () => {
+  let now = Date.now();
+  const { pg, store } = await fixture(() => now);
+  let calls = 0;
+  try {
+    const trace = { provider: 'trace-fi', url: 'https://globe.adsb.fi/data/traces/23/trace_recent_abc123.json', timeoutMs: 2200 };
+    const invoke = (req, response) => createAdsbAcquirer(store, { now: () => now, wait: async () => {}, fetch: async () => { calls++; return response; } })(req);
+    const denied = await invoke(trace, new Response('', { status: 403 }));
+    assert.equal(denied.status, '403'); assert.equal(denied.retryAt, now + 30 * 60000);
+    now += 1250;
+    assert.equal((await invoke(request('live-allowed'), Response.json({ ac: [] }))).status, 'ok');
+    now += 1250;
+    assert.equal((await invoke(trace, Response.json({ timestamp: now / 1000, trace: [] }))).status, 'backoff');
+    assert.equal(calls, 2, 'denied host never retried even after successful live lookup');
+    const rateLimited = await invoke(request('live-rate'), new Response('', { status: 429 }));
+    assert.equal(rateLimited.status, '429');
+    assert.ok(await store.cooldown('fi') > now);
+    assert.ok(await store.cooldown('trace-fi') >= rateLimited.retryAt);
+  } finally { await pg.close(); }
+});
+
+test('migration preserves legacy trace denial and spacing without imposing denial on liveAPI', async () => {
+  let now = Date.now();
+  const { pg, store } = await fixture(() => now, async pg => {
+    await pg.query("insert into adsb_provider_gate(provider, cooldown_until, failures, last_failure_at) values ('trace-fi',$1,1,$2),('fi',0,0,0)", [now + 1800000, now]);
+    await pg.query("update adsb_provider_gate set admitted_at=$1 where provider='trace-fi'", [now - 500]);
+  });
+  try {
+    assert.equal(await store.cooldown('trace-fi'), now + 1800000);
+    assert.equal(await store.cooldown('fi'), 0);
+    assert.equal(await store.admissionRetryAt('fi'), now + 750);
+    assert.equal(await store.acquire('too-early-live', 'fi', 'early-owner'), null);
+    now += 750;
+    assert.ok(await store.acquire('live', 'fi', 'live-owner'));
+    assert.equal(await store.acquire('trace', 'trace-fi', 'trace-owner'), null);
   } finally { await pg.close(); }
 });

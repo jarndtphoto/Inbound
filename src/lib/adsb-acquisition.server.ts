@@ -13,6 +13,11 @@ const HOSTS: Record<FreeAdsbProvider, string> = {
   "trace-airtraffic": "globe.theairtraffic.com", "trace-fi": "globe.adsb.fi", "trace-al": "globe.airplanes.live",
 };
 const FRESH_MS = 5_000, RETAIN_MS = 120_000, LEASE_MS = 10_000;
+const RATE_LIMIT_QUIET_MS = 15 * 60_000;
+// https://github.com/adsbfi/opendata/blob/main/README.md: public API1request/sec.
+const DISPATCH_GAP_MS = 1250;
+const MAX_HTTP_MS = 4000, DISPATCH_CHECK_BUDGET_MS = 1000, DISPATCH_MARGIN_MS = 250;
+const quotaScope = (provider: FreeAdsbProvider): FreeAdsbProvider => provider === "trace-fi" ? "fi" : provider === "trace-al" ? "al" : provider;
 type CacheRow = { payload: unknown; received_at: number | null; fresh_until: number; retain_until: number; refresh_expires_at: number };
 const empty = (status: AcquisitionStatus, retryAt?: number): AdsbAcquisition => ({ data: null, receivedAt: null, status, cache: false, retryAt });
 
@@ -23,7 +28,18 @@ export function retryAfterMs(value: string | null, now: number): number {
   return Number.isFinite(ms) && ms > 0 ? ms : 0;
 }
 
-export function createAdsbAcquisitionStore(sqlProvider: () => Promise<Sql>) {
+function validPayload(provider: FreeAdsbProvider, data: unknown): boolean {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const payload = data as Record<string, unknown>;
+  if (payload.error || (typeof payload.msg === "string" && !/^(no error|ok|success)$/i.test(payload.msg))) return false;
+  return provider.startsWith("trace-")
+    ? Number.isFinite(payload.timestamp) && Array.isArray(payload.trace)
+    : Array.isArray(payload.ac) || Array.isArray(payload.aircraft);
+}
+
+export function createAdsbAcquisitionStore(sqlProvider: () => Promise<Sql>, options: { now?: () => number } = {}) {
+  // Only injected tests use application time. Production admission uses DB time.
+  const now = () => options.now?.() ?? null;
   async function read(key: string) {
     const sql = await sqlProvider();
     return (await sql<CacheRow>`select payload, received_at, fresh_until, retain_until, refresh_expires_at
@@ -31,66 +47,107 @@ export function createAdsbAcquisitionStore(sqlProvider: () => Promise<Sql>) {
   }
   async function acquire(key: string, provider: FreeAdsbProvider, token: string) {
     const sql = await sqlProvider();
-    await sql`insert into adsb_provider_gate(provider) values (${provider}) on conflict do nothing`;
-    // Updating the provider row serializes admissions against cooldown writes.
-    // Distinct keys remain independent: no global mutex that starves alias lookups.
+    const scope = quotaScope(provider);
+    await sql`insert into adsb_provider_gate(provider) values (${scope}) on conflict do nothing`;
     const rows = await sql.query<{ acquired_at: number }>(`
       with gate as (
-        update adsb_provider_gate set admitted_at = floor(extract(epoch from clock_timestamp()) * 1000)::bigint,
-          window_at = case when window_at + 1000 <= floor(extract(epoch from clock_timestamp()) * 1000)::bigint
-            then floor(extract(epoch from clock_timestamp()) * 1000)::bigint else window_at end,
-          window_calls = case when window_at + 1000 <= floor(extract(epoch from clock_timestamp()) * 1000)::bigint then 1 else window_calls + 1 end
-        where provider = $2 and cooldown_until <= floor(extract(epoch from clock_timestamp()) * 1000)::bigint
-          and (window_calls < 2 or window_at + 1000 <= floor(extract(epoch from clock_timestamp()) * 1000)::bigint)
+        update adsb_provider_gate set admitted_at = coalesce($5::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint),
+          dispatch_token=$3, dispatch_expires_at=coalesce($5::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)+$4
+        where provider=$6
+          and greatest(cooldown_until, next_dispatch_at, dispatch_expires_at) <= coalesce($5::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)
+          and not exists (select 1 from adsb_source_access where provider=$2
+            and denied_until > coalesce($5::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint))
+          and not exists (select 1 from adsb_shared_cache where cache_key=$1
+            and greatest(refresh_expires_at, fresh_until) > coalesce($5::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint))
         returning admitted_at
       ), claim as (
         insert into adsb_shared_cache(cache_key, provider, refresh_token, refresh_expires_at)
-        select $1, $2, $3, admitted_at + $4 from gate
-        on conflict(cache_key) do update set refresh_token = excluded.refresh_token,
-          refresh_expires_at = excluded.refresh_expires_at
-        where adsb_shared_cache.refresh_expires_at <= excluded.refresh_expires_at - $4
-          and adsb_shared_cache.fresh_until <= excluded.refresh_expires_at - $4
+        select $1, $2, $3, admitted_at+$4 from gate
+        on conflict(cache_key) do update set refresh_token=excluded.refresh_token,
+          refresh_expires_at=excluded.refresh_expires_at
+        where adsb_shared_cache.refresh_expires_at <= excluded.refresh_expires_at-$4
+          and adsb_shared_cache.fresh_until <= excluded.refresh_expires_at-$4
         returning cache_key
       ) select admitted_at as acquired_at from gate where exists(select 1 from claim)
-    `, [key, provider, token, LEASE_MS]);
+    `, [key, provider, token, LEASE_MS, now(), scope]);
+    if (!rows[0]) await release(key, token);
     return rows[0]?.acquired_at ?? null;
   }
   async function cooldown(provider: FreeAdsbProvider) {
     const sql = await sqlProvider();
-    return (await sql<{ cooldown_until: number }>`select cooldown_until from adsb_provider_gate where provider = ${provider}`)[0]?.cooldown_until ?? 0;
+    return (await sql<{ cooldown_until: number }>`select greatest(g.cooldown_until, coalesce(a.denied_until,0)) as cooldown_until
+      from adsb_provider_gate g left join adsb_source_access a on a.provider=${provider}
+      where g.provider=${quotaScope(provider)}`)[0]?.cooldown_until ?? 0;
   }
   async function admissionRetryAt(provider: FreeAdsbProvider) {
     const sql = await sqlProvider();
-    return (await sql<{ retry_at: number }>`select greatest(cooldown_until,
-      case when window_calls >= 2 then window_at + 1000 else 0 end) as retry_at
-      from adsb_provider_gate where provider=${provider}`)[0]?.retry_at ?? 0;
+    return (await sql<{ retry_at: number }>`select greatest(g.cooldown_until, g.next_dispatch_at, g.dispatch_expires_at, coalesce(a.denied_until,0)) as retry_at
+      from adsb_provider_gate g left join adsb_source_access a on a.provider=${provider}
+      where g.provider=${quotaScope(provider)}`)[0]?.retry_at ?? 0;
+  }
+  async function canDispatch(key: string, provider: FreeAdsbProvider, token: string) {
+    const sql = await sqlProvider();
+    const rows = await sql.query(`select 1 from adsb_provider_gate g join adsb_shared_cache c on c.cache_key=$1
+      where g.provider=$2 and g.dispatch_token=$3 and c.refresh_token=$3
+        and g.cooldown_until <= coalesce($4::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)
+        and not exists(select 1 from adsb_source_access where provider=$5
+          and denied_until > coalesce($4::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint))
+        and least(g.dispatch_expires_at, c.refresh_expires_at) > coalesce($4::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)+$6`,
+    [key, quotaScope(provider), token, now(), provider, MAX_HTTP_MS + DISPATCH_GAP_MS + DISPATCH_CHECK_BUDGET_MS + DISPATCH_MARGIN_MS]);
+    return rows.length > 0;
   }
   async function complete(key: string, provider: FreeAdsbProvider, token: string, data: unknown, receivedAt: number, acquiredAt: number) {
     const sql = await sqlProvider();
-    // Token fencing prevents a late, expired owner from overwriting its successor.
-    await sql.query(`update adsb_shared_cache set payload=$4::jsonb, received_at=$5,
-      fresh_until=$5::bigint+$6::bigint, retain_until=$5::bigint+$7::bigint, refresh_token=null, refresh_expires_at=0
+    // Reset history only when a current, unexpired provider AND key owner stores
+    // a successful response. Zero-row/late/wrong-token writes cannot reset it.
+    await sql.query(`with stored as (
+      update adsb_shared_cache set payload=$4::jsonb, received_at=$5,
+        fresh_until=$5::bigint+$6::bigint, retain_until=$5::bigint+$7::bigint, refresh_token=null, refresh_expires_at=0
       where cache_key=$1 and provider=$2 and refresh_token=$3
-        and refresh_expires_at > floor(extract(epoch from clock_timestamp()) * 1000)::bigint`,
-    [key, provider, token, JSON.stringify(data), receivedAt, FRESH_MS, RETAIN_MS]);
-    // A request admitted before a newer failure cannot reset its failure history.
-    await sql`update adsb_provider_gate set failures=0 where provider=${provider} and last_failure_at < ${acquiredAt}`;
+        and refresh_expires_at=$8::bigint+$10::bigint
+        and refresh_expires_at > coalesce($9::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)
+        and exists(select 1 from adsb_provider_gate where provider=$11 and dispatch_token=$3
+          and dispatch_expires_at > coalesce($9::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint))
+      returning provider
+    ) update adsb_provider_gate set failures=0 where provider=$11 and dispatch_token=$3
+      and last_failure_at < $8 and exists(select 1 from stored)`,
+    [key, provider, token, JSON.stringify(data), receivedAt, FRESH_MS, RETAIN_MS, acquiredAt, now(), LEASE_MS, quotaScope(provider)]);
   }
+  // Valid successes reset generic failure counts only. A 429 streak survives
+  // intermittent API/trace successes, decaying after 15 minutes without a 429.
+  // Retry-After remains a floor even when it exceeds our 60/120/300s policy.
   async function fail(provider: FreeAdsbProvider, status: AcquisitionStatus, retryMs = 0) {
     const sql = await sqlProvider();
-    await sql.query(`update adsb_provider_gate set failures=least(failures+1, 1000),
-      last_failure_at=floor(extract(epoch from clock_timestamp()) * 1000)::bigint,
-      cooldown_until=greatest(cooldown_until, floor(extract(epoch from clock_timestamp()) * 1000)::bigint +
-        greatest($3::bigint, case when $2='403' then 1800000 when $2='429' then
-          case when failures=0 then 60000 when failures=1 then 120000 else 300000 end
+    if (status === "403") {
+      await sql.query(`insert into adsb_source_access(provider, denied_until)
+        values($1, coalesce($2::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)+$3)
+        on conflict(provider) do update set denied_until=greatest(adsb_source_access.denied_until, excluded.denied_until)`,
+      [provider, now(), Math.max(30 * 60_000, Math.ceil(retryMs))]);
+      return;
+    }
+    await sql.query(`update adsb_provider_gate set failures=least(failures+1,1000),
+      last_failure_at=coalesce($4::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint),
+      rate_limit_failures=case when $2='429' then
+        case when last_rate_limit_at <= coalesce($4::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)-$5
+          then 1 else least(rate_limit_failures+1,1000) end else rate_limit_failures end,
+      last_rate_limit_at=case when $2='429' then coalesce($4::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)
+        else last_rate_limit_at end,
+      cooldown_until=greatest(cooldown_until, coalesce($4::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)+
+        greatest($3::bigint, case when $2='429' then
+          case when last_rate_limit_at <= coalesce($4::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)-$5
+            or rate_limit_failures=0 then 60000 when rate_limit_failures=1 then 120000 else 300000 end
           else case when failures=0 then 6000 when failures=1 then 15000 else 40000 end end))
-      where provider=$1`, [provider, status, Math.ceil(retryMs)]);
+      where provider=$1`, [quotaScope(provider), status, Math.ceil(retryMs), now(), RATE_LIMIT_QUIET_MS]);
   }
   async function release(key: string, token: string) {
     const sql = await sqlProvider();
     await sql`update adsb_shared_cache set refresh_token=null, refresh_expires_at=0 where cache_key=${key} and refresh_token=${token}`;
+    // Spacing starts AFTER completion, protecting against slow/delayed dispatch.
+    await sql.query(`update adsb_provider_gate set dispatch_token=null, dispatch_expires_at=0,
+      next_dispatch_at=greatest(next_dispatch_at, coalesce($2::bigint, floor(extract(epoch from clock_timestamp()) * 1000)::bigint)+$3)
+      where dispatch_token=$1`, [token, now(), DISPATCH_GAP_MS]);
   }
-  // Six providers admit <=720 new keys/minute; 1024 amortizes above that
+  // Four quota scopes admit <200 new keys/minute; 1024 amortizes above that
   // maximum while keeping each demand-driven cleanup bounded.
   async function cleanup() {
     const sql = await sqlProvider();
@@ -101,7 +158,7 @@ export function createAdsbAcquisitionStore(sqlProvider: () => Promise<Sql>) {
       and retain_until < floor(extract(epoch from clock_timestamp()) * 1000)::bigint
       and refresh_expires_at < floor(extract(epoch from clock_timestamp()) * 1000)::bigint`;
   }
-  return { read, acquire, cooldown, admissionRetryAt, complete, fail, release, cleanup };
+  return { read, acquire, cooldown, admissionRetryAt, canDispatch, complete, fail, release, cleanup };
 }
 
 type Store = ReturnType<typeof createAdsbAcquisitionStore>;
@@ -127,8 +184,8 @@ export function createAdsbAcquirer(store: Store, options: {
       if (hit) return hit;
       token = crypto.randomUUID();
       let acquiredAt = await store.acquire(key, request.provider, token);
-      // Bounded admission retries let distinct keys progress without a global
-      // in-flight mutex. The SQL fixed-window cap admits at most two per second.
+      // Bounded retries let the next eligible request progress. The provider
+      // lease remains held through HTTP completion; waiting never bypasses it.
       for (let attempt = 0; acquiredAt == null && attempt < 2; attempt += 1) {
         const cooldownUntil = await store.cooldown(request.provider);
         if (cooldownUntil > clock()) break;
@@ -137,7 +194,7 @@ export function createAdsbAcquirer(store: Store, options: {
         if ((row?.refresh_expires_at ?? 0) > clock()) break;
         const retryAt = await store.admissionRetryAt(request.provider);
         if (retryAt <= clock()) break;
-        await wait(Math.min(1100, Math.max(1, retryAt - clock() + 10)));
+        await wait(Math.min(1300, Math.max(1, retryAt - clock() + 10)));
         acquiredAt = await store.acquire(key, request.provider, token);
       }
       if (acquiredAt == null) {
@@ -153,8 +210,17 @@ export function createAdsbAcquirer(store: Store, options: {
         return { ...(cached(row, RETAIN_MS, "busy") ?? empty("busy")), retryAt: Math.max(row?.refresh_expires_at ?? 0, await store.admissionRetryAt(request.provider), clock() + 1000) };
       }
       // Snapshot age is anchored once, before HTTP, including network latency.
-      const receivedAt = clock();
+      let receivedAt = clock();
       try {
+        const checkStartedAt = clock();
+        const permitted = await store.canDispatch(key, request.provider, token);
+        receivedAt = clock();
+        // SQL needs >=6.5s remaining. A reply delayed >1s is no longer a safe
+        // dispatch grant: retain >=4s HTTP +1.25s spacing plus250ms margin.
+        const checkElapsed = receivedAt - checkStartedAt;
+        if (!permitted || checkElapsed < 0 || checkElapsed > DISPATCH_CHECK_BUDGET_MS) {
+          return empty("busy", Math.max(clock() + DISPATCH_GAP_MS, await store.admissionRetryAt(request.provider)));
+        }
         let response: Response | undefined;
         let data: unknown = null;
         let failure: AcquisitionStatus | null = null;
@@ -162,9 +228,12 @@ export function createAdsbAcquirer(store: Store, options: {
           response = await (options.fetch ?? globalThis.fetch)(request.url, {
             headers: { Accept: "application/json", "User-Agent": "Inbound/1.0 free-adsb-acquisition" },
             redirect: "error",
-            signal: AbortSignal.timeout(Math.min(4000, Math.max(1, request.timeoutMs))),
+            signal: AbortSignal.timeout(Math.min(MAX_HTTP_MS, Math.max(1, request.timeoutMs))),
           });
-          if (response.ok) data = await response.json();
+          if (response.ok) {
+            data = await response.json();
+            if (!validPayload(request.provider, data)) failure = "error";
+          }
           else failure = response.status === 429 ? "429" : response.status === 403 ? "403" : "error";
         } catch (error) {
           failure = error instanceof Error && /abort|timeout/i.test(`${error.name} ${error.message}`) ? "timeout" : "error";
