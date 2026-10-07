@@ -1,6 +1,7 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { areaDefinition } from "./areas";
 import {
   createInboundAirborneSourceClient, createInboundAirborneSourceServer,
   LiveAirborneFlightResultSchema, LiveAirborneNearbyResponseSchema,
@@ -9,11 +10,7 @@ import {
 
 const now = "2026-10-07T01:00:00.000Z";
 const unavailableNearby = {
-  area: {
-    id: "preset:chicago", kind: "city", label: "Chicago",
-    reference: { latitude: 41.9, longitude: -87.8, label: "Chicago" },
-    radiusNm: 38, associatedAirports: ["ORD", "MDW"],
-  },
+  area: areaDefinition("preset:chicago"),
   collectionVersion: null, health: "unavailable", generatedAt: now,
   radarTargets: [], featuredFlights: [],
   status: "Nearby aircraft data is temporarily unavailable.",
