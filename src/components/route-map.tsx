@@ -21,7 +21,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CloudRain } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useId, useMemo } from "react";
 
-import { clampRouteMapView as clampView, isMapControl, MIN_FREE_ROUTE_ZOOM } from "@/lib/route-map-interaction";
+import { clampRouteMapView as clampView, isMapControl, minimumFreeRouteZoom, reconcileRouteMapView, type RouteMapPanBounds } from "@/lib/route-map-interaction";
 
 import { routeWeatherSegments, sampleWeather } from "@/lib/route-weather-segments";
 
@@ -210,9 +210,11 @@ function RadarLayer({
 
 function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
   const maxZoomRef = useRef(12);
+  const panBoundsRef = useRef<RouteMapPanBounds | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ s: 1, x: 0, y: 0 });
   const viewRef = useRef(view);
+  const resetKeyRef = useRef(resetKey);
   viewRef.current = view;
   const pinchRef = useRef<{
     d: number;
@@ -236,7 +238,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
 
   const zoomBy = useCallback((factor: number, anchor?: { x: number; y: number }) => {
     const { s, x, y } = viewRef.current;
-    const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
+    const minScale = freePan ? minimumFreeRouteZoom(panBoundsRef.current, H) : 1;
     const ns = Math.min(maxZoomRef.current, Math.max(minScale, s * factor));
     const cx = anchor ? anchor.x * s + x : W / 2;
     const cy = anchor ? anchor.y * s + y : H / 2;
@@ -245,26 +247,35 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
         s: ns,
         x: cx - ((cx - x) * ns) / s,
         y: cy - ((cy - y) * ns) / s,
-      }, H, freePan, maxZoomRef.current),
+      }, H, freePan, maxZoomRef.current, panBoundsRef.current),
     );
   }, [H, freePan]);
 
   useEffect(() => {
-    setView({ s: 1, x: 0, y: 0 });
-  }, [resetKey, H]);
+    const resetForNewLeg = resetKeyRef.current !== resetKey;
+    resetKeyRef.current = resetKey;
+    setView((current) => reconcileRouteMapView(
+      current,
+      resetForNewLeg,
+      H,
+      freePan,
+      maxZoomRef.current,
+      panBoundsRef.current,
+    ));
+  }, [resetKey, H, freePan]);
 
   useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
 
-    const apply = (next: { s: number; x: number; y: number }) => setView(clampView(next, H, freePan, maxZoomRef.current));
+    const apply = (next: { s: number; x: number; y: number }) => setView(clampView(next, H, freePan, maxZoomRef.current, panBoundsRef.current));
 
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       const { s, x, y } = viewRef.current;
       const factor = Math.exp(-e.deltaY * 0.0018);
-      const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
+      const minScale = freePan ? minimumFreeRouteZoom(panBoundsRef.current, H) : 1;
       const ns = Math.min(maxZoomRef.current, Math.max(minScale, s * factor));
       const { mx, my } = toSvg(el, e.clientX, e.clientY);
       apply({
@@ -312,7 +323,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
         const a = e.touches[0]!;
         const b = e.touches[1]!;
         const factor = dist(a, b) / p.d;
-        const minScale = freePan ? MIN_FREE_ROUTE_ZOOM : 1;
+        const minScale = freePan ? minimumFreeRouteZoom(panBoundsRef.current, H) : 1;
         const ns = Math.min(maxZoomRef.current, Math.max(minScale, p.s * factor));
         const mid = toSvg(el, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
         apply({
@@ -408,7 +419,7 @@ function useMapBoxZoom(resetKey: string, H = 800, freePan = false) {
     };
   }, [H, freePan]);
 
-  return { boxRef, maxZoomRef, s: view.s, x: view.x, y: view.y, reset, zoomBy };
+  return { boxRef, maxZoomRef, panBoundsRef, s: view.s, x: view.x, y: view.y, reset, zoomBy };
 }
 
 
@@ -514,6 +525,13 @@ function RouteMapContent({ story, fixedViewport = false, weatherPreview, remaini
   maxLon = proj.maxLon;
   const sx = proj.sx;
   const sy = proj.sy;
+  zoom.panBoundsRef.current = freePan ? {
+    minX: Math.min(sx(-180), sx(180)),
+    maxX: Math.max(sx(-180), sx(180)),
+    minY: Math.min(sy(85), sy(-85)),
+    maxY: Math.max(sy(85), sy(-85)),
+  } : null;
+  const minRouteZoom = freePan ? minimumFreeRouteZoom(zoom.panBoundsRef.current, H) : 1;
   const centerLatitude = proj.latitudeAtY((H / 2 - zoom.y) / zoom.s);
   const baseWidthMiles = routeVisibleWidthMiles(W / (sx(1) - sx(0)), centerLatitude);
   const visibleWidthMiles = baseWidthMiles / zoom.s;
@@ -696,6 +714,7 @@ function RouteMapContent({ story, fixedViewport = false, weatherPreview, remaini
         data-route-map
         data-visible-width-mi={visibleWidthMiles}
         data-max-route-zoom={zoom.maxZoomRef.current}
+        data-min-route-zoom={minRouteZoom}
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="xMidYMid meet"
         className={fixedViewport ? "block h-full w-full" : "block aspect-square h-auto w-full"}
