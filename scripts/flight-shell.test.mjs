@@ -68,6 +68,21 @@ test('departure delay alerts stop once departure movement is underway',()=>{
   assert.match(traveler,/!departureUnderway && !isLanded\(next\)/);
 });
 
+test('Map tab starts ground acquisition from durable identity before the story finishes',()=>{
+  assert.match(flightPages,/getGroundBootstrap/);
+  assert.match(flightPages,/flightTab === "Route"/);
+  assert.match(flightPages,/queryClient\.setQueryData\(key, bootstrap\.lastPosition\)/);
+  assert.match(flightPages,/queryClient\.prefetchQuery/);
+  assert.match(flightPages,/stateKey: bootstrap\.landKey/);
+  assert.match(flightPages,/groundPositionQueryKey/);
+});
+
+test('ground startup milestones are instrumented for baseline and QA measurements',()=>{
+  assert.match(flightPages,/event: "page_open"/);
+  assert.match(flightPages,/event: "story_loaded"/);
+  assert.match(source,/event: "ground_query_sent"/);
+});
+
 test('a newly opened Pushback stage gets two bounded confirmation checks without changing steady polling',()=>{
   assert.match(flightPages,/const pushConfirmRef = useRef/);
   assert.match(flightPages,/pushConfirmRef\.current\.attempts >= 2/);
