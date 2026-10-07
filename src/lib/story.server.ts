@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { currentOriginPushTraceScope, pushParkWithinScope, pushLatchWithinScope } from "./push-trace-scope.ts";
 import { phaseOf, verticalTrend, createPhaseHistory, destinationContext, type PhaseContext } from "./aircraft-phase.ts";
 import { loadAeroFlight } from "./aeroapi.server.ts";
 import { findInboundDiversion } from "./inbound-diversion.ts";
@@ -1806,17 +1807,17 @@ export function chooseFlightStatsScheduleCandidate(records, nowSec = Date.now() 
 	return physicallyPossible.sort((a, b) => score(a.record) + a.fit.score - score(b.record) - b.fit.score)[0]?.record ?? null;
 }
 
-/** FlightStats does not expose a takeoff clock, but its explicit Departed
- * state plus an actual gate departure is enough to avoid leaving a correct
- * leg stuck at Pushback for hours. This does not manufacture a takeoff time. */
+/** Gate-out and an elapsed taxi interval are not takeoff evidence. Only an
+ * explicit actual takeoff clock can establish airborne state without a fix. */
 export function flightStatsScheduleAirborne(record, nowSec = Date.now() / 1000) {
 	if (record?._publicScheduleSource !== "flightstats" || !/^departed$/i.test(String(record?.status ?? ""))) return false;
-	const departed = record?.gateOut?.actual;
+	const takeoff = record?.takeoff?.actual;
 	const arrival = bestUnix(record?.gateIn);
-	return Number.isFinite(departed) && nowSec - departed >= 12 * 60 && nowSec - departed <= 24 * 3600
+	return Number.isFinite(takeoff) && takeoff > 0 && nowSec >= takeoff && nowSec - takeoff <= 24 * 3600
 		&& !record?.landing?.actual && !record?.gateIn?.actual
 		&& (!Number.isFinite(arrival) || arrival >= nowSec - 30 * 60);
 }
+
 async function loadFlightStatsPublic(callsign, selection = {}) {
 	const parsed = parseFlightQuery(callsign);
 	const m = String(parsed?.iata ?? "").match(/^([A-Z0-9]{2})(\d{1,4}[A-Z]?)$/);
@@ -3534,7 +3535,8 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const loadedRoute = memoryLeg ? await routeMemoryStore.load(stateKey, memoryLeg, canPersistState ? legacyKeys : []) : null;
 	let routeMemory = loadedRoute?.state ?? null;
 	let routeMemoryPersistence = loadedRoute?.status ?? "unavailable";
-	let pushLatchValue = loadedPhase.state.push;
+	let pushNotBeforeUnix = loadedPhase.state.pushNotBeforeUnix ?? null;
+	let pushLatchValue = pushLatchWithinScope(loadedPhase.state.push, { notBeforeUnix: pushNotBeforeUnix });
 	let taxiOutLatchValue = loadedPhase.state.taxiOut;
 	let phaseStatePersistence = loadedPhase.status;
 	const evidenceArgs = { schedule: aware, key: stateKey, reason: stateIdentity.reason,
@@ -3560,6 +3562,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			taxiOutLatchValue = { at: progressResume.detectedTaxiUnix ?? Date.now() / 1e3 };
 		}
 	}
+	pushLatchValue = pushLatchWithinScope(pushLatchValue, { notBeforeUnix: pushNotBeforeUnix });
 	const departureProgressKnownBeforeMovement = Boolean(
 		pushLatchValue ||
 		taxiOutLatchValue ||
@@ -4169,9 +4172,59 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	});
 	const corridorAps = corridorStations(path, origin.iata, dest.iata, Object.values(AIRPORT_BY_ICAO), haversineNm);
 	const corridorMetsP = Promise.all(corridorAps.map((ap) => safe(loadMetar(ap.icao), { metar: null })));
-	const pirepPacks = await Promise.all(pirepRouteBounds(path).map((bbox) =>
+	// Start independent weather work without delaying the existing ground trace requests.
+	const pirepPacksP = Promise.all(pirepRouteBounds(path).map((bbox) =>
 		cached(`pirep:${bbox}`, 120_000, () => safe(fetchJson(`https://aviationweather.gov/api/data/pirep?format=geojson&bbox=${bbox}`).then((d) => d.features ?? []), null))
 	));
+	const aeroPush = flightawareOfficial?.push ?? null;
+	const aeroPushMatchesFlight = Boolean(
+		aeroPush &&
+		flightawareOfficial?.flightId &&
+		aware?.flightId &&
+		official.flightaware.flightId === aware.flightId
+	);
+	const effectiveGateOut = aeroPushMatchesFlight && aeroPush?.actual
+		? { ...aware.gateOut, actual: aeroPush.actual, _trustedActual: true }
+		: aware.gateOut;
+	const awareWithEffectiveGateOut = effectiveGateOut === aware.gateOut
+		? aware
+		: { ...aware, gateOut: effectiveGateOut };
+	let times = timesOf(awareWithEffectiveGateOut, origin, dest);
+	if (!confirmedTakeoff && (resumed || takeoffEvidence?.revocations?.some(r => r.time === aware?.takeoff?.actual))) {
+		// Device clocks and explicitly rejected provider stamps are schedule
+		// context, not validated takeoff proof (also across a later position gap).
+		const departureEstimate = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? null;
+		times = { ...times, airborne: false, takeoffUnix: departureEstimate,
+			takeoff: clockAt(departureEstimate, tzOf(origin)), takeoffKind: departureEstimate ? "estimated" : null };
+	}
+	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
+	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
+	const { awayFromPassengerGateArea } = departureSurfaceLocationHint(live, origin, effectiveGateOut);
+	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30
+		&& !awayFromPassengerGateArea && !pushLatchValue && !times.pushed) {
+		const prev = parkByFlight.get(landKey);
+		if (!prev) parkByFlight.set(landKey, { lat: live.lat, lon: live.lon, at: Date.now() });
+		else if (haversineNm({ lat: live.lat, lon: live.lon }, prev) < 0.03) {
+			parkByFlight.set(landKey, { lat: (prev.lat + live.lat) / 2, lon: (prev.lon + live.lon) / 2, at: prev.at });
+		}
+	}
+	let park = parkByFlight.get(landKey);
+	let distPark = live && park ? haversineNm({ lat: live.lat, lon: live.lon }, park) : 0;
+	let motion = { pushed: false, taxiing: false, flying: false };
+	const hexNow = String(live?.hex || hexByIdent.get(stateIdent) || aware?.hex || "").toLowerCase();
+	const needsGroundTrace = !live || (live.onGround && (live.gsKt ?? 0) < 1.2 && distPark < 0.025 && !pushLatchValue);
+	const takeoffForHistory = aware?.takeoff?.actual ?? null;
+	const historyStillUseful = !takeoffForHistory || Date.now() / 1e3 - takeoffForHistory < 2 * 3600;
+	let openTrace = [];
+	if (hexNow && origin && !ourLanded && (needsGroundTrace || historyStillUseful)) {
+		const [full, recent] = await Promise.all([
+			safe(fetchTrace(hexNow, "trace_full"), []),
+			safe(fetchTrace(hexNow, "trace_recent"), [])
+		]);
+		openTrace = mergeTraces(full, recent);
+		motion = motionFromTrace(openTrace, origin);
+	}
+	const pirepPacks = await pirepPacksP;
 	const pirepNow = Date.now();
 	for (const f of pirepPacks.flatMap(pack => pack ?? [])) {
 		const coords = f.geometry?.type === "Point" ? f.geometry.coordinates : null;
@@ -4216,55 +4269,28 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	}
 	const uniqHazards = distinctRouteHazards(hazards);
 	const weatherCoverage = { failedSources: [...(hazardsPack.failedSources ?? []), ...(pirepPacks.some(pack => pack == null) ? ["Pilot reports"] : [])] };
-	const aeroPush = flightawareOfficial?.push ?? null;
-	const aeroPushMatchesFlight = Boolean(
-		aeroPush &&
-		flightawareOfficial?.flightId &&
-		aware?.flightId &&
-		official.flightaware.flightId === aware.flightId
-	);
-	const effectiveGateOut = aeroPushMatchesFlight && aeroPush?.actual
-		? { ...aware.gateOut, actual: aeroPush.actual, _trustedActual: true }
-		: aware.gateOut;
-	const awareWithEffectiveGateOut = effectiveGateOut === aware.gateOut
-		? aware
-		: { ...aware, gateOut: effectiveGateOut };
-	let times = timesOf(awareWithEffectiveGateOut, origin, dest);
-	if (!confirmedTakeoff && (resumed || takeoffEvidence?.revocations?.some(r => r.time === aware?.takeoff?.actual))) {
-		// Device clocks and explicitly rejected provider stamps are schedule
-		// context, not validated takeoff proof (also across a later position gap).
-		const departureEstimate = aware?.takeoff?.estimated ?? aware?.takeoff?.scheduled ?? null;
-		times = { ...times, airborne: false, takeoffUnix: departureEstimate,
-			takeoff: clockAt(departureEstimate, tzOf(origin)), takeoffKind: departureEstimate ? "estimated" : null };
-	}
-	const atOrigLive = Boolean(live && origin && haversineNm({ lat: live.lat, lon: live.lon }, origin) < 10);
-	const dOrigLive = live && origin ? haversineNm({ lat: live.lat, lon: live.lon }, origin) : 0;
-	const { awayFromPassengerGateArea } = departureSurfaceLocationHint(live, origin, effectiveGateOut);
-	if (live && atOrigLive && live.onGround && (live.gsKt ?? 0) < 1.2 && (live.seenSec ?? 999) <= 30
-		&& !awayFromPassengerGateArea && !pushLatchValue && !times.pushed) {
-		const prev = parkByFlight.get(landKey);
-		if (!prev) parkByFlight.set(landKey, { lat: live.lat, lon: live.lon, at: Date.now() });
-		else if (haversineNm({ lat: live.lat, lon: live.lon }, prev) < 0.03) {
-			parkByFlight.set(landKey, { lat: (prev.lat + live.lat) / 2, lon: (prev.lon + live.lon) / 2, at: prev.at });
-		}
-	}
-	const park = parkByFlight.get(landKey);
-	const distPark = live && park ? haversineNm({ lat: live.lat, lon: live.lon }, park) : 0;
-	let motion = { pushed: false, taxiing: false, flying: false };
-	const hexNow = String(live?.hex || hexByIdent.get(stateIdent) || aware?.hex || "").toLowerCase();
-	const needsGroundTrace = !live || (live.onGround && (live.gsKt ?? 0) < 1.2 && distPark < 0.025 && !pushLatchValue);
-	const takeoffForHistory = aware?.takeoff?.actual ?? null;
-	const historyStillUseful = !takeoffForHistory || Date.now() / 1e3 - takeoffForHistory < 2 * 3600;
-	let openTrace = [];
-	if (hexNow && origin && !ourLanded && (needsGroundTrace || historyStillUseful)) {
-		const [full, recent] = await Promise.all([
-			safe(fetchTrace(hexNow, "trace_full"), []),
-			safe(fetchTrace(hexNow, "trace_recent"), [])
-		]);
-		openTrace = mergeTraces(full, recent);
-		motion = motionFromTrace(openTrace, origin);
-	}
-	const historyStart = (aware?.gateOut?.scheduled ?? aware?.gateOut?.estimated ?? aware?.takeoff?.scheduled ?? Date.now() / 1e3) - 6 * 3600;
+	// A tail's day trace can contain an earlier visit to the same origin.
+	// Associate it with actual current-leg evidence before reconstructing push.
+	const scopeIdentityMatches = live && (flightIdentOk(live.callsign, parsed, aware)
+		|| Boolean(aware?.tail && live.registration && String(aware.tail).replace(/[-\s]/g, "").toUpperCase() === String(live.registration).replace(/[-\s]/g, "").toUpperCase()));
+	const scopeCandidateUnix = scopeIdentityMatches && !live.extrapolated && (live.seenSec ?? 999) >= 0 && (live.seenSec ?? 999) <= 60
+		? (Number.isFinite(live.seenAt) ? live.seenAt : Date.now() / 1000 - live.seenSec) : null;
+	const scopeNowUnix = Date.now() / 1000;
+	const scopeLiveUnix = Number.isFinite(scopeCandidateUnix) && scopeCandidateUnix > 0 && scopeCandidateUnix <= scopeNowUnix && scopeNowUnix - scopeCandidateUnix <= 60 ? scopeCandidateUnix : null;
+	const scopeAnchor = confirmedGateOutActual(effectiveGateOut) ?? scopeLiveUnix;
+	const scopePoint = scopeLiveUnix != null ? { t: scopeLiveUnix, lat: live.lat, lon: live.lon,
+		alt: live.altFt, gs: live.gsKt, ground: live.onGround } : null;
+	const pushScope = currentOriginPushTraceScope(scopePoint ? [...openTrace, scopePoint] : openTrace,
+		{ ...origin, elevationFt: fieldElev(origin) }, { anchorUnix: scopeAnchor });
+	motion = motionFromTrace(pushScope.points, origin);
+	pushNotBeforeUnix = Math.max(pushNotBeforeUnix ?? 0, pushScope.notBeforeUnix ?? 0) || null;
+	const durablePushScope = { notBeforeUnix: pushNotBeforeUnix };
+	pushLatchValue = pushLatchWithinScope(pushLatchValue, durablePushScope);
+	const scopedPark = pushParkWithinScope(park, durablePushScope);
+	if (park && !scopedPark) parkByFlight.delete(landKey);
+	park = scopedPark;
+	distPark = live && park ? haversineNm(live, park) : 0;
+	const historyStart = Math.max(pushNotBeforeUnix ?? 0, (aware?.gateOut?.scheduled ?? aware?.gateOut?.estimated ?? aware?.takeoff?.scheduled ?? Date.now() / 1e3) - 6 * 3600);
 	const faHistory = mergeTraces(
 		flightawareOfficial?.track?.map((p) => ({ ...p, t: p.seenAt, gs: p.gsKt, alt: p.altFt, ground: p.altFt === 0 })) ?? [],
 		aware?.faTrack ?? []
@@ -4272,7 +4298,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const fr24History = official.fr24?.track?.map((p) => ({ ...p, t: p.seenAt, gs: p.gsKt, alt: p.altFt, ground: p.altFt === 0 })) ?? [];
 	const flightAwarePush = pushEvidenceFromTrack(faHistory, origin, park, historyStart);
 	const fr24Push = pushEvidenceFromTrack(fr24History, origin, park, historyStart);
-	const adsbPush = pushEvidenceFromTrack(openTrace, origin, park, historyStart);
+	const adsbPush = pushEvidenceFromTrack(pushScope.points, origin, park, historyStart);
 	const freshSurface = Boolean(live && live.onGround && atOrigLive && !live.extrapolated && (live.seenSec ?? 999) <= 30);
 	const leftGate = Boolean(
 		!ourLanded &&
@@ -4322,7 +4348,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		times = { ...times, airborne: true };
 	}
 	const providerPushActual = confirmedGateOutActual(effectiveGateOut);
-	const selectedPush = choosePushEvidence(providerPushActual, [
+	let selectedPush = choosePushEvidence(providerPushActual, [
 		flightAwarePush && { ...flightAwarePush, provider: "flightaware" },
 		fr24Push && { ...fr24Push, provider: "fr24" },
 		adsbPush && { ...adsbPush, provider: "adsb" }
@@ -4511,12 +4537,26 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	// Persist before choosing the response stage so a CAS winner also protects
 	// this stale poll. No provider lookup is needed to apply the floor.
 	const nextPhase = { push: pushLatchValue, taxiOut: taxiOutLatchValue,
-		...(takeoffEvidence ? { confirmedTakeoff: takeoffEvidence } : {}) };
+		...(takeoffEvidence ? { confirmedTakeoff: takeoffEvidence } : {}),
+		...(pushNotBeforeUnix != null ? { pushNotBeforeUnix } : {}) };
 	if (canPersistState && !phaseStateEqual(loadedPhase.state, nextPhase)) {
 		const saveStatus = await savePhaseState(stateKey, nextPhase, loadedPhase.version);
 		if (saveStatus !== "ok") phaseStatePersistence = saveStatus;
 		if (saveStatus === "conflict_resolved" || saveStatus === "conflict_dropped") {
 			const winner = await loadPhaseState(stateKey);
+			pushNotBeforeUnix = Math.max(pushNotBeforeUnix ?? 0, winner.state.pushNotBeforeUnix ?? 0) || null;
+			const responseScope = { notBeforeUnix: pushNotBeforeUnix };
+			if (pushLatchValue && !pushLatchWithinScope(pushLatchValue, responseScope)) {
+				const trustedActual = choosePushEvidence(providerPushActual, []);
+				const replacement = pushLatchWithinScope(winner.state.push, responseScope) ?? trustedActual;
+				pushLatchValue = replacement ? { ...replacement, live: true, at: replacement.at ?? Date.now() / 1000 } : null;
+				selectedPush = replacement;
+				const nextUnix = replacement?.unix ?? effectiveGateOut?.estimated ?? effectiveGateOut?.scheduled ?? null;
+				times = { ...times, pushed: Boolean(replacement || times.airborne), pushUnix: nextUnix,
+					push: clockAt(nextUnix, tzOf(origin)), pushSource: replacement?.source ?? null,
+					pushKind: replacement?.source === "provider_actual" ? "actual" : nextUnix ? "estimated" : null,
+					delayMin: slipMin(nextUnix, times.origPushUnix ?? nextUnix) };
+			}
 			takeoffEvidence = mergeConfirmedTakeoff(takeoffEvidence, winner.state.confirmedTakeoff);
 			confirmedTakeoff = activeConfirmedTakeoff(takeoffEvidence);
 			if (winner.status !== "ok") phaseStatePersistence = winner.status;
@@ -4633,6 +4673,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 				parkedPosition: park ?? null,
 				selectedPush,
 				pushLatch: pushLatchValue ?? null,
+				pushNotBeforeUnix, pushTraceScopeReason: pushScope.boundaryReason,
 				taxiOutLatch: taxiOutLatchValue ?? null,
 				finalPushUnix: times.pushed ? times.pushUnix : null,
 				finalPushSource: times.pushed ? times.pushSource ?? null : null,
@@ -4833,7 +4874,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		departureStage: confirmedTakeoff ? null : taxiOutLatched ? "taxi" : pushLatchValue ? "push" : null,
 		detectedPushUnix: detectedPush && typeof detectedPush === "object" && detectedPush.source === "live_detected"
 			? detectedPush.unix
-			: baseResume.detectedPushUnix ?? null,
+			: (pushNotBeforeUnix == null || (baseResume.detectedPushUnix ?? 0) >= pushNotBeforeUnix) ? baseResume.detectedPushUnix ?? null : null,
 		detectedTaxiUnix: taxiOutLatchValue?.at ?? baseResume.detectedTaxiUnix ?? null
 	} : undefined;
 	// Persist the combined filed/track/observation facts once, after the poll.

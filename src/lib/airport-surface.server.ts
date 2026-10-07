@@ -1,3 +1,5 @@
+import { getAirportSurfaceSnapshot } from "./airport-surface-snapshot.server";
+
 export type SurfacePoint = { lat: number; lon: number };
 export type SurfaceFeature = {
   id: number;
@@ -10,6 +12,8 @@ export type AirportSurface = {
   airport: string;
   checkedAt: number;
   source: "FAA" | "OpenStreetMap";
+  /** Durable map capture metadata; unrelated to live aircraft freshness. */
+  snapshot?: { retrievedAt: string; osmBaseAt: string; attribution: string; licenseUrl: string };
   /** Target aerodrome boundary rings from the same surface request, when OSM exposes them. */
   boundary?: SurfacePoint[][];
   features: SurfaceFeature[];
@@ -510,6 +514,10 @@ export async function loadAirportSurface(input: { airport: string; lat: number; 
   if (!/^[A-Z0-9]{3,4}$/.test(airport) || !validCoord(input.lat, -90, 90) || !validCoord(input.lon, -180, 180)) {
     throw new Error("Invalid airport surface request");
   }
+  // Captured public geometry survives cold starts and provider outages. No runtime
+  // Overpass/FAA request is needed for these validated, airport-specific snapshots.
+  const snapshot = getAirportSurfaceSnapshot({ ...input, airport });
+  if (snapshot) return snapshot;
   const key = `${airport}:surface-v10:${input.lat.toFixed(3)}:${input.lon.toFixed(3)}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;

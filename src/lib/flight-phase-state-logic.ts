@@ -13,9 +13,24 @@ export type TakeoffRevocation = { time: number; at: number };
 // That lets CAS/legacy merges reject a stale copy of the same provider stamp.
 export type ConfirmedTakeoff = { time: number | null; source: "provider_actual" | "observed_airborne"; confirmedAt: number;
   observedAt?: number; revocations?: TakeoffRevocation[] };
-export type PhaseState = { push: PushLatch; taxiOut: TaxiOutLatch; confirmedTakeoff?: ConfirmedTakeoff };
+export type PhaseState = { push: PushLatch; taxiOut: TaxiOutLatch; confirmedTakeoff?: ConfirmedTakeoff;
+  // Proven prior-tail segments cannot become this leg's detected push again.
+  // Provider actuals are independently scoped to the dated leg.
+  pushNotBeforeUnix?: number };
 
 export const EMPTY_PHASE_STATE: PhaseState = { push: null, taxiOut: null };
+
+/** Scope evidence only advances; callers predating this field cannot erase it. */
+export function mergePushNotBeforeUnix(a?: number, b?: number): number | undefined {
+  const values = [a, b].filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+  return values.length ? Math.max(...values) : undefined;
+}
+
+/** Tail-trace attribution cannot revoke provider actuals or contemporaneous same-leg live proof. */
+export function pushWithinScope(push: PushLatch, pushNotBeforeUnix?: number): PushLatch {
+  return push && push.source !== "provider_actual" && push.source !== "live_detected" && pushNotBeforeUnix != null && push.unix < pushNotBeforeUnix
+    ? null : push;
+}
 
 /**
  * Resolve two competing PushLatch observations -- used only to merge a write
@@ -62,10 +77,12 @@ function resolvePush(a: PushLatch, b: PushLatch): PushLatch {
  * on a conflict is consistent with that, not a special case for it.
  */
 export function mergeForward(a: PhaseState, b: PhaseState): PhaseState {
-  const push = resolvePush(a.push, b.push);
+  const pushNotBeforeUnix = mergePushNotBeforeUnix(a.pushNotBeforeUnix, b.pushNotBeforeUnix);
+  const push = resolvePush(pushWithinScope(a.push, pushNotBeforeUnix), pushWithinScope(b.push, pushNotBeforeUnix));
   const taxiOut = !a.taxiOut ? b.taxiOut : !b.taxiOut ? a.taxiOut : (a.taxiOut.at >= b.taxiOut.at ? a.taxiOut : b.taxiOut);
   const confirmedTakeoff = mergeConfirmedTakeoff(a.confirmedTakeoff, b.confirmedTakeoff);
-  return { push, taxiOut, ...(confirmedTakeoff ? { confirmedTakeoff } : {}) };
+  return { push, taxiOut, ...(confirmedTakeoff ? { confirmedTakeoff } : {}),
+    ...(pushNotBeforeUnix != null ? { pushNotBeforeUnix } : {}) };
 }
 
 /** Cheap dirty-check so buildStory only writes back when a latch actually changed. */

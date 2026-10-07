@@ -177,12 +177,20 @@ describe('same-number leg lock replays', () => {
     assert.equal(chooseFlightStatsScheduleCandidate([outbound, inbound], now, { aircraft: northwest }), outbound);
   });
 
-  it('DL4712 explicit Departed status cannot remain at Pushback two hours later', () => {
+  it('UA561 gate-out-only fallback cannot close Ground as an observed takeoff', () => {
+    const record = { _publicScheduleSource: 'flightstats', status: 'departed',
+      gateOut: { scheduled: 1791394800, estimated: null, actual: 1791394560 },
+      gateIn: { estimated: 1791400440, actual: null }, takeoff: {actual:null}, landing: {actual:null} };
+    assert.equal(flightStatsScheduleAirborne(record, 1791395845), false);
+    assert.equal(flightStatsScheduleAirborne({...record,takeoff:{actual:1791395880}},1791395917),true);
+  });
+
+  it('a Departed gate-out record does not prove takeoff even two hours later', () => {
     const dl4712 = { ...leg('MDW', 'MSP', now - 2 * 3600, now + 20 * 60, 'departed'),
       gateOut: { scheduled: now - 2 * 3600, estimated: null, actual: now - 2 * 3600 } };
-    assert.equal(flightStatsScheduleAirborne(dl4712, now), true);
+    assert.equal(flightStatsScheduleAirborne(dl4712, now), false);
     assert.equal(currentStageOf({ live: null, origin: {}, dest: {}, remainingNm: 300, pushed: true,
-      faAirborne: flightStatsScheduleAirborne(dl4712, now), inboundStatus: 'unknown' }), 'ride');
+      faAirborne: flightStatsScheduleAirborne(dl4712, now), inboundStatus: 'unknown' }), 'push');
   });
 });
 

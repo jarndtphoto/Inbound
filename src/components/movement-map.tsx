@@ -705,7 +705,7 @@ function GroundMovementMap({
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-[10px] leading-tight text-muted">
         <span>Pinch to zoom · drag to pan</span>
-        <span className="shrink-0">Airport surface · {(surfaceQ.data as AirportSurface | undefined)?.source ?? (fallbackRunways.length ? "runway fallback" : "loading")}</span>
+        <span className="text-right">{surface?.source === "OpenStreetMap" ? <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline">© OpenStreetMap contributors</a> : `Airport surface · ${surface?.source ?? (fallbackRunways.length ? "runway fallback" : "loading")}`}</span>
       </div>
     </div>
   );

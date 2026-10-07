@@ -1,5 +1,5 @@
-import { RouteAirportSurface } from "./route-airport-surface";
-import { airportNearViewport, maxRouteZoom, routeVisibleWidthMiles, routeStrokeWidths } from "@/lib/route-airport-detail";
+import { RouteAirportSurface, RouteAirportSurfaceAttribution } from "./route-airport-surface";
+import { airportDetailOpacity, airportNearViewport, maxRouteZoom, routeVisibleWidthMiles, routeStrokeWidths } from "@/lib/route-airport-detail";
 import { lastKnownProgressLabel } from "@/lib/route-continuity";
 import { remainingFlight, type RemainingFlightPresentation } from "@/lib/flight-presentation";
 import { destPoint, formatDuration, formatMiles, haversineNm } from "@/lib/geo";
@@ -812,6 +812,11 @@ function RouteMapContent({ story, fixedViewport = false, weatherPreview, remaini
 
         </g>
       </svg>
+
+      <div data-map-obstacle className="absolute bottom-16 left-3 flex flex-col items-start gap-1">
+        <RouteAirportSurfaceAttribution airport={story.origin} visible={originNear && airportDetailOpacity(visibleWidthMiles) > 0} />
+        <RouteAirportSurfaceAttribution airport={story.dest} visible={destNear && airportDetailOpacity(visibleWidthMiles) > 0} />
+      </div>
 
       {arrival && runwayAhead && !weatherPreview && !landed && <ArrivalRunwayChip
         frameRef={frameRef} geometryRef={geometryRef}

@@ -36,7 +36,7 @@ function toSql(run: <T>(query: string, values: unknown[]) => Promise<T[]>): Sql 
 
 async function database() {
   const pg = new PGlite();
-  for (const file of ["0002_flight_phase_state.sql", "0003_arrival_projection_state.sql", "0004_confirmed_takeoff.sql", "0005_route_geometry_state.sql", "0007_flight_ground_state.sql"])
+  for (const file of ["0002_flight_phase_state.sql", "0003_arrival_projection_state.sql", "0004_confirmed_takeoff.sql", "0005_route_geometry_state.sql", "0007_flight_ground_state.sql", "0011_push_scope_boundary.sql"])
     await pg.exec(readFileSync(new URL(`../../migrations/${file}`, import.meta.url), "utf8"));
   const sql = toSql(async <T>(query: string, values: unknown[]) => (await pg.query<T>(query, values)).rows);
   return { pg, sql };

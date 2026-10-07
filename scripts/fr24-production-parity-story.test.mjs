@@ -17,7 +17,9 @@ test('Production-parity Preview keeps normal sources working after the FR24 sess
   const saved = Object.fromEntries(envKeys.map(key => [key, process.env[key]]));
   const fixture = { dbCalls: 0 };
   globalThis.__fr24ParityStoryFixture = fixture;
-  const now = Date.parse('2026-10-07T17:40:00Z'), sec = now / 1000;
+  let now = Date.parse('2026-10-07T17:40:00Z'); const sec = now / 1000;
+  let traceOverride = null;
+  let holdPireps = false, pirepGate, releasePireps, pirepTimer, overlappedTrace = false;
   const requests = [];
   let statusReads = 0, reserveAttempts = 0;
   const stoppedSession = Object.freeze({ mode: 'production-parity', modeEnabled: true, enabled: true,
@@ -54,6 +56,11 @@ test('Production-parity Preview keeps normal sources working after the FR24 sess
           sql.query = sql; export async function getSql() { return sql; }`;
       },
       transform(code, id) {
+        if (id.endsWith('/src/lib/flight-phase-state.server.ts')) return {code:`
+          export {phaseStateEqual} from './flight-phase-state-logic.ts';
+          export async function loadPhaseState() { return globalThis.__fr24ParityStoryFixture.phase ?? {state:{push:null,taxiOut:null},version:0,status:'ok'}; }
+          export async function savePhaseState(key,next) {const f=globalThis.__fr24ParityStoryFixture; f.savedPhase=next; if(f.winner){f.phase=f.winner;return 'conflict_resolved';}return 'ok';}
+        `,map:null};
         if (id.endsWith('/src/lib/story.server.ts')) return { code: code + `
           export function fixtureSeedNormalStory(query, value) {
             cache.set('story43:' + query, { at: Date.now(), value });
@@ -84,9 +91,19 @@ test('Production-parity Preview keeps normal sources working after the FR24 sess
     console.info = () => {};
     globalThis.fetch = async input => {
       const url = new URL(String(input)); requests.push(url);
+      if (url.pathname.includes('trace_') && releasePireps) {
+        overlappedTrace=true; clearTimeout(pirepTimer); releasePireps(); releasePireps=null;
+      }
+      if (holdPireps && url.pathname.endsWith('/pirep')) {
+        if (!pirepGate) pirepGate = new Promise(resolve => {
+          releasePireps=resolve; pirepTimer=setTimeout(()=>{releasePireps=null;resolve();},200);
+        });
+        await pirepGate; return Response.json({features:[]});
+      }
       if (url.hostname === 'www.flightaware.com')
         return new Response(`trackpollBootstrap = ${JSON.stringify({ flights: { replay: record } })};`);
       if (/flightstats/.test(url.hostname)) return new Response(null, { status: 404 });
+      if (url.pathname.includes('trace_') && traceOverride) return Response.json(traceOverride);
       if (url.pathname.includes('trace_')) return Response.json({ timestamp: sec - 3600, trace: [
         [0, 41.9769, -87.9081, 5000, 210, 185], [1500, 38.4, -89.0, 35000, 450, 185],
         [3598, aircraft.lat, aircraft.lon, 35000, 450, 185],
@@ -167,6 +184,51 @@ test('Production-parity Preview keeps normal sources working after the FR24 sess
       assert.equal(reserveAttempts, 0);
       assert.equal(requests.filter(url => url.hostname === 'fr24api.flightradar24.com').length, 0);
       assert.equal(requests.filter(url => url.hostname === 'aeroapi.flightaware.com').length, 0);
+    });
+
+    await t.test('UA561 observed event times reject old tail push and retain current provider actual', async () => {
+      now = Date.parse('2026-10-07T17:58:37.665Z');
+      record.gateDepartureTimes = {scheduled:1791394800,estimated:null,actual:1791394560};
+      record.takeoffTimes = {scheduled:1791394800,estimated:null,actual:null};
+      Object.assign(aircraft,{lat:41.99,lon:-87.89,gs:165,alt_baro:1500});
+      const old = {unix:1791374036.419,source:'track_detected',live:true,at:now/1000};
+      fixture.phase={state:{push:old,taxiOut:null},version:1,status:'ok'};
+      traceOverride={timestamp:0,trace:[
+        [1791373997.829,41.9786,-87.9048,0,0,90],
+        [old.unix,41.9786,-87.9031,0,9.2,90],
+        [old.unix+40,41.9786,-87.902,0,9.2,90],
+        [now/1000-2,aircraft.lat,aircraft.lon,1500,165,90],
+      ]};
+      const result=await api.getFlightStory({data:{q:'UA9918',fresh:true}});
+      assert.equal(result.times.pushUnix,1791394560);
+      assert.equal(result.times.pushSource,'provider_actual');
+      assert(fixture.savedPhase.pushNotBeforeUnix>old.unix);
+      assert.equal(fixture.savedPhase.push.unix,1791394560);
+    });
+    await t.test('a late response applies the winning push fence before returning times or resume', async () => {
+      now+=35000; traceOverride={timestamp:0,trace:[]};
+      const old={unix:1791374036.419,source:'track_detected',live:true,at:now/1000};
+      fixture.phase={state:{push:old,taxiOut:null},version:1,status:'ok'};
+      fixture.winner={state:{push:{unix:1791394560,source:'provider_actual',live:true,at:now/1000},taxiOut:null,pushNotBeforeUnix:old.unix+40.001},version:2,status:'ok'};
+      const result=await api.getFlightStory({data:{q:'UA9918',fresh:true}});
+      assert.equal(result.times.pushUnix,1791394560);assert.equal(result.times.pushSource,'provider_actual');
+      assert.notEqual(result.resume.detectedPushUnix,old.unix);
+      fixture.winner=null;
+    });
+
+    await t.test('existing ground traces start while independent PIREPs are pending', async () => {
+      now+=35000; fixture.phase={state:{push:null,taxiOut:null},version:0,status:'ok'};
+      fixture.winner=null; holdPireps=true; traceOverride={timestamp:0,trace:[]};
+      Object.assign(record,{ident:'UAL9919',iataIdent:'UA9919',flightId:'UAL9919-current-fixture',flightStatus:'scheduled'});
+      record.gateDepartureTimes={scheduled:now/1000+600,estimated:null,actual:null};
+      record.takeoffTimes={scheduled:now/1000+900,estimated:null,actual:null};
+      Object.assign(aircraft,{flight:'UAL9919',lat:41.9786,lon:-87.9048,gs:0,alt_baro:'ground'});
+      const before=requests.length;
+      await api.getFlightStory({data:{q:'UA9919',fresh:true}});
+      assert.equal(overlappedTrace,true,'trace acquisition should not wait for PIREP completion');
+      const traces=requests.slice(before).filter(url=>url.pathname.includes('trace_'));
+      assert.equal(traces.length,6,'same existing three hosts and full/recent requests, no extra acquisition');
+      holdPireps=false;
     });
 
     await t.test('Production retains normal mode even if the Preview selector is present', async () => {
