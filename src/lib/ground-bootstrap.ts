@@ -11,6 +11,8 @@ export const getGroundBootstrap = createServerFn({ method: "POST" })
     return { ...input, ident: (parsed.iata ?? parsed.callsign).replace(/\s/g, "").toUpperCase() };
   })
   .handler(async ({ data }) => {
+    const { fr24PreviewModeEnabled } = await import("./fr24-preview-session.server.ts");
+    if (fr24PreviewModeEnabled()) return null;
     const { flightGroundStateStore } = await import("./flight-ground-state.server.ts");
     const state = await flightGroundStateStore.loadRecent(data.ident, data);
     if (!state) return null;

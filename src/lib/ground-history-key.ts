@@ -1,15 +1,16 @@
 import type { FlightStory } from "./types.ts";
 import { resolveGroundIdentity } from "./ground-position-identity.ts";
 
-type GroundHistoryStory = Pick<FlightStory, "stateKey" | "schedule" | "iata" | "origin" | "dest" | "aircraft" | "resume">;
+type GroundHistoryStory = Pick<FlightStory, "stateKey" | "flightId" | "schedule" | "iata" | "origin" | "dest" | "aircraft" | "resume" | "providers">;
 
 export function groundHistoryLegKey(story: GroundHistoryStory): string | null {
   const route = `${story.origin.iata}:${story.dest.iata}`;
   const date = story.schedule?.serviceDate;
-  const leg = story.stateKey?.startsWith("leg:v1:") ? story.stateKey
-    : date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${story.iata}:${date}:${route}` : null;
+  const previewLeg = story.providers?.previewMode === "fr24-only" && story.flightId ? `fr24:${story.flightId}` : null;
+  const leg = previewLeg ?? (story.stateKey?.startsWith("leg:v1:") ? story.stateKey
+    : date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${story.iata}:${date}:${route}` : null);
   if (!leg) return null;
-  return `${leg}:${route}`;
+  return `${story.providers?.previewMode === "fr24-only" ? `fr24-only:${story.providers.fr24Preview?.sessionId ?? "disabled"}:` : ""}${leg}:${route}`;
 }
 
 /** Persist actual surface history only when its service leg is known. */

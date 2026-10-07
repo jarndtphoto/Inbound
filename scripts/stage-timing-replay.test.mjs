@@ -146,3 +146,42 @@ test('DL4820 surface takeoff roll activates Taxi, then confirmed airborne activa
   assert.equal(statusProgressIndex(airborne.currentStage),3);
   assert.equal(airborne.times.takeoffUnix,null);assert.notEqual(airborne.times.takeoffKind,'actual');
 });
+
+test('WN768 14:46 pre-takeoff evidence gap leaves all physical stages unconfirmed', () => {
+  const base = polishStory();
+  const fetchedAt = Date.parse('2026-10-07T14:46:08.733Z');
+  const story = { ...base, stateKey: 'leg:v1:SWA768|2026-10-07|MDW|BNA', fetchedAt,
+    query: 'WN768', callsign: 'SWA768', iata: 'WN768', airline: 'Southwest', currentStage: 'origin_gate',
+    live: false, aircraft: null, confirmedTakeoff: null,
+    origin: { ...base.origin, iata: 'MDW', icao: 'KMDW', lat: 41.7868, lon: -87.7522 },
+    dest: { ...base.dest, iata: 'BNA', icao: 'KBNA', lat: 36.1263, lon: -86.6774 },
+    providers: { chosenPositionAgeSec: null, chosenPosition: null },
+    times: { ...base.times, pushed: false, airborne: false, pushUnix: 1791383400,
+      pushKind: 'estimated', pushSource: null, takeoffUnix: null, takeoffKind: null },
+    resume: { ...base.resume, departureStage: null, detectedPushUnix: null, detectedTaxiUnix: null,
+      gateOut: { scheduled: 1791383400, estimated: 1791383400, actual: null },
+      takeoff: { scheduled: null, estimated: null, actual: null } },
+  };
+  const headline = markup(ui.FlightHead, story);
+  assert.match(headline, /Ground position unavailable/);
+  assert.doesNotMatch(headline, />At the gate<|>Taxiing out</);
+  const progress = markup(ui.FlightStatusProgress, story);
+  assert.match(progress, /Flight progress: movement not confirmed/);
+  assert.match(progress, /data-progress-state="unknown"/);
+  assert.doesNotMatch(progress, /progress-current|bg-accent/);
+  assert.equal(statusProgressIndex(story.currentStage), 0);
+  const pushed = { ...story, currentStage: 'push', times: { ...story.times, pushed: true,
+    pushKind: 'actual', pushSource: 'provider_actual' } };
+  const confirmedProgress = markup(ui.FlightStatusProgress, pushed);
+  assert.match(confirmedProgress, /data-progress-state="confirmed"/);
+  assert.match(confirmedProgress, /Flight progress: Pushback/);
+  assert.match(confirmedProgress, /progress-current/);
+});
+
+test('FR24-only observation never claims gate or taxi status from one stationary fix',()=>{
+ for(const currentStage of ['origin_gate','taxi_in']) {
+  const story={...polishStory(),currentStage,providers:{previewMode:'fr24-only',chosenPosition:'fr24'},aircraft:{...polishStory().aircraft,onGround:true,gsKt:0}};
+  const html=markup(ui.FlightHead,story);
+  assert.match(html,/Reported on the ground/);assert.doesNotMatch(html,/At the gate|Taxiing in|data-progress-current/);
+ }
+});

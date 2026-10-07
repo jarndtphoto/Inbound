@@ -111,3 +111,12 @@ test("the existing 35-second transport deadline aborts, and an already-cancelled
   await assert.rejects(flightStoryRequest(controller.signal, async () => { requests++; return {}; }), /abort/i);
   assert.equal(requests, 1);
 });
+
+test("leaving FR24 Preview cancels its exact session query without touching other sessions", async () => {
+  const client = new QueryClient();
+  const key = [...flightStoryQueryKey("UA1036"), "fr24-only", "session-a"];
+  const other = [...flightStoryQueryKey("UA1036"), "fr24-only", "session-b"];
+  client.setQueryData(key, { live: true }); client.setQueryData(other, { live: true });
+  stopFlightSearch(client, "UA1036", null, key);
+  assert.equal(client.getQueryData(key), undefined); assert.ok(client.getQueryData(other)); client.clear();
+});

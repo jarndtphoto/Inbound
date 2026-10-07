@@ -29,7 +29,7 @@ import { getGroundBootstrap } from "@/lib/ground-bootstrap";
 import { getGroundPosition } from "@/lib/ground-position";
 import { groundPositionQueryKey } from "@/lib/ground-position-key";
 import { logGroundTiming } from "@/lib/ground-timing";
-import { getFlightStory } from "@/lib/story";
+import { getFlightStory, getFlightDataMode } from "@/lib/story";
 import type { Chop, Comfort, FlightStory, PilotReportObservation, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { RouteMap } from "@/components/route-map";
@@ -504,7 +504,12 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   const pushConfirmRef = useRef<{ key: string; attempts: number }>({ key: "", attempts: 0 });
   const flightKey = normFlight(query);
   const pageVisible = usePageVisible();
-  const storyQueryKey = flightStoryQueryKey(query, linkedDate);
+  const dataModeQ = useQuery({ queryKey: ["flight-data-mode"], queryFn: () => getFlightDataMode(), staleTime: 5_000, refetchInterval: (q) => q.state.data?.mode === "fr24-only" ? 5_000 : false, retry: false });
+  const fr24Only = dataModeQ.data?.mode === "fr24-only";
+  const previewSessionId = dataModeQ.data?.session?.sessionId;
+  const storyQueryKey = useMemo(() => fr24Only
+    ? [...flightStoryQueryKey(query, linkedDate), "fr24-only", previewSessionId]
+    : flightStoryQueryKey(query, linkedDate), [query, linkedDate, fr24Only, previewSessionId]);
   const shellStyle = {
     background: "var(--color-bg)",
     color: "var(--color-fg)",
@@ -551,7 +556,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
       if (leavingRef.current) throw new DOMException("Left flight search", "AbortError");
       const fresh = freshRef.current;
       freshRef.current = false;
-      const saved = storyForQuery(client.getQueryData<FlightStory>(storyQueryKey), query, linkedDate)
+      const saved = fr24Only ? undefined : storyForQuery(client.getQueryData<FlightStory>(storyQueryKey), query, linkedDate)
         ?? storyForQuery(readCachedStory(query), query, linkedDate);
       const resume = resumeFromStory(saved, query);
       const s = await flightStoryRequest(signal, (requestSignal) =>
@@ -567,6 +572,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
       if (linkedDate && flightDepartureDate(s) !== linkedDate) {
         throw new Error(`[flight_not_found] ${query} does not match the linked flight date.`);
       }
+      if (s.providers?.previewMode === "fr24-only") return s;
       const merged = keepRecentTrackGeometry(
         rememberOrigOnClient(applyTakeoffFloor(s, saved)),
         storyForQuery(saved, query, linkedDate),
@@ -577,13 +583,15 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
     // Seed saved data once; failed requests must remain errors, not successful
     // cache reads. React Query retains the last good story during a failure.
     initialData: () => {
+      if (!dataModeQ.data || fr24Only) return undefined;
       const cached = storyForQuery(readCachedStory(query), query, linkedDate);
       return cached ? rememberOrigOnClient(cached) : undefined;
     },
     initialDataUpdatedAt: 0,
-    enabled: (q) => cacheOk && pageVisible && query.length > 0
+    enabled: (q) => Boolean(dataModeQ.data) && (!fr24Only || dataModeQ.data?.session?.blocked === false) && cacheOk && pageVisible && query.length > 0
       && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     refetchInterval: (q) => {
+      if (fr24Only && dataModeQ.data?.session?.blocked) return false;
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return false;
       if (!flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount)) return false;
       const s = q.state.data;
@@ -608,17 +616,18 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
     refetchOnWindowFocus: (q) => Boolean(q.state.data) && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     refetchOnReconnect: (q) => Boolean(q.state.data) && flightSearchCanPoll(q.state.data, q.state.error, leavingRef.current, q.state.fetchFailureCount),
     placeholderData: (previousData) => {
+      if (!dataModeQ.data || fr24Only) return undefined;
       if (storyForQuery(previousData, query, linkedDate)) return previousData;
       return storyForQuery(readCachedStory(query), query, linkedDate);
     },
   });
 
-  const story = storyForQuery(storyQ.data, query, linkedDate);
+  const story = dataModeQ.data && (!fr24Only || storyQ.data?.providers?.previewMode === "fr24-only") ? storyForQuery(storyQ.data, query, linkedDate) : undefined;
   const remaining = story ? remainingFlight(story) : null;
   const groundBootstrapQ = useQuery({
     queryKey: ["ground-bootstrap", flightKey, story?.stateKey, story ? flightDepartureDate(story) : null, story?.origin.iata, story?.dest.iata],
     queryFn: () => getGroundBootstrap({ data: { flight: query, landKey: story!.stateKey!, serviceDate: flightDepartureDate(story!), originIata: story!.origin.iata, destIata: story!.dest.iata } }),
-    enabled: Boolean(story?.stateKey?.startsWith("leg:v1:") && flightDepartureDate(story)) && cacheOk && pageVisible && flightTab === "Route" && query.length > 0,
+    enabled: !fr24Only && Boolean(story?.stateKey?.startsWith("leg:v1:") && flightDepartureDate(story)) && cacheOk && pageVisible && flightTab === "Route" && query.length > 0,
     staleTime: 2_000,
     gcTime: 5 * 60_000,
     retry: false,
@@ -737,7 +746,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   }, [queryClient, flightKey, Boolean(story), story?.origin.icao, story?.origin.lat, story?.origin.lon,
     story?.dest.icao, story?.dest.lat, story?.dest.lon]);
   const restoringSavedData = Boolean(story && storyQ.dataUpdatedAt === 0);
-  useEffect(() => () => stopFlightSearch(queryClient, query, linkedDate), [queryClient, query, linkedDate]);
+  useEffect(() => () => stopFlightSearch(queryClient, query, linkedDate, storyQueryKey), [queryClient, query, linkedDate, storyQueryKey]);
   useEffect(() => {
     if (!cacheOk || story || storyQ.isError || stillLooking) return;
     const timer = window.setTimeout(() => {
@@ -758,7 +767,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   function leaveFlight() {
     leavingRef.current = true;
     briefGen.current += 1;
-    stopFlightSearch(queryClient, query, linkedDate);
+    stopFlightSearch(queryClient, query, linkedDate, storyQueryKey);
     onHome();
   }
   function trySearchAgain() {
@@ -886,13 +895,13 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   }, [flightKey]);
 
   useEffect(() => {
-    if (!story || briefingFor === flightKey) return;
+    if (fr24Only || !story || briefingFor === flightKey) return;
     briefM.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- first compile when the story arrives
   }, [story, flightKey]);
 
   useEffect(() => {
-    if (!story || !briefing || briefingFor !== flightKey) return;
+    if (fr24Only || !story || !briefing || briefingFor !== flightKey) return;
     const key = `${takeoffEstimateExpired(story)}|${story.weatherCoverage?.failedSources.join(",") ?? "unknown"}|${story.aircraft?.registration ?? ""}|${story.live}|${Math.round(story.route.etaMin)}|${Math.round(story.route.remainingNm / 10)}|${story.currentStage}|${story.times?.delayMin ?? ""}|${story.times?.pushKind ?? ""}|${story.times?.pushSource ?? ""}|${story.times?.takeoffKind ?? ""}|${story.times?.landKind ?? ""}|${story.times?.gateKind ?? ""}|${story.times?.taxiInKind ?? ""}|${story.times?.push ?? ""}|${story.times?.takeoff ?? ""}|${story.times?.gate ?? ""}|${story.times?.taxiOutMin ?? ""}|${story.times?.taxiInMin ?? ""}|${story.times?.originGate ?? ""}|${story.times?.destGate ?? ""}|${story.origin.nas?.reason ?? ""}|${story.dest.nas?.reason ?? ""}|${story.inbound.status}|${story.times?.land ?? ""}|${story.wx?.hash ?? ""}|${flightWeatherSummary(story)}`;
     if (key === lastBriefKey.current) return;
     lastBriefKey.current = key;
@@ -1010,7 +1019,16 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   return (
     <div className={cn("pwa-flight-shell", "inbound-redesign", "flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg text-fg")} style={shellStyle}>
       <header className="journey-header"><div className="flex min-w-0 items-center gap-2"><button type="button" aria-label="Back to search" onClick={leaveFlight} className="flex size-11 shrink-0 items-center justify-center rounded-md text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><ChevronLeft className="size-6" aria-hidden="true" /></button>{story ? <p><Plane aria-hidden="true" /><strong>{story.iata}</strong><span>{story.origin.iata} → {story.dest.iata}</span></p> : <p>{query || "Preparing your flight…"}</p>}</div><AppearanceControl fr24Usage={story?.providers?.fr24Usage} /></header>
-      {story && <FlightWelcome open={briefPopupOpen} onClose={closeWelcome} story={story} />}
+      {dataModeQ.isError && <p role="alert" className="px-4 py-2 text-sm">Flight data mode is unavailable. No flight lookup has started.</p>}
+      {fr24Only && <div role="status" className="border-b border-line px-4 py-2 text-sm text-muted">
+        FR24-only Preview · {dataModeQ.data?.session?.state ?? "unavailable"}
+        {dataModeQ.data?.session && <> · {dataModeQ.data.session.creditsConsumed} / {dataModeQ.data.session.creditCap ?? 0} credits reserved · {dataModeQ.data.session.attempts} / {dataModeQ.data.session.attemptCap ?? 0} attempts
+          {dataModeQ.data.session.expiresAt && <> · ends {new Date(dataModeQ.data.session.expiresAt).toLocaleTimeString()}</>}
+          {dataModeQ.data.session.lastStatusCode && <> · HTTP {dataModeQ.data.session.lastStatusCode}</>}
+        </>}
+        <span className="block">Actual FR24 observations only. Missing or expired positions stay unavailable.</span>
+      </div>}
+      {story && !fr24Only && <FlightWelcome open={briefPopupOpen} onClose={closeWelcome} story={story} />}
       <ScreenErrorBoundary>
       <main
         ref={mainRef}
@@ -1048,7 +1066,7 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
             <p className="text-sm text-ifr">
               {flightNotFound(storyQ.error ?? storyQ.failureReason)
                 ? `We couldn't find ${query}. Check the flight number.`
-                : "Flight data is temporarily unavailable."}
+                : fr24Only ? String(storyQ.error?.message ?? storyQ.failureReason?.message ?? "FR24 data unavailable") : "Flight data is temporarily unavailable."}
             </p>
             {!flightNotFound(storyQ.error ?? storyQ.failureReason) && storyQ.isFetching && <p className="mt-1 text-sm text-muted">We’ll try again shortly.</p>}
             <form className="mt-3" onSubmit={(event) => { event.preventDefault(); onSearch(errorSearch); }}>
@@ -1072,17 +1090,17 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
             <div className="journey-map journey-map-expanded" hidden={flightTab !== "Route"}><RouteMap story={story} fixedViewport active={flightTab === "Route"} remaining={remaining ?? undefined} />{(story.route?.samples?.length ?? 0) < 2 && <p className="map-unavailable">Route map unavailable</p>}</div>
             <section className="journey-panel" id="panel-Overview" role="tabpanel" aria-labelledby="tab-Overview" hidden={flightTab !== "Overview"}>
               <FlightHead story={story} remaining={remaining ?? undefined} restored={restoringSavedData} failed={storyQ.isError || Boolean(refreshErr)} fetching={storyQ.isFetching} refreshing={manualBusy} onRefresh={() => void refreshNow()} />
-              <OverviewDetails story={story} timing={<TimesStrip story={story} remaining={remaining ?? undefined} failed={storyQ.isError || Boolean(refreshErr)} />} />
-              <TravelerCompanion story={story} failed={storyQ.isError || Boolean(refreshErr)} onTrackInbound={openFlight} />
+              {!fr24Only && <OverviewDetails story={story} timing={<TimesStrip story={story} remaining={remaining ?? undefined} failed={storyQ.isError || Boolean(refreshErr)} />} />}
+              {!fr24Only && <TravelerCompanion story={story} failed={storyQ.isError || Boolean(refreshErr)} onTrackInbound={openFlight} />}
             </section>
             <section id="panel-Route" role="tabpanel" aria-labelledby="tab-Route" hidden={flightTab !== "Route"} className="h-full min-h-0" style={{ containerType: "size" }}>
               <p className="sr-only">Interactive flight map above. Use the map controls to zoom or reset.</p>
             </section>
             <section id="panel-Weather" role="tabpanel" aria-labelledby="tab-Weather" hidden={flightTab !== "Weather"}>
-              <WeatherTimeline story={story} />
+              {fr24Only ? <p className="p-4 text-muted">Weather is unavailable in this FR24-only test.</p> : <WeatherTimeline story={story} />}
             </section>
             <section id="panel-Briefing" role="tabpanel" aria-labelledby="tab-Briefing" hidden={flightTab !== "Briefing"}>
-              <BreakdownCard briefing={shownBrief} pending={briefM.isPending} feedback={briefFeedback} onCompile={updateBriefing} />
+              {fr24Only ? <p className="p-4 text-muted">Briefing is unavailable in this FR24-only test.</p> : <BreakdownCard briefing={shownBrief} pending={briefM.isPending} feedback={briefFeedback} onCompile={updateBriefing} />}
             </section>
           </div>
         )}
@@ -1159,6 +1177,7 @@ function departureUpdateDelayed(story: FlightStory, nowMs = Date.now()) {
 }
 
 function stageHeadline(story: FlightStory) {
+  if (story.providers?.previewMode === "fr24-only") return story.aircraft?.onGround ? "Reported on the ground" : story.live ? "Reported in flight" : "Position unavailable";
   const stage = displayStage(story);
   if (departureGroundUnconfirmed(story)) return departureUpdateDelayed(story) ? "Ground position unavailable" : "Ground movement not confirmed";
   if (stage === "ride") return "In flight";
@@ -1174,6 +1193,7 @@ function stageHeadline(story: FlightStory) {
 }
 
 function headStatus(story: FlightStory, remaining = remainingFlight(story)) {
+  if (story.providers?.previewMode === "fr24-only") return "FR24-only observation";
   const airline = story.airline;
   const stage = displayStage(story);
   const air = flightAirborne(story);
@@ -1196,12 +1216,17 @@ function headStatus(story: FlightStory, remaining = remainingFlight(story)) {
 const STATUS_PROGRESS = ["Gate", "Pushback", "Taxi", "Flight", "Landing", "Gate"] as const;
 
 function FlightStatusProgress({ story }: { story: FlightStory }) {
-  const active = statusProgressIndex(displayStage(story));
-  const labels = departureGroundUnconfirmed(story)
+  if (story.providers?.previewMode === "fr24-only") return null;
+  const unconfirmed = departureGroundUnconfirmed(story);
+  // An unavailable observation does not establish that the aircraft is still
+  // at its first stage. Keep every physical stage neutral until evidence does.
+  const active = unconfirmed ? -1 : statusProgressIndex(displayStage(story));
+  const labels = unconfirmed
     ? (["Status", ...STATUS_PROGRESS.slice(1)] as const)
     : STATUS_PROGRESS;
   return (
-    <div className="flight-progress mt-4" aria-label={`Flight progress: ${labels[active]}`}>
+    <div className="flight-progress mt-4" data-progress-state={unconfirmed ? "unknown" : "confirmed"}
+      aria-label={`Flight progress: ${unconfirmed ? "movement not confirmed" : labels[active]}`}>
       <div className="grid grid-cols-6 gap-1">
         {labels.map((label, index) => {
           const complete = index < active;

@@ -1,3 +1,4 @@
+import { fr24PreviewModeEnabled } from "./fr24-preview-session.server.ts";
 import type { Sql } from "./db.ts";
 
 /** Demand-driven acquisition for free sources only. No paid-provider imports. */
@@ -259,6 +260,7 @@ export function createAdsbAcquirer(store: Store, options: {
     }
   }
   return async function acquire(request: AdsbRequest): Promise<AdsbAcquisition> {
+    if (fr24PreviewModeEnabled()) return empty("unavailable");
     let url: URL;
     try { url = new URL(request.url); } catch { return empty("unavailable"); }
     if (url.protocol !== "https:" || url.hostname !== HOSTS[request.provider] || url.username || url.password || url.port) {

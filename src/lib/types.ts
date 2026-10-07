@@ -266,6 +266,8 @@ export type FlightStory = {
   currentStage: StageId;
   arrivalStatus?: "airborne" | "landed" | "taxi_in" | "gate";
   providers?: {
+    previewMode?: "fr24-only";
+    fr24Preview?: { sessionId: string | null; mode: string; state: string; creditsConsumed: number; creditCap: number | null; attempts: number; attemptCap: number | null; expiresAt: number | null; lastStatusCode: number | null; lastErrorKind: string | null; blocked: boolean } | null;
     scheduleSource?: FlightScheduleSource;
     flightStateKey?: string | null;
     canonicalKey?: string | null;

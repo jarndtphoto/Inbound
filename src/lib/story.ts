@@ -259,6 +259,15 @@ export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightR
   return replaceDetectedPush(story, reference);
 }
 
+/** Read configuration before restoring a browser story or starting any feed. */
+export const getFlightDataMode = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { fr24PreviewModeEnabled, fr24PreviewSessionStatus } = await import("./fr24-preview-session.server.ts");
+    const enabled = fr24PreviewModeEnabled();
+    return { mode: enabled ? "fr24-only" as const : "normal" as const,
+      session: enabled ? await fr24PreviewSessionStatus() : null };
+  });
+
 export const getFlightStory = createServerFn({ method: "POST" })
   .validator((input: { q: string; fresh?: boolean; resume?: FlightResume }) => {
     const q = String(input?.q ?? "").trim();
@@ -268,6 +277,9 @@ export const getFlightStory = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     const story = await loadFlightStory(data.q, { fresh: data.fresh, resume: data.resume });
+    // Saved device checkpoints belong to the normal fusion path. They must not
+    // inject old stages, coordinates, or takeoff proof into an isolated preview.
+    if (story.providers?.previewMode === "fr24-only") return story;
     // A device checkpoint is presentation context, not authenticated takeoff
     // evidence. Only loadFlightStory's provider/durable proof may floor here.
     const groundResume = data.resume ? { ...data.resume, confirmedTakeoff: null, stateKey: null } : undefined;

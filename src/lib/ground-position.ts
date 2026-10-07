@@ -72,6 +72,8 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     return { callsign, flightId, flightNumber, registration, hex, stateKey, serviceDate, airportIata: /^[A-Z]{3}$/.test(airportIata) ? airportIata : null, originIata, destIata, movementKind, airportLat, airportLon };
   })
   .handler(async ({ data }) => {
+    const { fr24PreviewModeEnabled } = await import("./fr24-preview-session.server.ts");
+    if (fr24PreviewModeEnabled()) return null;
     // Preserve request provenance across provider waits and parallel viewers.
     const requestStartedAt = Date.now();
     const airport = { lat: data.airportLat, lon: data.airportLon };
@@ -199,7 +201,8 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         .sort((a, b) => b.seenAt - a.seenAt)[0] ?? null;
     };
 
-    let hexPacks: ProviderPack[] = [], regPacks: ProviderPack[] = [], callsignPacks: ProviderPack[] = [], aroundPacks: ProviderPack[] = [];
+    let hexPacks: ProviderPack[] = [], regPacks: ProviderPack[] = [], aroundPacks: ProviderPack[] = [];
+    const callsignPacks: ProviderPack[] = [];
     const aroundKey = `${airport.lat.toFixed(3)}:${airport.lon.toFixed(3)}:20`;
     const pathsAttempted: string[] = [];
     const lookup = async (route: string, run: () => Promise<ProviderPack[]>) => {

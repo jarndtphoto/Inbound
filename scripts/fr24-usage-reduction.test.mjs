@@ -71,7 +71,7 @@ test("visibility and Map selection are wired through to the ground observer", as
   assert.doesNotMatch(app, /if \(s\.live \|\| s\.currentStage === "push"/);
   assert.match(await read("src/components/route-map-experiment.tsx"), /active=\{props.active\}/);
   const movement = await read("src/components/movement-map.tsx");
-  assert.match(movement, /enabled: groundPollingEnabled\([\s\S]{0,120}active,[\s\S]{0,80}pageVisible/);
+  assert.match(movement, /enabled: story\.providers\?\.previewMode !== "fr24-only" && groundPollingEnabled\([\s\S]{0,120}active,[\s\S]{0,80}pageVisible/);
   assert.doesNotMatch(movement, /refetchIntervalInBackground:\s*true/);
   assert.match(movement, /document\.visibilityState !== "visible"/);
   assert.match(movement, /startupMs < 30_000 \? 2_500 : 8_000/, "ground ADS-B polling retries every 2.5 seconds during startup, then returns to eight seconds");

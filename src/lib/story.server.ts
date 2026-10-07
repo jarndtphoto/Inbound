@@ -65,6 +65,7 @@ import { routeMemoryStore } from "./route-memory-store.server.ts";
 const ARRIVAL_INSTANCE = Math.random().toString(36).slice(2, 10);
 import { expectedArrivalRunway } from "./arrival-runway.server.ts";
 import { loadOfficialFlightData } from "./official-flight-data.server.ts";
+import { fr24PreviewModeEnabled } from "./fr24-preview-session.server.ts";
 import {
 	fetchAround,
 	fetchByCallsign,
@@ -4374,8 +4375,9 @@ async function buildStory(query, resumed = null, progressResume = null) {
 	const latched = pushLatchValue;
 	const latchUnix = latched && typeof latched === "object" ? latched.unix : typeof latched === "number" ? null : null;
 	if (latchUnix && !times.pushed) {
-		const age = Date.now() / 1e3 - (latched.at ?? latchUnix);
-		if (live || times.airborne || (latched.live && age < 180)) {
+		// A confirmed same-leg departure event does not expire with its position
+		// fix. Keep progress while telemetry is missing; never infer new movement.
+		if (live || times.airborne || latched.live) {
 			const otz = tzOf(origin);
 			const origPush = times.origPushUnix ?? latchUnix;
 			const delayMin = slipMin(latchUnix, origPush);
@@ -4942,10 +4944,134 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		})
 	};
 }
+/** Static airport context only: never acquire another flight or weather feed. */
+function fr24PreviewField(endpoint) {
+	if (!endpoint) return null;
+	const iata = String(endpoint.iata ?? "").trim().toUpperCase();
+	const icao = String(endpoint.icao ?? "").trim().toUpperCase();
+	const known = airportByIcao(icao) ?? airportByIata(iata) ?? scheduledAirportByIata(iata);
+	if (!known || (iata && known.iata !== iata) || (icao && known.icao && known.icao !== icao)) return null;
+	return {
+		...known, iata: iata || known.iata, icao: icao || known.icao,
+		decoded: null, rawMetar: null, nas: null, category: "UNK", windDir: null, taf: null,
+	};
+}
+
+/** An intentionally isolated story pipeline. Neither normal story caches nor
+ * device/server resume, traces, phase latches, and route memories enter here. */
+async function buildFr24PreviewStory(query) {
+	const parsed = parseFlightQuery(query);
+	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
+	const official = await loadOfficialFlightData(parsed.callsign, { fr24FlightNumber: parsed.iata });
+	const flight = official.fr24;
+	if (!flight) {
+		noteStorySchedule("unavailable");
+		const state = official.status.fr24;
+		const detail = state === "NO_MATCH" ? "No live FR24 match for this flight."
+			: state === "DISABLED" ? "The bounded FR24 preview session is not enabled."
+				: `FR24 live data is unavailable (${state}).`;
+		throw new Error(`[FR24_ONLY_${state}] ${detail}`);
+	}
+	const origin = fr24PreviewField(flight.origin);
+	const dest = fr24PreviewField(flight.destination);
+	if (!origin || !dest) {
+		noteStorySchedule("unavailable");
+		throw new Error("[FR24_ONLY_ROUTE_UNAVAILABLE] FR24 has no complete supported live route for this flight.");
+	}
+	const now = Date.now(), nowSec = now / 1000;
+	const position = flight.position;
+	const validPosition = position && Number.isFinite(position.lat) && Math.abs(position.lat) <= 90
+		&& Number.isFinite(position.lon) && Math.abs(position.lon) <= 180
+		&& Number.isFinite(position.seenAt) && position.seenAt > 0 && position.seenAt <= nowSec + 10;
+	// Reuse established freshness thresholds. Stale FR24 data is diagnostic only;
+	// it never becomes a held/extrapolated live fix and no other feed fills it in.
+	const selected = validPosition ? choosePosition([position], {}, nowSec).chosen : null;
+	const live = selected ? normalizedToLive(selected, { origin, dest }) : null;
+	if (live) live.typeName = airframeOf(live.type)?.name ?? live.type;
+	const totalNm = haversineNm(origin, dest);
+	const directToDestNm = live ? haversineNm(live, dest) : null;
+	const remainingNm = directToDestNm ?? totalNm;
+	const spine = makeSpine(origin, dest, []);
+	const progress = live ? progressAlongPath(spine, live).frac : 0;
+	const etaMin = live ? passengerEtaMin({ remainingNm, directToDestNm, gsKt: live.gsKt ?? 0,
+		providerEtaMin: Number.isFinite(flight.providerEta) ? Math.max(0, (flight.providerEta - nowSec) / 60) : null }) : 0;
+	const atOrigin = Boolean(live?.onGround && haversineNm(live, origin) < 10);
+	const atDestination = Boolean(live?.onGround && directToDestNm < 10 && !atOrigin);
+	// A single stationary destination fix proves surface presence, not gate-in.
+	const current = !live ? "inbound" : atDestination ? "taxi_in"
+		: atOrigin ? (live.gsKt ?? 0) >= 5 ? "taxi" : "origin_gate"
+			: currentStageOf({ live, origin, dest, remainingNm, faAirborne: !live.onGround, inboundStatus: "unknown" });
+	const none = { scheduled: null, estimated: null, actual: null };
+	const event = (value) => {
+		const row = value ?? none;
+		return { unix: bestUnix(row), kind: stampKind(row) };
+	};
+	const push = event(flight.push), takeoff = event(flight.takeoff), landing = event(flight.landing), gateIn = event(flight.gateIn);
+	const landingUnix = landing.unix ?? flight.providerEta ?? null;
+	const times = {
+		...timesOf(null, origin, dest),
+		push: clockAt(push.unix, origin.tz), pushUnix: push.unix, pushKind: push.kind,
+		pushSource: flight.push?.actual != null ? "provider_actual" : null,
+		takeoff: clockAt(takeoff.unix, origin.tz), takeoffUnix: takeoff.unix, takeoffKind: takeoff.kind,
+		land: clockAt(landingUnix, dest.tz), landUnix: landingUnix,
+		landKind: landing.kind ?? (flight.providerEta != null ? "estimated" : null),
+		gate: clockAt(gateIn.unix, dest.tz), gateUnix: gateIn.unix, gateKind: gateIn.kind,
+		originGate: flight.origin?.gate ?? null, destGate: flight.destination?.gate ?? null,
+		pushed: Boolean(flight.push?.actual || live && (!live.onGround || current === "taxi" || current === "taxi_in")),
+		airborne: Boolean(live && !live.onGround),
+	};
+	const fracs = pathFracs(spine);
+	const samples = spine.map((point, index) => ({ ...point, frac: fracs[index],
+		distNm: totalNm * fracs[index], remainingNm: totalNm * (1 - fracs[index]),
+		etaMin: etaMin * Math.max(0, fracs[index] - progress) / Math.max(0.001, 1 - progress),
+		chop: "smooth", cloud: false, convective: false, fix: false,
+		note: "Direct route context. Weather is unavailable in FR24-only preview.",
+	}));
+	// Compatibility fields stay present, with explicit unavailable copy. The
+	// preview UI suppresses the normal comfort grade and weather assessment.
+	const comfort = { score: 0, grade: "C", label: "Unavailable",
+		summary: "Weather and comfort are not assessed in FR24-only preview.", reasons: [] };
+	const inbound = { status: "unknown", headline: "FR24-only preview",
+		detail: "Inbound aircraft and schedules are not supplied by this preview.", watch: [] };
+	const stages = buildStages({ live, origin, dest, current, remainingNm, etaMin,
+		comfort, inbound, samples, times, taxiHint: current === "taxi", parkedAtGate: false });
+	if (!live) stages.inbound = { state: "now", title: "Awaiting a fresh FR24 position",
+		body: "The previous FR24 observation is too old to show as live.", watchouts: [] };
+	if (atOrigin && current === "origin_gate") stages.origin_gate = { ...stages.origin_gate,
+		title: `On the ground · ${origin.iata}`, body: "FR24 reports the aircraft on the departure airport surface. Gate status is unavailable." };
+	if (atDestination) stages.taxi_in = { ...stages.taxi_in,
+		title: `On the ground · ${dest.iata}`, body: "FR24 reports the aircraft on the destination airport surface. Gate status is unavailable." };
+	const callsign = flight.callsign ?? parsed.callsign;
+	return {
+		build: BUILD_INFO, fetchedAt: now, query, callsign, iata: displayIata(callsign, parsed.iata),
+		airline: airlineOf(callsign), flightId: flight.flightId ?? undefined,
+		stateKey: null, confirmedTakeoff: null, selectedStageReason: "fr24_only_observation", takeoffFloorApplied: false,
+		live: Boolean(live), currentStage: current, arrivalStatus: atDestination ? "taxi_in" : "airborne",
+		providers: {
+			previewMode: "fr24-only", fr24Preview: official.fr24Preview,
+			scheduleSource: "fr24_live", configured: official.configured, status: official.status,
+			chosenPosition: live ? "fr24" : null,
+			chosenPositionSeenAt: live?.seenAt ?? null, chosenPositionAgeSec: live?.seenSec ?? null,
+			fr24Position: position, flightawarePosition: null, adsbPosition: null,
+			providerEta: { flightaware: null, fr24: flight.providerEta ?? null }, fr24Usage: null,
+			remainingNm, etaMin, landed: atDestination, phaseStatePersistence: "isolated-preview",
+			routeMemoryPersistence: "isolated-preview", surfaceTelemetryStale: Boolean(position?.onGround && !live),
+		},
+		aircraft: live, origin, dest,
+		route: { totalNm, remainingNm, flownNm: Math.max(0, totalNm - remainingNm), observedFlownNm: null,
+			progressSource: live ? "observed" : "unknown", progressObservedAt: live?.seenAt ? live.seenAt * 1000 : null,
+			etaMin, progress, heading: live?.track ?? initialBearing(origin, dest), source: "direct", samples, filedFixes: [] },
+		hazards: [], weatherCoverage: { failedSources: ["Turbulence advisories", "Storm advisories", "Pilot reports", "Airport weather"] },
+		comfort, inbound, times, stages,
+	};
+}
+
 export async function loadFlightStory(query, opts) {
 	return withStoryRequest(query, Boolean(opts?.fresh), () => loadFlightStoryCore(query, opts));
 }
 async function loadFlightStoryCore(query, opts) {
+	// This must precede every normal cache hit and every resume fallback.
+	if (fr24PreviewModeEnabled()) return buildFr24PreviewStory(query);
 	const fresh = Boolean(opts?.fresh);
 	try {
 		const key = `story43:${String(query || "").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
@@ -4983,6 +5109,7 @@ async function loadFlightStoryCore(query, opts) {
 	}
 }
 export async function loadLiveBoard() {
+	if (fr24PreviewModeEnabled()) return [];
 	return cached("live-board-v3", 25e3, async () => {
 		const jfk = AIRPORT_BY_ICAO.KJFK;
 		const acs = await safe(adsbAround(jfk.lat, jfk.lon, 90), []);

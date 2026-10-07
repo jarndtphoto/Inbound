@@ -28,7 +28,7 @@ before(async () => {
         enforce: "pre",
         transform(code, id) {
           if (id === resolve(repo, "src/components/movement-map.tsx"))
-            return code + "\nexport { GroundMovementMap };";
+            return code + "\nexport { GroundMovementMap, RouteMap };";
         },
       },
       react(),
@@ -209,4 +209,29 @@ test("cached query from a different airport cannot displace the current airport 
     assert.doesNotMatch(html, /17 kt/);
     assert.match(html, /3 kt/);
   }
+});
+
+function previewFixture() {
+  const s = fixture();
+  s.providers = { ...s.providers, chosenPosition: "fr24", previewMode: "fr24-only", fr24Preview: {sessionId:"fixture-session"} };
+  return s;
+}
+test("FR24-only Ground ignores newer ADS-B query cache and ages genuine observation", () => {
+  const s = previewFixture();
+  const ground = { ...s.aircraft, provider: "adsb", gsKt: 99, seenAt: s.fetchedAt / 1000 };
+  assert.doesNotMatch(markup(s, 0, ground), /99 kt/);
+  assert.match(markup(s, 26, ground), /Last seen 31s ago/);
+  assert.match(markup(s, 116, ground), /Awaiting aircraft/);
+});
+test("FR24-only Flight uses actual arrival coordinates and expires surface marker at30s", () => {
+  const s = previewFixture(); s.live = true;
+  s.currentStage = "taxi_in";
+  s.aircraft = { ...s.aircraft, lat:s.dest.lat+0.005, lon:s.dest.lon+0.005 };
+  const render = elapsed => { const restore=freezeTestClock(s.fetchedAt+elapsed*1000);try{return renderToStaticMarkup(h(ui.RouteMap,{story:s}));}finally{restore();} };
+  assert.match(render(0), /data-map-aircraft/);
+  assert.doesNotMatch(render(26), /data-map-aircraft/);
+  const actual = render(0).match(/data-map-aircraft[^>]*transform="([^"]+)"/)[1];
+  const marker = { ...s.aircraft }; s.aircraft={...marker,lat:s.dest.lat,lon:s.dest.lon};
+  const center = render(0).match(/data-map-aircraft[^>]*transform="([^"]+)"/)[1];
+  assert.notEqual(actual,center,"aircraft must not be pinned to airport center");
 });

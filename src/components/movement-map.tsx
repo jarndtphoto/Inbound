@@ -371,7 +371,7 @@ function GroundMovementMap({
   const identityRegistration = identity.registration;
   const identityHex = identity.hex?.replace(/^~+/, "").toLowerCase() || null;
   const identityCallsign = identity.callsign;
-  const identityKey = `${story.stateKey ?? story.flightId ?? story.iata}:${story.origin.iata}:${story.dest.iata}:${airport.iata}:${mode.kind}:${identityRegistration ?? ""}:${identityHex ?? ""}`;
+  const identityKey = `${story.providers?.previewMode ?? "normal"}:${story.providers?.fr24Preview?.sessionId ?? ""}:${story.stateKey ?? story.flightId ?? story.iata}:${story.origin.iata}:${story.dest.iata}:${airport.iata}:${mode.kind}:${identityRegistration ?? ""}:${identityHex ?? ""}`;
   const groundPollStartRef = useRef<{ key: string; at: number }>({ key: identityKey, at: Date.now() });
   if (groundPollStartRef.current.key !== identityKey) {
     groundPollStartRef.current = { key: identityKey, at: Date.now() };
@@ -423,7 +423,7 @@ function GroundMovementMap({
       airportLon: airport.lon,
     } });
     },
-    enabled: groundPollingEnabled(
+    enabled: story.providers?.previewMode !== "fr24-only" && groundPollingEnabled(
       active,
       pageVisible,
       flightPollingComplete(story),
@@ -446,7 +446,7 @@ function GroundMovementMap({
     gcTime: 60_000,
     retry: false,
   });
-  const queriedFast = groundQ.data;
+  const queriedFast = story.providers?.previewMode === "fr24-only" ? null : groundQ.data;
   const queriedFastAge = groundObservationAge(queriedFast?.seenAt, nowMs);
   const queriedCandidate = queriedFast && (queriedFastAge ?? Infinity) <= 120
     && Number.isFinite(queriedFast.lat) && Number.isFinite(queriedFast.lon)
