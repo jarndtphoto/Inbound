@@ -4866,6 +4866,7 @@ async function buildStory(query, resumed = null, progressResume = null) {
 		currentStage: current,
 		arrivalStatus,
 		providers: {
+			...(official.fr24Preview ? { previewMode: "production-parity", fr24Preview: official.fr24Preview } : {}),
 			scheduleSource,
 			flightStateKey: stateKey,
 			canonicalKey: stateIdentity.canonicalKey,
@@ -4966,8 +4967,9 @@ async function buildFr24PreviewStory(query) {
 	const flight = official.fr24;
 	if (!flight) {
 		noteStorySchedule("unavailable");
-		const state = official.status.fr24;
-		const detail = state === "NO_MATCH" ? "No live FR24 match for this flight."
+		const state = official.fr24Preview?.state === "stopped_402" ? "STOPPED_402" : official.status.fr24;
+		const detail = state === "STOPPED_402" ? "FR24 returned HTTP 402. This session is stopped; account or API access needs resolution."
+			: state === "NO_MATCH" ? "No live FR24 match for this flight."
 			: state === "DISABLED" ? "The bounded FR24 preview session is not enabled."
 				: `FR24 live data is unavailable (${state}).`;
 		throw new Error(`[FR24_ONLY_${state}] ${detail}`);
@@ -5070,7 +5072,8 @@ export async function loadFlightStory(query, opts) {
 	return withStoryRequest(query, Boolean(opts?.fresh), () => loadFlightStoryCore(query, opts));
 }
 async function loadFlightStoryCore(query, opts) {
-	// This must precede every normal cache hit and every resume fallback.
+	// Isolation applies only to FR24-only mode. Production-parity Preview keeps
+	// the normal cache, resume, public schedule, weather and free ADS-B pipeline.
 	if (fr24PreviewModeEnabled()) return buildFr24PreviewStory(query);
 	const fresh = Boolean(opts?.fresh);
 	try {

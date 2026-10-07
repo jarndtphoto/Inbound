@@ -262,10 +262,12 @@ export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightR
 /** Read configuration before restoring a browser story or starting any feed. */
 export const getFlightDataMode = createServerFn({ method: "GET" })
   .handler(async () => {
-    const { fr24PreviewModeEnabled, fr24PreviewSessionStatus } = await import("./fr24-preview-session.server.ts");
-    const enabled = fr24PreviewModeEnabled();
-    return { mode: enabled ? "fr24-only" as const : "normal" as const,
-      session: enabled ? await fr24PreviewSessionStatus() : null };
+    const { fr24ProductionParityModeEnabled, fr24PreviewModeEnabled, fr24PreviewSessionStatus } = await import("./fr24-preview-session.server.ts");
+    const mode = fr24PreviewModeEnabled() ? "fr24-only" as const
+      : fr24ProductionParityModeEnabled() ? "production-parity" as const : "normal" as const;
+    // Read the persisted session independently of the normal story cache so a
+    // later FR24 stop remains visible while the other Production feeds continue.
+    return { mode, session: mode === "normal" ? null : await fr24PreviewSessionStatus() };
   });
 
 export const getFlightStory = createServerFn({ method: "POST" })

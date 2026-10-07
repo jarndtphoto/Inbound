@@ -1,7 +1,7 @@
 import { loadAeroApiFlight, aeroApiConfigured } from "./flightaware-aeroapi.server.ts";
 import { createFr24Cycle, loadFr24Flight, loadFr24FlightByNumber, loadFr24FlightByNumberAndRoute, loadFr24FlightByRegistration, fr24Configured } from "./fr24.server.ts";
 import { fr24UsageToday } from "./fr24-budget.server.ts";
-import { fr24PreviewModeEnabled, fr24PreviewSessionStatus } from "./fr24-preview-session.server.ts";
+import { fr24ProductionParityModeEnabled, fr24PreviewModeEnabled, fr24PreviewSessionStatus } from "./fr24-preview-session.server.ts";
 export { setFr24GuardForTests } from "./fr24-budget.server.ts";
 import type { NormalizedFlight, ProviderState } from "./flight-data.ts";
 
@@ -32,6 +32,11 @@ async function probe(configured: boolean, load: () => Promise<NormalizedFlight |
   } catch (error) {
     return { flight: null, state: stateFor(error) };
   }
+}
+
+async function parityPreviewDiagnostics() {
+  return fr24ProductionParityModeEnabled()
+    ? { fr24Preview: await fr24PreviewSessionStatus() } : {};
 }
 
 function operatingIdentFromFlightAware(flight: NormalizedFlight | null): string | null {
@@ -78,7 +83,7 @@ export async function loadOfficialFlightData(
     fr24Allowed?: boolean;
   },
 ) {
-  // Preview is a separate acquisition boundary, not another fusion preference.
+  // Only the explicitly isolated Preview uses a separate acquisition boundary.
   // Never read AeroAPI, a normal-mode lookup memo, or public/saved identity hints.
   if (fr24PreviewModeEnabled()) {
     const number = options?.fr24FlightNumber?.replace(/\s/g, "").toUpperCase() || null;
@@ -127,7 +132,8 @@ export async function loadOfficialFlightData(
       return { flightaware: fa.flight, fr24: flight,
         configured: { flightaware: aeroApiConfigured(), fr24: frConfigured },
         status: { flightaware: fa.state, fr24: recalled.state },
-        fr24Usage: await fr24UsageToday().catch(() => null) };
+        fr24Usage: await fr24UsageToday().catch(() => null),
+        ...await parityPreviewDiagnostics() };
     }
   }
   matchedLookups.delete(lookupKey);
@@ -246,5 +252,6 @@ export async function loadOfficialFlightData(
     configured: { flightaware: aeroApiConfigured(), fr24: frConfigured },
     status: { flightaware: fa.state, fr24: fr.state },
     fr24Usage: await fr24UsageToday().catch(() => null),
+    ...await parityPreviewDiagnostics(),
   };
 }

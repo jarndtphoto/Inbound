@@ -231,8 +231,10 @@ test("FR24 uses one strongest lookup per cycle and shares it for twenty seconds"
     assert.equal(previewOff.configured.fr24, false);
     assert.deepEqual(calls, [], "previews cannot spend FR24 credits by default");
     process.env.FR24_PREVIEW_ENABLED = "1";
-    now += 30000; calls = []; await api.loadOfficialFlightData("PREV1", { fr24OperatingCallsign: "PREV1" });
-    assert.deepEqual(calls, ["callsign"], "the explicit preview override works in code");
+    now += 30000; calls = [];
+    const unboundedPreview = await api.loadOfficialFlightData("PREV1", { fr24OperatingCallsign: "PREV1" });
+    assert.equal(unboundedPreview.configured.fr24, false);
+    assert.deepEqual(calls, [], "a preview enable flag without an approved session cannot spend");
   } finally {
     globalThis.fetch = realFetch; Date.now = realNow;
     for (const key of keys) { if (saved[key] == null) delete process.env[key]; else process.env[key] = saved[key]; }

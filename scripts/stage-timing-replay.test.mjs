@@ -17,7 +17,7 @@ before(async () => {
   directory = await mkdtemp(resolve('node_modules/.stage-timing-replay-'));
   await build({ configFile:false, logLevel:'silent', resolve:{alias:{'@':resolve('src')}},
     plugins:[{name:'test-stage-timing',enforce:'pre',transform(code,id){
-      if(id===resolve('src/components/filed-app.tsx')) return code+'\nexport {FlightHead, TimesStrip, FlightStatusProgress, RouteMap};\nexport {preserveDepartureProgress, preferFreshAirborneState} from "@/lib/story";';
+      if(id===resolve('src/components/filed-app.tsx')) return code+'\nexport {FlightHead, TimesStrip, FlightStatusProgress, RouteMap, Fr24AccessStoppedNotice, PreviewProviderStatus};\nexport {preserveDepartureProgress, preferFreshAirborneState} from "@/lib/story";';
     }},react()],build:{ssr:resolve('src/components/filed-app.tsx'),outDir:directory,rollupOptions:{output:{entryFileNames:'ui.mjs'}}} });
   ui=await import(pathToFileURL(join(directory,'ui.mjs')).href);
 });
@@ -184,4 +184,25 @@ test('FR24-only observation never claims gate or taxi status from one stationary
   const html=markup(ui.FlightHead,story);
   assert.match(html,/Reported on the ground/);assert.doesNotMatch(html,/At the gate|Taxiing in|data-progress-current/);
  }
+});
+
+test('terminal FR24 HTTP402 explains account resolution without loading or retry prompts', async()=>{
+  const html=renderToStaticMarkup(h(ui.Fr24AccessStoppedNotice,{onHome:()=>{}}));
+  assert.match(html,/HTTP 402/);assert.match(html,/account or API access issue must be resolved/);
+  assert.match(html,/no further paid requests or automatic retries/);assert.match(html,/No aircraft coverage was established/);
+  assert.doesNotMatch(html,/We’ll try again shortly|Still looking|Try again<|Loading/);
+  const source=await readFile(resolve('src/components/filed-app.tsx'),'utf8');
+  assert.match(source,/!fr24AccessStopped && !story && !storyQ.isError[^\n]*<Skeleton/);
+  assert.match(source,/!fr24AccessStopped && \(storyQ.isError \|\| storyQ.failureCount > 0\)/);
+});
+
+test('Production-source Preview reports stopped FR24 while retaining active fallback sources',()=>{
+ const session={mode:'production-parity',state:'stopped_402',creditsConsumed:8,creditCap:400,attempts:1,attemptCap:50,lastStatusCode:402,expiresAt:null};
+ const html=renderToStaticMarkup(h(ui.PreviewProviderStatus,{mode:'production-parity',session,providers:{chosenPosition:'adsb',scheduleSource:'flightaware_public'}}));
+ assert.match(html,/Production-source Preview/);assert.match(html,/8 \/ 400 credits reserved/);
+ assert.match(html,/Other configured sources and fallbacks remain active/);assert.match(html,/Position source: ADS-B/);
+ assert.match(html,/Schedule source: FlightAware public/);assert.match(html,/HTTP 402/);
+ assert.doesNotMatch(html,/This test session has stopped|Actual FR24 observations only/);
+ const story={...polishStory(),currentStage:'taxi',providers:{previewMode:'production-parity',chosenPosition:'adsb'},aircraft:{...polishStory().aircraft,onGround:true,gsKt:15}};
+ assert.match(markup(ui.FlightHead,story),/>Taxiing out</,'ordinary source-backed stage presentation remains enabled');
 });

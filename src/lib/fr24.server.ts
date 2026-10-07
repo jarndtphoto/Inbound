@@ -1,4 +1,4 @@
-import { fr24PreviewModeEnabled, fr24PreviewSessionStatus, reserveFr24PreviewSession, finishFr24PreviewSessionCall, canDispatchFr24PreviewSession, readFr24PreviewConfig } from "./fr24-preview-session.server.ts";
+import { fr24PreviewModeEnabled, fr24PreviewBudgetEnabled, fr24PreviewSessionStatus, reserveFr24PreviewSession, finishFr24PreviewSessionCall, canDispatchFr24PreviewSession, readFr24PreviewConfig } from "./fr24-preview-session.server.ts";
 import { safeFr24ErrorDetails } from "./fr24-safe-error.ts";
 import { emptyTimes, type NormalizedFlight, type NormalizedPosition } from "./flight-data.ts";
 import { fr24CreditsForResponse, fr24Endpoint, fr24MaxCredits } from "./fr24-budget.ts";
@@ -81,7 +81,7 @@ function sharedCacheKey(path: string, ident: string): string {
   // Registration -> flight number -> callsign fallbacks therefore cannot each
   // spend credits in separate cold instances during the same twenty seconds.
   const key = endpoint === "/live/flight-positions/full" ? `live:${ident}` : `${endpoint}:${ident}`;
-  if (!fr24PreviewModeEnabled()) return key;
+  if (!fr24PreviewBudgetEnabled()) return key;
   const config = readFr24PreviewConfig();
   return `preview:${config.ok ? config.config.sessionId : "disabled"}:${key}`;
 }
@@ -105,11 +105,16 @@ async function get(path: string, ttlMs: number, probe?: Fr24ProbeDiagnostics, cy
     probe.rawPosition = null;
   }
   if (!token) return null;
-  const previewMode = fr24PreviewModeEnabled();
-  if (previewMode) {
+  const previewBudget = fr24PreviewBudgetEnabled();
+  if (previewBudget) {
+    const config = readFr24PreviewConfig();
+    if (!config.ok) throw new Error(`[FR24_PREVIEW_${config.reason}] Preview allowance unavailable`);
     const status = await fr24PreviewSessionStatus();
-    if (status.blocked) throw new Error(`[FR24_PREVIEW_${status.state}] FR24-only Preview ${status.state}`);
-    if (endpoint !== "/live/flight-positions/full" || new URLSearchParams(path.split("?")[1]).get("limit") !== "1")
+    if (status.blocked) throw new Error(`[FR24_PREVIEW_${status.state}] FR24 Preview ${status.state}`);
+    if (endpoint === "unknown")
+      throw new Error("[FR24_PREVIEW_ENDPOINT_BLOCKED] No approved cost bound for this endpoint");
+    if (fr24PreviewModeEnabled()
+      && (endpoint !== "/live/flight-positions/full" || new URLSearchParams(path.split("?")[1]).get("limit") !== "1"))
       throw new Error("[FR24_PREVIEW_ENDPOINT_BLOCKED] Only one live aircraft per request is allowed");
   }
   const hit = await readFr24Cache(cacheKey, cacheTtlMs, now);
@@ -162,10 +167,10 @@ async function get(path: string, ttlMs: number, probe?: Fr24ProbeDiagnostics, cy
 
   if (cycle) cycle.networkUsed = true;
   const maximum = fr24MaxCredits(path);
-  const previewReservation = previewMode ? await reserveFr24PreviewSession(maximum, now) : null;
-  if (previewMode && !previewReservation) {
+  const previewReservation = previewBudget ? await reserveFr24PreviewSession(maximum, now) : null;
+  if (previewBudget && !previewReservation) {
     await releaseFr24Cache(cacheKey, refreshToken);
-    throw new Error("[FR24_PREVIEW_BLOCKED] FR24-only Preview allowance unavailable");
+    throw new Error("[FR24_PREVIEW_BLOCKED] Preview allowance unavailable");
   }
   const finishPreview = (statusCode: number | null, errorKind: string | null) => previewReservation
     ? finishFr24PreviewSessionCall(previewReservation, { statusCode, errorKind }) : Promise.resolve();
@@ -207,12 +212,12 @@ async function get(path: string, ttlMs: number, probe?: Fr24ProbeDiagnostics, cy
     cache: "miss",
   }));
   try {
-    res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, "Accept-Version": "v1", Accept: "application/json" }, signal: AbortSignal.timeout(5500), redirect: previewMode ? "error" : "follow" });
+    res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, "Accept-Version": "v1", Accept: "application/json" }, signal: AbortSignal.timeout(5500), redirect: previewBudget ? "error" : "follow" });
   } catch (error) {
     const errorKind = fr24ErrorKind(error);
     // A timeout can happen after FR24 processed the request. Count the reserved
     // maximum so an uncertain response can never let the shared cap overspend.
-    const uncertainCredits = previewMode || errorKind === "timeout" ? maximum : 0;
+    const uncertainCredits = previewBudget || errorKind === "timeout" ? maximum : 0;
     await finishPreview(null, errorKind);
     await finishFr24Call(reservation, { ident, endpoint, credits: uncertainCredits, statusCode: null, resultCount: null, errorKind });
     await releaseFr24Cache(cacheKey, refreshToken);
@@ -222,7 +227,7 @@ async function get(path: string, ttlMs: number, probe?: Fr24ProbeDiagnostics, cy
   }
   if (!res.ok) {
     await finishPreview(res.status, res.status === 402 ? "payment_required" : "http");
-    if (previewMode) {
+    if (previewBudget) {
       const details = await safeFr24ErrorDetails(res, token);
       console.warn(JSON.stringify({ event: "fr24_preview_response_error", endpoint, statusCode: res.status, ...details }));
     }
@@ -265,7 +270,7 @@ async function get(path: string, ttlMs: number, probe?: Fr24ProbeDiagnostics, cy
 
 export function normalizeFr24Position(f: any): NormalizedPosition | null {
   if (!f || !Number.isFinite(f.lat) || !Number.isFinite(f.lon)) return null;
-  if (fr24PreviewModeEnabled() && (!Number.isFinite(unix(f.timestamp)) || Number(unix(f.timestamp)) <= 0 || Math.abs(f.lat) > 90 || Math.abs(f.lon) > 180)) return null;
+  if (fr24PreviewBudgetEnabled() && (!Number.isFinite(unix(f.timestamp)) || Number(unix(f.timestamp)) <= 0 || Math.abs(f.lat) > 90 || Math.abs(f.lon) > 180)) return null;
   const seenAt = unix(f.timestamp) ?? Date.now() / 1000;
   const altFt = Number.isFinite(f.alt) ? f.alt : null;
   return { provider: "fr24", flightId: f.fr24_id ?? null, callsign: f.callsign ?? f.flight ?? null, lat: f.lat, lon: f.lon,
@@ -328,7 +333,7 @@ async function loadFr24ByFilter(filter: "callsigns" | "registrations" | "flights
     } : null;
   }
   const selected = rows[0];
-  if (fr24PreviewModeEnabled() && selected && (!Number.isFinite(unix(selected.timestamp)) || Number(unix(selected.timestamp)) <= 0 || !Number.isFinite(selected.lat) || Math.abs(selected.lat) > 90 || !Number.isFinite(selected.lon) || Math.abs(selected.lon) > 180))
+  if (fr24PreviewBudgetEnabled() && selected && (!Number.isFinite(unix(selected.timestamp)) || Number(unix(selected.timestamp)) <= 0 || !Number.isFinite(selected.lat) || Math.abs(selected.lat) > 90 || !Number.isFinite(selected.lon) || Math.abs(selected.lon) > 180))
     throw new Error("[FR24_PREVIEW_INVALID_POSITION] FR24 returned no timestamped coordinates");
   return hydrateFr24Flight(selected, value, cycle);
 }
@@ -415,4 +420,4 @@ export async function loadFr24RecentArrivalIdentity(
 }
 
 export const fr24Configured = () => Boolean(process.env.FR24_API_TOKEN?.trim())
-  && (process.env.VERCEL_ENV !== "preview" || process.env.FR24_PREVIEW_ENABLED === "1");
+  && (!fr24PreviewBudgetEnabled() || readFr24PreviewConfig().ok);

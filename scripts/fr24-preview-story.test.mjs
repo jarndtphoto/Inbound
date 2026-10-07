@@ -215,6 +215,16 @@ test('FR24-only story stays isolated from every other live provider and old stor
       assert.equal(fixture.dbCalls, 0); assert.equal(fixture.otherAcquisitions, 0);
     });
 
+    await t.test('first HTTP402 is terminal in story response and later flights cannot retry it', async () => {
+      reset(); statusCode = 402;
+      await assert.rejects(api.loadFlightStory('AA1', {}), /FR24_ONLY_STOPPED_402.*account or API access needs resolution/);
+      assert.equal(calls.length, 1);
+      await assert.rejects(api.loadFlightStory('AA2', {}), /FR24_ONLY_STOPPED_402/);
+      assert.equal(calls.length, 1, 'shared stop prevents a second paid request');
+      const mode = await api.getFlightDataMode();
+      assert.equal(mode.session.state, 'stopped_402');
+    });
+
     await t.test('disabled and stopped sessions never switch to another provider', async () => {
       reset(); process.env.FR24_PREVIEW_ENABLED = '0';
       await assert.rejects(api.loadFlightStory('AA1', {}), /FR24_ONLY_DISABLED/);

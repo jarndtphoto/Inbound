@@ -15,8 +15,10 @@ export type Fr24PreviewConfig = {
   expiresAt: number;
 };
 
+export type Fr24PreviewMode = "fr24-only" | "production-parity";
+
 export type Fr24PreviewSessionStatus = {
-  mode: "fr24-only";
+  mode: Fr24PreviewMode | null;
   modeEnabled: boolean;
   enabled: boolean;
   state: "ready" | Fr24PreviewBlockReason;
@@ -59,9 +61,25 @@ type SessionRow = {
   guard_now: number;
 };
 
-/** Server-only mode selection is independent of permission to spend. */
+/** Selects provider isolation only; it never grants permission to spend. */
 export function fr24PreviewModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.VERCEL_ENV === "preview" && env.FR24_PREVIEW_MODE === "fr24-only";
+}
+
+/** Uses the ordinary provider paths while retaining the Preview allowance. */
+export function fr24ProductionParityModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.VERCEL_ENV === "preview" && env.FR24_PREVIEW_MODE === "production-parity";
+}
+
+/** Every Preview paid call needs the session guard, even without a valid mode. */
+export function fr24PreviewBudgetEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.VERCEL_ENV === "preview";
+}
+
+function previewMode(env: NodeJS.ProcessEnv): Fr24PreviewMode | null {
+  if (!fr24PreviewBudgetEnabled(env)) return null;
+  return env.FR24_PREVIEW_MODE === "fr24-only" || env.FR24_PREVIEW_MODE === "production-parity"
+    ? env.FR24_PREVIEW_MODE : null;
 }
 
 function positiveInt(value: string | undefined): number | null {
@@ -73,7 +91,8 @@ function positiveInt(value: string | undefined): number | null {
 /** No inferred allowance, default enabled flag, rolling expiry, or credit reset. */
 export function readFr24PreviewConfig(env: NodeJS.ProcessEnv = process.env):
   { ok: true; config: Fr24PreviewConfig } | { ok: false; reason: Fr24PreviewBlockReason } {
-  if (!fr24PreviewModeEnabled(env)) return { ok: false, reason: "not_preview" };
+  if (!fr24PreviewBudgetEnabled(env)) return { ok: false, reason: "not_preview" };
+  if (!previewMode(env)) return { ok: false, reason: "invalid_config" };
   if (env.FR24_PREVIEW_ENABLED !== "1") return { ok: false, reason: "disabled" };
   const sessionId = env.FR24_PREVIEW_SESSION_ID ?? "";
   const creditCap = positiveInt(env.FR24_PREVIEW_CREDIT_CAP);
@@ -106,9 +125,11 @@ function snapshot(env: NodeJS.ProcessEnv, config: Fr24PreviewConfig | null,
   const attemptCap = row?.attempt_cap ?? config?.attemptCap ?? 0;
   const creditsConsumed = row?.credits_consumed ?? 0;
   const attempts = row?.attempts ?? 0;
+  const mode = previewMode(env);
+  const modeEnabled = fr24PreviewBudgetEnabled(env) && mode !== null;
   return {
-    mode: "fr24-only", modeEnabled: fr24PreviewModeEnabled(env),
-    enabled: fr24PreviewModeEnabled(env) && env.FR24_PREVIEW_ENABLED === "1",
+    mode, modeEnabled,
+    enabled: modeEnabled && env.FR24_PREVIEW_ENABLED === "1",
     state: reason ?? "ready", reason, blocked: reason !== null,
     sessionId: row?.session_id ?? config?.sessionId ?? null,
     creditCap, attemptCap, expiresAt: row?.expires_at ?? config?.expiresAt ?? null,

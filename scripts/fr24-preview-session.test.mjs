@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import {
-  createFr24PreviewSessionGuard, fr24PreviewModeEnabled, readFr24PreviewConfig,
+  createFr24PreviewSessionGuard, fr24PreviewModeEnabled, fr24ProductionParityModeEnabled,
+  fr24PreviewBudgetEnabled, readFr24PreviewConfig,
 } from "../src/lib/fr24-preview-session.server.ts";
 
 const AT = Date.UTC(2035, 0, 1, 23, 59);
@@ -30,8 +31,20 @@ async function fixture(env = validEnv()) {
 
 test("Preview configuration is explicit, disabled by default, and strictly validated", async () => {
   assert.equal(fr24PreviewModeEnabled(validEnv()), true);
+  assert.equal(fr24ProductionParityModeEnabled(validEnv()), false);
   assert.equal(fr24PreviewModeEnabled(validEnv({ FR24_PREVIEW_ENABLED: undefined })), true,
     "provider mode is separate from permission to spend");
+  const parityEnv = validEnv({ FR24_PREVIEW_MODE: "production-parity" });
+  assert.equal(fr24PreviewModeEnabled(parityEnv), false, "production parity never enables provider isolation");
+  assert.equal(fr24ProductionParityModeEnabled(parityEnv), true);
+  for (const env of [validEnv(), parityEnv, validEnv({ FR24_PREVIEW_MODE: undefined }),
+    validEnv({ FR24_PREVIEW_MODE: "unknown" }), validEnv({ FR24_PREVIEW_ENABLED: "0" })]) {
+    assert.equal(fr24PreviewBudgetEnabled(env), true, "all Preview requests require the allowance guard");
+  }
+  assert.equal(fr24PreviewBudgetEnabled(validEnv({ VERCEL_ENV: "production" })), false);
+  assert.equal(fr24ProductionParityModeEnabled({ ...parityEnv, VERCEL_ENV: "production" }), false);
+  assert.deepEqual(readFr24PreviewConfig(parityEnv), readFr24PreviewConfig(validEnv()),
+    "mode changes do not change the approved ledger parameters");
   assert.deepEqual(readFr24PreviewConfig(validEnv()), { ok: true, config: {
     sessionId: "approved-session-1", creditCap: 80, attemptCap: 10, expiresAt: AT + 2 * DAY,
   } });
@@ -62,7 +75,8 @@ test("Preview configuration is explicit, disabled by default, and strictly valid
 test("simultaneous viewers and cold instances share one atomic allowance and in-flight gate", async () => {
   const { pg, sql, env } = await fixture(validEnv({ FR24_PREVIEW_CREDIT_CAP: "32" }));
   try {
-    const viewers = Array.from({ length: 12 }, () => createFr24PreviewSessionGuard(async () => sql, () => env));
+    const viewers = Array.from({ length: 12 }, (_, index) => createFr24PreviewSessionGuard(async () => sql,
+      () => ({ ...env, FR24_PREVIEW_MODE: index % 2 ? "production-parity" : "fr24-only" })));
     for (let cycle = 0; cycle < 4; cycle += 1) {
       const reservations = (await Promise.all(viewers.map(guard => guard.reserve(8, AT + cycle)))).filter(Boolean);
       assert.equal(reservations.length, 1, "only one request can be dispatched while another is unfinished");
@@ -78,6 +92,31 @@ test("simultaneous viewers and cold instances share one atomic allowance and in-
     assert.equal(status.remainingAttempts, 0);
     assert.equal(status.inFlight, false);
     assert.equal((await pg.query("select count(*)::integer as count from fr24_preview_reservations")).rows[0].count, 4);
+  } finally { await pg.close(); }
+});
+
+test("production parity preserves the original 400-credit session with eight credits and one attempt consumed", async () => {
+  const { pg, sql, env, guard } = await fixture(validEnv({ FR24_PREVIEW_CREDIT_CAP: "400" }));
+  try {
+    const original = await guard.reserve(8, AT);
+    assert.ok(original);
+    await guard.finish(original, { statusCode: 200 }, AT);
+    const parity = createFr24PreviewSessionGuard(async () => sql,
+      () => ({ ...env, FR24_PREVIEW_MODE: "production-parity", VERCEL_DEPLOYMENT_ID: "parity-build" }));
+    const status = await parity.status(AT + DAY);
+    assert.equal(status.mode, "production-parity");
+    assert.equal(status.modeEnabled, true);
+    assert.equal(status.enabled, true);
+    assert.equal(status.sessionId, env.FR24_PREVIEW_SESSION_ID);
+    assert.equal(status.creditCap, 400);
+    assert.equal(status.creditsConsumed, 8);
+    assert.equal(status.attempts, 1);
+    assert.equal(status.expiresAt, AT + 2 * DAY);
+    assert.equal(status.remainingCredits, 392);
+    assert.equal(status.remainingAttempts, 49);
+    assert.equal((await pg.query("select count(*)::integer as count from fr24_preview_sessions")).rows[0].count, 1);
+    assert.equal(await parity.reserve(8, AT + 2 * DAY), null, "switching modes cannot extend the original expiry");
+    assert.equal((await guard.status(AT + 2 * DAY)).state, "expired");
   } finally { await pg.close(); }
 });
 
@@ -206,15 +245,17 @@ test("slow preflight, disabled config and database failures cannot dispatch an e
   } finally { await pg.close(); }
 });
 
-test("402 persists across viewers, day rollover and redeploy, even if config changed in flight", async () => {
+test("402 persists across modes, viewers, day rollover and redeploy, even if config changed in flight", async () => {
   const { pg, sql, env, guard } = await fixture();
   try {
     const reservation = await guard.reserve(8, AT);
     assert.ok(reservation);
-    const disabledDuringCall = createFr24PreviewSessionGuard(async () => sql, () => validEnv({ FR24_PREVIEW_ENABLED: "0" }));
+    const disabledDuringCall = createFr24PreviewSessionGuard(async () => sql,
+      () => ({ ...env, FR24_PREVIEW_MODE: "production-parity", FR24_PREVIEW_ENABLED: "0" }));
     await disabledDuringCall.finish(reservation, { statusCode: 402, errorKind: "http" }, AT);
     await guard.finish(reservation, { statusCode: 200 }, AT + 1000);
-    const cold = createFr24PreviewSessionGuard(async () => sql, () => env);
+    const cold = createFr24PreviewSessionGuard(async () => sql,
+      () => ({ ...env, FR24_PREVIEW_MODE: "production-parity" }));
     const status = await cold.status(AT + DAY);
     assert.equal(status.state, "stopped_402");
     assert.equal(status.stopped402, true);
@@ -224,6 +265,7 @@ test("402 persists across viewers, day rollover and redeploy, even if config cha
     assert.equal(status.attempts, 1);
     assert.equal(status.inFlight, false);
     assert.equal(await cold.reserve(8, AT + DAY), null);
+    assert.equal(await guard.reserve(8, AT + DAY), null, "returning to FR24-only cannot clear the 402 stop");
   } finally { await pg.close(); }
 });
 
