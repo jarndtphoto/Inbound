@@ -24,6 +24,9 @@ import { formatStoryEventTime } from "@/lib/flight-event-time";
 import { FLIGHT_TABS, flightHref, parseFlightLocation, storyMatchesFlightLink, type FlightLocation, type FlightTab } from "@/lib/flight-url";
 import { passengerAirportWeather } from "@/lib/passenger-airport-weather";
 import { prefetchFlightAirportSurfacesOnce, scheduleLowPrioritySurfacePrefetch } from "@/lib/airport-surface-prefetch";
+import { getGroundBootstrap } from "@/lib/ground-bootstrap";
+import { getGroundPosition } from "@/lib/ground-position";
+import { groundPositionQueryKey } from "@/lib/ground-position-key";
 import { getFlightStory } from "@/lib/story";
 import type { Chop, Comfort, FlightStory, PilotReportObservation, StageId } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -495,10 +498,19 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   const groundTimingStoryLoggedRef = useRef(false);
   const publishedLegDate = useRef<string | null>(null);
   const surfacePrefetchRef = useRef<{ flightKey: string; airports: Set<string> }>({ flightKey: "", airports: new Set() });
+  const groundBootstrapPrefetchRef = useRef("");
   const pushConfirmRef = useRef<{ key: string; attempts: number }>({ key: "", attempts: 0 });
   const flightKey = normFlight(query);
   const pageVisible = usePageVisible();
   const storyQueryKey = flightStoryQueryKey(query, linkedDate);
+  const groundBootstrapQ = useQuery({
+    queryKey: ["ground-bootstrap", flightKey],
+    queryFn: () => getGroundBootstrap({ data: { flight: query } }),
+    enabled: cacheOk && pageVisible && flightTab === "Route" && query.length > 0,
+    staleTime: 2_000,
+    gcTime: 5 * 60_000,
+    retry: false,
+  });
   const shellStyle = {
     background: "var(--color-bg)",
     color: "var(--color-fg)",
@@ -534,7 +546,48 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
     );
   }, []);
 
-  const storyQ = useQuery({
+  useEffect(() => {
+    const bootstrap = groundBootstrapQ.data;
+    if (!bootstrap || flightTab !== "Route") return;
+    const prefetchKey = `${bootstrap.landKey}:${bootstrap.airportIata}:${bootstrap.movementKind}`;
+    if (groundBootstrapPrefetchRef.current === prefetchKey) return;
+    groundBootstrapPrefetchRef.current = prefetchKey;
+    const key = groundPositionQueryKey({
+      stateKey: bootstrap.landKey,
+      flightNumber: bootstrap.requestedIdent,
+      airportIata: bootstrap.airportIata,
+      movementKind: bootstrap.movementKind,
+    });
+    if (bootstrap.lastPosition) queryClient.setQueryData(key, bootstrap.lastPosition);
+    console.info("[ground-ttfp]", {
+      event: "ground_query_sent",
+      flight: flightKey,
+      airport: bootstrap.airportIata,
+      movement: bootstrap.movementKind,
+      atMs: Date.now(),
+      bootstrap: true,
+    });
+    void queryClient.prefetchQuery({
+      queryKey: key,
+      queryFn: () => getGroundPosition({ data: {
+        stateKey: bootstrap.landKey,
+        serviceDate: bootstrap.serviceDate,
+        airportIata: bootstrap.airportIata,
+        flightNumber: bootstrap.requestedIdent,
+        callsign: bootstrap.callsign,
+        registration: bootstrap.registration,
+        hex: bootstrap.hex,
+        originIata: bootstrap.originIata,
+        destIata: bootstrap.destIata,
+        movementKind: bootstrap.movementKind,
+        airportLat: bootstrap.airportLat,
+        airportLon: bootstrap.airportLon,
+      } }),
+      staleTime: 0,
+    });
+  }, [groundBootstrapQ.data, flightTab, queryClient, flightKey]);
+
+    const storyQ = useQuery({
     queryKey: storyQueryKey,
     queryFn: async ({ client, signal }) => {
       if (leavingRef.current) throw new DOMException("Left flight search", "AbortError");
