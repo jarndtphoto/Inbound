@@ -59,6 +59,15 @@ export function createFlightStateCleanup(options: Options = {}): FlightStateClea
           )
           delete from public.flight_route_state as target using stale
           where target.land_key = stale.land_key and target.updated_at < ${flightCutoff}::timestamptz` },
+        { table: "flight_ground_state", run: () => sql`
+          with stale as (
+            select land_key from public.flight_ground_state
+            where updated_at < ${flightCutoff}::timestamptz
+            order by updated_at, land_key limit ${CLEANUP_BATCH_LIMIT}
+            for update skip locked
+          )
+          delete from public.flight_ground_state as target using stale
+          where target.land_key = stale.land_key and target.updated_at < ${flightCutoff}::timestamptz` },
         { table: "arrival_atis_cache", run: () => sql`
           with stale as (
             select airport from public.arrival_atis_cache
