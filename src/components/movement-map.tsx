@@ -11,6 +11,7 @@ import { flightPollingComplete, groundPollingEnabled } from "@/lib/flight-pollin
 import { usePageVisible } from "@/lib/use-page-visible";
 import { getGroundPosition } from "@/lib/ground-position";
 import { groundPositionQueryKey } from "@/lib/ground-position-key";
+import { logGroundTiming } from "@/lib/ground-timing";
 import type { FlightStory } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -370,6 +371,10 @@ function GroundMovementMap({
           movement: mode.kind,
           atMs: Date.now(),
         });
+        void logGroundTiming({ data: {
+          event: "ground_query_sent", flight: story.iata, airport: airport.iata,
+          movement: mode.kind, atMs: Date.now(),
+        } }).catch(() => undefined);
       }
       return getGroundPosition({ data: {
       stateKey: story.stateKey ?? null,
@@ -562,6 +567,11 @@ function GroundMovementMap({
       ageSec: fastAge ?? story.providers?.chosenPositionAgeSec ?? null,
       onGround: displayAircraft.onGround,
     });
+    void logGroundTiming({ data: {
+      event: "first_fix_shown", flight: story.iata, airport: airport.iata, movement: mode.kind,
+      atMs: Date.now(), source: String(fastFix?.provider ?? story.providers?.chosenPosition ?? "saved"),
+      ageSec: fastAge ?? story.providers?.chosenPositionAgeSec ?? null,
+    } }).catch(() => undefined);
   }, [active, Boolean(displayAircraft), story.iata, airport.iata, mode.kind]);
 
   const coverageNotice = groundCoverageNotice({
