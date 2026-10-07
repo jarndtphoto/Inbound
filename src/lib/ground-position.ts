@@ -69,7 +69,7 @@ async function recentGroundTrace(
       if (typeof lat !== "number" || typeof lon !== "number" || Math.abs(lat) > 90 || Math.abs(lon) > 180) return [];
       const seenAt = base + offset;
       const ageSec = now / 1000 - seenAt;
-      if (!Number.isFinite(ageSec) || ageSec < -10 || ageSec > 90) return [];
+      if (!Number.isFinite(ageSec) || ageSec < -10 || ageSec > 120) return [];
       const gsKt = typeof gsRaw === "number" ? gsRaw : null;
       const ground = altRaw === "ground" || altRaw === 0 || altRaw === "0"
         || (typeof altRaw === "number" && altRaw <= 50 && (gsKt ?? 999) <= 80);
