@@ -292,10 +292,13 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /rotate\(\$\{displayAircraft\.track\}\)/);
     assert.doesNotMatch(groundSource, /displayAircraft\.track \+ 180/);
     assert.match(groundSource, /delayed \$\{providerLabel\} position/);
-    assert.match(groundSource, /storyPositionAge != null && storyPositionAge <= 90/);
-    assert.match(groundSource, /queriedFastAge \?\? Infinity\) <= 90/);
-    assert.match(groundSource, /\? 8_000 : false/);
+    assert.match(groundSource, /storyPositionAge != null && storyPositionAge <= 120/);
+    assert.match(groundSource, /queriedFastAge \?\? Infinity\) <= 120/);
+    assert.match(groundSource, /startupMs < 30_000 \? 2_500 : 8_000/);
     assert.match(groundSource, /airportRunwayFallbackFeatures\(airport\.icao\)/);
+    assert.match(groundSource, /Last seen \$\{age\}s ago/);
+    assert.match(groundSource, /Last seen \$\{Math\.max\(1, Math\.round\(age \/ 60\)\)\}m ago/);
+    assert.match(groundSource, /groundPositionQueryKey/);
     assert.match(groundSource, /Detailed taxiways unavailable; runways shown\./);
   });
 
