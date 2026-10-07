@@ -201,12 +201,14 @@ export function createAdsbAcquirer(store: Store, options: {
       if (acquiredAt == null) {
         const retryAt = await store.cooldown(request.provider);
         if (retryAt > clock()) return { ...(cached(row, RETAIN_MS, "backoff") ?? empty("backoff")), retryAt };
-        // Bounded shared-cache wait, never an unguarded second provider request.
-        for (const delay of [100, 200, 400, 800]) {
-          await wait(delay);
+        // Re-read after the last failed claim: another owner may have started
+        // or finished meanwhile. Only wait while this key has a live refresher.
+        for (const delay of [0, 100, 200, 400, 800]) {
+          if (delay) await wait(delay);
           row = await store.read(key);
           const shared = cached(row, FRESH_MS, "ok");
           if (shared) return shared;
+          if ((row?.refresh_expires_at ?? 0) <= clock()) break;
         }
         return { ...(cached(row, RETAIN_MS, "busy") ?? empty("busy")), retryAt: Math.max(row?.refresh_expires_at ?? 0, await store.admissionRetryAt(request.provider), clock() + 1000) };
       }

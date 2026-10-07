@@ -19,6 +19,7 @@ test('Production-parity Preview keeps normal sources working after the FR24 sess
   globalThis.__fr24ParityStoryFixture = fixture;
   let now = Date.parse('2026-10-07T17:40:00Z'); const sec = now / 1000;
   let traceOverride = null;
+  let emptyFree = false, freeClockAdvance = 0;
   let holdPireps = false, pirepGate, releasePireps, pirepTimer, overlappedTrace = false;
   const requests = [];
   let statusReads = 0, reserveAttempts = 0;
@@ -108,7 +109,9 @@ test('Production-parity Preview keeps normal sources working after the FR24 sess
         [0, 41.9769, -87.9081, 5000, 210, 185], [1500, 38.4, -89.0, 35000, 450, 185],
         [3598, aircraft.lat, aircraft.lon, 35000, 450, 185],
       ] });
-      if (/adsb\.fi|adsb\.lol|airplanes\.live/.test(url.hostname)) return Response.json({ ac: [aircraft] });
+      if (/adsb\.fi|adsb\.lol|airplanes\.live/.test(url.hostname)) {
+        now += freeClockAdvance; return Response.json({ ac: emptyFree ? [] : [aircraft] });
+      }
       if (url.hostname === 'aviationweather.gov') return Response.json(
         url.pathname.endsWith('/metar') || url.pathname.endsWith('/taf') ? [] : { features: [] });
       if (url.hostname === 'external-api.faa.gov') return Response.json({ Status: [] });
@@ -293,6 +296,22 @@ test('Production-parity Preview keeps normal sources working after the FR24 sess
       assert.notEqual(next.aircraft?.lat,35.88,'rejected aircraft must not become the selected position');
       assert.equal(next.currentStage,'ride','rejecting this fix must not erase previously validated takeoff');
       assert.equal(next.times.airborne,true);
+    });
+
+    await t.test('one slow empty story never repeats an identical free endpoint after cache expiry', async () => {
+      now+=35000;emptyFree=true;freeClockAdvance=2000;
+      fixture.phase={state:{push:null,taxiOut:null},version:0,status:'ok'};
+      Object.assign(record,{ident:'AAL3398',iataIdent:'AA3398',flightId:`ENY3398-${now/1000-600}-synthetic`,hexid:null,atcIdent:null});
+      record.aircraft={type:'E75L',tail:null};
+      const coldApi=await import(pathToFileURL(join(directory,'story.mjs')).href+'?slow-empty-recovery');
+      coldApi.setFr24PreviewSessionGuardForTests({status:async()=>({...stoppedSession}),reserve:async()=>null,canDispatch:async()=>false,finish:async()=>{throw Error('no paid call allowed');}});
+      const before=requests.length;
+      const result=await coldApi.getFlightStory({data:{q:'AA3398',fresh:true}});
+      const free=requests.slice(before).filter(url=>/adsb\.fi|adsb\.lol/.test(url.hostname)&&!url.pathname.includes('trace_')).map(url=>url.href);
+      assert.equal(result.live,false);
+      assert(free.some(url=>url.includes('ENY3398')),'distinct operating identity must still be tried');
+      assert.equal(free.length,new Set(free).size,'one request must not repeat already completed empty endpoint work');
+      emptyFree=false;freeClockAdvance=0;
     });
 
     await t.test('Production retains normal mode even if the Preview selector is present', async () => {

@@ -23,6 +23,112 @@ const request = (suffix = 'abc123', provider = 'fi') => ({ provider,
   url: `https://${provider === 'fi' ? 'opendata.adsb.fi' : 'api.adsb.lol'}/api/v2/hex/${suffix}`, timeoutMs: 4000 });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+function busyFixture({ row, onAcquire, onWait } = {}) {
+  const state = { now: 10_000, row, waits: [], claims: 0, fetches: 0, cooldownUntil: 0 };
+  const store = {
+    read: async () => state.row && structuredClone(state.row),
+    acquire: async () => { state.claims++; onAcquire?.(state); return null; },
+    cooldown: async () => state.cooldownUntil,
+    admissionRetryAt: async () => 20_000,
+  };
+  const acquire = createAdsbAcquirer(store, {
+    now: () => state.now,
+    wait: async ms => { state.waits.push(ms); state.now += ms; onWait?.(state, ms); },
+    fetch: async () => { state.fetches++; throw new Error('busy requests must not fetch'); },
+  });
+  return { state, acquire };
+}
+const cacheRow = (receivedAt, refreshExpiresAt = 0) => ({
+  payload: receivedAt == null ? null : { ac: [] }, received_at: receivedAt,
+  fresh_until: receivedAt == null ? 0 : receivedAt + 5000,
+  retain_until: receivedAt == null ? 0 : receivedAt + 120_000,
+  refresh_expires_at: refreshExpiresAt,
+});
+
+test('provider-only contention skips cache polling when this key has no live refresher', async () => {
+  for (const row of [undefined, cacheRow(1000), cacheRow(1000, 9999)]) {
+    const { state, acquire } = busyFixture({ row });
+    const result = await acquire(request());
+    assert.deepEqual(state.waits, [1300, 1300], 'keep admission retries, omit the futile 1500ms cache wait');
+    assert.equal(state.now, 12_600);
+    assert.equal(state.claims, 3);
+    assert.equal(state.fetches, 0);
+    assert.equal(result.status, 'busy');
+    assert.equal(result.retryAt, 20_000);
+    assert.equal(result.receivedAt, row?.received_at ?? null);
+    assert.deepEqual(result.data, row?.payload ?? null);
+  }
+});
+
+test('a same-key refresh elected during the last failed admission is still shared', async () => {
+  const { state, acquire } = busyFixture({
+    onAcquire: state => { if (state.claims === 3) state.row = cacheRow(null, state.now + 10_000); },
+    onWait: (state, ms) => { if (ms === 100) state.row = cacheRow(state.now); },
+  });
+  const result = await acquire(request());
+  assert.deepEqual(state.waits, [1300, 1300, 100]);
+  assert.equal(result.status, 'ok');
+  assert.equal(result.cache, true);
+  assert.equal(result.receivedAt, 12_700);
+  assert.equal(state.fetches, 0);
+});
+
+test('a fresh result published during the last failed admission returns without polling', async () => {
+  const { state, acquire } = busyFixture({
+    onAcquire: state => { if (state.claims === 3) state.row = cacheRow(state.now); },
+  });
+  const result = await acquire(request());
+  assert.deepEqual(state.waits, [1300, 1300]);
+  assert.equal(result.status, 'ok');
+  assert.equal(result.receivedAt, 12_600);
+  assert.equal(result.cache, true);
+  assert.equal(state.fetches, 0);
+});
+
+test('an active same-key worker keeps bounded polling and shares its eventual result', async () => {
+  const { state, acquire } = busyFixture({
+    row: cacheRow(null, 20_000),
+    onWait: (state, ms) => { if (ms === 200) state.row = cacheRow(state.now); },
+  });
+  const result = await acquire(request());
+  assert.deepEqual(state.waits, [100, 200]);
+  assert.equal(state.claims, 1);
+  assert.equal(result.status, 'ok');
+  assert.equal(result.receivedAt, 10_300);
+  assert.equal(state.fetches, 0);
+
+  const pending = busyFixture({ row: cacheRow(null, 20_000) });
+  assert.equal((await pending.acquire(request())).status, 'busy');
+  assert.deepEqual(pending.state.waits, [100, 200, 400, 800]);
+  assert.equal(pending.state.fetches, 0);
+});
+
+test('polling stops when the same-key refresh is released or expires without a result', async () => {
+  for (const expires of [false, true]) {
+    const { state, acquire } = busyFixture({
+      row: cacheRow(1000, expires ? 10_100 : 20_000),
+      onWait: state => { if (!expires) state.row = cacheRow(1000); },
+    });
+    const result = await acquire(request());
+    assert.deepEqual(state.waits, [100]);
+    assert.equal(result.status, 'busy');
+    assert.equal(result.receivedAt, 1000, 'retained data keeps its original age');
+    assert.equal(result.retryAt, 20_000);
+    assert.equal(state.fetches, 0);
+  }
+});
+
+test('provider cooldown still returns backoff without polling an active same-key worker', async () => {
+  const { state, acquire } = busyFixture({ row: cacheRow(1000, 20_000) });
+  state.cooldownUntil = 70_000;
+  const result = await acquire(request());
+  assert.deepEqual(state.waits, []);
+  assert.equal(result.status, 'backoff');
+  assert.equal(result.retryAt, 70_000);
+  assert.equal(result.receivedAt, 1000);
+  assert.equal(state.fetches, 0);
+});
+
 test('many concurrent viewers and two cold acquirers share one request and immutable timestamp', async () => {
   const { pg, store } = await fixture();
   try {

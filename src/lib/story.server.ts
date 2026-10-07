@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { withAdsbRequestScope } from "./adsb-request-scope.server.ts";
 import { currentOriginPushTraceScope, pushParkWithinScope, pushLatchWithinScope } from "./push-trace-scope.ts";
 import { phaseOf, verticalTrend, createPhaseHistory, destinationContext, type PhaseContext } from "./aircraft-phase.ts";
 import { loadAeroFlight } from "./aeroapi.server.ts";
@@ -3254,6 +3255,9 @@ export function activeFlightStatsLegLock(resume, nowSec = Date.now() / 1000) {
 	return leg;
 }
 async function buildStory(query, resumed = null, progressResume = null) {
+	return withAdsbRequestScope(() => buildStoryScoped(query, resumed, progressResume));
+}
+async function buildStoryScoped(query, resumed, progressResume) {
 	const parsed = parseFlightQuery(query);
 	if (!parsed) throw new Error("Try a flight number like AA 1 or UA 2814");
 	const identKey = parsed.callsign.toUpperCase();
