@@ -4724,6 +4724,48 @@ async function buildStory(query, resumed = null, progressResume = null) {
 			};
 		}
 	}
+	// Warm the durable ground bootstrap independently of the map. Identity is
+	// useful even without a current position; only a real recent surface-like
+	// observation is persisted as the last known map point.
+	if (stateKey && origin && dest) {
+		const movementKind = ["arrival", "final_approach", "taxi_in", "gate"].includes(current) || ourLanded
+			? "arrival" : "departure";
+		const groundAirport = movementKind === "arrival" ? dest : origin;
+		const ageSec = liveAgeSec(live);
+		const nearGroundAirport = Boolean(live && haversineNm({ lat: live.lat, lon: live.lon }, groundAirport) <= 20);
+		const surfaceLike = Boolean(live && (live.onGround || ((live.altFt ?? 9999) <= 250 && (live.gsKt ?? 999) <= 80)));
+		const lastPosition = live && nearGroundAirport && surfaceLike && (ageSec ?? 999) <= 120 ? {
+			lat: live.lat,
+			lon: live.lon,
+			altFt: live.altFt ?? null,
+			gsKt: live.gsKt ?? null,
+			track: live.track ?? null,
+			onGround: Boolean(live.onGround),
+			seenAt: live.seenAt ?? Date.now() / 1000 - (ageSec ?? 0),
+			registration: live.registration ?? aware?.tail ?? null,
+			callsign: live.callsign ?? liveCs ?? null,
+			provider: live.source === "fr24" ? "fr24" : live.source === "adsb" ? "adsb" : "saved"
+		} : null;
+		const groundHex = String(live?.hex || aware?.hex || hexByIdent.get(stateIdent) || "").replace(/^~+/, "").toLowerCase() || null;
+		const groundRegistration = live?.registration ?? aware?.tail ?? aircraft?.registration ?? null;
+		const groundCallsign = live?.callsign ?? liveCs ?? aware?.ident ?? null;
+		void (await import("./flight-ground-state.server.ts")).flightGroundStateStore.save({
+			landKey: stateKey,
+			requestedIdent: String(parsed.iata ?? parsed.callsign).replace(/\s/g, "").toUpperCase(),
+			serviceDate: stateKey.split("|")[1] ?? null,
+			originIata: origin.iata,
+			destIata: dest.iata,
+			airportIata: groundAirport.iata,
+			airportLat: groundAirport.lat,
+			airportLon: groundAirport.lon,
+			movementKind,
+			hex: groundHex,
+			registration: groundRegistration,
+			callsign: groundCallsign,
+			lastPosition,
+			positionSeenAt: lastPosition?.seenAt ?? null,
+		});
+	}
 	let wx = null;
 	// Final-approach position must reach the client inside the story deadline.
 	// Corridor weather is non-critical here and can involve several slow feeds.
