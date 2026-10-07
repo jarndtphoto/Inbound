@@ -3,12 +3,15 @@ import { haversineNm } from "./geo";
 import { fetchAround, fetchByCallsign, fetchByHex, fetchByReg, fuseProviderLists, type AdsbRaw, type ProviderPack } from "./adsb-fusion";
 import { usRegistrationHex } from "./us-registration-hex";
 
-type GroundPositionInput = {
+export type GroundPositionInput = {
   callsign?: string | null;
   flightId?: string | null;
   flightNumber?: string | null;
   registration?: string | null;
   hex?: string | null;
+  stateKey?: string | null;
+  serviceDate?: string | null;
+  airportIata?: string | null;
   originIata?: string | null;
   destIata?: string | null;
   movementKind?: "departure" | "arrival" | null;
@@ -99,20 +102,25 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     const flightNumber = String(input?.flightNumber ?? "").replace(/\s/g, "").trim().toUpperCase() || null;
     const registration = String(input?.registration ?? "").trim().toUpperCase() || null;
     const hex = String(input?.hex ?? "").trim().toLowerCase().replace(/^~+/, "") || null;
+    const stateKey = typeof input?.stateKey === "string" && input.stateKey.startsWith("leg:") ? input.stateKey : null;
+    const serviceDate = typeof input?.serviceDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.serviceDate) ? input.serviceDate : null;
+    const airportIata = String(input?.airportIata ?? "").trim().toUpperCase();
     const originIata = String(input?.originIata ?? "").trim().toUpperCase() || null;
     const destIata = String(input?.destIata ?? "").trim().toUpperCase() || null;
     const movementKind = input?.movementKind === "arrival" || input?.movementKind === "departure" ? input.movementKind : null;
     const airportLat = Number(input?.airportLat);
     const airportLon = Number(input?.airportLon);
     if (!Number.isFinite(airportLat) || !Number.isFinite(airportLon)) throw new Error("Invalid airport position");
-    return { callsign, flightId, flightNumber, registration, hex, originIata, destIata, movementKind, airportLat, airportLon };
+    return { callsign, flightId, flightNumber, registration, hex, stateKey, serviceDate, airportIata: /^[A-Z]{3}$/.test(airportIata) ? airportIata : null, originIata, destIata, movementKind, airportLat, airportLon };
   })
   .handler(async ({ data }) => {
     const airport = { lat: data.airportLat, lon: data.airportLon };
-    const diagnosticAirport = data.movementKind === "arrival" ? data.destIata : data.originIata;
+    const diagnosticAirport = data.airportIata ?? (data.movementKind === "arrival" ? data.destIata : data.originIata);
     const diagnosticEnabled = diagnosticAirport === "MCO" || diagnosticAirport === "TPA";
     const pollId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const adsbStatus: Record<"fi" | "lol" | "al", string | null> = { fi: null, lol: null, al: null };
+    const groundStore = data.stateKey ? (await import("./flight-ground-state.server.ts")).flightGroundStateStore : null;
+    const cachedState = groundStore && data.stateKey ? await groundStore.load(data.stateKey) : null;
 
     const noteAdsbPacks = (packs: ProviderPack[]) => {
       for (const pack of packs) {
@@ -127,7 +135,40 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       }
     };
 
-    const finish = <T extends { provider?: string; seenAt?: number } | null>(position: T): T => {
+    const normCallsign = (value: unknown) => String(value ?? "").replace(/\s/g, "").toUpperCase();
+    const normRegistration = (value: unknown) => String(value ?? "").replace(/[-\s]/g, "").toUpperCase();
+    const flightIdCallsign = data.flightId?.match(/^([A-Z]{2,4}\d{1,4}[A-Z]?)/)?.[1] ?? null;
+    const callsigns = [...new Set([flightIdCallsign, data.callsign, cachedState?.callsign].filter(Boolean).map(normCallsign))].slice(0, 3);
+    const wantedCallsigns = new Set(callsigns);
+    const wantedHex = String(data.hex ?? cachedState?.hex ?? "").toLowerCase();
+    const resolvedRegistration = data.registration ?? cachedState?.registration ?? null;
+    const wantedReg = normRegistration(resolvedRegistration);
+    const traceHex = wantedHex || usRegistrationHex(resolvedRegistration) || "";
+
+    const persist = async (position: GroundTracePosition | null) => {
+      if (!groundStore || !data.stateKey || !data.flightNumber || !data.originIata || !data.destIata
+        || !data.movementKind || !diagnosticAirport) return;
+      const seenAt = position?.seenAt ?? null;
+      await groundStore.save({
+        landKey: data.stateKey,
+        requestedIdent: data.flightNumber,
+        serviceDate: data.serviceDate ?? data.stateKey.split("|")[1] ?? null,
+        originIata: data.originIata,
+        destIata: data.destIata,
+        airportIata: diagnosticAirport,
+        airportLat: data.airportLat,
+        airportLon: data.airportLon,
+        movementKind: data.movementKind,
+        hex: traceHex || null,
+        registration: position?.registration ?? resolvedRegistration,
+        callsign: position?.callsign ?? callsigns[0] ?? null,
+        lastPosition: position,
+        positionSeenAt: seenAt,
+      });
+    };
+
+    const finish = async <T extends GroundTracePosition | null>(position: T): Promise<T> => {
+      await persist(position);
       if (diagnosticEnabled) {
         const finalAgeSec = position?.seenAt == null ? null : Math.max(0, Date.now() / 1000 - position.seenAt);
         console.info("[ground-coverage]", JSON.stringify({
@@ -146,7 +187,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
           rawAltFt: null,
           errorKind: "none",
           rateLimitedUntilActive: false,
-          registrationKnownAtPollStart: Boolean(data.registration),
+          registrationKnownAtPollStart: Boolean(resolvedRegistration),
           adsbStatus,
           finalProvider: position?.provider ?? "none",
           finalAgeSec: finalAgeSec == null ? null : Math.round(finalAgeSec * 10) / 10,
@@ -155,16 +196,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       return position;
     };
 
-    const normCallsign = (value: unknown) => String(value ?? "").replace(/\s/g, "").toUpperCase();
-    const normRegistration = (value: unknown) => String(value ?? "").replace(/[-\s]/g, "").toUpperCase();
-    const flightIdCallsign = data.flightId?.match(/^([A-Z]{2,4}\d{1,4}[A-Z]?)/)?.[1] ?? null;
-    const callsigns = [...new Set([flightIdCallsign, data.callsign].filter(Boolean).map(normCallsign))].slice(0, 2);
-    const wantedCallsigns = new Set(callsigns);
-    const wantedHex = String(data.hex ?? "").toLowerCase();
-    const resolvedRegistration = data.registration;
-    const wantedReg = normRegistration(resolvedRegistration);
-    const traceHex = wantedHex || usRegistrationHex(resolvedRegistration) || "";
-    const usableAdsb = (raw: AdsbRaw | null | undefined, maxAgeSec = 30) => {
+    const usableAdsb = (raw: AdsbRaw | null | undefined, maxAgeSec = 30): GroundTracePosition | null => {
       if (!raw || !Number.isFinite(raw.lat) || !Number.isFinite(raw.lon)) return null;
       const point = { lat: raw.lat as number, lon: raw.lon as number };
       if (haversineNm(point, airport) > 20) return null;
@@ -180,107 +212,103 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         altFt,
         gsKt: typeof raw.gs === "number" ? raw.gs : typeof raw.spd === "number" ? raw.spd : null,
         track: typeof raw.track === "number" ? raw.track : null,
-        onGround,
+        onGround: true,
         seenAt: Date.now() / 1000 - ageSec,
-        registration: raw.r ?? null,
-        callsign: raw.flight?.trim() || null,
-        provider: "adsb" as const,
+        registration: raw.r ?? resolvedRegistration,
+        callsign: raw.flight?.trim() || callsigns[0] || null,
+        provider: "adsb",
       };
     };
-
-    // The five-second ground-map loop is intentionally free ADS-B only. FR24
-    // enrichment belongs to the shared twenty-second tracked-flight cache.
 
     const matchesIdentity = (raw: AdsbRaw) => {
       const reg = normRegistration(raw.r);
       const cs = normCallsign(raw.flight);
       const hex = String(raw.hex ?? "").toLowerCase();
-      if (traceHex && hex === traceHex) return true;
-      if (wantedReg && reg === wantedReg) return true;
+      if (traceHex) return hex === traceHex;
+      if (wantedReg) return reg === wantedReg;
       return Boolean(cs && wantedCallsigns.has(cs));
     };
-    // Exact identity is both stronger and much cheaper than scanning the whole
-    // airport every five seconds. Try hex, registration, or the operating
-    // callsign first; only fall back to the radius feed when exact lookup is
-    // unavailable or delayed enough that a broad hit could materially help.
-    const exactPacks = traceHex
-      ? await fetchByHex(traceHex).catch(() => [])
-      : resolvedRegistration
-        ? await fetchByReg(resolvedRegistration).catch(() => [])
-        : callsigns[0]
-          ? await fetchByCallsign(callsigns[0]).catch(() => [])
-          : [];
-    noteAdsbPacks(exactPacks);
-    const exact = fuseProviderLists(exactPacks, { airside: true })
-      .filter(matchesIdentity)
-      .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
-    for (const candidate of exact) {
-      const position = usableAdsb(candidate);
-      if (!position) continue;
-      const ageSec = Math.round(Date.now() / 1000 - position.seenAt);
-      console.info("[ground-position]", { provider: "adsb-exact", callsign: position.callsign, ageSec });
-      return finish(position);
-    }
 
-    // During provider cooldown, still continue through the airport-cache and
-    // trace recovery below. fetchAround() returns immediately while a provider
-    // is backing off, so this does not create another upstream request.
-    const exactUnavailable = exactPacks.length > 0
-      && exactPacks.every((pack) => pack.status && pack.status !== "ok");
-    if (exactUnavailable && traceHex) {
-      const traced = await recentGroundTrace(traceHex, airport, resolvedRegistration, callsigns[0] ?? data.callsign);
-      if (traced) {
+    const pick = (packs: ProviderPack[], maxAgeSec = 30) => {
+      noteAdsbPacks(packs);
+      return fuseProviderLists(packs, { airside: true })
+        .filter(matchesIdentity)
+        .map(raw => usableAdsb(raw, maxAgeSec))
+        .filter((position): position is GroundTracePosition => Boolean(position))
+        .sort((a, b) => b.seenAt - a.seenAt)[0] ?? null;
+    };
+
+    const controller = new AbortController();
+    const signal = controller.signal;
+    let hexPacks: ProviderPack[] = [], regPacks: ProviderPack[] = [], callsignPacks: ProviderPack[] = [], aroundPacks: ProviderPack[] = [];
+    const aroundKey = `${airport.lat.toFixed(3)}:${airport.lon.toFixed(3)}:20`;
+
+    const validPath = async (route: string, promise: Promise<ProviderPack[]>) => {
+      const packs = await promise;
+      if (route === "hex") hexPacks = packs;
+      else if (route === "registration") regPacks = packs;
+      else if (route === "callsign") callsignPacks = packs;
+      else aroundPacks = packs;
+      if (route === "area") {
+        const fused = fuseProviderLists(packs, { airside: true });
+        if (fused.length) groundAroundCache.set(aroundKey, { at: Date.now(), ac: fused });
+      }
+      const position = pick(packs);
+      if (!position) throw new Error(`${route} miss`);
+      return { route, position };
+    };
+
+    const paths: Promise<{ route: string; position: GroundTracePosition }>[] = [];
+    if (traceHex) paths.push(validPath("hex", fetchByHex(traceHex, signal)));
+    if (resolvedRegistration) paths.push(validPath("registration", fetchByReg(resolvedRegistration, signal)));
+    if (callsigns.length) {
+      paths.push(Promise.any(callsigns.map(callsign =>
+        fetchByCallsign(callsign, signal).then(packs => {
+          callsignPacks.push(...packs);
+          const position = pick(packs);
+          if (!position) throw new Error("callsign miss");
+          return { route: "callsign", position };
+        })
+      )));
+    }
+    paths.push(validPath("area", fetchAround(airport.lat, airport.lon, 20, signal)));
+
+    if (paths.length) {
+      const winner = await Promise.any(paths).catch(() => null);
+      if (winner) {
+        controller.abort();
         console.info("[ground-position]", {
-          provider: "adsb-trace-recovery",
-          callsign: traced.callsign,
-          ageSec: Math.round(Date.now() / 1000 - traced.seenAt),
+          provider: "adsb-parallel",
+          route: winner.route,
+          callsign: winner.position.callsign,
+          ageSec: Math.round(Date.now() / 1000 - winner.position.seenAt),
         });
-        return finish(traced);
+        return finish(winner.position);
       }
     }
 
-    const aroundPacks = await fetchAround(airport.lat, airport.lon, 20).catch(() => []);
-    noteAdsbPacks(aroundPacks);
-    const aroundKey = `${airport.lat.toFixed(3)}:${airport.lon.toFixed(3)}:20`;
-    const fusedAround = fuseProviderLists(aroundPacks, { airside: true });
-    if (fusedAround.length) {
-      groundAroundCache.set(aroundKey, { at: Date.now(), ac: fusedAround });
-    }
-    const heldAround = !fusedAround.length ? groundAroundCache.get(aroundKey) : null;
-    const aroundSource = heldAround && Date.now() - heldAround.at <= 90_000
-      ? heldAround.ac.map((raw) => {
-          const heldSec = Math.max(0, Date.now() - heldAround.at) / 1000;
-          return {
-            ...raw,
-            seen_pos: typeof raw.seen_pos === "number" ? raw.seen_pos + heldSec : raw.seen_pos,
-            seen: typeof raw.seen === "number" ? raw.seen + heldSec : raw.seen,
-            _fusion: raw._fusion ? { ...raw._fusion, ageSec: raw._fusion.ageSec + heldSec } : undefined,
-          };
-        })
-      : fusedAround;
-    const around = aroundSource
-      .filter(matchesIdentity)
-      .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
-    let aroundFallback: ReturnType<typeof usableAdsb> = null;
-    for (const candidate of around) {
-      const position = usableAdsb(candidate, heldAround ? 90 : 30);
-      if (!position) continue;
-      aroundFallback = position;
-      break;
+    const heldAround = groundAroundCache.get(aroundKey);
+    if (heldAround && Date.now() - heldAround.at <= 120_000) {
+      const heldSec = Math.max(0, Date.now() - heldAround.at) / 1000;
+      const held = heldAround.ac.map(raw => ({
+        ...raw,
+        seen_pos: typeof raw.seen_pos === "number" ? raw.seen_pos + heldSec : raw.seen_pos,
+        seen: typeof raw.seen === "number" ? raw.seen + heldSec : raw.seen,
+        _fusion: raw._fusion ? { ...raw._fusion, ageSec: raw._fusion.ageSec + heldSec } : undefined,
+      })).filter(matchesIdentity)
+        .map(raw => usableAdsb(raw, 120))
+        .filter((position): position is GroundTracePosition => Boolean(position))
+        .sort((a, b) => b.seenAt - a.seenAt)[0] ?? null;
+      if (held) {
+        console.info("[ground-position]", {
+          provider: "adsb-held-airport",
+          callsign: held.callsign,
+          ageSec: Math.round(Date.now() / 1000 - held.seenAt),
+        });
+        return finish(held);
+      }
     }
 
-    if (aroundFallback) {
-      console.info("[ground-position]", {
-        provider: "adsb-around-fallback",
-        callsign: aroundFallback.callsign,
-        ageSec: Math.round(Date.now() / 1000 - aroundFallback.seenAt),
-      });
-      return finish(aroundFallback);
-    }
-
-    // An "ok" live response can still omit one aircraft. If both exact and
-    // airport-radius lookup miss, try the already-supported recent trace for
-    // the known hex before leaving the map without a marker.
     const traced = traceHex
       ? await recentGroundTrace(traceHex, airport, resolvedRegistration, callsigns[0] ?? data.callsign)
       : null;
@@ -293,7 +321,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       return finish(traced);
     }
 
-    const missKey = `${data.movementKind ?? "ground"}:${data.flightNumber ?? data.callsign ?? wantedHex ?? wantedReg ?? "unknown"}:${diagnosticAirport ?? "unknown"}`;
+    const missKey = `${data.movementKind ?? "ground"}:${data.flightNumber ?? data.callsign ?? traceHex ?? wantedReg ?? "unknown"}:${diagnosticAirport ?? "unknown"}`;
     const now = Date.now();
     if (now - (groundMissLogAt.get(missKey) ?? 0) >= 15_000) {
       groundMissLogAt.set(missKey, now);
@@ -305,9 +333,11 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         derivedUsHex: !wantedHex && Boolean(traceHex),
         hasRegistration: Boolean(wantedReg),
         callsigns,
-        exactStatus: exactPacks.map((pack) => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
-        aroundStatus: aroundPacks.map((pack) => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
+        hexStatus: hexPacks.map(pack => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
+        registrationStatus: regPacks.map(pack => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
+        callsignStatus: callsignPacks.map(pack => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
+        aroundStatus: aroundPacks.map(pack => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
       });
     }
     return finish(null);
-  });;
+  });
