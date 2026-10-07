@@ -1,3 +1,4 @@
+import { acquisitionFixture } from "./helpers/acquisition-fixture.mjs";
 import { freezeTestClock } from './helpers/test-clock.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,7 +45,7 @@ test('UA219 durable filed/track geometry and oceanic progress survive provider h
       if (url.hostname === 'api.adsbdb.com') return Response.json({ response: { flightroute: null } });
       throw Error('Unexpected provider: ' + url);
     };
-    await build({ configFile:false, logLevel:'silent', build:{ ssr:resolve('src/lib/story.server.ts'), outDir:dir,
+    await build({ configFile:false, logLevel:'silent', plugins:[acquisitionFixture()], build:{ ssr:resolve('src/lib/story.server.ts'), outDir:dir,
       rollupOptions:{ output:{ entryFileNames:'story.mjs' } } } });
     await build({ configFile:false, logLevel:'silent', resolve:{ alias:{'@':resolve('src')} }, plugins:[react()],
       build:{ ssr:resolve('src/components/route-map.tsx'), outDir:join(dir,'ui'), rollupOptions:{ output:{entryFileNames:'map.mjs'} } } });

@@ -67,8 +67,6 @@ export const GAP_EXTRAPOLATE_ENROUTE_SEC = 20;
 export const STALE_KEEP_SEC = 45;
 export const STALE_KEEP_ENROUTE_SEC = 15 * 60;
 
-const UA = "Inbound/1.0 (+https://github.com/jarndtphoto/Inbound)";
-
 export const PROVIDERS: Record<
   ProviderId,
   {
@@ -267,9 +265,14 @@ export function rawToObservation(raw: AdsbRaw, provider: ProviderId, receivedAt:
 
 function rememberObs(obs: Observation) {
   const list = observations.get(obs.hex) ?? [];
+  // Many viewers may fuse the same immutable cached response. Replays must
+  // neither crowd newer observations out nor make arrival order imply freshness.
+  if (list.some(o => o.provider === obs.provider && o.receivedAt === obs.receivedAt
+    && o.seen === obs.seen && o.lat === obs.lat && o.lon === obs.lon)) return;
   list.push(obs);
-  const cut = obs.receivedAt - 90_000;
-  const kept = list.filter((o) => o.receivedAt >= cut).slice(-12);
+  const cut = Math.max(...list.map(o => o.receivedAt)) - 90_000;
+  const kept = list.filter((o) => o.receivedAt >= cut)
+    .sort((a, b) => a.receivedAt - b.receivedAt).slice(-12);
   observations.set(obs.hex, kept);
 }
 
@@ -304,13 +307,14 @@ function commitTrack(hex: string, raw: AdsbRaw, provider: ProviderId, now: numbe
 export function maybeExtrapolate(prev: TrackState, now: number, airside = false): AdsbRaw | null {
   // Do not repeatedly coast a coasted point: doing so resets the gap clock.
   if (prev.extrapolated) return null;
-  const dt = (now - prev.at) / 1000;
+  const dt = Math.max(0, (now - prev.at) / 1000);
+  const observationAge = dt + (prev.raw._fusion?.ageSec ?? 0);
   if (dt <= 0.15) {
-    return { ...prev.raw, extrapolated: false, _fusion: { provider: prev.provider, extrapolated: false, ageSec: 0 } };
+    return { ...prev.raw, extrapolated: false, _fusion: { provider: prev.provider, extrapolated: false, ageSec: observationAge } };
   }
   const cruise = !onGroundOf(prev.altBaro) && ((prev.gs ?? 0) >= 180 || (typeof prev.altBaro === "number" && prev.altBaro > 15_000));
   const maxGap = airside || !cruise ? GAP_EXTRAPOLATE_SEC : GAP_EXTRAPOLATE_ENROUTE_SEC;
-  if (dt + (prev.raw._fusion?.ageSec ?? 0) > maxGap) return null;
+  if (observationAge > maxGap) return null;
   if (prev.gs == null || prev.gs < 40 || prev.track == null || !Number.isFinite(prev.track)) return null;
   if (onGroundOf(prev.altBaro)) return null;
   const moved = destPoint({ lat: prev.lat, lon: prev.lon }, prev.track, (prev.gs / 3600) * dt);
@@ -319,7 +323,7 @@ export function maybeExtrapolate(prev: TrackState, now: number, airside = false)
     lat: moved.lat,
     lon: moved.lon,
     extrapolated: true,
-    _fusion: { provider: prev.provider, extrapolated: true, ageSec: dt },
+    _fusion: { provider: prev.provider, extrapolated: true, ageSec: observationAge },
   };
   return commitTrack(prev.hex, raw, prev.provider, now, true);
 }
@@ -371,8 +375,8 @@ export function chooseBest(
   return null;
 }
 
-export type ProviderFetchStatus = "ok" | "403" | "429" | "timeout" | "error" | "backoff" | "cancelled";
-export type ProviderPack = { provider: ProviderId; ac: AdsbRaw[]; status?: ProviderFetchStatus };
+export type ProviderFetchStatus = "ok" | "403" | "429" | "timeout" | "error" | "backoff" | "cancelled" | "busy" | "unavailable";
+export type ProviderPack = { provider: ProviderId; ac: AdsbRaw[]; status?: ProviderFetchStatus; receivedAt?: number; retryAt?: number };
 
 export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; airside?: boolean }): AdsbRaw[] {
   const now = opts?.now ?? Date.now();
@@ -380,7 +384,7 @@ export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; 
   const hexes = new Set<string>();
   for (const pack of packs) {
     for (const raw of pack.ac ?? []) {
-      const obs = rawToObservation(raw, pack.provider, now);
+      const obs = rawToObservation(raw, pack.provider, pack.receivedAt ?? now);
       if (!obs) continue;
       rememberObs(obs);
       hexes.add(obs.hex);
@@ -433,75 +437,24 @@ export function stickyPick(
   return null;
 }
 
-function fetchSignal(ms: number, signal?: AbortSignal) {
-  const timeout = AbortSignal.timeout(ms);
-  if (!signal) return timeout;
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  if (signal.aborted || timeout.aborted) abort();
-  else {
-    signal.addEventListener("abort", abort, { once: true });
-    timeout.addEventListener("abort", abort, { once: true });
-  }
-  return controller.signal;
-}
-
-async function fetchJson(url: string, ms: number, signal?: AbortSignal): Promise<unknown> {
-  const res = await fetch(url, {
-    headers: { "User-Agent": UA, Accept: "application/json" },
-    signal: fetchSignal(ms, signal),
-  });
-  if (res.status === 429) throw new Error("upstream 429");
-  if (!res.ok) throw new Error(`upstream ${res.status}`);
-  return res.json();
-}
-
-function providerFetchStatus(error: unknown): ProviderFetchStatus {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/\b403\b/.test(message)) return "403";
-  if (/\b429\b/.test(message)) return "429";
-  if (/timeout|timed out|abort/i.test(message) || (error instanceof Error && /TimeoutError|AbortError/.test(error.name))) return "timeout";
-  return "error";
-}
-
 async function fetchProviderPack(id: ProviderId, url: string, now = Date.now(), signal?: AbortSignal): Promise<ProviderPack> {
-  if (!providerHealthy(id, now)) {
-    const h = health.get(id);
-    const key = `${id}:backoff`;
+  if (signal?.aborted) return { provider: id, ac: [], status: "cancelled" };
+  const { acquireFreeAdsb, waitForAdsbViewer } = await import("./adsb-acquisition.server.ts");
+  const result = await waitForAdsbViewer(acquireFreeAdsb({ provider: id, url, timeoutMs: PROVIDERS[id].timeoutMs }), signal);
+  if (!result) return { provider: id, ac: [], status: "cancelled" };
+  if (result.status === "ok") markProviderOk(id, now);
+  else if (result.status === "403" || result.status === "429" || result.status === "error" || result.status === "timeout") {
+    markProviderFail(id, result.status, now);
+  }
+  if (result.status !== "ok") {
+    const key = `${id}:${result.status}`;
     if (now - (providerLogAt.get(key) ?? 0) >= 5_000) {
       providerLogAt.set(key, now);
-      console.warn("[adsb-provider-backoff]", {
-        provider: id,
-        remainingMs: Math.max(0, (h?.until ?? now) - now),
-        failures: h?.fails ?? 0,
-      });
+      console.warn("[adsb-provider-acquisition]", { provider: id, status: result.status, retryAt: result.retryAt ?? null });
     }
-    return { provider: id, ac: [], status: "backoff" };
   }
-  try {
-    const json = await fetchJson(url, PROVIDERS[id].timeoutMs, signal);
-    markProviderOk(id, now);
-    return { provider: id, ac: acList(json), status: "ok" };
-  } catch (error) {
-    if (signal?.aborted) return { provider: id, ac: [], status: "cancelled" };
-    const status = providerFetchStatus(error);
-    markProviderFail(id, status, now);
-    const h = health.get(id);
-    const key = `${id}:fail`;
-    if (now - (providerLogAt.get(key) ?? 0) >= 5_000) {
-      providerLogAt.set(key, now);
-      let host = "";
-      try { host = new URL(url).hostname; } catch {}
-      console.warn("[adsb-provider-fail]", {
-        provider: id,
-        host,
-        error: error instanceof Error ? error.message : String(error),
-        backoffMs: Math.max(0, (h?.until ?? now) - now),
-        failures: h?.fails ?? 0,
-      });
-    }
-    return { provider: id, ac: [], status };
-  }
+  return { provider: id, ac: acList(result.data), status: result.status,
+    receivedAt: result.receivedAt ?? undefined, retryAt: result.retryAt };
 }
 
 export async function fetchProvider(id: ProviderId, url: string, now = Date.now(), signal?: AbortSignal): Promise<AdsbRaw[]> {

@@ -1,3 +1,4 @@
+import { acquisitionFixture } from "./helpers/acquisition-fixture.mjs";
 import { freezeTestClock } from './helpers/test-clock.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -49,7 +50,7 @@ test('UA219 actual takeoff survives provider-ID to FlightStats fallback to provi
       if (url.hostname === 'api.adsbdb.com') return Response.json({ response: { flightroute: null } });
       throw Error('Unexpected provider: ' + url);
     };
-    await build({ configFile: false, logLevel: 'silent', build: { ssr: resolve('src/lib/story.server.ts'), outDir: dir,
+    await build({ configFile: false, logLevel: 'silent', plugins: [acquisitionFixture()], build: { ssr: resolve('src/lib/story.server.ts'), outDir: dir,
       rollupOptions: { output: { entryFileNames: 'story.mjs' } } } });
     const cold = () => import(pathToFileURL(join(dir, 'story.mjs')).href + '?instance=' + ++instance);
     let server = await cold(); await globalThis.__pgBootstrapPromise__;

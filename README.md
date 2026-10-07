@@ -12,7 +12,7 @@ Inbound uses FR24 as its primary live provider and keeps open ADS-B fusion as th
 - `FLIGHTAWARE_AEROAPI_KEY` or `FLIGHTAWARE_API_KEY`: paid FlightAware credential, used only when the explicit opt-in flag is enabled.
 - The existing public schedule fallback remains available for pre-departure flight identity/schedule data while paid FlightAware is off.
 
-Provider secrets must be configured in Vercel and must never use a `VITE_` prefix. Live responses are held only in short in-memory caches. FR24 data is not persisted; if persistence is added later, its raw API data must be deleted within the provider's 30-day limit.
+Provider secrets must be configured in Vercel and must never use a `VITE_` prefix. Free ADS-B requests use shared database leases, provider cooldowns, and a short-lived cache (five seconds fresh, at most 120 seconds usable). Cached responses preserve their original observation age; they are never relabeled as fresh on reread. Deployed builds require the configured database and migration `0008_adsb_acquisition.sql`; if coordination is unavailable, acquisition fails closed instead of multiplying provider requests across viewers. FR24 data is not stored in this shared cache.
 
 Flight information app — inbound aircraft, delays, taxi, ride, arrival, and the gate.
 

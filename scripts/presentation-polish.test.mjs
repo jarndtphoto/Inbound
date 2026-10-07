@@ -9,7 +9,7 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { composeBrief } from '../src/lib/brief-copy.ts';
-import { timeKindLabel } from '../src/lib/presentation-time.ts';
+import { formatClockTime, timeKindLabel } from '../src/lib/presentation-time.ts';
 import { polishStory, actualOnlyStory } from './fixtures/presentation-polish.mjs';
 
 const dir = await mkdtemp(resolve('node_modules/.polish-ui-'));
@@ -167,7 +167,15 @@ test('overnight event clocks use each airport zone and mark the next local day a
     assert.match(head, /4:27 AM/); assert.match(head, /CDT \+1/);
     for (const value of ['4:16 PM HST', '4:27 PM HST', '4:16 AM CDT +1', '4:27 AM CDT +1']) assert.match(details, new RegExp(value.replace('+', '\\+')));
     for (const value of ['4:16 PM', '4:27 PM', '4:16 AM +1', '4:27 AM +1']) assert.match(welcome, new RegExp(value.replace('+', '\\+')));
-    assert.equal((welcome.match(/HST/g) ?? []).length, 1); assert.equal((welcome.match(/CDT/g) ?? []).length, 1);
+    // Each event row names its airport's zone once. The independently useful
+    // "Data as of" footer may legitimately repeat either abbreviation.
+    const departureRow = welcome.match(/<section[^>]*data-flight-time-row="departure"[^>]*>([\s\S]*?)<\/section>/)?.[1];
+    const arrivalRow = welcome.match(/<section[^>]*data-flight-time-row="arrival"[^>]*>([\s\S]*?)<\/section>/)?.[1];
+    assert.ok(departureRow); assert.ok(arrivalRow);
+    assert.equal((departureRow.match(/HST/g) ?? []).length, 1);
+    assert.equal((arrivalRow.match(/CDT/g) ?? []).length, 1);
+    assert.doesNotMatch(departureRow, /CDT/); assert.doesNotMatch(arrivalRow, /HST/);
+    assert.ok(welcome.includes(`Data as of ${formatClockTime(shown.fetchedAt)}. Estimates may change.`));
     assert.match(JSON.stringify(brief), /4:16 AM CDT \+1|4:27 AM CDT \+1/);
   } finally {
     if (oldStorage === undefined) delete globalThis.localStorage;

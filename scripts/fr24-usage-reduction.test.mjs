@@ -85,13 +85,14 @@ test("paced ground map is free ADS-B only", async () => {
   assert.doesNotMatch(source, /from "\.\/fr24\.server"/);
   assert.doesNotMatch(source, /loadFr24|FR24_API_TOKEN/, "ground polling cannot reach paid FR24");
   assert.match(source, /fr24KeyType: "disabled-ground-map"/);
-  assert.match(source, /const paths: Promise/);
-  assert.match(source, /validPath\("hex", fetchByHex\(traceHex, signal\)\)/);
-  assert.match(source, /validPath\("registration", fetchByReg\(resolvedRegistration, signal\)\)/);
-  assert.match(source, /fetchByCallsign\(callsign, signal\)/);
-  assert.match(source, /validPath\("area", fetchAround\(airport\.lat, airport\.lon, 20, signal\)\)/);
-  assert.match(source, /const winner = await Promise\.any\(paths\)/, "hex, registration, callsign, and area race in parallel");
-  assert.match(source, /controller\.abort\(\)/, "winning ground lookup cancels the remaining routes");
+  assert.match(source, /acquireGroundInStages/);
+  assert.match(source, /fetchByHex\(traceHex\)/);
+  assert.match(source, /fetchByReg\(resolvedRegistration\)/);
+  assert.match(source, /fetchByCallsign\(callsign\)/);
+  assert.match(source, /fetchAround\(airport\.lat, airport\.lon, 20\)/);
+  assert.doesNotMatch(source, /Promise\.any\(paths\)/, "ground routes no longer fan out before the strongest path is tried");
+  assert.match(source, /acquireFreeAdsb/, "trace recovery shares the fleet-wide free-provider gate");
+  assert.doesNotMatch(source, /await fetch\(/, "traces cannot bypass shared acquisition with direct network requests");
   assert.match(source, /const traceHex = wantedHex \|\| usRegistrationHex\(resolvedRegistration\)/);
   assert.match(source, /heldAround && Date\.now\(\) - heldAround\.at <= 120_000/);
   assert.match(source, /recentGroundTrace\(traceHex/, "trace recovery remains after live lookup misses");
@@ -109,8 +110,8 @@ test("surface providers are paced and expose throttling instead of silently look
   assert.match(story, /fr24DepartureClock - 2 \* 60 \* 60/);
   assert.match(story, /fr24DepartureClock \+ 4 \* 60 \* 60/);
   assert.match(story, /providers:\s*\{[\s\S]*?fr24Usage: official\.fr24Usage/, "today's shared total reaches client diagnostics");
-  assert.match(fusion, /\[adsb-provider-fail\]/);
-  assert.match(fusion, /\[adsb-provider-backoff\]/);
+  assert.match(fusion, /\[adsb-provider-acquisition\]/);
+  assert.match(fusion, /status: result\.status, retryAt: result\.retryAt/);
 });
 
 test("MCO/TPA ground diagnostics emit one compact free-provider summary", async () => {
@@ -142,8 +143,8 @@ test("MCO/TPA ground diagnostics emit one compact free-provider summary", async 
 
   assert.match(fusion, /ProviderFetchStatus = "ok" \| "403" \| "429" \| "timeout" \| "error" \| "backoff" \| "cancelled"/);
   assert.match(fusion, /if \(signal\?\.aborted\) return \{ provider: id, ac: \[\], status: "cancelled" \}/);
-  assert.match(fusion, /status: "backoff"/);
-  assert.match(fusion, /status: "ok"/);
+  assert.match(fusion, /status: result\.status/);
+  assert.match(fusion, /result\.status === "ok"/);
 });
 
 test("FR24 uses one strongest lookup per cycle and shares it for twenty seconds", async () => {

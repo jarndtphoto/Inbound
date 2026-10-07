@@ -1,3 +1,4 @@
+import { acquisitionFixture } from "./helpers/acquisition-fixture.mjs";
 import { freezeTestClock } from './helpers/test-clock.mjs';
 import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +41,7 @@ before(async () => {
   delete process.env.DATABASE_URL;
   restoreClock = freezeTestClock(() => now ?? initialNow);
   directory = await mkdtemp(resolve("node_modules/.inbound-feed-test-"));
-  await build({ configFile: false, logLevel: "silent", build: {
+  await build({ configFile: false, logLevel: "silent", plugins: [acquisitionFixture()], build: {
     ssr: resolve("src/lib/story.server.ts"), outDir: directory,
     rollupOptions: { output: { entryFileNames: "story.mjs" } },
   } });

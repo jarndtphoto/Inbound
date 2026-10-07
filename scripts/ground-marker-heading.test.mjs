@@ -26,13 +26,13 @@ after(async () => { if (directory) await rm(directory, { recursive: true, force:
 
 const arrow = /M0 -31 L12 17 L0 11 L-12 17 Z/;
 const dot = /<circle[^>]*class="fill-accent"/;
-function groundMarkup(track, provider = 'flightaware-public', patch = {}) {
+function groundMarkup(track, provider = 'flightaware-public', patch = {}, timing = {}) {
   const base = polishStory();
   const origin = { ...base.origin, iata: 'MCO', icao: 'KMCO', lat: 28.4312, lon: -81.3081 };
   const aircraft = { ...base.aircraft, ...origin, onGround: true, altFt: 0, gsKt: 0, track, ...patch };
   const story = { ...base, origin, aircraft, currentStage: 'origin_gate',
-    times: { ...base.times, airborne: false }, providers: { chosenPosition: provider, chosenPositionAgeSec: 1 } };
-  const restoreClock = freezeTestClock(story.fetchedAt);
+    times: { ...base.times, airborne: false }, providers: { chosenPosition: provider, chosenPositionAgeSec: 1, ...timing.providers } };
+  const restoreClock = freezeTestClock(story.fetchedAt + (timing.elapsedMs ?? 0));
   const realFetch = globalThis.fetch;
   const client = new QueryClient();
   globalThis.fetch = () => { throw new Error('marker rendering must not request providers'); };
@@ -91,4 +91,24 @@ test('airborne story fallback retains its provider heading', () => {
   const html = groundMarkup(123, 'flightaware-public', { onGround: false, altFt: 3000, gsKt: 180 });
   assert.match(html, arrow);
   assert.match(html, /rotate\(123\)/);
+});
+
+// A cached story is the same observation even when rendered much later.
+test('cached story fix ages past the live window instead of rejuvenating', () => {
+  const html = groundMarkup(0, 'adsb', {}, { elapsedMs: 35_000 });
+  assert.match(html, /Last seen 36s ago/);
+  assert.doesNotMatch(html, /live movement/);
+});
+test('cached story fix expires after the 120 second hold window', () => {
+  const html = groundMarkup(0, 'adsb', {}, { elapsedMs: 121_000 });
+  assert.doesNotMatch(html, dot);
+  assert.match(html, /Awaiting aircraft/);
+});
+test('explicit observation timestamp takes precedence over inconsistent relative age', () => {
+  const base = polishStory();
+  const html = groundMarkup(0, 'adsb', {}, {
+    providers: { chosenPositionSeenAt: base.fetchedAt / 1000 - 60 },
+  });
+  assert.match(html, /Last seen 1m ago/);
+  assert.doesNotMatch(html, /live movement/);
 });

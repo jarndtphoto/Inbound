@@ -24,6 +24,7 @@ import { formatStoryEventTime } from "@/lib/flight-event-time";
 import { FLIGHT_TABS, flightHref, parseFlightLocation, storyMatchesFlightLink, type FlightLocation, type FlightTab } from "@/lib/flight-url";
 import { passengerAirportWeather } from "@/lib/passenger-airport-weather";
 import { prefetchFlightAirportSurfacesOnce, scheduleLowPrioritySurfacePrefetch } from "@/lib/airport-surface-prefetch";
+import { resolveGroundIdentity } from "@/lib/ground-position-identity";
 import { getGroundBootstrap } from "@/lib/ground-bootstrap";
 import { getGroundPosition } from "@/lib/ground-position";
 import { groundPositionQueryKey } from "@/lib/ground-position-key";
@@ -504,14 +505,6 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   const flightKey = normFlight(query);
   const pageVisible = usePageVisible();
   const storyQueryKey = flightStoryQueryKey(query, linkedDate);
-  const groundBootstrapQ = useQuery({
-    queryKey: ["ground-bootstrap", flightKey],
-    queryFn: () => getGroundBootstrap({ data: { flight: query } }),
-    enabled: cacheOk && pageVisible && flightTab === "Route" && query.length > 0,
-    staleTime: 2_000,
-    gcTime: 5 * 60_000,
-    retry: false,
-  });
   const shellStyle = {
     background: "var(--color-bg)",
     color: "var(--color-fg)",
@@ -551,52 +544,8 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
     );
   }, []);
 
-  useEffect(() => {
-    const bootstrap = groundBootstrapQ.data;
-    if (!bootstrap || flightTab !== "Route") return;
-    const prefetchKey = `${bootstrap.landKey}:${bootstrap.airportIata}:${bootstrap.movementKind}`;
-    if (groundBootstrapPrefetchRef.current === prefetchKey) return;
-    groundBootstrapPrefetchRef.current = prefetchKey;
-    const key = groundPositionQueryKey({
-      stateKey: bootstrap.landKey,
-      flightNumber: bootstrap.requestedIdent,
-      airportIata: bootstrap.airportIata,
-      movementKind: bootstrap.movementKind,
-    });
-    if (bootstrap.lastPosition) queryClient.setQueryData(key, bootstrap.lastPosition);
-    console.info("[ground-ttfp]", {
-      event: "ground_query_sent",
-      flight: flightKey,
-      airport: bootstrap.airportIata,
-      movement: bootstrap.movementKind,
-      atMs: Date.now(),
-      bootstrap: true,
-    });
-    void logGroundTiming({ data: {
-      event: "ground_query_sent", flight: flightKey, airport: bootstrap.airportIata,
-      movement: bootstrap.movementKind, atMs: Date.now(),
-    } }).catch(() => undefined);
-    void queryClient.prefetchQuery({
-      queryKey: key,
-      queryFn: () => getGroundPosition({ data: {
-        stateKey: bootstrap.landKey,
-        serviceDate: bootstrap.serviceDate,
-        airportIata: bootstrap.airportIata,
-        flightNumber: bootstrap.requestedIdent,
-        callsign: bootstrap.callsign,
-        registration: bootstrap.registration,
-        hex: bootstrap.hex,
-        originIata: bootstrap.originIata,
-        destIata: bootstrap.destIata,
-        movementKind: bootstrap.movementKind,
-        airportLat: bootstrap.airportLat,
-        airportLon: bootstrap.airportLon,
-      } }),
-      staleTime: 0,
-    });
-  }, [groundBootstrapQ.data, flightTab, queryClient, flightKey]);
 
-    const storyQ = useQuery({
+  const storyQ = useQuery({
     queryKey: storyQueryKey,
     queryFn: async ({ client, signal }) => {
       if (leavingRef.current) throw new DOMException("Left flight search", "AbortError");
@@ -666,6 +615,75 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
 
   const story = storyForQuery(storyQ.data, query, linkedDate);
   const remaining = story ? remainingFlight(story) : null;
+  const groundBootstrapQ = useQuery({
+    queryKey: ["ground-bootstrap", flightKey, story?.stateKey, story ? flightDepartureDate(story) : null, story?.origin.iata, story?.dest.iata],
+    queryFn: () => getGroundBootstrap({ data: { flight: query, landKey: story!.stateKey!, serviceDate: flightDepartureDate(story!), originIata: story!.origin.iata, destIata: story!.dest.iata } }),
+    enabled: Boolean(story?.stateKey?.startsWith("leg:v1:") && flightDepartureDate(story)) && cacheOk && pageVisible && flightTab === "Route" && query.length > 0,
+    staleTime: 2_000,
+    gcTime: 5 * 60_000,
+    retry: false,
+  });
+
+  useEffect(() => {
+    const bootstrap = groundBootstrapQ.data;
+    if (!bootstrap || !story || bootstrap.landKey !== story.stateKey || flightTab !== "Route") return;
+    // Current story assignment outranks the older bootstrap identity.
+    const storyIdentity = resolveGroundIdentity({
+      registration: story.aircraft?.registration,
+      hex: story.aircraft?.hex || null,
+      callsign: story.callsign,
+    }, { registration: story.resume?.tail, hex: story.resume?.hex });
+    const { registration, hex, callsign } = resolveGroundIdentity(storyIdentity, bootstrap);
+    const assignmentChanged = Boolean((registration && bootstrap.registration && registration !== bootstrap.registration)
+      || (hex && bootstrap.hex && hex !== bootstrap.hex)
+      || (storyIdentity.registration && !bootstrap.registration));
+    const prefetchKey = `${bootstrap.landKey}:${bootstrap.airportIata}:${bootstrap.movementKind}:${registration ?? ""}:${hex ?? ""}`;
+    if (groundBootstrapPrefetchRef.current === prefetchKey) return;
+    groundBootstrapPrefetchRef.current = prefetchKey;
+    const key = groundPositionQueryKey({
+      stateKey: bootstrap.landKey,
+      flightNumber: bootstrap.requestedIdent,
+      airportIata: bootstrap.airportIata,
+      movementKind: bootstrap.movementKind,
+      registration, hex,
+    });
+    const existingPosition = queryClient.getQueryData<{ seenAt: number }>(key);
+    if (!assignmentChanged && bootstrap.lastPosition
+      && (!existingPosition || bootstrap.lastPosition.seenAt > existingPosition.seenAt)) {
+      queryClient.setQueryData(key, bootstrap.lastPosition);
+    }
+    console.info("[ground-ttfp]", {
+      event: "ground_query_sent",
+      flight: flightKey,
+      airport: bootstrap.airportIata,
+      movement: bootstrap.movementKind,
+      atMs: Date.now(),
+      bootstrap: true,
+    });
+    void logGroundTiming({ data: {
+      event: "ground_query_sent", flight: flightKey, airport: bootstrap.airportIata,
+      movement: bootstrap.movementKind, atMs: Date.now(),
+    } }).catch(() => undefined);
+    void queryClient.prefetchQuery({
+      queryKey: key,
+      queryFn: () => getGroundPosition({ data: {
+        stateKey: bootstrap.landKey,
+        serviceDate: bootstrap.serviceDate,
+        airportIata: bootstrap.airportIata,
+        flightNumber: bootstrap.requestedIdent,
+        callsign,
+        registration,
+        hex,
+        originIata: bootstrap.originIata,
+        destIata: bootstrap.destIata,
+        movementKind: bootstrap.movementKind,
+        airportLat: bootstrap.airportLat,
+        airportLon: bootstrap.airportLon,
+      } }),
+      staleTime: 0,
+    });
+  }, [groundBootstrapQ.data, flightTab, queryClient, flightKey, story]);
+
 
   useEffect(() => {
     if (!story || groundTimingStoryLoggedRef.current) return;

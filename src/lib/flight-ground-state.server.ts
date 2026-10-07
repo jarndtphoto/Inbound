@@ -32,6 +32,8 @@ export type GroundState = {
   updatedAt: number;
 };
 
+export type GroundStateScope = Pick<GroundState, "landKey" | "serviceDate" | "originIata" | "destIata">;
+
 type Row = {
   land_key: string;
   requested_ident: string;
@@ -90,16 +92,18 @@ export function createFlightGroundStateStore(
     }
   }
 
-  async function loadRecent(requestedIdent: string): Promise<GroundState | null> {
+  async function loadRecent(requestedIdent: string, scope?: GroundStateScope): Promise<GroundState | null> {
     const ident = String(requestedIdent || "").replace(/\s/g, "").toUpperCase();
-    if (!ident) return null;
+    if (!ident || !scope?.landKey || !scope.serviceDate || !scope.originIata || !scope.destIata) return null;
     try {
       const sql = await sqlProvider();
       const rows = await sql<Row>`select land_key, requested_ident, service_date, origin_iata, dest_iata,
         airport_iata, airport_lat, airport_lon, movement_kind, hex, registration, callsign,
         last_position, position_seen_at, extract(epoch from updated_at) * 1000 as updated_at_ms
         from flight_ground_state
-        where requested_ident = ${ident} and updated_at >= now() - interval '6 hours'
+        where requested_ident = ${ident} and land_key = ${scope.landKey}
+          and service_date = ${scope.serviceDate} and origin_iata = ${scope.originIata}
+          and dest_iata = ${scope.destIata} and updated_at >= now() - interval '6 hours'
         order by updated_at desc limit 1`;
       return fromRow(rows[0]);
     } catch (error) {
@@ -108,8 +112,8 @@ export function createFlightGroundStateStore(
     }
   }
 
-  async function save(next: Omit<GroundState, "updatedAt">): Promise<void> {
-    if (!next.landKey || !next.requestedIdent) return;
+  async function save(next: Omit<GroundState, "updatedAt">, requestStartedAt = Date.now()): Promise<void> {
+    if (!next.landKey || !next.requestedIdent || !Number.isFinite(requestStartedAt)) return;
     try {
       const sql = await sqlProvider();
       await sql`insert into flight_ground_state (
@@ -133,18 +137,50 @@ export function createFlightGroundStateStore(
           airport_lat = excluded.airport_lat,
           airport_lon = excluded.airport_lon,
           movement_kind = excluded.movement_kind,
-          hex = coalesce(excluded.hex, flight_ground_state.hex),
-          registration = coalesce(excluded.registration, flight_ground_state.registration),
+          hex = case when ((excluded.registration is not null
+              and ((flight_ground_state.registration is not null and excluded.registration <> flight_ground_state.registration)
+                or (flight_ground_state.registration is null and flight_ground_state.hex is not null)))
+            or (excluded.hex is not null and flight_ground_state.hex is not null
+              and excluded.hex <> flight_ground_state.hex)) then excluded.hex else coalesce(excluded.hex, flight_ground_state.hex) end,
+          registration = case when ((excluded.registration is not null
+              and ((flight_ground_state.registration is not null and excluded.registration <> flight_ground_state.registration)
+                or (flight_ground_state.registration is null and flight_ground_state.hex is not null)))
+            or (excluded.hex is not null and flight_ground_state.hex is not null
+              and excluded.hex <> flight_ground_state.hex)) then excluded.registration else coalesce(excluded.registration, flight_ground_state.registration) end,
           callsign = coalesce(excluded.callsign, flight_ground_state.callsign),
           last_position = case
+            when excluded.airport_iata is distinct from flight_ground_state.airport_iata
+              or excluded.movement_kind is distinct from flight_ground_state.movement_kind
+            then excluded.last_position
+            when ((excluded.registration is not null
+              and ((flight_ground_state.registration is not null and excluded.registration <> flight_ground_state.registration)
+                or (flight_ground_state.registration is null and flight_ground_state.hex is not null)))
+            or (excluded.hex is not null and flight_ground_state.hex is not null
+              and excluded.hex <> flight_ground_state.hex)) then excluded.last_position
             when excluded.position_seen_at is not null
               and (flight_ground_state.position_seen_at is null or excluded.position_seen_at >= flight_ground_state.position_seen_at)
             then excluded.last_position else flight_ground_state.last_position end,
           position_seen_at = case
+            when excluded.airport_iata is distinct from flight_ground_state.airport_iata
+              or excluded.movement_kind is distinct from flight_ground_state.movement_kind
+            then excluded.position_seen_at
+            when ((excluded.registration is not null
+              and ((flight_ground_state.registration is not null and excluded.registration <> flight_ground_state.registration)
+                or (flight_ground_state.registration is null and flight_ground_state.hex is not null)))
+            or (excluded.hex is not null and flight_ground_state.hex is not null
+              and excluded.hex <> flight_ground_state.hex)) then excluded.position_seen_at
             when excluded.position_seen_at is not null
               and (flight_ground_state.position_seen_at is null or excluded.position_seen_at >= flight_ground_state.position_seen_at)
             then excluded.position_seen_at else flight_ground_state.position_seen_at end,
-          updated_at = now()`;
+          updated_at = now()
+        where date_trunc('milliseconds', flight_ground_state.updated_at) <= to_timestamp(${requestStartedAt} / 1000.0)
+          and not (((excluded.registration is not null
+              and ((flight_ground_state.registration is not null and excluded.registration <> flight_ground_state.registration)
+                or (flight_ground_state.registration is null and flight_ground_state.hex is not null)))
+            or (excluded.hex is not null and flight_ground_state.hex is not null
+              and excluded.hex <> flight_ground_state.hex))
+            and excluded.position_seen_at is not null and flight_ground_state.position_seen_at is not null
+            and excluded.position_seen_at < flight_ground_state.position_seen_at)`;
       await cleanup(sql);
     } catch (error) {
       console.error("[flight-ground-state] save failed", { landKey: next.landKey, error });

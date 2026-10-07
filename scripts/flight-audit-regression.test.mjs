@@ -1,3 +1,4 @@
+import { acquisitionFixture } from "./helpers/acquisition-fixture.mjs";
 import { freezeTestClock } from './helpers/test-clock.mjs';
 import { after, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,7 +19,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context);
 }});
 const storyBundleDir = await mkdtemp(resolve('node_modules/.inbound-audit-test-'));
-await build({ configFile: false, logLevel: 'silent', build: {
+await build({ configFile: false, logLevel: 'silent', plugins: [acquisitionFixture()], build: {
   ssr: resolve('src/lib/story.server.ts'), outDir: storyBundleDir,
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});

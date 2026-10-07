@@ -1,3 +1,6 @@
+import { acquireGroundInStages, type GroundAcquisitionRoute } from "./ground-acquisition.ts";
+import { parseRecentGroundTrace, type GroundTracePosition } from "./ground-trace.ts";
+import { resolveGroundIdentity } from "./ground-position-identity.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { haversineNm } from "./geo";
 import { fetchAround, fetchByCallsign, fetchByHex, fetchByReg, fuseProviderLists, type AdsbRaw, type ProviderPack } from "./adsb-fusion";
@@ -20,25 +23,11 @@ export type GroundPositionInput = {
 };
 
 
-type GroundTracePosition = {
-  lat: number;
-  lon: number;
-  altFt: number | null;
-  gsKt: number | null;
-  track: number | null;
-  onGround: true;
-  seenAt: number;
-  registration: string | null;
-  callsign: string | null;
-  provider: "adsb";
-};
-
 const TRACE_HOSTS = [
-  "https://globe.theairtraffic.com",
-  "https://globe.adsb.fi",
-  "https://globe.airplanes.live",
-];
-const groundTraceCache = new Map<string, { at: number; value: GroundTracePosition | null }>();
+  { provider: "trace-airtraffic", host: "https://globe.theairtraffic.com" },
+  { provider: "trace-fi", host: "https://globe.adsb.fi" },
+  { provider: "trace-al", host: "https://globe.airplanes.live" },
+] as const;
 const groundMissLogAt = new Map<string, number>();
 const groundAroundCache = new Map<string, { at: number; ac: AdsbRaw[] }>();
 
@@ -51,48 +40,17 @@ async function recentGroundTrace(
 ): Promise<GroundTracePosition | null> {
   const id = hex.toLowerCase();
   if (!/^[0-9a-f]{6}$/.test(id)) return null;
-  const cached = groundTraceCache.get(id);
-  if (cached && now - cached.at <= 8_000) return cached.value;
-
-  const attempts = TRACE_HOSTS.map(async (host) => {
-    const response = await fetch(`${host}/data/traces/${id.slice(-2)}/trace_recent_${id}.json`, {
-      signal: AbortSignal.timeout(2_200),
-      headers: { Accept: "application/json", "User-Agent": "Inbound/1.0 ground-trace-recovery" },
+  const { acquireFreeAdsb } = await import("./adsb-acquisition.server.ts");
+  for (const { provider, host } of TRACE_HOSTS) {
+    const acquired = await acquireFreeAdsb({
+      provider,
+      url: `${host}/data/traces/${id.slice(-2)}/trace_recent_${id}.json`,
+      timeoutMs: 2_200,
     });
-    if (!response.ok) throw new Error(`trace HTTP ${response.status}`);
-    const payload = await response.json() as { timestamp?: number; trace?: unknown[][] };
-    const base = typeof payload.timestamp === "number" ? payload.timestamp : 0;
-    const rows = Array.isArray(payload.trace) ? payload.trace : [];
-    const candidates = rows.flatMap((row) => {
-      const offset = typeof row?.[0] === "number" ? row[0] : 0;
-      const lat = row?.[1], lon = row?.[2], altRaw = row?.[3], gsRaw = row?.[4], trackRaw = row?.[5];
-      if (typeof lat !== "number" || typeof lon !== "number" || Math.abs(lat) > 90 || Math.abs(lon) > 180) return [];
-      const seenAt = base + offset;
-      const ageSec = now / 1000 - seenAt;
-      if (!Number.isFinite(ageSec) || ageSec < -10 || ageSec > 120) return [];
-      const gsKt = typeof gsRaw === "number" ? gsRaw : null;
-      const ground = altRaw === "ground" || altRaw === 0 || altRaw === "0"
-        || (typeof altRaw === "number" && altRaw <= 50 && (gsKt ?? 999) <= 80);
-      if (!ground || haversineNm({ lat, lon }, airport) > 20) return [];
-      const altFt = typeof altRaw === "number" && altRaw > 0 ? altRaw : 0;
-      return [{
-        lat, lon, altFt, gsKt,
-        track: typeof trackRaw === "number" && trackRaw >= 0 && trackRaw <= 360 ? trackRaw : null,
-        onGround: true as const,
-        seenAt,
-        registration,
-        callsign,
-        provider: "adsb" as const,
-      }];
-    }).sort((a, b) => b.seenAt - a.seenAt);
-    const position = candidates[0] ?? null;
-    if (!position) throw new Error("trace has no recent ground point");
-    return position;
-  });
-
-  const value = await Promise.any(attempts).catch(() => null);
-  groundTraceCache.set(id, { at: now, value });
-  return value;
+    const position = parseRecentGroundTrace(acquired.data, airport, { registration, callsign }, Math.max(now, Date.now()));
+    if (position) return position;
+  }
+  return null;
 }
 
 export const getGroundPosition = createServerFn({ method: "POST" })
@@ -114,6 +72,8 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     return { callsign, flightId, flightNumber, registration, hex, stateKey, serviceDate, airportIata: /^[A-Z]{3}$/.test(airportIata) ? airportIata : null, originIata, destIata, movementKind, airportLat, airportLon };
   })
   .handler(async ({ data }) => {
+    // Preserve request provenance across provider waits and parallel viewers.
+    const requestStartedAt = Date.now();
     const airport = { lat: data.airportLat, lon: data.airportLon };
     const diagnosticAirport = data.airportIata ?? (data.movementKind === "arrival" ? data.destIata : data.originIata);
     const diagnosticEnabled = diagnosticAirport === "MCO" || diagnosticAirport === "TPA";
@@ -137,11 +97,12 @@ export const getGroundPosition = createServerFn({ method: "POST" })
 
     const normCallsign = (value: unknown) => String(value ?? "").replace(/\s/g, "").toUpperCase();
     const normRegistration = (value: unknown) => String(value ?? "").replace(/[-\s]/g, "").toUpperCase();
+    const identity = resolveGroundIdentity(data, cachedState);
     const flightIdCallsign = data.flightId?.match(/^([A-Z]{2,4}\d{1,4}[A-Z]?)/)?.[1] ?? null;
-    const callsigns = [...new Set([flightIdCallsign, data.callsign, cachedState?.callsign].filter(Boolean).map(normCallsign))].slice(0, 3);
+    const callsigns = [...new Set([data.callsign, flightIdCallsign, identity.callsign].filter(Boolean).map(normCallsign))].slice(0, 3);
     const wantedCallsigns = new Set(callsigns);
-    const wantedHex = String(data.hex ?? cachedState?.hex ?? "").toLowerCase();
-    const resolvedRegistration = data.registration ?? cachedState?.registration ?? null;
+    const wantedHex = String(identity.hex ?? "").toLowerCase();
+    const resolvedRegistration = identity.registration;
     const wantedReg = normRegistration(resolvedRegistration);
     const traceHex = wantedHex || usRegistrationHex(resolvedRegistration) || "";
 
@@ -164,7 +125,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         callsign: position?.callsign ?? callsigns[0] ?? null,
         lastPosition: position,
         positionSeenAt: seenAt,
-      });
+      }, requestStartedAt);
     };
 
     const finish = async <T extends GroundTracePosition | null>(position: T): Promise<T> => {
@@ -238,53 +199,43 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         .sort((a, b) => b.seenAt - a.seenAt)[0] ?? null;
     };
 
-    const controller = new AbortController();
-    const signal = controller.signal;
     let hexPacks: ProviderPack[] = [], regPacks: ProviderPack[] = [], callsignPacks: ProviderPack[] = [], aroundPacks: ProviderPack[] = [];
     const aroundKey = `${airport.lat.toFixed(3)}:${airport.lon.toFixed(3)}:20`;
-
-    const validPath = async (route: string, promise: Promise<ProviderPack[]>) => {
-      const packs = await promise;
+    const pathsAttempted: string[] = [];
+    const lookup = async (route: string, run: () => Promise<ProviderPack[]>) => {
+      pathsAttempted.push(route);
+      const packs = await run();
       if (route === "hex") hexPacks = packs;
       else if (route === "registration") regPacks = packs;
-      else if (route === "callsign") callsignPacks = packs;
+      else if (route.startsWith("callsign:")) callsignPacks.push(...packs);
       else aroundPacks = packs;
       if (route === "area") {
         const fused = fuseProviderLists(packs, { airside: true });
         if (fused.length) groundAroundCache.set(aroundKey, { at: Date.now(), ac: fused });
       }
-      const position = pick(packs);
-      if (!position) throw new Error(`${route} miss`);
-      return { route, position };
+      return pick(packs);
     };
-
-    const paths: Promise<{ route: string; position: GroundTracePosition }>[] = [];
-    if (traceHex) paths.push(validPath("hex", fetchByHex(traceHex, signal)));
-    if (resolvedRegistration) paths.push(validPath("registration", fetchByReg(resolvedRegistration, signal)));
-    if (callsigns.length) {
-      paths.push(Promise.any(callsigns.map(callsign =>
-        fetchByCallsign(callsign, signal).then(packs => {
-          callsignPacks.push(...packs);
-          const position = pick(packs);
-          if (!position) throw new Error("callsign miss");
-          return { route: "callsign", position };
-        })
-      )));
-    }
-    paths.push(validPath("area", fetchAround(airport.lat, airport.lon, 20, signal)));
-
-    if (paths.length) {
-      const winner = await Promise.any(paths).catch(() => null);
-      if (winner) {
-        controller.abort();
-        console.info("[ground-position]", {
-          provider: "adsb-parallel",
-          route: winner.route,
-          callsign: winner.position.callsign,
-          ageSec: Math.round(Date.now() / 1000 - winner.position.seenAt),
-        });
-        return finish(winner.position);
-      }
+    const identityRoutes: GroundAcquisitionRoute<GroundTracePosition>[] = [];
+    if (traceHex) identityRoutes.push({ route: "hex", run: () => lookup("hex", () => fetchByHex(traceHex)) });
+    if (resolvedRegistration) identityRoutes.push({ route: "registration", run: () => lookup("registration", () => fetchByReg(resolvedRegistration)) });
+    for (const callsign of callsigns) identityRoutes.push({
+      route: `callsign:${callsign}`, run: () => lookup(`callsign:${callsign}`, () => fetchByCallsign(callsign)),
+    });
+    const strongest = identityRoutes.shift() ?? null;
+    // Prefer the current callsign among bounded fallbacks; cached aliases follow it.
+    const aliases = identityRoutes.sort((a, b) => Number(b.route === `callsign:${callsigns[0]}`) - Number(a.route === `callsign:${callsigns[0]}`));
+    const winner = await acquireGroundInStages({
+      strongest,
+      area: { route: "area", run: () => lookup("area", () => fetchAround(airport.lat, airport.lon, 20)) },
+      aliases,
+    });
+    if (winner) {
+      console.info("[ground-position]", {
+        provider: "adsb-staged", route: winner.route, pathsAttempted,
+        callsign: winner.position.callsign,
+        ageSec: Math.round(Date.now() / 1000 - winner.position.seenAt),
+      });
+      return finish(winner.position);
     }
 
     const heldAround = groundAroundCache.get(aroundKey);
@@ -333,6 +284,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         derivedUsHex: !wantedHex && Boolean(traceHex),
         hasRegistration: Boolean(wantedReg),
         callsigns,
+        pathsAttempted,
         hexStatus: hexPacks.map(pack => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
         registrationStatus: regPacks.map(pack => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
         callsignStatus: callsignPacks.map(pack => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),

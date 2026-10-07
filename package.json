@@ -16,7 +16,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --experimental-strip-types --import ./scripts/test-imports.mjs --test 'scripts/**/*.test.mjs' 'src/**/*.test.ts'",
+    "test": "node --experimental-strip-types --import ./scripts/test-imports.mjs --test-concurrency=2 --test 'scripts/**/*.test.mjs' 'src/**/*.test.ts'",
     "lint": "eslint .",
     "format": "prettier --write .",
     "check": "npm run typecheck && npm test"

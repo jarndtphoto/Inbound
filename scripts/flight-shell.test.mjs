@@ -12,7 +12,7 @@ test('tracked-flight shell identifies the flight with appearance controls and us
   assert.match(flightPages, /<header className="journey-header">/);
   assert.match(flightPages, /<strong>\{story\.iata\}<\/strong>/);
   assert.match(flightPages, /<AppearanceControl/);
-  assert.doesNotMatch(flightPages, /aria-label="Back to flight search"|Home & settings|story\.callsign/);
+  assert.doesNotMatch(flightPages, /aria-label="Back to flight search"|Home & settings|\{story\.callsign\}/);
 });
 
 test('tracked-flight search and recent chips remain off the flight shell',()=>{
@@ -68,8 +68,13 @@ test('departure delay alerts stop once departure movement is underway',()=>{
   assert.match(traveler,/!departureUnderway && !isLanded\(next\)/);
 });
 
-test('Map tab starts ground acquisition from durable identity before the story finishes',()=>{
+test('Map tab scopes durable ground recovery to the resolved dated route',()=>{
   assert.match(flightPages,/getGroundBootstrap/);
+  assert.match(flightPages,/landKey: story!\.stateKey!/);
+  assert.match(flightPages,/serviceDate: flightDepartureDate\(story!\)/);
+  assert.match(flightPages,/originIata: story!\.origin\.iata, destIata: story!\.dest\.iata/);
+  assert.match(flightPages,/bootstrap\.landKey !== story\.stateKey/);
+  assert.match(flightPages,/bootstrap\.lastPosition\.seenAt > existingPosition\.seenAt/);
   assert.match(flightPages,/flightTab === "Route"/);
   assert.match(flightPages,/queryClient\.setQueryData\(key, bootstrap\.lastPosition\)/);
   assert.match(flightPages,/queryClient\.prefetchQuery/);
