@@ -10,6 +10,7 @@ import { airportRunwayFallbackFeatures } from "@/lib/airport-runway-fallback";
 import { flightPollingComplete, groundPollingEnabled } from "@/lib/flight-polling";
 import { usePageVisible } from "@/lib/use-page-visible";
 import { getGroundPosition } from "@/lib/ground-position";
+import { groundPositionQueryKey } from "@/lib/ground-position-key";
 import type { FlightStory } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -311,7 +312,7 @@ function GroundMovementMap({
       ? Math.max(0, storyAircraft.seenSec)
       : null;
   const storyProvider = story.providers?.chosenPosition;
-  const storyPhysicalProvider = storyProvider === "fr24" || storyProvider === "adsb";
+  const storyPhysicalProvider = storyProvider === "fr24" || storyProvider === "adsb" || storyProvider === "flightaware-public";
   const storyNearAirport = Boolean(storyAircraft && Number.isFinite(storyAircraft.lat) && Number.isFinite(storyAircraft.lon)
     && haversineNm(storyAircraft, airport) <= 20);
   const storySurfaceLike = Boolean(storyAircraft && (
@@ -319,7 +320,7 @@ function GroundMovementMap({
     ((storyAircraft.altFt ?? 9999) <= 250 && (storyAircraft.gsKt ?? 999) <= 80)
   ));
   const storyFast = storyAircraft && storyPhysicalProvider && storyNearAirport && storySurfaceLike
-    && storyPositionAge != null && storyPositionAge <= 90
+    && storyPositionAge != null && storyPositionAge <= 120
     ? {
         lat: storyAircraft.lat,
         lon: storyAircraft.lon,
@@ -341,14 +342,24 @@ function GroundMovementMap({
   const identityHex = (aircraft?.hex ?? storyAircraft?.hex ?? story.resume?.hex ?? null)?.replace(/^~+/, "").toLowerCase() || null;
   const identityCallsign = aircraft?.callsign ?? storyAircraft?.callsign ?? story.callsign;
   const identityKey = `${story.flightId ?? story.iata}:${airport.iata}:${mode.kind}`;
+  const groundPollStartRef = useRef<{ key: string; at: number }>({ key: identityKey, at: Date.now() });
+  if (groundPollStartRef.current.key !== identityKey) {
+    groundPollStartRef.current = { key: identityKey, at: Date.now() };
+  }
   const groundIdentityRef = useRef<{ key: string; registration: string | null }>({ key: identityKey, registration: identityRegistration });
   if (groundIdentityRef.current.key !== identityKey) {
     groundIdentityRef.current = { key: identityKey, registration: identityRegistration };
   } else if (identityRegistration) {
     groundIdentityRef.current.registration = identityRegistration;
   }
+  const groundQueryKey = groundPositionQueryKey({
+    stateKey: story.stateKey,
+    flightNumber: story.iata,
+    airportIata: airport.iata,
+    movementKind: mode.kind,
+  });
   const groundQ = useQuery({
-    queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, mode.kind, identityHex ?? "", identityRegistration ?? "", identityCallsign],
+    queryKey: groundQueryKey,
     queryFn: () => {
       if (!groundTimingQueryLoggedRef.current) {
         groundTimingQueryLoggedRef.current = true;
@@ -361,6 +372,9 @@ function GroundMovementMap({
         });
       }
       return getGroundPosition({ data: {
+      stateKey: story.stateKey ?? null,
+      serviceDate: story.stateKey?.split("|")[1] ?? null,
+      airportIata: airport.iata,
       callsign: identityCallsign,
       flightId: story.flightId ?? null,
       flightNumber: story.iata ?? null,
@@ -373,8 +387,21 @@ function GroundMovementMap({
       airportLon: airport.lon,
     } });
     },
-    enabled: groundPollingEnabled(active, pageVisible, flightPollingComplete(story), inFlight, Boolean(storyFast), Boolean(identityHex || identityRegistration || identityCallsign)),
-    refetchInterval: () => active && document.visibilityState === "visible" && !flightPollingComplete(story) ? 8_000 : false,
+    enabled: groundPollingEnabled(
+      active,
+      pageVisible,
+      flightPollingComplete(story),
+      inFlight,
+      Boolean(storyFast && (storyPositionAge ?? Infinity) <= 30),
+      Boolean(story.stateKey || identityHex || identityRegistration || identityCallsign),
+    ),
+    refetchInterval: (q) => {
+      if (!active || document.visibilityState !== "visible" || flightPollingComplete(story)) return false;
+      const data = q.state.data as { seenAt?: number } | null | undefined;
+      const ageSec = data?.seenAt ? Math.max(0, Date.now() / 1000 - data.seenAt) : Infinity;
+      const startupMs = Date.now() - groundPollStartRef.current.at;
+      return ageSec > 30 && startupMs < 30_000 ? 2_500 : 8_000;
+    },
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
@@ -386,7 +413,7 @@ function GroundMovementMap({
   const queriedFast = groundQ.data;
   if (queriedFast?.registration) groundIdentityRef.current.registration = queriedFast.registration;
   const queriedFastAge = queriedFast?.seenAt ? Math.max(0, Date.now() / 1000 - queriedFast.seenAt) : null;
-  const queriedCandidate = queriedFast && (queriedFastAge ?? Infinity) <= 90 ? queriedFast : null;
+  const queriedCandidate = queriedFast && (queriedFastAge ?? Infinity) <= 120 ? queriedFast : null;
 
   // Maintain heading history separately for story and map-ground feeds. MCO
   // can report the same aircraft at slightly different timestamps/positions in
@@ -517,9 +544,11 @@ function GroundMovementMap({
   const provider = fastFix?.provider ?? (typeof story.providers?.chosenPosition === "string" ? story.providers.chosenPosition : "live position");
   const providerLabel = provider === "fr24" ? "FR24" : provider === "adsb" ? "ADS-B" : provider;
   const age = fastAge != null ? Math.max(0, Math.round(fastAge)) : typeof story.providers?.chosenPositionAgeSec === "number" ? Math.max(0, Math.round(story.providers.chosenPositionAgeSec)) : null;
+  const lastSeen = Boolean(displayAircraft && age != null && age > 30 && age <= 120);
+  const lastSeenLabel = age == null ? null : age < 60 ? `Last seen ${age}s ago` : `Last seen ${Math.max(1, Math.round(age / 60))}m ago`;
   const fastStale = Boolean(!fast && fastFix);
   const delayedFast = Boolean(fast && (fastAge ?? Infinity) > 12);
-  const displayFrozen = frozen && !(fast && (fastAge ?? Infinity) <= 30);
+  const displayFrozen = lastSeen || (frozen && !(fast && (fastAge ?? Infinity) <= 30));
   useEffect(() => {
     if (!active || !displayAircraft || groundTimingFixLoggedRef.current) return;
     groundTimingFixLoggedRef.current = true;
@@ -546,11 +575,11 @@ function GroundMovementMap({
       <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-2">
         <div>
           <p className="font-mono text-[11px] tracking-widest text-subtle uppercase">{mode.kind === "departure" ? "Departure ground" : "Arrival ground"}</p>
-          <p className="font-display text-base font-semibold">{airport.iata} · {displayFrozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? `holding last ${providerLabel} fix` : delayedFast ? `delayed ${providerLabel} position` : displayAircraft ? "live movement" : "airport surface"}</p>
+          <p className="font-display text-base font-semibold">{airport.iata} · {lastSeen && lastSeenLabel ? lastSeenLabel : displayFrozen ? "last ground position" : inFlight ? "aircraft in flight" : fastStale ? `holding last ${providerLabel} fix` : delayedFast ? `delayed ${providerLabel} position` : displayAircraft ? "live movement" : "airport surface"}</p>
         </div>
         <div className="text-right font-mono text-[10px] leading-tight text-muted">
           {inFlight ? <div>Plane in flight</div> : displayAircraft ? <div>{Math.round(displayAircraft.gsKt ?? 0)} kt · {displayFrozen ? "frozen" : displayAircraft.onGround ? "ground" : `${Math.round(displayAircraft.altFt ?? 0)} ft`}</div> : <div>Awaiting aircraft</div>}
-          <div>{displayFrozen ? "last known ground fix" : inFlight ? "departure complete" : `${providerLabel}${age != null ? ` · ${age}s` : ""}${fastStale ? " · held" : delayedFast ? " · delayed" : ""}`}</div>
+          <div>{lastSeen && lastSeenLabel ? lastSeenLabel : displayFrozen ? "last known ground fix" : inFlight ? "departure complete" : `${providerLabel}${age != null ? ` · ${age}s` : ""}${fastStale ? " · held" : delayedFast ? " · delayed" : ""}`}</div>
         </div>
       </div>
       <div ref={zoom.boxRef} className="relative min-h-0 flex-1 overflow-hidden bg-bg" style={{ touchAction: "none" }}>
