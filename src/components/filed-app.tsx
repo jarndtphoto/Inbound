@@ -534,8 +534,11 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   }, []);
 
   useEffect(() => {
-    console.info("[ground-ttfp]", { event: "page_open", flight: flightKey, atMs: groundTimingOpenAtRef.current });
-    void logGroundTiming({ data: { event: "page_open", flight: flightKey, atMs: groundTimingOpenAtRef.current } }).catch(() => undefined);
+    const openedAt = Date.now();
+    groundTimingOpenAtRef.current = openedAt;
+    groundTimingStoryLoggedRef.current = false;
+    console.info("[ground-ttfp]", { event: "page_open", flight: flightKey, atMs: openedAt });
+    void logGroundTiming({ data: { event: "page_open", flight: flightKey, atMs: openedAt } }).catch(() => undefined);
   }, [flightKey]);
 
 
