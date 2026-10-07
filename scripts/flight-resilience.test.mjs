@@ -1,3 +1,4 @@
+import { acquisitionFixture } from "./helpers/acquisition-fixture.mjs";
 import { freezeTestClock } from './helpers/test-clock.mjs';
 import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +41,7 @@ before(async () => {
   delete process.env.DATABASE_URL;
   restoreClock = freezeTestClock(() => now ?? initialNow);
   directory = await mkdtemp(resolve("node_modules/.inbound-feed-test-"));
-  await build({ configFile: false, logLevel: "silent", build: {
+  await build({ configFile: false, logLevel: "silent", plugins: [acquisitionFixture()], build: {
     ssr: resolve("src/lib/story.server.ts"), outDir: directory,
     rollupOptions: { output: { entryFileNames: "story.mjs" } },
   } });
@@ -82,6 +83,31 @@ after(async () => {
 });
 
 describe("schedule outage resilience", { concurrency: false }, () => {
+  for (const gap of [180, 600]) it(`retains previously confirmed pushback through a ${gap}-second position gap`, async () => {
+    upstream = 200;
+    aircraft = null;
+    const saved = { ...resume(), departureStage: "push", detectedPushUnix: now / 1000 - gap };
+    const result = await server.loadFlightStory("WN1111", { resume: saved, fresh: true });
+    assert.equal(result.currentStage, "push");
+    assert.equal(result.times.pushed, true);
+    assert.equal(result.resume.detectedPushUnix, saved.detectedPushUnix);
+  });
+  it("does not invent pushback or taxi from overdue schedule times without movement evidence", async () => {
+    upstream = 200;
+    aircraft = null;
+    const result = await server.loadFlightStory("WN1111", { fresh: true });
+    assert.ok(!["push", "taxi", "takeoff_roll", "ride"].includes(result.currentStage));
+    assert.equal(result.times.pushed, false);
+    assert.equal(result.times.airborne, false);
+  });
+  it("retains previously confirmed taxi during the same position gap", async () => {
+    upstream = 200;
+    aircraft = null;
+    const saved = { ...resume(), departureStage: "taxi", detectedPushUnix: now / 1000 - 600,
+      detectedTaxiUnix: now / 1000 - 500 };
+    const result = await server.loadFlightStory("WN1111", { resume: saved, fresh: true });
+    assert.equal(result.currentStage, "taxi");
+  });
   it("keeps an overdue departure at the gate until fresh movement, then detects takeoff", async () => {
     const saved = resume();
     const first = await server.loadFlightStory("WN1111", { resume: saved, fresh: true });

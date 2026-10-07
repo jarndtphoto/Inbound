@@ -51,3 +51,16 @@ function BrowserAirportSurface({ airport, near, approachActive, widthMiles, inve
   if (!shapes.length) return null;
   return <g data-route-airport={airport.icao} opacity={opacity} pointerEvents="none" aria-hidden="true">{geometry}</g>;
 }
+
+/** Shared query data only: attribution never starts a second geometry request. */
+export function RouteAirportSurfaceAttribution(props: Parameters<typeof BrowserAirportSurfaceAttribution>[0]) {
+  const browser = useSyncExternalStore(subscribe, browserSnapshot, serverSnapshot);
+  return browser ? <BrowserAirportSurfaceAttribution {...props} /> : null;
+}
+
+function BrowserAirportSurfaceAttribution({ airport, visible }: { airport: { icao: string; lat: number; lon: number }; visible: boolean }) {
+  const query = useQuery({ ...airportSurfaceQueryOptions(airport), enabled: false });
+  const surface = query.data as AirportSurface | undefined;
+  if (!visible || surface?.source !== "OpenStreetMap") return null;
+  return <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="rounded bg-bg/90 px-2 py-1 text-xs text-muted underline">{airport.icao}: © OpenStreetMap contributors</a>;
+}

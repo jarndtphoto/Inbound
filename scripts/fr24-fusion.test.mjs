@@ -45,6 +45,31 @@ test('fresh airborne fusion stays airborne through departure wrappers without pr
       assert.equal(oldResult.currentStage, 'taxi');
       assert.equal(oldResult.times.airborne, false);
     }
+
+    const origin = { icao: 'KMDW', lat: 41.7868, lon: -87.7522 };
+    const dest = { icao: 'KMSP', lat: 44.8848, lon: -93.2223 };
+    for (const age of [60, 90]) {
+      const continuity = {
+        callsign: 'SWA1111', iata: 'WN1111', origin, dest, currentStage: 'taxi', live: true,
+        aircraft: { ...normalizedToLive(airborne), seenSec: age, seenAt: 10_000 - age },
+        providers: { chosenPosition: 'adsb', chosenPositionAgeSec: age },
+        times: { airborne: false },
+      };
+      const result = preferFreshAirborneState(continuity);
+      assert.equal(result.currentStage, 'ride', `accepted airborne age ${age} keeps Flight stage`);
+      assert.equal(result.times.airborne, true);
+    }
+    for (const age of [90.01, 91]) {
+      const stale = {
+        callsign: 'SWA1111', iata: 'WN1111', origin, dest, currentStage: 'taxi', live: true,
+        aircraft: { ...normalizedToLive(airborne), seenSec: age, seenAt: 10_000 - age },
+        providers: { chosenPosition: 'adsb', chosenPositionAgeSec: age },
+        times: { airborne: false },
+      };
+      const result = preferFreshAirborneState(stale);
+      assert.equal(result.currentStage, 'taxi', `stale airborne age ${age} cannot advance stage`);
+      assert.equal(result.times.airborne, false);
+    }
   } finally {
     globalThis.fetch = realFetch; Date.now = realNow;
     await rm(directory, { recursive: true, force: true });

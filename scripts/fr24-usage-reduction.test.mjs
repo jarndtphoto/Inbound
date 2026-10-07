@@ -71,24 +71,33 @@ test("visibility and Map selection are wired through to the ground observer", as
   assert.doesNotMatch(app, /if \(s\.live \|\| s\.currentStage === "push"/);
   assert.match(await read("src/components/route-map-experiment.tsx"), /active=\{props.active\}/);
   const movement = await read("src/components/movement-map.tsx");
-  assert.match(movement, /enabled: groundPollingEnabled\(active, pageVisible/);
+  assert.match(movement, /enabled: story\.providers\?\.previewMode !== "fr24-only" && groundPollingEnabled\([\s\S]{0,120}active,[\s\S]{0,80}pageVisible/);
   assert.doesNotMatch(movement, /refetchIntervalInBackground:\s*true/);
-  assert.match(movement, /document.visibilityState === "visible"/);
-  assert.match(movement, /\? 5_000 : false/, "ground ADS-B polling is paced to five seconds");
+  assert.match(movement, /document\.visibilityState !== "visible"/);
+  assert.match(movement, /startupMs < 30_000 \? 2_500 : 8_000/, "ground ADS-B polling retries every 2.5 seconds during startup, then returns to eight seconds");
   const hook = await read("src/lib/use-page-visible.ts");
   assert.match(hook, /useSyncExternalStore/);
   assert.match(hook, /removeEventListener\("visibilitychange", onChange\)/);
 });
 
-test("five-second ground map is free ADS-B only", async () => {
+test("paced ground map is free ADS-B only", async () => {
   const source = await readFile(resolve("src/lib/ground-position.ts"), "utf8");
   assert.doesNotMatch(source, /from "\.\/fr24\.server"/);
   assert.doesNotMatch(source, /loadFr24|FR24_API_TOKEN/, "ground polling cannot reach paid FR24");
   assert.match(source, /fr24KeyType: "disabled-ground-map"/);
-  assert.match(source, /const aroundPacks = await fetchAround/, "departure map still refreshes from open ADS-B");
-  assert.match(source, /wantedHex[\s\S]*?fetchByHex\(wantedHex\)/, "delayed broad fixes retry the strongest free exact hex identity");
-  assert.match(source, /if \(ageSec <= 8\)/, "only genuinely fresh broad fixes bypass the exact lookup");
-  assert.match(source, /position\.seenAt > aroundFallback\.seenAt/, "the newer exact or broad observation wins");
+  assert.match(source, /acquireGroundInStages/);
+  assert.match(source, /fetchByHex\(traceHex\)/);
+  assert.match(source, /fetchByReg\(resolvedRegistration\)/);
+  assert.match(source, /fetchByCallsign\(callsign\)/);
+  assert.match(source, /fetchAround\(airport\.lat, airport\.lon, 20\)/);
+  assert.doesNotMatch(source, /Promise\.any\(paths\)/, "ground routes no longer fan out before the strongest path is tried");
+  assert.match(source, /acquireFreeAdsb/, "trace recovery shares the fleet-wide free-provider gate");
+  assert.doesNotMatch(source, /await fetch\(/, "traces cannot bypass shared acquisition with direct network requests");
+  assert.match(source, /const traceHex = wantedHex \|\| usRegistrationHex\(resolvedRegistration\)/);
+  assert.match(source, /heldAround && Date\.now\(\) - heldAround\.at <= 120_000/);
+  assert.match(source, /recentGroundTrace\(traceHex/, "trace recovery remains after live lookup misses");
+  assert.match(source, /flightGroundStateStore/, "ground lookup reads and persists durable Neon identity");
+  assert.match(source, /\[ground-position-miss\]/);
 });
 
 test("surface providers are paced and expose throttling instead of silently looking empty", async () => {
@@ -101,8 +110,8 @@ test("surface providers are paced and expose throttling instead of silently look
   assert.match(story, /fr24DepartureClock - 2 \* 60 \* 60/);
   assert.match(story, /fr24DepartureClock \+ 4 \* 60 \* 60/);
   assert.match(story, /providers:\s*\{[\s\S]*?fr24Usage: official\.fr24Usage/, "today's shared total reaches client diagnostics");
-  assert.match(fusion, /\[adsb-provider-fail\]/);
-  assert.match(fusion, /\[adsb-provider-backoff\]/);
+  assert.match(fusion, /\[adsb-provider-acquisition\]/);
+  assert.match(fusion, /status: result\.status, retryAt: result\.retryAt/);
 });
 
 test("MCO/TPA ground diagnostics emit one compact free-provider summary", async () => {
@@ -132,9 +141,10 @@ test("MCO/TPA ground diagnostics emit one compact free-provider summary", async 
   assert.match(fr24, /probe\.upstream = "fresh"/);
   assert.match(fr24, /probe\.rowsReturned = rows\.length/);
 
-  assert.match(fusion, /ProviderFetchStatus = "ok" \| "429" \| "timeout" \| "error" \| "backoff"/);
-  assert.match(fusion, /status: "backoff"/);
-  assert.match(fusion, /status: "ok"/);
+  assert.match(fusion, /ProviderFetchStatus = "ok" \| "403" \| "429" \| "timeout" \| "error" \| "backoff" \| "cancelled"/);
+  assert.match(fusion, /if \(signal\?\.aborted\) return \{ provider: id, ac: \[\], status: "cancelled" \}/);
+  assert.match(fusion, /status: result\.status/);
+  assert.match(fusion, /result\.status === "ok"/);
 });
 
 test("FR24 uses one strongest lookup per cycle and shares it for twenty seconds", async () => {
@@ -221,8 +231,10 @@ test("FR24 uses one strongest lookup per cycle and shares it for twenty seconds"
     assert.equal(previewOff.configured.fr24, false);
     assert.deepEqual(calls, [], "previews cannot spend FR24 credits by default");
     process.env.FR24_PREVIEW_ENABLED = "1";
-    now += 30000; calls = []; await api.loadOfficialFlightData("PREV1", { fr24OperatingCallsign: "PREV1" });
-    assert.deepEqual(calls, ["callsign"], "the explicit preview override works in code");
+    now += 30000; calls = [];
+    const unboundedPreview = await api.loadOfficialFlightData("PREV1", { fr24OperatingCallsign: "PREV1" });
+    assert.equal(unboundedPreview.configured.fr24, false);
+    assert.deepEqual(calls, [], "a preview enable flag without an approved session cannot spend");
   } finally {
     globalThis.fetch = realFetch; Date.now = realNow;
     for (const key of keys) { if (saved[key] == null) delete process.env[key]; else process.env[key] = saved[key]; }

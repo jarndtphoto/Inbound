@@ -1,5 +1,5 @@
-import { RouteAirportSurface } from "./route-airport-surface";
-import { airportNearViewport, maxRouteZoom, routeVisibleWidthMiles, routeStrokeWidths } from "@/lib/route-airport-detail";
+import { RouteAirportSurface, RouteAirportSurfaceAttribution } from "./route-airport-surface";
+import { airportDetailOpacity, airportNearViewport, maxRouteZoom, routeVisibleWidthMiles, routeStrokeWidths } from "@/lib/route-airport-detail";
 import { lastKnownProgressLabel } from "@/lib/route-continuity";
 import { remainingFlight, type RemainingFlightPresentation } from "@/lib/flight-presentation";
 import { destPoint, formatDuration, formatMiles, haversineNm } from "@/lib/geo";
@@ -542,8 +542,16 @@ function RouteMapContent({ story, fixedViewport = false, weatherPreview, remaini
 
   const origin = { lat: story.origin.lat, lon: story.origin.lon };
   const dest = { lat: story.dest.lat, lon: story.dest.lon };
+  const fr24Only = story.providers?.previewMode === "fr24-only";
+  const [, tickFr24Clock] = useState(0);
+  useEffect(() => {
+    if (!fr24Only) return;
+    const timer = setInterval(() => tickFr24Clock(value => value + 1), 1_000);
+    return () => clearInterval(timer);
+  }, [fr24Only]);
+  const fr24Age = (Date.now() / 1000) - (story.providers?.chosenPositionSeenAt ?? 0);
   const ac = story.aircraft;
-  const hasFix = Boolean(story.route.progressSource !== "last_known" && story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
+  const hasFix = Boolean((!fr24Only || (Number.isFinite(fr24Age) && fr24Age >= -10 && fr24Age <= (story.aircraft?.onGround ? 30 : 90))) && story.route.progressSource !== "last_known" && story.live && ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon));
   const lastKnownLabel = lastKnownProgressLabel(story);
   const remainingView = remaining ?? remainingFlight(story);
   const hasCredibleProgress = (hasFix && !remainingView.estimated) || story.route.progressSource === "last_known";
@@ -556,17 +564,17 @@ function RouteMapContent({ story, fixedViewport = false, weatherPreview, remaini
   const landed = atGate || onField || story.route.progressSource === "landed"
     || story.currentStage === "taxi_in" || story.arrivalStatus === "landed" || story.arrivalStatus === "taxi_in";
   const progress = landed ? 1 : story.route.progress;
-  const ax = landed
+  const ax = fr24Only && hasFix ? sx(ac!.lon) : landed
     ? sx(dest.lon)
     : hasFix
       ? sx(ac!.lon)
       : sx(origin.lon);
-  const ay = landed
+  const ay = fr24Only && hasFix ? sy(ac!.lat) : landed
     ? sy(dest.lat)
     : hasFix
       ? sy(ac!.lat)
       : sy(origin.lat);
-  const rot = landed ? 0 : story.route.heading;
+  const rot = fr24Only && hasFix ? ac!.track ?? story.route.heading : landed ? 0 : story.route.heading;
   const takeoffAt = story.times.takeoffUnix;
   const airborneNow = story.currentStage === "ride" || story.currentStage === "arrival" || story.currentStage === "final_approach";
   const elapsedMin = airborneNow && story.times.takeoffKind === "actual" && takeoffAt != null
@@ -804,6 +812,11 @@ function RouteMapContent({ story, fixedViewport = false, weatherPreview, remaini
 
         </g>
       </svg>
+
+      <div data-map-obstacle className="absolute bottom-16 left-3 flex flex-col items-start gap-1">
+        <RouteAirportSurfaceAttribution airport={story.origin} visible={originNear && airportDetailOpacity(visibleWidthMiles) > 0} />
+        <RouteAirportSurfaceAttribution airport={story.dest} visible={destNear && airportDetailOpacity(visibleWidthMiles) > 0} />
+      </div>
 
       {arrival && runwayAhead && !weatherPreview && !landed && <ArrivalRunwayChip
         frameRef={frameRef} geometryRef={geometryRef}

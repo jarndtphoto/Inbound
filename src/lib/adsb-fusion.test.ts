@@ -9,8 +9,12 @@ import {
   rawToObservation,
   resetFusion,
   stickyPick,
+  markProviderFail,
+  providerHealthy,
+  PROVIDERS,
   type AdsbRaw,
   STALE_AIR_SEC,
+  STALE_AIR_RECOVERY_SEC,
 } from "./adsb-fusion.ts";
 
 const HEX = "abc123";
@@ -49,6 +53,17 @@ describe("stale reject", () => {
     );
     assert.equal(fused.length, 1);
     assert.equal(fused[0]?.extrapolated, false);
+  });
+
+  it("keeps a real low-altitude airborne recovery fix through 90 seconds", () => {
+    const at60 = ac({ lat: 41.75, lon: -87.4, alt_baro: 7000, gs: 150, seen: 60, seen_pos: 60 });
+    const at90 = ac({ lat: 41.72, lon: -87.3, alt_baro: 6500, gs: 145, seen: STALE_AIR_RECOVERY_SEC, seen_pos: STALE_AIR_RECOVERY_SEC });
+    const stale91 = ac({ lat: 41.70, lon: -87.2, alt_baro: 6000, gs: 140, seen: STALE_AIR_RECOVERY_SEC + 1, seen_pos: STALE_AIR_RECOVERY_SEC + 1 });
+    assert.equal(fuseProviderLists([{ provider: "fi", ac: [at60] }], { now: T0, airside: false }).length, 1);
+    resetFusion();
+    assert.equal(fuseProviderLists([{ provider: "fi", ac: [at90] }], { now: T0, airside: false }).length, 1);
+    resetFusion();
+    assert.equal(fuseProviderLists([{ provider: "fi", ac: [stale91] }], { now: T0, airside: false }).length, 0);
   });
 });
 
@@ -180,5 +195,24 @@ describe("extrapolated flag", () => {
     assert.equal(second[0]?._fusion?.ageSec, 30);
     const fix = fuseProviderLists([{ provider: "lol", ac: [ac({ lat: 30.25, lon: -139.2, gs: 480 })] }], { now: T0 + 31_000 });
     assert.equal(fix[0]?.lon, -139.2);
+  });
+});
+
+
+describe("provider access and rate-limit resilience", () => {
+  it("uses adsb.fi's current v3 radius endpoint", () => {
+    assert.match(PROVIDERS.fi.around(41.9742, -87.9073, 12), /\/api\/v3\/lat\//);
+  });
+
+  it("backs off a 429 long enough to stop repeated passenger polls from hammering it", () => {
+    markProviderFail("fi", "429", T0);
+    assert.equal(providerHealthy("fi", T0 + 59_999), false);
+    assert.equal(providerHealthy("fi", T0 + 60_000), true);
+  });
+
+  it("backs off a forbidden provider for a long access-policy window", () => {
+    markProviderFail("al", "403", T0);
+    assert.equal(providerHealthy("al", T0 + 29 * 60_000), false);
+    assert.equal(providerHealthy("al", T0 + 30 * 60_000), true);
   });
 });

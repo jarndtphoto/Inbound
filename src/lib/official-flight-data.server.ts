@@ -1,6 +1,7 @@
 import { loadAeroApiFlight, aeroApiConfigured } from "./flightaware-aeroapi.server.ts";
 import { createFr24Cycle, loadFr24Flight, loadFr24FlightByNumber, loadFr24FlightByNumberAndRoute, loadFr24FlightByRegistration, fr24Configured } from "./fr24.server.ts";
 import { fr24UsageToday } from "./fr24-budget.server.ts";
+import { fr24ProductionParityModeEnabled, fr24PreviewModeEnabled, fr24PreviewSessionStatus } from "./fr24-preview-session.server.ts";
 export { setFr24GuardForTests } from "./fr24-budget.server.ts";
 import type { NormalizedFlight, ProviderState } from "./flight-data.ts";
 
@@ -31,6 +32,11 @@ async function probe(configured: boolean, load: () => Promise<NormalizedFlight |
   } catch (error) {
     return { flight: null, state: stateFor(error) };
   }
+}
+
+async function parityPreviewDiagnostics() {
+  return fr24ProductionParityModeEnabled()
+    ? { fr24Preview: await fr24PreviewSessionStatus() } : {};
 }
 
 function operatingIdentFromFlightAware(flight: NormalizedFlight | null): string | null {
@@ -77,6 +83,27 @@ export async function loadOfficialFlightData(
     fr24Allowed?: boolean;
   },
 ) {
+  // Only the explicitly isolated Preview uses a separate acquisition boundary.
+  // Never read AeroAPI, a normal-mode lookup memo, or public/saved identity hints.
+  if (fr24PreviewModeEnabled()) {
+    const number = options?.fr24FlightNumber?.replace(/\s/g, "").toUpperCase() || null;
+    const cycle = createFr24Cycle(number ?? ident);
+    const configured = fr24Configured();
+    const result = await probe(configured, () => number
+      ? loadFr24FlightByNumber(number, undefined, undefined, cycle)
+      : /^N[0-9]{1,5}[A-Z]{0,2}$/i.test(ident)
+        ? loadFr24FlightByRegistration(ident, undefined, cycle)
+        : loadFr24Flight(ident, undefined, cycle));
+    return {
+      flightaware: null,
+      fr24: result.flight,
+      configured: { flightaware: false, fr24: configured },
+      status: { flightaware: "DISABLED" as ProviderState, fr24: result.state },
+      // The isolated session has its own ledger. Do not touch Production usage.
+      fr24Usage: null,
+      fr24Preview: await fr24PreviewSessionStatus(),
+    };
+  }
   const fa = await probe(aeroApiConfigured(), () => loadAeroApiFlight(ident));
   const preferredFlightNumber = options?.fr24FlightNumber?.replace(/\s/g, "").trim().toUpperCase() || null;
   const fr24Cycle = createFr24Cycle(preferredFlightNumber ?? ident);
@@ -105,7 +132,8 @@ export async function loadOfficialFlightData(
       return { flightaware: fa.flight, fr24: flight,
         configured: { flightaware: aeroApiConfigured(), fr24: frConfigured },
         status: { flightaware: fa.state, fr24: recalled.state },
-        fr24Usage: await fr24UsageToday().catch(() => null) };
+        fr24Usage: await fr24UsageToday().catch(() => null),
+        ...await parityPreviewDiagnostics() };
     }
   }
   matchedLookups.delete(lookupKey);
@@ -224,5 +252,6 @@ export async function loadOfficialFlightData(
     configured: { flightaware: aeroApiConfigured(), fr24: frConfigured },
     status: { flightaware: fa.state, fr24: fr.state },
     fr24Usage: await fr24UsageToday().catch(() => null),
+    ...await parityPreviewDiagnostics(),
   };
 }

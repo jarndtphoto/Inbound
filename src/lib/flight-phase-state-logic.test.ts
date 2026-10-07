@@ -91,6 +91,49 @@ describe("phaseStateEqual", () => {
   it("treats a present vs. absent field as not equal", () => {
     assert.ok(!phaseStateEqual(state(push(100), null), state(null, null)));
   });
+
+  it("persists a newly proven push scope even without another latch change", () => {
+    assert.ok(!phaseStateEqual(EMPTY_PHASE_STATE, { ...EMPTY_PHASE_STATE, pushNotBeforeUnix: 150 }));
+  });
+});
+
+describe("durable push scope", () => {
+  it("rejects a prior-tail detected push before the newly proven boundary in either order", () => {
+    const stale = state(push(100), null);
+    const scoped = { ...EMPTY_PHASE_STATE, pushNotBeforeUnix: 150 };
+    assert.deepEqual(mergeForward(stale, scoped), scoped);
+    assert.deepEqual(mergeForward(scoped, stale), scoped);
+  });
+
+  it("keeps the maximum boundary through older or boundary-free states", () => {
+    const scoped = { ...state(push(200), null), pushNotBeforeUnix: 150 };
+    const stale = { ...state(push(100), null), pushNotBeforeUnix: 90 };
+    assert.deepEqual(mergeForward(scoped, stale), scoped);
+    assert.deepEqual(mergeForward(stale, scoped), scoped);
+    assert.deepEqual(mergeForward(scoped, state(push(100), null)), scoped);
+  });
+
+  it("never rejects a provider actual based on physical trace scope", () => {
+    const provider = state(push(100, "provider_actual"), null);
+    const scoped = { ...EMPTY_PHASE_STATE, pushNotBeforeUnix: 150 };
+    const expected = { ...provider, pushNotBeforeUnix: 150 };
+    assert.deepEqual(mergeForward(provider, scoped), expected);
+    assert.deepEqual(mergeForward(scoped, provider), expected);
+  });
+
+  it("preserves the earliest valid physical push, including one exactly at the boundary", () => {
+    const early = { ...state(push(150), null), pushNotBeforeUnix: 150 };
+    const later = state(push(200, "live_detected"), null);
+    assert.deepEqual(mergeForward(early, later), early);
+    assert.deepEqual(mergeForward(later, early), early);
+  });
+
+  it("keeps the old state shape when scope evidence is absent", () => {
+    const earlier = state(push(100), null);
+    const later = state(push(200), null);
+    assert.deepEqual(mergeForward(earlier, later), earlier);
+    assert.ok(!Object.hasOwn(mergeForward(earlier, later), "pushNotBeforeUnix"));
+  });
 });
 
 
@@ -124,4 +167,9 @@ describe("confirmed takeoff merge", () => {
     assert.deepEqual(mergeForward(mergeForward(revoked, corrected), observed), mergeForward(revoked, mergeForward(corrected, observed)));
   });
 
+});
+
+it("trace attribution fences preserve contemporaneous live-detected proof", () => {
+  const observed = { ...state(push(100, "live_detected"), null), pushNotBeforeUnix: 150 };
+  assert.deepEqual(mergeForward(observed, { ...EMPTY_PHASE_STATE, pushNotBeforeUnix: 140 }), observed);
 });

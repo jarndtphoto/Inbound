@@ -3,7 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { loadFlightStory, loadLiveBoard } from "./story.server";
 import { readFlightResume, type DepartureStageCheckpoint, type FlightResume } from "./flight-resume";
 import { haversineNm } from "./geo";
-import { FR24_SURFACE_FRESH_SEC, airborneFixSupersedesGround, identityCompatible, normalizedToLive, positionAgeSec } from "./flight-data";
+import { AIRBORNE_POSITION_FRESH_SEC, FR24_SURFACE_FRESH_SEC, airborneFixSupersedesGround, identityCompatible, normalizedToLive, positionAgeSec } from "./flight-data";
 import { airportByIata, airportByIcao } from "./airports";
 import type { FlightStory } from "./types";
 import { formatClockTime } from "./presentation-time";
@@ -191,7 +191,7 @@ export function preferFreshAirborneState(story: FlightStory): FlightStory {
   const ac = story.aircraft;
   if (!ac || !Number.isFinite(ac.lat) || !Number.isFinite(ac.lon) || ac.onGround !== false) return story;
   const age = typeof story.providers?.chosenPositionAgeSec === "number" ? story.providers.chosenPositionAgeSec : ac.seenSec ?? null;
-  if (age != null && age > 30) return story;
+  if (age != null && age > AIRBORNE_POSITION_FRESH_SEC) return story;
   const altFt = typeof ac.altFt === "number" && Number.isFinite(ac.altFt) ? ac.altFt : null;
   const gsKt = typeof ac.gsKt === "number" && Number.isFinite(ac.gsKt) ? ac.gsKt : null;
   const originNm = Number.isFinite(story.origin?.lat) && Number.isFinite(story.origin?.lon)
@@ -259,6 +259,17 @@ export function suppressLateJoinDetectedPush(story: FlightStory, prior?: FlightR
   return replaceDetectedPush(story, reference);
 }
 
+/** Read configuration before restoring a browser story or starting any feed. */
+export const getFlightDataMode = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { fr24ProductionParityModeEnabled, fr24PreviewModeEnabled, fr24PreviewSessionStatus } = await import("./fr24-preview-session.server.ts");
+    const mode = fr24PreviewModeEnabled() ? "fr24-only" as const
+      : fr24ProductionParityModeEnabled() ? "production-parity" as const : "normal" as const;
+    // Read the persisted session independently of the normal story cache so a
+    // later FR24 stop remains visible while the other Production feeds continue.
+    return { mode, session: mode === "normal" ? null : await fr24PreviewSessionStatus() };
+  });
+
 export const getFlightStory = createServerFn({ method: "POST" })
   .validator((input: { q: string; fresh?: boolean; resume?: FlightResume }) => {
     const q = String(input?.q ?? "").trim();
@@ -268,6 +279,9 @@ export const getFlightStory = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     const story = await loadFlightStory(data.q, { fresh: data.fresh, resume: data.resume });
+    // Saved device checkpoints belong to the normal fusion path. They must not
+    // inject old stages, coordinates, or takeoff proof into an isolated preview.
+    if (story.providers?.previewMode === "fr24-only") return story;
     // A device checkpoint is presentation context, not authenticated takeoff
     // evidence. Only loadFlightStory's provider/durable proof may floor here.
     const groundResume = data.resume ? { ...data.resume, confirmedTakeoff: null, stateKey: null } : undefined;

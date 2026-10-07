@@ -9,7 +9,7 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { composeBrief } from '../src/lib/brief-copy.ts';
-import { timeKindLabel } from '../src/lib/presentation-time.ts';
+import { formatClockTime, timeKindLabel } from '../src/lib/presentation-time.ts';
 import { polishStory, actualOnlyStory } from './fixtures/presentation-polish.mjs';
 
 const dir = await mkdtemp(resolve('node_modules/.polish-ui-'));
@@ -167,7 +167,15 @@ test('overnight event clocks use each airport zone and mark the next local day a
     assert.match(head, /4:27 AM/); assert.match(head, /CDT \+1/);
     for (const value of ['4:16 PM HST', '4:27 PM HST', '4:16 AM CDT +1', '4:27 AM CDT +1']) assert.match(details, new RegExp(value.replace('+', '\\+')));
     for (const value of ['4:16 PM', '4:27 PM', '4:16 AM +1', '4:27 AM +1']) assert.match(welcome, new RegExp(value.replace('+', '\\+')));
-    assert.equal((welcome.match(/HST/g) ?? []).length, 1); assert.equal((welcome.match(/CDT/g) ?? []).length, 1);
+    // Each event row names its airport's zone once. The independently useful
+    // "Data as of" footer may legitimately repeat either abbreviation.
+    const departureRow = welcome.match(/<section[^>]*data-flight-time-row="departure"[^>]*>([\s\S]*?)<\/section>/)?.[1];
+    const arrivalRow = welcome.match(/<section[^>]*data-flight-time-row="arrival"[^>]*>([\s\S]*?)<\/section>/)?.[1];
+    assert.ok(departureRow); assert.ok(arrivalRow);
+    assert.equal((departureRow.match(/HST/g) ?? []).length, 1);
+    assert.equal((arrivalRow.match(/CDT/g) ?? []).length, 1);
+    assert.doesNotMatch(departureRow, /CDT/); assert.doesNotMatch(arrivalRow, /HST/);
+    assert.ok(welcome.includes(`Data as of ${formatClockTime(shown.fetchedAt)}. Estimates may change.`));
     assert.match(JSON.stringify(brief), /4:16 AM CDT \+1|4:27 AM CDT \+1/);
   } finally {
     if (oldStorage === undefined) delete globalThis.localStorage;
@@ -175,17 +183,60 @@ test('overnight event clocks use each airport zone and mark the next local day a
   }
 });
 
-test('Flight welcome shows alert-red delay rows only at five minutes or more', () => {
+test('Flight welcome shows alert-red delay rows only at five minutes or more before departure', () => {
   const base = polishStory();
-  const onTime = { ...base, times: { ...base.times, delayMin: 4, arriveDelayMin: 0 } };
+  const predeparture = {
+    ...base,
+    currentStage: 'origin_gate',
+    aircraft: { ...base.aircraft, ...base.origin, onGround: true, altFt: 0, gsKt: 0, extrapolated: false, seenSec: 1 },
+    providers: { ...base.providers, chosenPositionAgeSec: 1 },
+    times: { ...base.times, pushed: false, airborne: false, pushKind: 'estimated', pushSource: null, takeoffKind: 'estimated' },
+  };
+  const onTime = { ...predeparture, times: { ...predeparture.times, delayMin: 4, arriveDelayMin: 0 } };
   const onTimeHtml = render(ui.FlightWelcome, { open: true, onClose() {}, story: onTime });
   assert.doesNotMatch(onTimeHtml, /data-flight-alerts|Departure delayed|Arrival delayed|On time/);
 
-  const delayed = { ...base, times: { ...base.times, delayMin: 5, arriveDelayMin: 18 } };
+  const delayed = { ...predeparture, times: { ...predeparture.times, delayMin: 5, arriveDelayMin: 18 } };
   const delayedHtml = render(ui.FlightWelcome, { open: true, onClose() {}, story: delayed });
   assert.match(delayedHtml, /class="[^"]*text-turbulence-moderate[^"]*" data-flight-alerts/);
   assert.match(delayedHtml, /Departure delayed 5 min/);
   assert.match(delayedHtml, /Arrival delayed 18 min/);
+});
+
+test('near-departure stale ground data stays unconfirmed instead of saying inbound, gate, or delayed', () => {
+  const base = polishStory();
+  const now = base.fetchedAt;
+  const oldNow = Date.now;
+  Date.now = () => now;
+  try {
+    const story = {
+      ...base,
+      currentStage: 'inbound',
+      live: true,
+      aircraft: { ...base.aircraft, ...base.origin, onGround: true, altFt: 0, gsKt: 0, extrapolated: false, seenSec: 49 },
+      providers: { ...base.providers, chosenPositionAgeSec: 49 },
+      times: {
+        ...base.times,
+        pushed: false,
+        airborne: false,
+        pushUnix: now / 1000 + 9 * 60,
+        pushKind: 'estimated',
+        pushSource: null,
+        takeoffKind: 'estimated',
+        delayMin: 20,
+        arriveDelayMin: 0,
+      },
+    };
+    const head = render(ui.FlightHead, { story, fetching: false, refreshing: false, onRefresh() {} });
+    const welcome = render(ui.FlightWelcome, { open: true, onClose() {}, story });
+    assert.match(head, /Ground movement not confirmed/);
+    assert.match(head, /Movement not confirmed/);
+    assert.doesNotMatch(head, />Inbound<|>At the gate</);
+    assert.match(welcome, /Ground movement not confirmed/);
+    assert.doesNotMatch(welcome, /Departure delayed 20 min|>At the gate<|>Inbound</);
+  } finally {
+    Date.now = oldNow;
+  }
 });
 
 test('Flight welcome distinguishes occurred and estimated clocks and shares the Overview stage line', () => {
@@ -213,6 +264,8 @@ test('taxi welcome uses the Overview pushback clock as detected, without an esti
   assert.match(departure, /data-time-state="detected"> · Detected/);
   assert.match(departure, /data-time-value="pushback">7:56 PM/);
   assert.doesNotMatch(departure, /~7:56 PM/);
+  assert.doesNotMatch(welcome, /Departure delayed 21 min/, 'taxiing is movement, not a current departure-delay state');
+  assert.match(welcome, /Arrival delayed 14 min/);
   assert.match(departure, /data-time-value="takeoff">~8:01 PM/);
   assert.equal((departure.match(/CDT/g) ?? []).length, 1, 'departure timezone is shown once');
 });

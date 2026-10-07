@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 
 const source=readFileSync(new URL('../src/components/filed-app.tsx',import.meta.url),'utf8');
 const styles=readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
+const traveler=readFileSync(new URL('../src/lib/traveler.ts',import.meta.url),'utf8');
 const flightPages=source.slice(source.indexOf('function FlightPages'),source.indexOf('function wheelsDown'));
 const filedApp=source.slice(source.indexOf('export function FiledApp'),source.indexOf('function FlightPages'));
 
@@ -11,7 +12,7 @@ test('tracked-flight shell identifies the flight with appearance controls and us
   assert.match(flightPages, /<header className="journey-header">/);
   assert.match(flightPages, /<strong>\{story\.iata\}<\/strong>/);
   assert.match(flightPages, /<AppearanceControl/);
-  assert.doesNotMatch(flightPages, /aria-label="Back to flight search"|Home & settings|story\.callsign/);
+  assert.doesNotMatch(flightPages, /aria-label="Back to flight search"|Home & settings|\{story\.callsign\}/);
 });
 
 test('tracked-flight search and recent chips remain off the flight shell',()=>{
@@ -50,16 +51,54 @@ test('welcome dialog does not reopen from asynchronous briefing enrichment in th
   assert.doesNotMatch(flightPages,/welcomeSummaryVersion|welcomeVersion/);
 });
 
-test('overdue departures without fresh position do not claim the aircraft is still at the gate',()=>{
-  assert.match(source,/function departureUpdateDelayed/);
-  assert.match(source,/nowMs \/ 1000 - pushAt >= 10 \* 60/);
-  assert.match(source,/Departure update delayed/);
+test('near-departure flights without fresh ground evidence do not claim inbound, gate, or a current delay',()=>{
+  assert.match(source,/function departureGroundUnconfirmed/);
+  assert.match(source,/pushAt - 15 \* 60/);
+  assert.match(source,/ageSec <= 30/);
+  assert.match(source,/Ground movement not confirmed/);
+  assert.match(source,/Ground position unavailable/);
+  assert.doesNotMatch(source,/Departure update delayed/);
   assert.match(source,/Movement not confirmed/);
+  assert.match(source,/!departureUnderway && !departureGroundUnconfirmed\(story\)/);
   assert.match(source,/\["Status", \.\.\.STATUS_PROGRESS\.slice\(1\)\]/);
+});
+
+test('departure delay alerts stop once departure movement is underway',()=>{
+  assert.match(traveler,/const departureUnderway = Boolean\(next\.times\.pushed/);
+  assert.match(traveler,/!departureUnderway && !isLanded\(next\)/);
+});
+
+test('Map tab scopes durable ground recovery to the resolved dated route',()=>{
+  assert.match(flightPages,/getGroundBootstrap/);
+  assert.match(flightPages,/landKey: story!\.stateKey!/);
+  assert.match(flightPages,/serviceDate: flightDepartureDate\(story!\)/);
+  assert.match(flightPages,/originIata: story!\.origin\.iata, destIata: story!\.dest\.iata/);
+  assert.match(flightPages,/bootstrap\.landKey !== story\.stateKey/);
+  assert.match(flightPages,/bootstrap\.lastPosition\.seenAt > existingPosition\.seenAt/);
+  assert.match(flightPages,/flightTab === "Route"/);
+  assert.match(flightPages,/queryClient\.setQueryData\(key, bootstrap\.lastPosition\)/);
+  assert.match(flightPages,/queryClient\.prefetchQuery/);
+  assert.match(flightPages,/stateKey: bootstrap\.landKey/);
+  assert.match(flightPages,/groundPositionQueryKey/);
+});
+
+test('ground startup milestones are instrumented for baseline and QA measurements',()=>{
+  assert.match(flightPages,/event: "page_open"/);
+  assert.match(flightPages,/event: "story_loaded"/);
+  assert.match(source,/event: "ground_query_sent"/);
+});
+
+test('a newly opened Pushback stage gets two bounded confirmation checks without changing steady polling',()=>{
+  assert.match(flightPages,/const pushConfirmRef = useRef/);
+  assert.match(flightPages,/pushConfirmRef\.current\.attempts >= 2/);
+  assert.match(flightPages,/2_500 : 4_000/);
+  assert.match(flightPages,/story\.currentStage !== "push"/);
+  assert.match(flightPages,/void storyQ\.refetch\(\)/);
 });
 
 test('tracked-flight polling pauses while hidden and refreshes stale state on return',()=>{
   assert.match(flightPages,/document\.visibilityState !== "visible"\) return false/);
+  assert.doesNotMatch(flightPages,/q\.state\.fetchStatus === "fetching"\) return false/);
   assert.match(flightPages,/addEventListener\("visibilitychange", refreshWhenVisible\)/);
   assert.match(flightPages,/Date\.now\(\) - storyQ\.dataUpdatedAt > 2_500/);
   assert.match(flightPages,/void storyQ\.refetch\(\)/);

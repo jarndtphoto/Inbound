@@ -19,7 +19,7 @@ const arrival = { ...emptyArrivalState(), active: true, side: -1, startedAt: 179
 
 async function database() {
   const pg = new PGlite();
-  for (const file of ["0002_flight_phase_state.sql", "0003_arrival_projection_state.sql", "0004_confirmed_takeoff.sql"])
+  for (const file of ["0002_flight_phase_state.sql", "0003_arrival_projection_state.sql", "0004_confirmed_takeoff.sql", "0011_push_scope_boundary.sql"])
     await pg.exec(readFileSync(new URL(`../../migrations/${file}`, import.meta.url), "utf8"));
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     let query = strings[0]; for (let i = 0; i < values.length; i++) query += `$${i + 1}${strings[i + 1]}`;

@@ -1,3 +1,4 @@
+import { acquisitionFixture } from "./helpers/acquisition-fixture.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -35,7 +36,7 @@ test('cold airborne and at-gate polls save route state only when changed, once p
     };
     const entry = join(dir,'entry.ts');
     await writeFile(entry, `export { loadFlightStory } from ${JSON.stringify(resolve('src/lib/story.server.ts'))};\nexport { getSql } from ${JSON.stringify(resolve('src/lib/db.ts'))};\n`);
-    await build({configFile:false,logLevel:'silent',build:{ssr:entry,outDir:join(dir,'bundle'),rollupOptions:{output:{entryFileNames:'story.mjs'}}}});
+    await build({configFile:false,logLevel:'silent',plugins:[acquisitionFixture()],build:{ssr:entry,outDir:join(dir,'bundle'),rollupOptions:{output:{entryFileNames:'story.mjs'}}}});
     const cold = () => import(pathToFileURL(join(dir,'bundle/story.mjs')).href + '?cold=' + ++instance);
     await (await cold()).getSql();
     pg = await globalThis.__pgliteInstance__;

@@ -22,19 +22,26 @@ export function flightSurfacePrefetchAirports(story: FlightStory): SurfaceAirpor
  * The caller owns the Set for one flight-open lifetime. Adding the identity
  * before starting the request guarantees story polls cannot start another
  * prefetch for the same airport. */
-export function prefetchFlightAirportSurfacesOnce(
+export async function prefetchFlightAirportSurfacesOnce(
   client: SurfacePrefetchClient,
   story: FlightStory,
   prefetched: Set<string>,
 ) {
-  const jobs: Promise<unknown>[] = [];
+  const results: PromiseSettledResult<unknown>[] = [];
+  // Warm the departure airport first. Running origin + destination Overpass
+  // requests in parallel made cold ground maps compete with their own
+  // low-priority destination prefetch.
   for (const airport of flightSurfacePrefetchAirports(story)) {
     const identity = airportSurfacePrefetchIdentity(airport);
     if (prefetched.has(identity)) continue;
     prefetched.add(identity);
-    jobs.push(Promise.resolve(client.prefetchQuery(airportSurfaceQueryOptions(airport))));
+    try {
+      results.push({ status: "fulfilled", value: await client.prefetchQuery(airportSurfaceQueryOptions(airport)) });
+    } catch (reason) {
+      results.push({ status: "rejected", reason });
+    }
   }
-  return Promise.allSettled(jobs);
+  return results;
 }
 
 type IdleWindow = Window & {

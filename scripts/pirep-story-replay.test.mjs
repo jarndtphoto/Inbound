@@ -1,3 +1,4 @@
+import { acquisitionFixture } from "./helpers/acquisition-fixture.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -51,7 +52,7 @@ test('mocked story loader preserves fresh aircraft observations without changing
       if (url.hostname === 'api.adsbdb.com') return Response.json({ response: { flightroute: null } });
       throw Error('Unexpected mocked provider: ' + url.href);
     };
-    await build({ configFile: false, logLevel: 'silent', build: { ssr: resolve('src/lib/story.server.ts'), outDir: dir,
+    await build({ configFile: false, logLevel: 'silent', plugins: [acquisitionFixture()], build: { ssr: resolve('src/lib/story.server.ts'), outDir: dir,
       rollupOptions: { output: { entryFileNames: 'story.mjs' } } } });
     const cold = () => import(pathToFileURL(join(dir, 'story.mjs')).href + '?case=' + ++instance);
     const baseline = await (await cold()).loadFlightStory('UA9918', { fresh: true });

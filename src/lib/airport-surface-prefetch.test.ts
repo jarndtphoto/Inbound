@@ -23,13 +23,32 @@ test("airport surface prefetch fires once per airport for one flight open and no
 
   await prefetchFlightAirportSurfacesOnce(client as never, first, prefetched);
   assert.equal(calls.length, 2);
-  assert.deepEqual(calls.map(call => call[0]), ["airport-surface-v7", "airport-surface-v7"]);
+  assert.deepEqual(calls.map(call => call[0]), ["airport-surface-v7", "airport-surface-chicago-2026-10-07-v1"]);
   assert.deepEqual(calls.map(call => call[1]), ["KBWI", "KORD"]);
 
   // A routine story poll creates a new story object/fetchedAt, but must not
   // issue another surface prefetch for either airport.
   await prefetchFlightAirportSurfacesOnce(client as never, { ...first, fetchedAt: Date.now() } as FlightStory, prefetched);
   assert.equal(calls.length, 2);
+});
+
+test("airport surface prefetch finishes origin before starting destination", async () => {
+  const calls: string[] = [];
+  let releaseOrigin!: () => void;
+  const originDone = new Promise<void>((resolve) => { releaseOrigin = resolve; });
+  const client = {
+    async prefetchQuery(options: { queryKey: readonly unknown[] }) {
+      const airport = String(options.queryKey[1]);
+      calls.push(airport);
+      if (airport === "KBWI") await originDone;
+    },
+  };
+  const work = prefetchFlightAirportSurfacesOnce(client as never, story(), new Set());
+  await Promise.resolve();
+  assert.deepEqual(calls, ["KBWI"]);
+  releaseOrigin();
+  await work;
+  assert.deepEqual(calls, ["KBWI", "KORD"]);
 });
 
 test("airport surface prefetch deduplicates a same-airport leg", async () => {

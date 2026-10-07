@@ -28,8 +28,8 @@ export function flightSearchShouldRetry(failures: number, error: unknown, stoppe
   return !stopped && !flightNotFound(error) && failures < INITIAL_FLIGHT_SEARCH_ATTEMPTS - 1;
 }
 
-export function stopFlightSearch(client: QueryClient, query: string, legDate?: string | null): void {
-  const filters = { queryKey: flightStoryQueryKey(query, legDate), exact: true };
+export function stopFlightSearch(client: QueryClient, query: string, legDate?: string | null, actualKey?: readonly unknown[]): void {
+  const filters = { queryKey: actualKey ?? flightStoryQueryKey(query, legDate), exact: true };
   void client.cancelQueries(filters);
   client.removeQueries(filters);
 }

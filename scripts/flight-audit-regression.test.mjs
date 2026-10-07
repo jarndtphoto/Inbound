@@ -1,3 +1,4 @@
+import { acquisitionFixture } from "./helpers/acquisition-fixture.mjs";
 import { freezeTestClock } from './helpers/test-clock.mjs';
 import { after, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,7 +19,7 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context);
 }});
 const storyBundleDir = await mkdtemp(resolve('node_modules/.inbound-audit-test-'));
-await build({ configFile: false, logLevel: 'silent', build: {
+await build({ configFile: false, logLevel: 'silent', plugins: [acquisitionFixture()], build: {
   ssr: resolve('src/lib/story.server.ts'), outDir: storyBundleDir,
   rollupOptions: { output: { entryFileNames: 'story.mjs' } },
 }});
@@ -176,12 +177,20 @@ describe('same-number leg lock replays', () => {
     assert.equal(chooseFlightStatsScheduleCandidate([outbound, inbound], now, { aircraft: northwest }), outbound);
   });
 
-  it('DL4712 explicit Departed status cannot remain at Pushback two hours later', () => {
+  it('UA561 gate-out-only fallback cannot close Ground as an observed takeoff', () => {
+    const record = { _publicScheduleSource: 'flightstats', status: 'departed',
+      gateOut: { scheduled: 1791394800, estimated: null, actual: 1791394560 },
+      gateIn: { estimated: 1791400440, actual: null }, takeoff: {actual:null}, landing: {actual:null} };
+    assert.equal(flightStatsScheduleAirborne(record, 1791395845), false);
+    assert.equal(flightStatsScheduleAirborne({...record,takeoff:{actual:1791395880}},1791395917),true);
+  });
+
+  it('a Departed gate-out record does not prove takeoff even two hours later', () => {
     const dl4712 = { ...leg('MDW', 'MSP', now - 2 * 3600, now + 20 * 60, 'departed'),
       gateOut: { scheduled: now - 2 * 3600, estimated: null, actual: now - 2 * 3600 } };
-    assert.equal(flightStatsScheduleAirborne(dl4712, now), true);
+    assert.equal(flightStatsScheduleAirborne(dl4712, now), false);
     assert.equal(currentStageOf({ live: null, origin: {}, dest: {}, remainingNm: 300, pushed: true,
-      faAirborne: flightStatsScheduleAirborne(dl4712, now), inboundStatus: 'unknown' }), 'ride');
+      faAirborne: flightStatsScheduleAirborne(dl4712, now), inboundStatus: 'unknown' }), 'push');
   });
 });
 
@@ -222,6 +231,7 @@ describe('zoom-stable route presentation', () => {
   const source = readFileSync(new URL('../src/components/route-map.tsx', import.meta.url), 'utf8');
   const groundSource = readFileSync(new URL('../src/components/movement-map.tsx', import.meta.url), 'utf8');
   const motionSource = readFileSync(new URL('../src/lib/ground-motion.ts', import.meta.url), 'utf8');
+  const surfaceServer = readFileSync(new URL('../src/lib/airport-surface.server.ts', import.meta.url), 'utf8');
   const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
   it('keeps every route, flown-track, projected, outline, and weather stroke screen-sized', () => {
@@ -273,7 +283,7 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /fitGroundSurfaceView/);
     assert.match(groundSource, /filterAirportSurfaceFeatures/);
     assert.match(groundSource, /const surface = surfaceQ\.data as AirportSurface \| undefined/);
-    assert.match(groundSource, /surface\?\.features \?\? \[\]/);
+    assert.match(groundSource, /surface\?\.features\?\.length \? surface\.features : fallbackRunways/);
     assert.match(groundSource, /BoundaryShape/);
     assert.match(groundSource, /fitFeatures\.flatMap/);
     assert.match(groundSource, /zoom\.fitPoints\(points\)/);
@@ -291,6 +301,31 @@ describe('zoom-stable route presentation', () => {
     assert.match(groundSource, /rotate\(\$\{displayAircraft\.track\}\)/);
     assert.doesNotMatch(groundSource, /displayAircraft\.track \+ 180/);
     assert.match(groundSource, /delayed \$\{providerLabel\} position/);
+    assert.match(groundSource, /storyPositionAge != null && storyPositionAge <= 120/);
+    assert.match(groundSource, /queriedFastAge \?\? Infinity\) <= 120/);
+    assert.match(groundSource, /startupMs < 30_000 \? 2_500 : 8_000/);
+    assert.match(groundSource, /airportRunwayFallbackFeatures\(airport\.icao\)/);
+    assert.match(groundSource, /Last seen \$\{age\}s ago/);
+    assert.match(groundSource, /Last seen \$\{Math\.max\(1, Math\.round\(age \/ 60\)\)\}m ago/);
+    assert.match(groundSource, /groundPositionQueryKey/);
+    assert.match(groundSource, /Detailed taxiways unavailable; runways shown\./);
+  });
+
+  it('switches from flight to arrival ground when the trusted story confirms landing even if the last coordinate is stale', () => {
+    assert.match(groundSource, /const arrivalStageConfirmed = arrivedGroundNow/);
+    assert.match(groundSource, /story\.currentStage === "taxi_in"/);
+    assert.match(groundSource, /story\.arrivalStatus === "landed"/);
+    assert.match(groundSource, /if \(arrivalStageConfirmed && !autoArrivalSwitched\.current\)/);
+    assert.match(groundSource, /setTab\("arrival"\)/);
+  });
+
+  it('races cold airport-surface fallbacks instead of serially waiting through two OSM timeouts', () => {
+    assert.match(surfaceServer, /const OVERPASS_TIMEOUT_MS = 4_000/);
+    assert.match(surfaceServer, /const exactOsm = requireSurface/);
+    assert.match(surfaceServer, /const boxedOsm = requireSurface/);
+    assert.match(surfaceServer, /Promise\.any\(\[\s*exactOsm,\s*boxedOsm,/);
+    assert.match(surfaceServer, /await sleep\(1_000\)/);
+    assert.match(surfaceServer, /loadFaaAirportSurface[\s\S]*?, 6_000, "FAA surface"/);
   });
 });
 
@@ -823,8 +858,9 @@ describe('first-class pushback and taxi-out stages', () => {
     assert.equal(FLIGHT_STAGES.find(stage => stage.id === 'push')?.label, 'Pushback');
     assert.equal(FLIGHT_STAGES.find(stage => stage.id === 'taxi')?.label, 'Taxiing out');
     assert.match(source, /FLIGHT_STAGES as STAGES/);
-    assert.match(source, /story\.currentStage === "push"/);
-    assert.match(source, /story\.currentStage === "taxi"/);
+    assert.match(source, /const stage = displayStage\(story\);/);
+    assert.match(source, /if \(stage === "push"\) return/);
+    assert.match(source, /if \(stage === "taxi"\) return/);
   });
 });
 
@@ -1249,9 +1285,10 @@ describe('public schedule fallback', () => {
     assert.equal(parseFlightStatsPublicSchedule('<html>Flight Status UA 3 Scheduled</html>', 'UAL3', '2026-10-01'), null);
   });
 
-  it('allows an exact FR24 leg up to 60 seconds old to establish origin-gate identity', () => {
+  it('keeps an identity-matched outbound surface fix on the departure side through 60 seconds', () => {
     const source = readFileSync(new URL('../src/lib/story.server.ts', import.meta.url), 'utf8');
-    assert.match(source, /\(live\.seenSec \?\? 999\) <= \(exactFr24Leg \? 60 : 30\)/);
+    assert.match(source, /\(live\.seenSec \?\? 999\) <= 60/);
+    assert.match(source, /currentFlightSurfaceConfirmed/);
   });
 });
 
@@ -1265,6 +1302,31 @@ describe('outbound turn-aircraft recovery', () => {
     assert.match(source, /turnLive && turnLive\.onGround/);
     assert.match(source, /turnAge <= 30/);
     assert.match(source, /\[outbound-turn-recovery\]/);
+  });
+});
+
+describe('ground status during provider gaps', () => {
+  it('does not call a near-departure stale or missing surface position gate/inbound', () => {
+    const now = Date.parse('2026-10-06T21:22:42Z');
+    const base = {
+      fetchedAt: now,
+      currentStage: 'inbound',
+      live: true,
+      origin: { iata: 'ORD', icao: 'KORD', lat: 41.9786, lon: -87.9048 },
+      dest: { iata: 'MIA', icao: 'KMIA', lat: 25.7959, lon: -80.2870 },
+      times: { pushUnix: now / 1000 + 9 * 60, pushKind: 'estimated', pushed: false, airborne: false },
+      providers: { chosenPositionAgeSec: 49 },
+      aircraft: { lat: 41.98, lon: -87.90, onGround: true, extrapolated: false, seenSec: 49 },
+      inbound: { status: 'watching', detail: '' },
+    };
+    const stale = nextStep(base, now);
+    assert.equal(stale.title, 'Ground movement not confirmed');
+    assert.match(stale.body, /still at the gate, pushing back, or taxiing/);
+
+    const missing = nextStep({ ...base, currentStage: 'origin_gate', live: false, aircraft: null,
+      providers: { chosenPositionAgeSec: null } }, now);
+    assert.equal(missing.title, 'Ground movement not confirmed');
+    assert.doesNotMatch(missing.body, /Your aircraft is at the departure airport/);
   });
 });
 
