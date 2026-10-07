@@ -41,3 +41,20 @@ Therefore this commit does **not** activate public real-data redistribution or d
 ## Preserved work
 
 Part 3B.4's fixture connector and deployed fixture remain unchanged. Main, Production and the current Inbound app UI are unchanged. The new branch carries current-main airborne fusion plus the host-approved plugin code; unfinished ground work is excluded.
+
+## Current checkpoint — October 6, 2026
+
+Branch head after the live MCP boundary work is the current `plugin-v1-live-airborne` head.
+
+Validation in a fresh disposable sandbox:
+
+- `npm run typecheck`: passed.
+- Focused ADS-B / acquisition / live-source / live-backend / live-MCP run: **39 tests, 39 passed, 0 failed**.
+- The live MCP exposes exactly three read-only tools and records zero direct aviation-provider calls.
+- Direct adsb.fi, ADSB.lol, Airplanes.live, FR24 and FlightAware origins are rejected by the MCP-side Inbound source client.
+- The private Nearby engine adapter emits only airborne-eligible Radar rows.
+- Without an explicitly injected real Inbound handoff resolver, Track flight fails closed as unsupported rather than mixing fixture detail with live Radar.
+- No live provider request, database mutation, deployment, Vercel setting change, main merge or Production change occurred during this checkpoint.
+
+The next runtime dependency is a shared **non-production** Postgres store for the private Nearby engine/source service. Do not replace it with process-local state: the shared lease is what prevents viewer count from multiplying provider acquisition. Once an isolated store is explicitly available, the source service can be wired and privately smoked before any ChatGPT live-host test.
+
