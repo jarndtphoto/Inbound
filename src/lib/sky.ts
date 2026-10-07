@@ -1,7 +1,7 @@
 import { createPhaseHistory } from "./aircraft-phase.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { AIRPORT_BY_ICAO, airportByIcao } from "./airports";
-import { airframeOf, airlineOf, isVehicleType, isWidebody } from "./aircraft";
+import { airframeOf, airlineOf, isVehicleType, isWidebody, isInterestingAircraft } from "./aircraft";
 import { haversineNm, initialBearing } from "./geo";
 import { decodeMetar, passengerDelayHint, type Metar, type Taf } from "./metar";
 import type { FieldSnapshot, Traffic } from "./types";
@@ -55,22 +55,8 @@ export function toTraffic(raw: AdsbRaw, airport: { lat: number; lon: number; ele
   const callsign = raw.flight?.trim() || null;
   const airline = airlineOf(callsign);
   const year = raw.year?.trim() || null;
-  const yearNum = year ? Number(year) : null;
   const widebody = isWidebody(type);
-  const kind = frame?.kind;
-  const interesting =
-    widebody ||
-    kind === "biz" ||
-    type === "A388" ||
-    type === "B744" ||
-    type === "B748" ||
-    type === "B752" ||
-    type === "B753" ||
-    (yearNum != null &&
-      yearNum >= new Date().getUTCFullYear() - 1 &&
-      kind !== "ga" &&
-      kind !== "heli" &&
-      kind !== "other");
+  const interesting = isInterestingAircraft(type, year);
 
   const gsKt = typeof raw.gs === "number" ? raw.gs : null;
   const vertFpm = Number.isFinite(raw.baro_rate) ? raw.baro_rate! : Number.isFinite(raw.geom_rate) ? raw.geom_rate! : null;

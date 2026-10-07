@@ -1,0 +1,64 @@
+{
+  "stage": "Part 3B.2.1",
+  "sourceSha": "cd9dbf611ed95e5a734d7173c9aefea93285b88d",
+  "implementationSha": "11abfb4896658f22525433a40d3e1ac637e2cecb",
+  "databaseUrlUnset": true,
+  "nearbyVerifyDatabaseUrlUnset": true,
+  "sequential": true,
+  "afterNeonCertification": true,
+  "check": {
+    "passed": true,
+    "exitCode": 0,
+    "tests": 909,
+    "suites": 88,
+    "pass": 908,
+    "fail": 0,
+    "todo": 1,
+    "skipped": 0,
+    "cancelled": 0,
+    "durationMs": 78973.104946
+  },
+  "build": {
+    "passed": true,
+    "exitCode": 0,
+    "databaseMigratorSkipped": true
+  },
+  "clockFileHashes": {
+    "scripts/flight-audit-regression.test.mjs": "fd2a2dff0a8f56f823c0d3749b6739403fb21cd7b1de0260707b9a7b4f95c6c5",
+    "scripts/flight-identity-replay.test.mjs": "3ba979cd684dcc81e76ad9f87f973c3e76f962a38bc9d373cc6f0fc267cb6969",
+    "scripts/flight-resilience.test.mjs": "d4c434909292f08828886c98256eb98792b94daca7b187925d9b180bb7ca1ed9",
+    "scripts/fr24-usage-reduction.test.mjs": "c2cbc61fdfe2ce5bd8786b7e710dbd9fe301cd3597db2b57a654ac60cdd89a16",
+    "scripts/route-memory-replay.test.mjs": "c6d620b439dc1dcd9ce185ad2be548ec5d1920a50069601eae950929a987fb8c",
+    "scripts/route-memory-write-replay.test.mjs": "c6ded3b736a98070676bb7c936461ecebb85fd1f1d6b80cf29ac22922b72f74d",
+    "scripts/takeoff-floor-replay.test.mjs": "462e03afd6827f04ac5b1cc4ebea85e4c83d9cebfee1a30dcd6598d57ff09ac4",
+    "scripts/test-clock.mjs": "ea049913da23a90e1c881f987e6bdb28641b2a9c60ac55e08ecf051ee97e5744",
+    "scripts/test-clock.test.mjs": "c7b19010c372697d08706c5c06828892d56b9e394ea558e5f171efc498a754e8"
+  },
+  "neon": {
+    "status": "passed",
+    "suites": 14,
+    "passed": 14,
+    "independentSessions": 100,
+    "resultSha256": "4c155d7fdd8ded5bf28c3e819b7c256729e3745c66e7ebadbd829e904467ff69"
+  },
+  "fakeInvocationCounts": {
+    "successfulRun": {
+      "aircraftAcquisitions": 7,
+      "routeLookups": 12
+    },
+    "allRuns": {
+      "aircraftAcquisitions": 11,
+      "routeLookups": 20
+    },
+    "providerApiCalls": 0
+  },
+  "evidenceHashes": {
+    "check-final.log": "a08e930a72fc173b393c1bafa3d8a3d129f33c68e08c394d084753a8595159b5",
+    "build-final.log": "9f4e1687275e324c311e8e5589aecb4a6ab393f451615605a0766292f98b697f",
+    "postgres-run.log": "291308645aae36a3a0cdc946859f7224ed4ce9c4a136b6091efa453fbfb5109f",
+    "postgres-attempt-1.log": "e3d7f26f35c227097b7d204f27c7b962a124f0b48854e838dc04face811bc749",
+    "harness.mjs": "f6e3f74b53c32eb9d2f68871e9ff81310da367bfe215882f2ee422e7ccdf94ea",
+    "integration.ts": "9759a14b1e2380309a2af6ddf1279f22a6537757e53cc037dcb936428d5c9eaf",
+    "neon-branch.json": "b83d280046748d596afebd481b8d1c009795e68e438348d651dffd9a05ca7af9"
+  }
+}

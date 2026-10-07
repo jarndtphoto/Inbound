@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "verifiedAt": "2026-10-05T13:39:52.619Z",
+  "mcp": "https://inbound-live-fixture-ngc64c094-jarndtphoto.vercel.app/mcp",
+  "widgetScriptSha256": "5d10191549e675f42f3fa62cf785bf8254a5bc41dbbc66870571c31943441487",
+  "exactMatchToTestedCompiledWidgetScript": true,
+  "widgetBytes": 217599
+}

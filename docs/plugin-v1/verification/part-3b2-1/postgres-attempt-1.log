@@ -1,0 +1,430 @@
+PASS 100 independent normal viewers: one fake aircraft acquisition, zero route lookups
+PASS real cold-snapshot route renderer/ranking/privacy integration
+PASS 100 explicit construction workers share two cycle winners and six rolling starts
+PASS 100 same-callsign claims collapse to one lease and charge; hits charge zero
+PASS positive/negative TTL reuse, exact expiry and sixty-second failure cooldown
+PASS expired/crashed leases, stale owners and duplicate route publications are fenced
+PASS actual cycle identity and exact rolling-minute boundary enforced across independent sessions
+PASS current/fresh/active/successful collection required; environment state isolated
+FAIL Expected values to be strictly equal:
+
+0 !== 1
+
+{
+  "stage": "Part 3B.2.1",
+  "status": "failed",
+  "startedAt": "2026-10-04T02:34:12.896Z",
+  "implementationCommit": "11abfb4896658f22525433a40d3e1ac637e2cecb",
+  "fakeAircraftOnly": true,
+  "fakeRoutesOnly": true,
+  "fakeAcquisitionCalls": 4,
+  "fakeRouteLookupCalls": 8,
+  "routeClaimWinners": 32,
+  "directFixtureSeeds": 21,
+  "liveProviderCalls": 0,
+  "productionDataQueries": 0,
+  "deployments": 0,
+  "publicEndpoints": 0,
+  "unexpectedStoreSqlErrors": [],
+  "tests": [
+    {
+      "name": "100 independent normal viewers: one fake aircraft acquisition, zero route lookups",
+      "status": "passed",
+      "elapsedMs": 8059,
+      "independentSessions": 100,
+      "fakeAcquisitions": 1,
+      "leaseWinners": 1,
+      "coldContenders": 99,
+      "normalViewerRouteLookups": 0,
+      "warmExtraAcquisitions": 0,
+      "collectionVersion": 1,
+      "radarCount": 100,
+      "featuredCount": 4,
+      "radarBytes": 45900,
+      "oneSharedCollection": true
+    },
+    {
+      "name": "real cold-snapshot route renderer/ranking/privacy integration",
+      "status": "passed",
+      "elapsedMs": 6639,
+      "acceptedObservationCount": 125,
+      "radarCount": 100,
+      "radarBytes": 45900,
+      "radarMaximumBytes": 49152,
+      "featuredDefault": 4,
+      "featuredMaximum": 5,
+      "blockedRouteCacheReadCount": 0,
+      "blockedRouteConstructionCount": 0,
+      "radarIndependentOfRouteWork": true,
+      "motionExtrapolationSeconds": 25,
+      "motionStopsAt25Seconds": true,
+      "missingTrackNotInvented": true,
+      "mainSnapshotAndVersionUnchanged": true,
+      "acquisitionHookCalls": 0,
+      "fakeRouteLookupCalls": 0,
+      "externalProviderCalls": 0,
+      "seededCollectionPublications": 1,
+      "seededRouteHintPublications": 2,
+      "positiveHintTtlMs": 1800000,
+      "ownEnvironmentRowsRemaining": 0,
+      "cleanup": {
+        "collections": 1,
+        "hints": 2,
+        "budgets": 1
+      },
+      "storedObservationCount": 125,
+      "datedBindingRoundTrip": true,
+      "hintWeightDelta": 5,
+      "confirmedWeightDelta": 15,
+      "confirmedOnlyAirportAssociationDelta": 5,
+      "datedDowngradeCases": 7,
+      "genericRouteNeverConfirmed": true,
+      "edvDalAliasesSeparated": true,
+      "changedCallsignKeyCannotInheritHintAndOverlayPreservesSuppliedIds": true,
+      "sameVersionBoardRevisionUnchanged": true,
+      "rendererAllowedFields": [
+        "airlineLabel",
+        "checkedAt",
+        "destinationIata",
+        "originIata",
+        "verification"
+      ],
+      "routeAndProviderPrivateFieldsExcluded": true,
+      "acceptedSnapshotUnchangedAfterOverlay": true,
+      "incumbentHoldMs": 90000,
+      "challengerMargin": 20
+    },
+    {
+      "name": "100 explicit construction workers share two cycle winners and six rolling starts",
+      "status": "passed",
+      "elapsedMs": 25970,
+      "independentWorkers": 100,
+      "initialExactFakeRouteLookups": 2,
+      "initialPublished": 2,
+      "sameCallsignCollapsePassed": true,
+      "normalViewerLookupsAfterCachePublication": 0,
+      "startsOverFourAcceptedCycles": [
+        {
+          "key": "UAL1",
+          "at": 1894730400000
+        },
+        {
+          "key": "UAL2",
+          "at": 1894730400000
+        },
+        {
+          "key": "UAL3",
+          "at": 1894730420000
+        },
+        {
+          "key": "UAL4",
+          "at": 1894730420000
+        },
+        {
+          "key": "UAL5",
+          "at": 1894730440000
+        },
+        {
+          "key": "UAL6",
+          "at": 1894730440000
+        },
+        {
+          "key": "UAL2",
+          "at": 1894730460000
+        },
+        {
+          "key": "UAL7",
+          "at": 1894730460000
+        }
+      ],
+      "perCycleMaximum": 2,
+      "rollingMinuteMaximum": 6,
+      "positiveReusedAcrossCycles": true,
+      "negativeRequeriedAt60Seconds": true,
+      "rawAcceptedSnapshotUnchangedByHints": true,
+      "radarUnaffectedByRouteHints": true,
+      "sameVersionFeaturedStable": true
+    },
+    {
+      "name": "100 same-callsign claims collapse to one lease and charge; hits charge zero",
+      "status": "passed",
+      "elapsedMs": 1007,
+      "independentClaims": 100,
+      "exactLeaseWinners": 1,
+      "exactChargedStarts": 1,
+      "duplicateCachedClaimsCharged": 0,
+      "oneMutableCallsignRow": true
+    },
+    {
+      "name": "positive/negative TTL reuse, exact expiry and sixty-second failure cooldown",
+      "status": "passed",
+      "elapsedMs": 1863,
+      "positiveTtlSeconds": 1800,
+      "negativeFailureTtlSeconds": 60,
+      "cacheHitsConsumeNoQuota": true,
+      "negativeUsableBeforeExpiryAndHiddenAtExpiry": true,
+      "positiveUsableBeforeExpiryAndHiddenAtExpiry": true,
+      "refreshedNegativeGeneration": 2,
+      "failureSourceClass": "lookup_failure"
+    },
+    {
+      "name": "expired/crashed leases, stale owners and duplicate route publications are fenced",
+      "status": "passed",
+      "elapsedMs": 1285,
+      "leaseSeconds": 10,
+      "crashRetryCooldownSeconds": 60,
+      "originalGeneration": 1,
+      "replacementGeneration": 2,
+      "expiredWriterRejected": true,
+      "staleWriterRejected": true,
+      "duplicatePublishRejected": true,
+      "duplicateFailureRejected": true
+    },
+    {
+      "name": "actual cycle identity and exact rolling-minute boundary enforced across independent sessions",
+      "status": "passed",
+      "elapsedMs": 1866,
+      "cycleMaximum": 2,
+      "rollingMaximum": 6,
+      "exact59999MsBlocked": true,
+      "exact60000MsTwoWinners": true,
+      "acceptedStarts": [
+        1894730400000,
+        1894730400000,
+        1894730420000,
+        1894730420000,
+        1894730440000,
+        1894730440000,
+        1894730460000,
+        1894730460000
+      ],
+      "finalCycleVersion": 4,
+      "finalCycleCharges": 2,
+      "finalRollingCharges": 6
+    },
+    {
+      "name": "current/fresh/active/successful collection required; environment state isolated",
+      "status": "passed",
+      "elapsedMs": 1792,
+      "absentCollectionRejected": true,
+      "staleVersionRejected": true,
+      "exact45SecondsFresh": true,
+      "olderThan45SecondsRejected": true,
+      "failedCollectionRejected": true,
+      "inactiveCollectionRejected": true,
+      "sharedCallsignAcrossEnvironmentsIndependent": true,
+      "cleanupDoesNotCrossEnvironment": true
+    },
+    {
+      "name": "cleanup/recreation preserve quota; 100 concurrent cleanup and claim operations remain bounded",
+      "status": "failed",
+      "elapsedMs": 3576,
+      "error": {
+        "name": "AssertionError",
+        "code": "ERR_ASSERTION",
+        "message": "Expected values to be strictly equal:\n\n0 !== 1\n"
+      }
+    }
+  ],
+  "certifiedSourceSha": "cd9dbf611ed95e5a734d7173c9aefea93285b88d",
+  "runtimeUnchangedFromImplementation": true,
+  "applicationGates": {
+    "sourceSha": "cd9dbf611ed95e5a734d7173c9aefea93285b88d",
+    "implementationSha": "11abfb4896658f22525433a40d3e1ac637e2cecb",
+    "databaseUrlUnset": true,
+    "nearbyVerifyDatabaseUrlUnset": true,
+    "sequential": true,
+    "check": {
+      "passed": true,
+      "exitCode": 0,
+      "tests": 909,
+      "pass": 908,
+      "fail": 0,
+      "todo": 1,
+      "suites": 88,
+      "skipped": 0,
+      "cancelled": 0
+    },
+    "build": {
+      "passed": true,
+      "exitCode": 0,
+      "productionMigrationSkipped": true
+    },
+    "testOnlyFixSha256": {
+      "scripts/flight-audit-regression.test.mjs": "fd2a2dff0a8f56f823c0d3749b6739403fb21cd7b1de0260707b9a7b4f95c6c5",
+      "scripts/flight-identity-replay.test.mjs": "3ba979cd684dcc81e76ad9f87f973c3e76f962a38bc9d373cc6f0fc267cb6969",
+      "scripts/flight-resilience.test.mjs": "d4c434909292f08828886c98256eb98792b94daca7b187925d9b180bb7ca1ed9",
+      "scripts/fr24-usage-reduction.test.mjs": "c2cbc61fdfe2ce5bd8786b7e710dbd9fe301cd3597db2b57a654ac60cdd89a16",
+      "scripts/route-memory-replay.test.mjs": "c6d620b439dc1dcd9ce185ad2be548ec5d1920a50069601eae950929a987fb8c",
+      "scripts/route-memory-write-replay.test.mjs": "c6ded3b736a98070676bb7c936461ecebb85fd1f1d6b80cf29ac22922b72f74d",
+      "scripts/takeoff-floor-replay.test.mjs": "462e03afd6827f04ac5b1cc4ebea85e4c83d9cebfee1a30dcd6598d57ff09ac4",
+      "scripts/test-clock.mjs": "ea049913da23a90e1c881f987e6bdb28641b2a9c60ac55e08ecf051ee97e5744",
+      "scripts/test-clock.test.mjs": "c7b19010c372697d08706c5c06828892d56b9e394ea558e5f171efc498a754e8"
+    },
+    "applicationAndPluginMigrationsUnchangedFromImplementation": true
+  },
+  "neon": {
+    "projectName": "inbound-db",
+    "projectId": "withered-water-48367194",
+    "branchName": "plugin-v1-3b2-1-verification-20261004",
+    "branchId": "br-fragrant-sun-auv7swsu",
+    "endpointHost": "ep-long-silence-auec2kal.c-10.us-east-1.aws.neon.tech",
+    "endpointId": "ep-long-silence-auec2kal",
+    "databaseName": "neondb",
+    "productionBranchId": "br-late-forest-au7csk9x",
+    "creationMode": "schema-only",
+    "isolated": true,
+    "noProductionDataCopied": true,
+    "createdForVerification": true,
+    "createdAt": "2026-10-04T02:33:04Z",
+    "automaticDeletionAt": "2026-10-05T02:33:04Z",
+    "sourceCommit": "cd9dbf611ed95e5a734d7173c9aefea93285b88d",
+    "proofSource": "Authenticated Neon control-plane branch overview and creation confirmation; schema-only inventory badge; direct connection pooling off before SQL"
+  },
+  "transport": "injected-pg-compatible-driver",
+  "database": {
+    "name": "neondb",
+    "serverVersion": "18.6 (4e955f5)"
+  },
+  "migrations": [
+    {
+      "file": "docs/plugin-v1/migrations/0006_nearby_collection.sql",
+      "applied": true,
+      "sha256": "45ca4563371c8e1effd6fa4cebc06620af157186d6c5ffab2dca6be9c99cbea7"
+    },
+    {
+      "file": "docs/plugin-v1/migrations/0007_route_hint.sql",
+      "applied": true,
+      "sha256": "cdc0e0402aa43278304f3a98d11e6dfccb0c631a33ea9a54f15e24c0dc218479"
+    }
+  ],
+  "schema": {
+    "tables": [
+      "inbound_plugin_v1.current_collection",
+      "inbound_plugin_v1.ranked_view",
+      "inbound_plugin_v1.route_construction_budget",
+      "inbound_plugin_v1.route_hint"
+    ],
+    "only0006And0007Applied": true,
+    "otherApplicationCatalogUnchanged": true,
+    "routeStateContainsNoPrivateAircraftViewerPayloadOrHistoryFields": true,
+    "userTriggers": 0
+  },
+  "connections": {
+    "count": 100,
+    "distinctBackendPids": 100,
+    "backendPids": [
+      1091,
+      1090,
+      1088,
+      1089,
+      1087,
+      1080,
+      1083,
+      1082,
+      1084,
+      1081,
+      1104,
+      1113,
+      1105,
+      1108,
+      1110,
+      1109,
+      1111,
+      1107,
+      1112,
+      1106,
+      1136,
+      1135,
+      1126,
+      1125,
+      1133,
+      1124,
+      1128,
+      1134,
+      1129,
+      1127,
+      1153,
+      1157,
+      1151,
+      1150,
+      1155,
+      1149,
+      1152,
+      1156,
+      1154,
+      1158,
+      1179,
+      1178,
+      1181,
+      1176,
+      1172,
+      1173,
+      1180,
+      1177,
+      1175,
+      1174,
+      1201,
+      1200,
+      1193,
+      1195,
+      1202,
+      1197,
+      1198,
+      1196,
+      1199,
+      1194,
+      1214,
+      1218,
+      1220,
+      1222,
+      1221,
+      1217,
+      1216,
+      1213,
+      1215,
+      1219,
+      1246,
+      1240,
+      1234,
+      1237,
+      1244,
+      1238,
+      1245,
+      1239,
+      1235,
+      1236,
+      1266,
+      1267,
+      1258,
+      1264,
+      1265,
+      1263,
+      1261,
+      1260,
+      1259,
+      1262,
+      1282,
+      1283,
+      1284,
+      1289,
+      1288,
+      1286,
+      1281,
+      1287,
+      1280,
+      1285
+    ],
+    "separateControlSession": true,
+    "directEndpoint": true
+  },
+  "concurrent100ViewerAcquisitions": 1,
+  "concurrent100ViewerRouteLookups": 0,
+  "concurrent100ConstructionLookups": 2,
+  "error": {
+    "name": "AssertionError",
+    "code": "ERR_ASSERTION",
+    "message": "Expected values to be strictly equal:\n\n0 !== 1\n"
+  },
+  "finishedAt": "2026-10-04T02:35:58.086Z"
+}

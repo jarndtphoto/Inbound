@@ -1,0 +1,92 @@
+{
+  "endpoint": "https://inbound-live-fixture-d6eedvyfd-jarndtphoto.vercel.app/mcp",
+  "startedAt": "2026-10-04T16:49:23.733Z",
+  "finishedAt": "2026-10-04T16:50:04.521Z",
+  "status": "passed",
+  "assertions": {
+    "total": 297,
+    "passed": 297,
+    "failed": 0
+  },
+  "requestOutcomes": {
+    "total": 25,
+    "positive": 11,
+    "expectedRejections": 14,
+    "mcpPosts": 21,
+    "mcpJson200": 20,
+    "mcpNotification202": 1,
+    "proofHandlerResponses": 24
+  },
+  "verified": {
+    "initialize": true,
+    "toolListing": true,
+    "resourceListing": true,
+    "resourceRetrieval": true,
+    "widgetRetrieval": true,
+    "nearbyResponses": true,
+    "inventedAircraft40To39": true,
+    "radarMax100": true,
+    "featuredMax5": true,
+    "mutationRejected": true,
+    "unsupportedToolsRejected": true,
+    "unsupportedAreasCoordinatesProviderAndRadiusRejected": true,
+    "foreignOriginRejected": true,
+    "productionFlightApiAbsent": true,
+    "noStoreOnAllProofResponses": true,
+    "fixtureOnlyHeaderOnAllProofResponses": true,
+    "staticIsolationHeaderOnAllProofResponses": true,
+    "widgetCspSameOriginMcpOnly": true,
+    "widgetExternalAssetsAbsent": true
+  },
+  "first": {
+    "collectionVersion": 1,
+    "radar": 40,
+    "featured": 4,
+    "dtoBytes": 19716,
+    "radarBytes": 17658,
+    "envelopeBytes": 19956
+  },
+  "refreshed": {
+    "collectionVersion": 2,
+    "radar": 39,
+    "featured": 4,
+    "dtoBytes": 19755,
+    "radarBytes": 17696,
+    "envelopeBytes": 19995,
+    "retiredIdent": "SYN140"
+  },
+  "areas": [
+    {
+      "id": "airport:KORD",
+      "radiusNm": 25,
+      "collectionVersion": 2,
+      "radar": 39,
+      "featured": 5
+    },
+    {
+      "id": "airport:KMDW",
+      "radiusNm": 25,
+      "collectionVersion": 2,
+      "radar": 39,
+      "featured": 5
+    },
+    {
+      "id": "preset:chicago",
+      "radiusNm": 38,
+      "collectionVersion": 2,
+      "radar": 39,
+      "featured": 5
+    }
+  ],
+  "isolation": {
+    "configuredEnvironmentVariables": 0,
+    "providerInterfacesInArtifact": 0,
+    "productionApiInterfacesInArtifact": 0,
+    "productionDbInterfacesInArtifact": 0,
+    "providerApiCalls": 0,
+    "productionApiCalls": 0,
+    "productionDbAccess": 0,
+    "runtimeRequestsObservedOnlyOnNewPreviewDeployment": true
+  },
+  "failures": []
+}

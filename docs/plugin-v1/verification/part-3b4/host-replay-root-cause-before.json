@@ -1,0 +1,48 @@
+{
+  "mode": "pre-fix-capture",
+  "assertions": 2,
+  "failures": 0,
+  "errors": [],
+  "timeline": [
+    {
+      "label": "Radar before retained SYN101 replay",
+      "handoffMode": "nearby",
+      "handoffStatus": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "activeHandoffRequest": null,
+      "ignoredHandoffReplays": null,
+      "appliedHandoffResponses": null
+    },
+    {
+      "label": "Retained SYN101 via openai:set_globals",
+      "handoffMode": "detail",
+      "handoffStatus": "resolved",
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "activeHandoffRequest": null,
+      "ignoredHandoffReplays": null,
+      "appliedHandoffResponses": null
+    },
+    {
+      "label": "Back to Radar before second replay",
+      "handoffMode": "nearby",
+      "handoffStatus": null,
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "activeHandoffRequest": null,
+      "ignoredHandoffReplays": null,
+      "appliedHandoffResponses": null
+    },
+    {
+      "label": "Same SYN101 via ui/notifications/tool-result",
+      "handoffMode": "detail",
+      "handoffStatus": "resolved",
+      "selectedRadarId": "00000000-0000-4000-8000-000000003e80",
+      "activeHandoffRequest": null,
+      "ignoredHandoffReplays": null,
+      "appliedHandoffResponses": null
+    }
+  ],
+  "assertionText": [
+    "Captured old widget: retained SYN101 globals replay opens detail without Track flight",
+    "Captured old widget: Back to Radar is overwritten by the same generic tool-result replay"
+  ]
+}

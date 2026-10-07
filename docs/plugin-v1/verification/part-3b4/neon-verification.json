@@ -1,0 +1,60 @@
+{
+  "verifiedAt": "2026-10-05T00:35:30.000Z",
+  "branchId": "br-morning-resonance-audhcpkt",
+  "environment": "verify34",
+  "migrations": [
+    {
+      "file": "docs/plugin-v1/migrations/0006_nearby_collection.sql",
+      "sha256": "45ca4563371c8e1effd6fa4cebc06620af157186d6c5ffab2dca6be9c99cbea7"
+    },
+    {
+      "file": "docs/plugin-v1/migrations/0007_route_hint.sql",
+      "sha256": "cdc0e0402aa43278304f3a98d11e6dfccb0c631a33ea9a54f15e24c0dc218479"
+    },
+    {
+      "file": "docs/plugin-v1/migrations/0008_flight_handoff.sql",
+      "sha256": "b0ab15f669eaedc2db268ce49ed731c36d7f3d87b029861d22996b08a28f7670"
+    }
+  ],
+  "pluginTables": [
+    "candidate_choice",
+    "current_collection",
+    "detail_snapshot",
+    "occurrence_registry",
+    "ranked_view",
+    "route_construction_budget",
+    "route_hint",
+    "selection_handle"
+  ],
+  "pluginTableCount": 8,
+  "pluginRowsImmediatelyAfterMigration": 0,
+  "rawTokenColumnCount": 0,
+  "userTriggerCount": 0,
+  "productionPublicTablesBefore": 5,
+  "productionPublicTablesAfter": 5,
+  "productionTablesChanged": false,
+  "concurrency": {
+    "kind": "selection-resolution lease",
+    "independentPostgresBackends": 29,
+    "contenders": 29,
+    "winners": 1,
+    "losers": 28,
+    "distinctBackendPids": 29
+  },
+  "fencing": {
+    "generation": 11,
+    "attempts": 1,
+    "freshWriterAccepted": true,
+    "staleWriterAccepted": false,
+    "leaseCleared": true
+  },
+  "retryExhaustion": {
+    "attempts": 3,
+    "additionalClaims": 0
+  },
+  "postVerificationState": {
+    "inventedSelectionRows": 1,
+    "note": "The isolated schema-only branch is disposable and configured for automatic deletion."
+  },
+  "productionDatabaseAccess": 0
+}

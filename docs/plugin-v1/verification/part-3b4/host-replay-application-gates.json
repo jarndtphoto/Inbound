@@ -1,0 +1,49 @@
+{
+  "verifiedAt": "2026-10-05T01:38:10.000Z",
+  "databaseUrlsUnset": true,
+  "focusedPluginTests": {
+    "total": 145,
+    "passed": 145,
+    "failed": 0
+  },
+  "hostReplayProof": {
+    "sourceAssertionGroups": 5,
+    "compiledAssertionGroups": 5,
+    "failed": 0,
+    "browserErrors": 0
+  },
+  "hostLifecycleProof": {
+    "sourceAssertionGroups": 20,
+    "compiledAssertionGroups": 20,
+    "inventedAircraft": 40,
+    "externalRequests": 0,
+    "browserErrors": 0,
+    "durationSecondsAtLeast": 90
+  },
+  "motionWatchdogRegression": {
+    "passed": true,
+    "maximumShortRetriesPerTrajectory": 3,
+    "extrapolationBoundSeconds": 25,
+    "maximumRafLoops": 1,
+    "maximumPollTimers": 1,
+    "maximumAgeTimers": 1
+  },
+  "npmRunCheck": {
+    "exitCode": 0,
+    "tests": 967,
+    "suites": 92,
+    "passed": 966,
+    "failed": 0,
+    "heldTodo": 1
+  },
+  "npmRunBuild": {
+    "exitCode": 0,
+    "migrations": "skipped because DATABASE_URL was unset"
+  },
+  "isolation": {
+    "files": 3,
+    "providerCalls": 0,
+    "productionApiCalls": 0,
+    "productionDbAccess": 0
+  }
+}

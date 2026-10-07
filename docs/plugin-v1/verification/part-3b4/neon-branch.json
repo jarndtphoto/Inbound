@@ -1,0 +1,34 @@
+{
+  "verifiedAt": "2026-10-05T00:12:34.000Z",
+  "project": {
+    "name": "inbound-db",
+    "id": "withered-water-48367194"
+  },
+  "productionBranch": {
+    "id": "br-late-forest-au7csk9x",
+    "touched": false
+  },
+  "verificationBranch": {
+    "name": "plugin-v1-3b4-verification-20261005",
+    "id": "br-morning-resonance-audhcpkt",
+    "parentName": "preview/plugin-v1-3b1-5-verification",
+    "parentId": "br-round-breeze-augnsxmu",
+    "mode": "schema-only",
+    "endpointId": "ep-lingering-cell-au2zpk07",
+    "endpointHost": "ep-lingering-cell-au2zpk07.c-10.us-east-1.aws.neon.tech",
+    "database": "neondb",
+    "storageBytesAtCreation": 0,
+    "createdAt": "2026-10-05T00:12:34.000Z",
+    "expiresAt": "2026-10-06T00:12:34.000Z",
+    "autoDelete": true
+  },
+  "initialPublicTables": [
+    "_migrations",
+    "arrival_atis_cache",
+    "arrival_projection_state",
+    "flight_phase_state",
+    "flight_route_state"
+  ],
+  "initialPluginTables": [],
+  "credentialsExported": false
+}

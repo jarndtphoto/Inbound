@@ -1,0 +1,37 @@
+{
+  "projectName": "inbound-db",
+  "projectId": "withered-water-48367194",
+  "branchName": "plugin-v1-3b2-1-verification-20261004",
+  "branchId": "br-fragrant-sun-auv7swsu",
+  "databaseName": "neondb",
+  "endpointHost": "ep-long-silence-auec2kal.c-10.us-east-1.aws.neon.tech",
+  "endpointId": "ep-long-silence-auec2kal",
+  "productionBranchId": "br-late-forest-au7csk9x",
+  "creationMode": "schema-only",
+  "isolated": true,
+  "createdForVerification": true,
+  "noProductionDataCopied": true,
+  "sourceCommit": "cd9dbf611ed95e5a734d7173c9aefea93285b88d",
+  "createdAt": "2026-10-04T02:33:04Z",
+  "automaticDeletionAt": "2026-10-05T02:33:04Z",
+  "automaticDeletionUi": "Oct 4, 2026 9:33 pm (CDT)",
+  "schemaSourceSelected": "preview/plugin-v1-3b1-5-verification",
+  "schemaSourceSelectedId": "br-round-breeze-augnsxmu",
+  "proofSource": "Authenticated Neon control-plane branch overview and creation confirmation; schema-only inventory badge; direct connection pooling off before SQL",
+  "deletedDisposableBranch": {
+    "name": "plugin-v1-3b1-5-verification-20261003",
+    "id": "br-calm-star-aualangq",
+    "exactPairVerifiedBeforeDeletion": true,
+    "deletionConfirmed": true
+  },
+  "retainedDisposableBranch": {
+    "name": "plugin-v1-3b1-6-verification-20261003",
+    "id": "br-cold-resonance-aud9ey98",
+    "exactPairVerified": true
+  },
+  "rootQuotaFailurePreviously": "Request failed: root branches limit exceeded",
+  "proofFiles": [
+    "neon-created.jpg",
+    "neon-disposable-cleanup.jpg"
+  ]
+}

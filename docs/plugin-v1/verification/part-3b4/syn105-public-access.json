@@ -1,0 +1,9 @@
+{
+  "verifiedAt": "2026-10-05T14:21:10.965Z",
+  "mcp": "https://inbound-live-fixture-ra6kolsml-jarndtphoto.vercel.app/mcp",
+  "status": 302,
+  "vercelAuthenticationRedirect": true,
+  "body": "Protected by Vercel Authentication\nTo access this deployment with an authenticated Vercel CLI, run: vercel curl <deployment-url>\nWith an authorized Vercel MCP connection (https://mcp.vercel.com), call web_fetch_vercel_url with url set to the full deployment URL.\n",
+  "publicMcpVerified": false,
+  "actualChatGptHostApproved": false
+}

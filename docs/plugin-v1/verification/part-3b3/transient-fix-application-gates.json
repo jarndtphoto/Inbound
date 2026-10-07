@@ -1,0 +1,35 @@
+{
+  "recordedAt": "2026-10-04T17:28:10Z",
+  "databaseUrlsUnset": true,
+  "sequence": [
+    "npm run check",
+    "npm run build"
+  ],
+  "check": {
+    "status": "passed",
+    "typecheck": "passed",
+    "tests": 957,
+    "suites": 92,
+    "passed": 956,
+    "failed": 0,
+    "todo": 1,
+    "todoIsPreExistingHeldCase": true
+  },
+  "build": {
+    "status": "passed",
+    "databaseMigration": "skipped because DATABASE_URL was unset"
+  },
+  "browserProofs": {
+    "sourceAssertions": 19,
+    "compiledAssertions": 19,
+    "transientTimeline": "passed",
+    "hostLikeDurationMs": 90100,
+    "externalBrowserRequests": 0,
+    "browserErrors": 0
+  },
+  "isolation": {
+    "providerApiCalls": 0,
+    "productionApiCalls": 0,
+    "productionDbAccess": 0
+  }
+}

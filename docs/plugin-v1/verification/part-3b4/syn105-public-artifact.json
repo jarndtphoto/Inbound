@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "verifiedAt": "2026-10-05T15:12:07.171Z",
+  "mcp": "https://inbound-live-fixture-ra6kolsml-jarndtphoto.vercel.app/mcp",
+  "sourceSha": "6e4d1fc8dde3164c15f913bb6aa6428237f83b3a",
+  "compiledServerBlobSha": "11fa1b808535cc44f06a07f5e94cf648d3e0c30b",
+  "widgetScriptSha256": [
+    "7b737d25e3193ab7be2dac8db6691125e40080b4294e42ceac40b6047d55b73f"
+  ],
+  "scriptCount": 1,
+  "exactMatchToTestedCompiledWidgetScript": true,
+  "widgetBytes": 218685,
+  "actualChatGptHostApproved": false
+}

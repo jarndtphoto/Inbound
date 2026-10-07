@@ -1,0 +1,25 @@
+{
+  "stage": "Part 3B.2.1",
+  "branch": "plugin-v1-route-enrichment",
+  "allCertificationAndApplicationGatesPassed": true,
+  "status": "local_commit_complete_push_blocked",
+  "attemptedCommitSha": "3f6bbbc37b8818116b4c54fda15093300516068d",
+  "pushCommand": "GIT_TERMINAL_PROMPT=0 git push origin HEAD:refs/heads/plugin-v1-route-enrichment",
+  "pushExitCode": 128,
+  "exactPushError": "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+  "pushedBranchSha": null,
+  "recordedAt": "2026-10-04T02:48:57.683598+00:00",
+  "applicationRuntimeAndMigrationChanges": false,
+  "note": "The local unpushed certification commit is amended only to include delivery/evidence metadata. Its exact final SHA is returned in the final message and verified Git bundle; approved ancestor SHAs are preserved.",
+  "resumePushAttempt": {
+    "attemptedCommitSha": "666ca6dcb7522090599f8a9e50112a581deb7a5d",
+    "pushCommand": "env -u DATABASE_URL -u NEARBY_VERIFY_DATABASE_URL GIT_TERMINAL_PROMPT=0 git push origin HEAD:refs/heads/plugin-v1-route-enrichment",
+    "pushExitCode": 128,
+    "exactPushError": "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    "pushedBranchSha": null,
+    "recordedAt": "2026-10-04T03:01:24.602123+00:00",
+    "worktreeWasClean": true,
+    "applicationOrNeonChanges": false,
+    "remoteFeatureBranchAbsentAfterAttempt": true
+  }
+}

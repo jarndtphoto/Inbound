@@ -1,0 +1,10 @@
+{
+  "transport": "Postgres protocol over Neon WebSocket",
+  "packageName": "@neondatabase/serverless",
+  "packageVersion": "1.2.0",
+  "packageSource": "Official package installed from npm during earlier verification setup",
+  "driverSource": "import { Client, neonConfig } from \"./neon-315-runtime/node_modules/@neondatabase/serverless/index.mjs\";\nneonConfig.webSocketConstructor = WebSocket;\nexport { Client };\n",
+  "driverSha256": "a724f71ac813891e0db443ae7606ba8889da26d1c3a64a0b437f7e174331d16f",
+  "purpose": "Independent Client instances backed by distinct pg_backend_pid values; avoids unavailable direct TCP from this execution environment. The harness also supports the repository native pg driver without adapter.",
+  "applicationDependencyChanges": false
+}

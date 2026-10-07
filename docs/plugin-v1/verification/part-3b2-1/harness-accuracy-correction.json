@@ -1,0 +1,22 @@
+{
+  "classification": "verification harness timing inaccuracy; no implementation discrepancy",
+  "failedAssertion": "cleanup/recreation suite expected one expired budget deletion at NOW+3700000",
+  "recreatedSnapshotAt": "2030-01-15T18:02:00.000Z",
+  "requiredRetentionUntil": "2030-01-15T19:02:00.000Z",
+  "incorrectCleanupAt": "2030-01-15T19:01:40.000Z",
+  "tooEarlyMs": 20000,
+  "reason": "Combined scenario reused the earlier 20-second fixture cleanup timestamp after recreation was moved to 120 seconds. Original PGlite concurrency scenario did not perform that final cleanup assertion.",
+  "sqlImplementationBehavior": "Correctly retains budget before retain_until and removes it at/after expiry when collection is absent and rolling starts expired.",
+  "applicationCodeChanged": false,
+  "migrationCodeChanged": false,
+  "correctionScope": "Harness only: derive cleanup clock from stored retention; preserve fresh default guard and allow verified same-branch checkpoint reuse without additional DDL.",
+  "initialRun": {
+    "status": "failed",
+    "passedSuites": 8,
+    "independentSessions": 100,
+    "fakeAcquisitions": 4,
+    "fakeRouteLookups": 8,
+    "providerApiCalls": 0
+  },
+  "initialResultSha256": "e68d6e8d18a948ff06c69ad725b48a113361be3a4acfea7922e87f489f386b89"
+}

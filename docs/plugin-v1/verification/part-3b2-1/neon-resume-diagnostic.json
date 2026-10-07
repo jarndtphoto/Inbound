@@ -1,0 +1,58 @@
+{
+  "stage": "Part 3B.2.1",
+  "recordedAt": "2026-10-04T02:19:52.445904+00:00",
+  "currentCommittedHead": "cd9dbf611ed95e5a734d7173c9aefea93285b88d",
+  "implementationSha": "11abfb4896658f22525433a40d3e1ac637e2cecb",
+  "projectName": "inbound-db",
+  "projectId": "withered-water-48367194",
+  "requestedBranchName": "plugin-v1-3b2-1-verification-20261004",
+  "excludedProductionBranchId": "br-late-forest-au7csk9x",
+  "existingControlPlaneBranchCount": 4,
+  "formValidation": {
+    "visibleErrors": [],
+    "ariaInvalidControls": [],
+    "errorElements": []
+  },
+  "accountPlan": "Free; managed by Vercel",
+  "schemaOnlyRemainingSpaceDisplayed": "1.07 GB",
+  "branchCountLimitDisplayed": null,
+  "limitExceededBannerDisplayed": false,
+  "allowedParentIds": [
+    "br-late-forest-au7csk9x",
+    "br-round-breeze-augnsxmu"
+  ],
+  "disabledParentIds": [
+    "br-cold-resonance-aud9ey98",
+    "br-calm-star-aualangq"
+  ],
+  "parentRestrictionExplanationDisplayed": null,
+  "nonExtensionConsoleErrorsOrWarnings": 0,
+  "extensionErrors": "Browser metadata-to-extension errors observed; no demonstrated causal relation to Neon creation.",
+  "branchCreationNetworkStatus": null,
+  "networkStatusLimitation": "The documented browser interface exposes console logs but no branch-creation request/response trace. No status was inferred.",
+  "rootCause": "undetermined",
+  "additionalCreateSubmissionsThisResume": 0,
+  "retryDecision": "No retry: the user conditioned another attempt on an understood cause; diagnostics did not establish one.",
+  "branchCreationVerified": false,
+  "newBranchId": null,
+  "databaseName": null,
+  "directEndpoint": null,
+  "actualAutomaticDeletionTime": null,
+  "sqlConnections": 0,
+  "migrationsApplied": [],
+  "finalPostNeonApplicationGates": "not run; Neon prerequisite incomplete",
+  "newCommits": 0,
+  "pushes": 0,
+  "providerApiCalls": 0,
+  "realAircraftExposed": 0,
+  "evidence": [
+    {
+      "file": "neon-resume-diagnostic.jpg",
+      "sha256": "a1076908f056b1d55914060ab4ceacdafaef3c4ff4ef6ff29474c4f014c10919"
+    },
+    {
+      "file": "neon-resume-console.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    }
+  ]
+}

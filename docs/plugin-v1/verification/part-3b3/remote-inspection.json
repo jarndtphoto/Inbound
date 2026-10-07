@@ -1,0 +1,47 @@
+{
+  "stage": "Part 3B.3",
+  "hostname": "inbound-live-fixture-rf27hpb80-jarndtphoto.vercel.app",
+  "mcpUrl": "https://inbound-live-fixture-rf27hpb80-jarndtphoto.vercel.app/mcp",
+  "deploymentId": "dpl_3QCUsdCSpiqfk3DvppKqkdbQ42Rz",
+  "publicMcpVerified": false,
+  "publicInitialize": {
+    "status": 401,
+    "contentType": "application/json",
+    "jsonRpcResponse": false,
+    "reason": "Deployment Protection prevents unauthenticated access"
+  },
+  "ownerAssistedWidgetInspection": {
+    "status": 200,
+    "contentType": "text/html; charset=utf-8",
+    "inventedNotice": true,
+    "radarTargets": 40,
+    "featuredFlights": 4,
+    "collectionVersion": 1,
+    "cspHeaderPresent": true
+  },
+  "protectedMcpFetch": {
+    "attempted": true,
+    "automaticApprovalReview": "rejected",
+    "operation": "Vercel temporary authentication-bypass fetch of protected /mcp",
+    "reason": "Creates or reuses a temporary authentication-bypass link; inspection authorization did not authorize that security-control change",
+    "retried": false
+  },
+  "localMcpInspection": {
+    "passed": true,
+    "supportedTools": [
+      "get_nearby_flights"
+    ],
+    "supportedResources": [
+      "ui://inbound/radar-v1.html"
+    ],
+    "strictInputsAndInvalidRequestsVerified": true,
+    "100ViewerFakeAcquisitions": 1,
+    "100ViewerNewRouteLookups": 0
+  },
+  "protectionException": "not added; exact-host browser fallback approval required",
+  "globalStandardProtection": "enabled",
+  "actualChatGptVerified": false,
+  "providerApiCalls": 0,
+  "productionApiCalls": 0,
+  "productionDbAccess": 0
+}
