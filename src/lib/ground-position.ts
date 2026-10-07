@@ -220,13 +220,13 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       return finish(position);
     }
 
-    // If every exact provider is already rate-limited/backing off, a broad
-    // airport scan would hit the same unavailable feeds and only make this
-    // ground-map request slower. Let the next scheduled poll recover instead.
-    if (exactPacks.length > 0 && exactPacks.every((pack) => pack.status && pack.status !== "ok")) {
-      const traced = wantedHex
-        ? await recentGroundTrace(wantedHex, airport, resolvedRegistration, callsigns[0] ?? data.callsign)
-        : null;
+    // During provider cooldown, still continue through the airport-cache and
+    // trace recovery below. fetchAround() returns immediately while a provider
+    // is backing off, so this does not create another upstream request.
+    const exactUnavailable = exactPacks.length > 0
+      && exactPacks.every((pack) => pack.status && pack.status !== "ok");
+    if (exactUnavailable && wantedHex) {
+      const traced = await recentGroundTrace(wantedHex, airport, resolvedRegistration, callsigns[0] ?? data.callsign);
       if (traced) {
         console.info("[ground-position]", {
           provider: "adsb-trace-recovery",
@@ -235,7 +235,6 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         });
         return finish(traced);
       }
-      return finish(null);
     }
 
     const aroundPacks = await fetchAround(airport.lat, airport.lon, 20).catch(() => []);
