@@ -491,6 +491,8 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   const manualBriefBase = useRef<CompiledBrief | null>(null);
   const [briefFeedback, setBriefFeedback] = useState<"no_change" | "failed" | null>(null);
   const mainRef = useRef<HTMLElement>(null);
+  const groundTimingOpenAtRef = useRef(Date.now());
+  const groundTimingStoryLoggedRef = useRef(false);
   const publishedLegDate = useRef<string | null>(null);
   const surfacePrefetchRef = useRef<{ flightKey: string; airports: Set<string> }>({ flightKey: "", airports: new Set() });
   const pushConfirmRef = useRef<{ key: string; attempts: number }>({ key: "", attempts: 0 });
@@ -517,6 +519,11 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
   useLayoutEffect(() => {
     setCacheOk(true);
   }, []);
+
+  useEffect(() => {
+    console.info("[ground-ttfp]", { event: "page_open", flight: flightKey, atMs: groundTimingOpenAtRef.current });
+  }, [flightKey]);
+
 
   useEffect(() => {
     const meta = document.querySelector('meta[name="viewport"]');
@@ -597,6 +604,20 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
 
   const story = storyForQuery(storyQ.data, query, linkedDate);
   const remaining = story ? remainingFlight(story) : null;
+
+  useEffect(() => {
+    if (!story || groundTimingStoryLoggedRef.current) return;
+    groundTimingStoryLoggedRef.current = true;
+    console.info("[ground-ttfp]", {
+      event: "story_loaded",
+      flight: flightKey,
+      atMs: Date.now(),
+      sincePageOpenMs: Date.now() - groundTimingOpenAtRef.current,
+      stage: story.currentStage,
+      hasAircraft: Boolean(story.aircraft),
+    });
+  }, [story, flightKey]);
+
 
   useEffect(() => {
     if (!story || story.currentStage !== "push" || storyQ.isFetching || !pageVisible) return;
