@@ -651,9 +651,11 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
     const assignmentChanged = Boolean((registration && bootstrap.registration && registration !== bootstrap.registration)
       || (hex && bootstrap.hex && hex !== bootstrap.hex)
       || (storyIdentity.registration && !bootstrap.registration));
-    const prefetchKey = `${bootstrap.landKey}:${bootstrap.airportIata}:${bootstrap.movementKind}:${registration ?? ""}:${hex ?? ""}`;
+    // Lookup evidence may arrive after an initial miss without changing the
+    // dated leg or aircraft assignment used by the shared position cache.
+    const prefetchKey = JSON.stringify([bootstrap.landKey, bootstrap.airportIata, bootstrap.movementKind,
+      registration, hex, story.flightId?.trim().toUpperCase() ?? "", callsign?.replace(/\s/g, "").toUpperCase() ?? ""]);
     if (groundBootstrapPrefetchRef.current === prefetchKey) return;
-    groundBootstrapPrefetchRef.current = prefetchKey;
     const key = groundPositionQueryKey({
       stateKey: bootstrap.landKey,
       flightNumber: bootstrap.requestedIdent,
@@ -666,36 +668,52 @@ function FlightPages({ query, linkedDate, flightTab, onTabChange, onLegDate, onO
       && (!existingPosition || bootstrap.lastPosition.seenAt > existingPosition.seenAt)) {
       queryClient.setQueryData(key, bootstrap.lastPosition);
     }
-    console.info("[ground-ttfp]", {
-      event: "ground_query_sent",
-      flight: flightKey,
-      airport: bootstrap.airportIata,
-      movement: bootstrap.movementKind,
-      atMs: Date.now(),
-      bootstrap: true,
-    });
-    void logGroundTiming({ data: {
-      event: "ground_query_sent", flight: flightKey, airport: bootstrap.airportIata,
-      movement: bootstrap.movementKind, atMs: Date.now(),
-    } }).catch(() => undefined);
-    void queryClient.prefetchQuery({
-      queryKey: key,
-      queryFn: () => getGroundPosition({ data: {
-        stateKey: bootstrap.landKey,
-        serviceDate: bootstrap.serviceDate,
-        airportIata: bootstrap.airportIata,
-        flightNumber: bootstrap.requestedIdent,
-        callsign,
-        registration,
-        hex,
-        originIata: bootstrap.originIata,
-        destIata: bootstrap.destIata,
-        movementKind: bootstrap.movementKind,
-        airportLat: bootstrap.airportLat,
-        airportLon: bootstrap.airportLon,
-      } }),
-      staleTime: 0,
-    });
+    let active = true;
+    let joinedPending = queryClient.getQueryState(key)?.fetchStatus === "fetching";
+    const prefetch = () => {
+      void queryClient.prefetchQuery({
+        queryKey: key,
+        queryFn: () => {
+          // Only suppress evidence that actually started a request. A pending
+          // lookup with older evidence can cause React Query to deduplicate us.
+          groundBootstrapPrefetchRef.current = prefetchKey;
+          console.info("[ground-ttfp]", {
+            event: "ground_query_sent",
+            flight: flightKey,
+            airport: bootstrap.airportIata,
+            movement: bootstrap.movementKind,
+            atMs: Date.now(),
+            bootstrap: true,
+          });
+          void logGroundTiming({ data: {
+            event: "ground_query_sent", flight: flightKey, airport: bootstrap.airportIata,
+            movement: bootstrap.movementKind, atMs: Date.now(),
+          } }).catch(() => undefined);
+          return getGroundPosition({ data: {
+            stateKey: bootstrap.landKey,
+            serviceDate: bootstrap.serviceDate,
+            airportIata: bootstrap.airportIata,
+            flightNumber: bootstrap.requestedIdent,
+            flightId: story.flightId ?? null,
+            callsign,
+            registration,
+            hex,
+            originIata: bootstrap.originIata,
+            destIata: bootstrap.destIata,
+            movementKind: bootstrap.movementKind,
+            airportLat: bootstrap.airportLat,
+            airportLon: bootstrap.airportLon,
+          } });
+        },
+        staleTime: 0,
+      }).then(() => {
+        if (!active || !joinedPending || groundBootstrapPrefetchRef.current === prefetchKey) return;
+        joinedPending = false;
+        prefetch();
+      });
+    };
+    prefetch();
+    return () => { active = false; };
   }, [groundBootstrapQ.data, flightTab, queryClient, flightKey, story]);
 
 
@@ -1217,6 +1235,8 @@ const STATUS_PROGRESS = ["Gate", "Pushback", "Taxi", "Flight", "Landing", "Gate"
 function FlightStatusProgress({ story }: { story: FlightStory }) {
   if (story.providers?.previewMode === "fr24-only") return null;
   const unconfirmed = departureGroundUnconfirmed(story);
+  const scheduledDeparture = formatStoryEventTime(story, story.times.origPushUnix ?? story.resume?.gateOut?.scheduled
+    ?? (story.times.pushKind === "scheduled" ? story.times.pushUnix : null), story.origin.tz);
   // An unavailable observation does not establish that the aircraft is still
   // at its first stage. Keep every physical stage neutral until evidence does.
   const active = unconfirmed ? -1 : statusProgressIndex(displayStage(story));
@@ -1226,6 +1246,10 @@ function FlightStatusProgress({ story }: { story: FlightStory }) {
   return (
     <div className="flight-progress mt-4" data-progress-state={unconfirmed ? "unknown" : "confirmed"}
       aria-label={`Flight progress: ${unconfirmed ? "movement not confirmed" : labels[active]}`}>
+      {unconfirmed && <p role="status" className="mb-2 text-sm text-muted">
+        {scheduledDeparture ? `Departure scheduled for ${scheduledDeparture}. ` : ""}
+        Awaiting a movement update; the current stage is unconfirmed.
+      </p>}
       <div className="grid grid-cols-6 gap-1">
         {labels.map((label, index) => {
           const complete = index < active;

@@ -206,3 +206,15 @@ test('Production-source Preview reports stopped FR24 while retaining active fall
  const story={...polishStory(),currentStage:'taxi',providers:{previewMode:'production-parity',chosenPosition:'adsb'},aircraft:{...polishStory().aircraft,onGround:true,gsKt:15}};
  assert.match(markup(ui.FlightHead,story),/>Taxiing out</,'ordinary source-backed stage presentation remains enabled');
 });
+
+test('AA3362 missing movement shows its known departure schedule without inventing a stage',()=>{
+ const base=polishStory();
+ const story={...base,iata:'AA3362',callsign:'AAL3362',currentStage:'origin_gate',live:false,aircraft:null,confirmedTakeoff:null,
+   fetchedAt:Date.parse('2026-10-07T20:05:14Z'),schedule:{serviceDate:'2026-10-07'},
+   origin:{...base.origin,tz:'America/Chicago'},providers:{chosenPosition:null},
+   times:{...base.times,pushed:false,airborne:false,origPushUnix:1791403200,pushUnix:1791402780,pushKind:'estimated',takeoffKind:null,takeoffUnix:null,gateKind:'estimated',landKind:'estimated'}};
+ const html=markup(ui.FlightStatusProgress,story);
+ assert.match(html,/Departure scheduled for 3:00 PM CDT/);
+ assert.match(html,/current stage is unconfirmed/);
+ assert.doesNotMatch(html,/progress-current|bg-accent/);
+});

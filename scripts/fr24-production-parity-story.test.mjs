@@ -19,6 +19,7 @@ test('Production-parity Preview keeps normal sources working after the FR24 sess
   globalThis.__fr24ParityStoryFixture = fixture;
   let now = Date.parse('2026-10-07T17:40:00Z'); const sec = now / 1000;
   let traceOverride = null;
+  let emptyFree = false, freeClockAdvance = 0;
   let holdPireps = false, pirepGate, releasePireps, pirepTimer, overlappedTrace = false;
   const requests = [];
   let statusReads = 0, reserveAttempts = 0;
@@ -108,7 +109,9 @@ test('Production-parity Preview keeps normal sources working after the FR24 sess
         [0, 41.9769, -87.9081, 5000, 210, 185], [1500, 38.4, -89.0, 35000, 450, 185],
         [3598, aircraft.lat, aircraft.lon, 35000, 450, 185],
       ] });
-      if (/adsb\.fi|adsb\.lol|airplanes\.live/.test(url.hostname)) return Response.json({ ac: [aircraft] });
+      if (/adsb\.fi|adsb\.lol|airplanes\.live/.test(url.hostname)) {
+        now += freeClockAdvance; return Response.json({ ac: emptyFree ? [] : [aircraft] });
+      }
       if (url.hostname === 'aviationweather.gov') return Response.json(
         url.pathname.endsWith('/metar') || url.pathname.endsWith('/taf') ? [] : { features: [] });
       if (url.hostname === 'external-api.faa.gov') return Response.json({ Status: [] });
@@ -229,6 +232,86 @@ test('Production-parity Preview keeps normal sources working after the FR24 sess
       const traces=requests.slice(before).filter(url=>url.pathname.includes('trace_'));
       assert.equal(traces.length,6,'same existing three hosts and full/recent requests, no extra acquisition');
       holdPireps=false;
+    });
+
+    await t.test('selected current-leg operating flightId admits ENY3362 without an atc or tail hint', async () => {
+      now+=35000; holdPireps=false; fixture.phase={state:{push:null,taxiOut:null},version:0,status:'ok'};fixture.winner=null;
+      Object.assign(record,{ident:'AAL3362',iataIdent:'AA3362',flightId:`ENY3362-${now/1000-600}-synthetic`,flightStatus:'scheduled',atcIdent:null,hexid:null});
+      record.aircraft={type:'E75L',tail:null};
+      record.gateDepartureTimes={scheduled:now/1000-300,estimated:null,actual:null};
+      record.takeoffTimes={scheduled:now/1000+600,estimated:null,actual:null};
+      Object.assign(aircraft,{flight:'ENY3362',hex:'ab3362',r:'N3362Z',lat:41.9786,lon:-87.9048,gs:12,alt_baro:'ground'});
+      const result=await api.getFlightStory({data:{q:'AA3362',fresh:true}});
+      assert.equal(result.live,true);assert.equal(result.aircraft.callsign,'ENY3362');
+      assert.equal(result.aircraft.onGround,true);assert.equal(result.callsign,'AAL3362');assert.equal(result.iata.replace(/\s/g,''),'AA3362');
+    });
+    await t.test('a cold story cannot match the operating alias over a conflicting assigned tail', async () => {
+      now+=35000; record.aircraft={type:'E75L',tail:'N99999'};
+      const coldApi=await import(pathToFileURL(join(directory,'story.mjs')).href+'?tail-conflict');
+      coldApi.setFr24PreviewSessionGuardForTests({status:async()=>({...stoppedSession}),reserve:async()=>null,canDispatch:async()=>false,finish:async()=>{throw Error('no paid call allowed');}});
+      const result=await coldApi.getFlightStory({data:{q:'AA3362',fresh:true}});
+      assert.equal(result.resume.tail,'N99999', 'fixture must select the changed current assignment');
+      assert.equal(result.aircraft,null);assert.equal(result.live,false);
+    });
+
+    await t.test('the added operating alias cannot override an explicitly assigned hex', async () => {
+      now+=35000; record.aircraft={type:'E75L',tail:null};record.hexid='aaaaaa';
+      const coldApi=await import(pathToFileURL(join(directory,'story.mjs')).href+'?hex-conflict');
+      coldApi.setFr24PreviewSessionGuardForTests({status:async()=>({...stoppedSession}),reserve:async()=>null,canDispatch:async()=>false,finish:async()=>{throw Error('no paid call allowed');}});
+      const result=await coldApi.getFlightStory({data:{q:'AA3362',fresh:true}});
+      assert.equal(result.live,false);assert.equal(result.aircraft,null);
+    });
+
+    await t.test('rejected distant airborne fixes cannot create departure stage or push evidence', async () => {
+      now+=35000; record.hexid='ab3362';record.atcIdent='ENY3362';record.aircraft={type:'E75L',tail:'N3362Z'};
+      record.destination={iata:'RDU',icao:'KRDU',coord:[-78.7875,35.8776],TZ:':America/New_York',friendlyName:'Synthetic RDU'};
+      record.gateDepartureTimes={scheduled:now/1000-300,estimated:null,actual:null};
+      record.takeoffTimes={scheduled:now/1000+900,estimated:null,actual:null};
+      fixture.phase={state:{push:null,taxiOut:null},version:0,status:'ok'};
+      traceOverride={timestamp:0,trace:[]};
+      Object.assign(aircraft,{lat:35.88,lon:-78.78,alt_baro:24000,gs:420});
+      fixture.savedPhase=null;
+      const coldApi=await import(pathToFileURL(join(directory,'story.mjs')).href+'?distant-predeparture');
+      coldApi.setFr24PreviewSessionGuardForTests({status:async()=>({...stoppedSession}),reserve:async()=>null,canDispatch:async()=>false,finish:async()=>{throw Error('no paid call allowed');}});
+      const result=await coldApi.getFlightStory({data:{q:'AA3362',fresh:true}});
+      assert.equal(result.live,false);assert.equal(result.aircraft,null);
+      assert(!['ride','arrival','final_approach','taxi_in','gate'].includes(result.currentStage), result.currentStage);
+      assert.equal(result.times.airborne,false);assert.notEqual(result.times.pushSource,'live_detected');
+      assert.equal(fixture.savedPhase?.confirmedTakeoff ?? null,null);
+      assert.equal(fixture.savedPhase?.push ?? null,null);
+    });
+
+    await t.test('genuine same-leg takeoff proof survives a later rejected distant fix', async () => {
+      now+=35000; fixture.phase={state:{push:null,taxiOut:null},version:0,status:'ok'};fixture.savedPhase=null;
+      Object.assign(aircraft,{lat:41.99,lon:-87.89,alt_baro:2500,gs:180});
+      const coldApi=await import(pathToFileURL(join(directory,'story.mjs')).href+'?genuine-prior-takeoff');
+      coldApi.setFr24PreviewSessionGuardForTests({status:async()=>({...stoppedSession}),reserve:async()=>null,canDispatch:async()=>false,finish:async()=>{throw Error('no paid call allowed');}});
+      const first=await coldApi.getFlightStory({data:{q:'AA3362',fresh:true}});
+      assert.equal(first.live,true);assert.equal(first.currentStage,'ride');
+      assert(fixture.savedPhase?.confirmedTakeoff,'genuine origin climb must establish takeoff proof');
+      fixture.phase={state:fixture.savedPhase,version:1,status:'ok'};
+      now+=35000;Object.assign(aircraft,{r:'NWRONG',lat:35.88,lon:-78.78,alt_baro:24000,gs:420});
+      const next=await coldApi.getFlightStory({data:{q:'AA3362',fresh:true}});
+      assert.notEqual(next.aircraft?.registration,'NWRONG');
+      assert.notEqual(next.aircraft?.lat,35.88,'rejected aircraft must not become the selected position');
+      assert.equal(next.currentStage,'ride','rejecting this fix must not erase previously validated takeoff');
+      assert.equal(next.times.airborne,true);
+    });
+
+    await t.test('one slow empty story never repeats an identical free endpoint after cache expiry', async () => {
+      now+=35000;emptyFree=true;freeClockAdvance=2000;
+      fixture.phase={state:{push:null,taxiOut:null},version:0,status:'ok'};
+      Object.assign(record,{ident:'AAL3398',iataIdent:'AA3398',flightId:`ENY3398-${now/1000-600}-synthetic`,hexid:null,atcIdent:null});
+      record.aircraft={type:'E75L',tail:null};
+      const coldApi=await import(pathToFileURL(join(directory,'story.mjs')).href+'?slow-empty-recovery');
+      coldApi.setFr24PreviewSessionGuardForTests({status:async()=>({...stoppedSession}),reserve:async()=>null,canDispatch:async()=>false,finish:async()=>{throw Error('no paid call allowed');}});
+      const before=requests.length;
+      const result=await coldApi.getFlightStory({data:{q:'AA3398',fresh:true}});
+      const free=requests.slice(before).filter(url=>/adsb\.fi|adsb\.lol/.test(url.hostname)&&!url.pathname.includes('trace_')).map(url=>url.href);
+      assert.equal(result.live,false);
+      assert(free.some(url=>url.includes('ENY3398')),'distinct operating identity must still be tried');
+      assert.equal(free.length,new Set(free).size,'one request must not repeat already completed empty endpoint work');
+      emptyFree=false;freeClockAdvance=0;
     });
 
     await t.test('Production retains normal mode even if the Preview selector is present', async () => {

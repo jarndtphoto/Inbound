@@ -440,19 +440,25 @@ export function stickyPick(
 async function fetchProviderPack(id: ProviderId, url: string, now = Date.now(), signal?: AbortSignal): Promise<ProviderPack> {
   if (signal?.aborted) return { provider: id, ac: [], status: "cancelled" };
   const { acquireFreeAdsb, waitForAdsbViewer } = await import("./adsb-acquisition.server.ts");
-  const result = await waitForAdsbViewer(acquireFreeAdsb({ provider: id, url, timeoutMs: PROVIDERS[id].timeoutMs }), signal);
-  if (!result) return { provider: id, ac: [], status: "cancelled" };
-  if (result.status === "ok") markProviderOk(id, now);
-  else if (result.status === "403" || result.status === "429" || result.status === "error" || result.status === "timeout") {
-    markProviderFail(id, result.status, now);
-  }
-  if (result.status !== "ok") {
-    const key = `${id}:${result.status}`;
-    if (now - (providerLogAt.get(key) ?? 0) >= 5_000) {
-      providerLogAt.set(key, now);
-      console.warn("[adsb-provider-acquisition]", { provider: id, status: result.status, retryAt: result.retryAt ?? null });
+  const { reuseAdsbRequest } = await import("./adsb-request-scope.server.ts");
+  const result = await waitForAdsbViewer(reuseAdsbRequest(`${id}:${url}`, async () => {
+    const result = await acquireFreeAdsb({ provider: id, url, timeoutMs: PROVIDERS[id].timeoutMs });
+    // Replaying a request-local result must not count the same failure twice
+    // or let an earlier success erase newer provider health information.
+    if (result.status === "ok") markProviderOk(id, now);
+    else if (result.status === "403" || result.status === "429" || result.status === "error" || result.status === "timeout") {
+      markProviderFail(id, result.status, now);
     }
-  }
+    if (result.status !== "ok") {
+      const key = `${id}:${result.status}`;
+      if (now - (providerLogAt.get(key) ?? 0) >= 5_000) {
+        providerLogAt.set(key, now);
+        console.warn("[adsb-provider-acquisition]", { provider: id, status: result.status, retryAt: result.retryAt ?? null });
+      }
+    }
+    return result;
+  }), signal);
+  if (!result) return { provider: id, ac: [], status: "cancelled" };
   return { provider: id, ac: acList(result.data), status: result.status,
     receivedAt: result.receivedAt ?? undefined, retryAt: result.retryAt };
 }
