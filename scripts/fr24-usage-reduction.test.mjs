@@ -85,10 +85,12 @@ test("paced ground map is free ADS-B only", async () => {
   assert.doesNotMatch(source, /from "\.\/fr24\.server"/);
   assert.doesNotMatch(source, /loadFr24|FR24_API_TOKEN/, "ground polling cannot reach paid FR24");
   assert.match(source, /fr24KeyType: "disabled-ground-map"/);
-  const exactIndex = source.indexOf("const exactPacks = wantedHex");
+  const exactIndex = source.indexOf("const exactPacks = traceHex");
   const aroundIndex = source.indexOf("const aroundPacks = await fetchAround");
   assert.ok(exactIndex >= 0 && aroundIndex > exactIndex, "ground polling tries exact identity before an airport-radius scan");
-  assert.match(source, /wantedHex[\s\S]*?fetchByHex\(wantedHex\)/, "known hex remains the strongest free ground identity");
+  assert.match(source, /const traceHex = wantedHex \|\| usRegistrationHex\(resolvedRegistration\)/);
+  assert.match(source, /traceHex[\s\S]*?fetchByHex\(traceHex\)/, "known or derived hex remains the strongest free ground identity");
+  assert.match(source, /if \(traceHex && hex === traceHex\) return true/);
   assert.match(source, /return finish\(position\);/, "any usable exact fix avoids the extra airport scan");
   assert.match(source, /const exactUnavailable = exactPacks\.length > 0/, "provider cooldown is identified explicitly");
   assert.match(source, /if \(exactUnavailable && traceHex\)/, "provider cooldown can recover a recent ground point before the held airport scan");
