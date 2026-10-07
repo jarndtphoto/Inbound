@@ -301,6 +301,8 @@ function GroundMovementMap({
 }) {
   const pageVisible = usePageVisible();
   const airport = mode.airport;
+  const groundTimingQueryLoggedRef = useRef(false);
+  const groundTimingFixLoggedRef = useRef(false);
   const surfaceQ = useQuery(surfaceQueryOptions(airport));
   const storyAircraft = story.aircraft;
   const storyPositionAge = typeof story.providers?.chosenPositionAgeSec === "number"
@@ -347,7 +349,18 @@ function GroundMovementMap({
   }
   const groundQ = useQuery({
     queryKey: ["ground-position", story.flightId ?? story.iata, airport.iata, mode.kind, identityHex ?? "", identityRegistration ?? "", identityCallsign],
-    queryFn: () => getGroundPosition({ data: {
+    queryFn: () => {
+      if (!groundTimingQueryLoggedRef.current) {
+        groundTimingQueryLoggedRef.current = true;
+        console.info("[ground-ttfp]", {
+          event: "ground_query_sent",
+          flight: story.iata,
+          airport: airport.iata,
+          movement: mode.kind,
+          atMs: Date.now(),
+        });
+      }
+      return getGroundPosition({ data: {
       callsign: identityCallsign,
       flightId: story.flightId ?? null,
       flightNumber: story.iata ?? null,
@@ -358,7 +371,8 @@ function GroundMovementMap({
       movementKind: mode.kind,
       airportLat: airport.lat,
       airportLon: airport.lon,
-    } }),
+    } });
+    },
     enabled: groundPollingEnabled(active, pageVisible, flightPollingComplete(story), inFlight, Boolean(storyFast), Boolean(identityHex || identityRegistration || identityCallsign)),
     refetchInterval: () => active && document.visibilityState === "visible" && !flightPollingComplete(story) ? 8_000 : false,
     refetchOnMount: "always",
@@ -506,6 +520,21 @@ function GroundMovementMap({
   const fastStale = Boolean(!fast && fastFix);
   const delayedFast = Boolean(fast && (fastAge ?? Infinity) > 12);
   const displayFrozen = frozen && !(fast && (fastAge ?? Infinity) <= 30);
+  useEffect(() => {
+    if (!active || !displayAircraft || groundTimingFixLoggedRef.current) return;
+    groundTimingFixLoggedRef.current = true;
+    console.info("[ground-ttfp]", {
+      event: "first_fix_shown",
+      flight: story.iata,
+      airport: airport.iata,
+      movement: mode.kind,
+      atMs: Date.now(),
+      source: fastFix?.provider ?? story.providers?.chosenPosition ?? "saved",
+      ageSec: fastAge ?? story.providers?.chosenPositionAgeSec ?? null,
+      onGround: displayAircraft.onGround,
+    });
+  }, [active, Boolean(displayAircraft), story.iata, airport.iata, mode.kind]);
+
   const coverageNotice = groundCoverageNotice({
     kind: mode.kind,
     airportIata: airport.iata,
