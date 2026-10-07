@@ -73,7 +73,7 @@ test("visibility and Map selection are wired through to the ground observer", as
   const movement = await read("src/components/movement-map.tsx");
   assert.match(movement, /enabled: groundPollingEnabled\([\s\S]{0,120}active,[\s\S]{0,80}pageVisible/);
   assert.doesNotMatch(movement, /refetchIntervalInBackground:\s*true/);
-  assert.match(movement, /document.visibilityState === "visible"/);
+  assert.match(movement, /document\.visibilityState !== "visible"/);
   assert.match(movement, /startupMs < 30_000 \? 2_500 : 8_000/, "ground ADS-B polling retries every 2.5 seconds during startup, then returns to eight seconds");
   const hook = await read("src/lib/use-page-visible.ts");
   assert.match(hook, /useSyncExternalStore/);
