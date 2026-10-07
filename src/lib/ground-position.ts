@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { haversineNm } from "./geo";
 import { fetchAround, fetchByCallsign, fetchByHex, fetchByReg, fuseProviderLists, type AdsbRaw, type ProviderPack } from "./adsb-fusion";
+import { usRegistrationHex } from "./us-registration-hex";
 
 type GroundPositionInput = {
   callsign?: string | null;
@@ -162,7 +163,8 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     const wantedHex = String(data.hex ?? "").toLowerCase();
     const resolvedRegistration = data.registration;
     const wantedReg = normRegistration(resolvedRegistration);
-    const usableAdsb = (raw: AdsbRaw | null | undefined) => {
+    const traceHex = wantedHex || usRegistrationHex(resolvedRegistration) || "";
+    const usableAdsb = (raw: AdsbRaw | null | undefined, maxAgeSec = 30) => {
       if (!raw || !Number.isFinite(raw.lat) || !Number.isFinite(raw.lon)) return null;
       const point = { lat: raw.lat as number, lon: raw.lon as number };
       if (haversineNm(point, airport) > 20) return null;
@@ -171,7 +173,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       if (!onGround && (altFt ?? 9999) > 250) return null;
       const ageSec = raw._fusion?.ageSec
         ?? (typeof raw.seen_pos === "number" ? raw.seen_pos : typeof raw.seen === "number" ? raw.seen : 999);
-      if (!Number.isFinite(ageSec) || ageSec > 30) return null;
+      if (!Number.isFinite(ageSec) || ageSec > maxAgeSec) return null;
       return {
         lat: point.lat,
         lon: point.lon,
@@ -225,8 +227,8 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     // is backing off, so this does not create another upstream request.
     const exactUnavailable = exactPacks.length > 0
       && exactPacks.every((pack) => pack.status && pack.status !== "ok");
-    if (exactUnavailable && wantedHex) {
-      const traced = await recentGroundTrace(wantedHex, airport, resolvedRegistration, callsigns[0] ?? data.callsign);
+    if (exactUnavailable && traceHex) {
+      const traced = await recentGroundTrace(traceHex, airport, resolvedRegistration, callsigns[0] ?? data.callsign);
       if (traced) {
         console.info("[ground-position]", {
           provider: "adsb-trace-recovery",
@@ -245,7 +247,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       groundAroundCache.set(aroundKey, { at: Date.now(), ac: fusedAround });
     }
     const heldAround = !fusedAround.length ? groundAroundCache.get(aroundKey) : null;
-    const aroundSource = heldAround && Date.now() - heldAround.at <= 30_000
+    const aroundSource = heldAround && Date.now() - heldAround.at <= 90_000
       ? heldAround.ac.map((raw) => {
           const heldSec = Math.max(0, Date.now() - heldAround.at) / 1000;
           return {
@@ -261,7 +263,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       .sort((a, b) => (a._fusion?.ageSec ?? 999) - (b._fusion?.ageSec ?? 999));
     let aroundFallback: ReturnType<typeof usableAdsb> = null;
     for (const candidate of around) {
-      const position = usableAdsb(candidate);
+      const position = usableAdsb(candidate, heldAround ? 90 : 30);
       if (!position) continue;
       aroundFallback = position;
       break;
@@ -279,8 +281,8 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     // An "ok" live response can still omit one aircraft. If both exact and
     // airport-radius lookup miss, try the already-supported recent trace for
     // the known hex before leaving the map without a marker.
-    const traced = wantedHex
-      ? await recentGroundTrace(wantedHex, airport, resolvedRegistration, callsigns[0] ?? data.callsign)
+    const traced = traceHex
+      ? await recentGroundTrace(traceHex, airport, resolvedRegistration, callsigns[0] ?? data.callsign)
       : null;
     if (traced) {
       console.info("[ground-position]", {
@@ -300,6 +302,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
         movement: data.movementKind,
         flight: data.flightNumber,
         hasHex: Boolean(wantedHex),
+        derivedUsHex: !wantedHex && Boolean(traceHex),
         hasRegistration: Boolean(wantedReg),
         callsigns,
         exactStatus: exactPacks.map((pack) => `${pack.provider}:${pack.status ?? "ok"}+${pack.ac.length}`),
