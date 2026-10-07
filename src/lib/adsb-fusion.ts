@@ -371,7 +371,7 @@ export function chooseBest(
   return null;
 }
 
-export type ProviderFetchStatus = "ok" | "403" | "429" | "timeout" | "error" | "backoff";
+export type ProviderFetchStatus = "ok" | "403" | "429" | "timeout" | "error" | "backoff" | "cancelled";
 export type ProviderPack = { provider: ProviderId; ac: AdsbRaw[]; status?: ProviderFetchStatus };
 
 export function fuseProviderLists(packs: ProviderPack[], opts?: { now?: number; airside?: boolean }): AdsbRaw[] {
@@ -433,10 +433,23 @@ export function stickyPick(
   return null;
 }
 
-async function fetchJson(url: string, ms: number): Promise<unknown> {
+function fetchSignal(ms: number, signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(ms);
+  if (!signal) return timeout;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal.aborted || timeout.aborted) abort();
+  else {
+    signal.addEventListener("abort", abort, { once: true });
+    timeout.addEventListener("abort", abort, { once: true });
+  }
+  return controller.signal;
+}
+
+async function fetchJson(url: string, ms: number, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(url, {
     headers: { "User-Agent": UA, Accept: "application/json" },
-    signal: AbortSignal.timeout(ms),
+    signal: fetchSignal(ms, signal),
   });
   if (res.status === 429) throw new Error("upstream 429");
   if (!res.ok) throw new Error(`upstream ${res.status}`);
@@ -451,7 +464,7 @@ function providerFetchStatus(error: unknown): ProviderFetchStatus {
   return "error";
 }
 
-async function fetchProviderPack(id: ProviderId, url: string, now = Date.now()): Promise<ProviderPack> {
+async function fetchProviderPack(id: ProviderId, url: string, now = Date.now(), signal?: AbortSignal): Promise<ProviderPack> {
   if (!providerHealthy(id, now)) {
     const h = health.get(id);
     const key = `${id}:backoff`;
@@ -466,10 +479,11 @@ async function fetchProviderPack(id: ProviderId, url: string, now = Date.now()):
     return { provider: id, ac: [], status: "backoff" };
   }
   try {
-    const json = await fetchJson(url, PROVIDERS[id].timeoutMs);
+    const json = await fetchJson(url, PROVIDERS[id].timeoutMs, signal);
     markProviderOk(id, now);
     return { provider: id, ac: acList(json), status: "ok" };
   } catch (error) {
+    if (signal?.aborted) return { provider: id, ac: [], status: "cancelled" };
     const status = providerFetchStatus(error);
     markProviderFail(id, status, now);
     const h = health.get(id);
@@ -490,38 +504,38 @@ async function fetchProviderPack(id: ProviderId, url: string, now = Date.now()):
   }
 }
 
-export async function fetchProvider(id: ProviderId, url: string, now = Date.now()): Promise<AdsbRaw[]> {
-  return (await fetchProviderPack(id, url, now)).ac;
+export async function fetchProvider(id: ProviderId, url: string, now = Date.now(), signal?: AbortSignal): Promise<AdsbRaw[]> {
+  return (await fetchProviderPack(id, url, now, signal)).ac;
 }
 
-export async function fetchAround(lat: number, lon: number, dist: number): Promise<ProviderPack[]> {
+export async function fetchAround(lat: number, lon: number, dist: number, signal?: AbortSignal): Promise<ProviderPack[]> {
   const now = Date.now();
   return Promise.all(
-    PROVIDER_ORDER.map((id) => fetchProviderPack(id, PROVIDERS[id].around(lat, lon, dist), now)),
+    PROVIDER_ORDER.map((id) => fetchProviderPack(id, PROVIDERS[id].around(lat, lon, dist), now, signal)),
   );
 }
 
-export async function fetchByHex(hex: string): Promise<ProviderPack[]> {
+export async function fetchByHex(hex: string, signal?: AbortSignal): Promise<ProviderPack[]> {
   const id = hex.toLowerCase();
   const now = Date.now();
   return Promise.all(
-    PROVIDER_ORDER.map((p) => fetchProviderPack(p, PROVIDERS[p].hex(id), now)),
+    PROVIDER_ORDER.map((p) => fetchProviderPack(p, PROVIDERS[p].hex(id), now, signal)),
   );
 }
 
-export async function fetchByCallsign(callsign: string): Promise<ProviderPack[]> {
+export async function fetchByCallsign(callsign: string, signal?: AbortSignal): Promise<ProviderPack[]> {
   const u = callsign.replace(/\s/g, "").toUpperCase();
   const now = Date.now();
   return Promise.all(
-    PROVIDER_ORDER.map((p) => fetchProviderPack(p, PROVIDERS[p].callsign(u), now)),
+    PROVIDER_ORDER.map((p) => fetchProviderPack(p, PROVIDERS[p].callsign(u), now, signal)),
   );
 }
 
-export async function fetchByReg(reg: string): Promise<ProviderPack[]> {
+export async function fetchByReg(reg: string, signal?: AbortSignal): Promise<ProviderPack[]> {
   const u = reg.replace(/[-\s]/g, "").toUpperCase();
   const now = Date.now();
   return Promise.all(
-    PROVIDER_ORDER.map((p) => fetchProviderPack(p, PROVIDERS[p].registration(u), now)),
+    PROVIDER_ORDER.map((p) => fetchProviderPack(p, PROVIDERS[p].registration(u), now, signal)),
   );
 }
 
