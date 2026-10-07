@@ -195,7 +195,7 @@ export const getGroundPosition = createServerFn({ method: "POST" })
       const reg = normRegistration(raw.r);
       const cs = normCallsign(raw.flight);
       const hex = String(raw.hex ?? "").toLowerCase();
-      if (wantedHex && hex === wantedHex) return true;
+      if (traceHex && hex === traceHex) return true;
       if (wantedReg && reg === wantedReg) return true;
       return Boolean(cs && wantedCallsigns.has(cs));
     };
@@ -203,8 +203,8 @@ export const getGroundPosition = createServerFn({ method: "POST" })
     // airport every five seconds. Try hex, registration, or the operating
     // callsign first; only fall back to the radius feed when exact lookup is
     // unavailable or delayed enough that a broad hit could materially help.
-    const exactPacks = wantedHex
-      ? await fetchByHex(wantedHex).catch(() => [])
+    const exactPacks = traceHex
+      ? await fetchByHex(traceHex).catch(() => [])
       : resolvedRegistration
         ? await fetchByReg(resolvedRegistration).catch(() => [])
         : callsigns[0]
