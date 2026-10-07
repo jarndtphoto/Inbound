@@ -90,15 +90,17 @@ test("paced ground map is free ADS-B only", async () => {
   assert.ok(exactIndex >= 0 && aroundIndex > exactIndex, "ground polling tries exact identity before an airport-radius scan");
   assert.match(source, /wantedHex[\s\S]*?fetchByHex\(wantedHex\)/, "known hex remains the strongest free ground identity");
   assert.match(source, /return finish\(position\);/, "any usable exact fix avoids the extra airport scan");
-  assert.match(source, /exactPacks\.every\(\(pack\) => pack\.status && pack\.status !== "ok"\)/, "provider cooldown skips a redundant broad scan");
-  assert.match(source, /recentGroundTrace\(wantedHex/, "provider cooldown can recover a recent ground point from the existing ADS-B trace service");
+  assert.match(source, /const exactUnavailable = exactPacks\.length > 0/, "provider cooldown is identified explicitly");
+  assert.match(source, /if \(exactUnavailable && traceHex\)/, "provider cooldown can recover a recent ground point before the held airport scan");
+  assert.match(source, /recentGroundTrace\(traceHex/, "trace recovery can use a known or registration-derived hex");
   assert.match(source, /provider: "adsb-trace-recovery"/);
   assert.match(source, /ageSec > 90/);
   assert.match(source, /trace has no recent ground point/);
   assert.match(source, /provider: "adsb-around-fallback"/, "a broad scan remains available when exact lookup is healthy but empty");
   assert.match(source, /const groundAroundCache = new Map/);
-  assert.match(source, /heldAround && Date\.now\(\) - heldAround\.at <= 30_000/);
-  assert.match(source, /const traced = wantedHex[\s\S]*?recentGroundTrace\(wantedHex/);
+  assert.match(source, /heldAround && Date\.now\(\) - heldAround\.at <= 90_000/);
+  assert.match(source, /const traceHex = wantedHex \|\| usRegistrationHex\(resolvedRegistration\)/);
+  assert.match(source, /const traced = traceHex[\s\S]*?recentGroundTrace\(traceHex/);
   assert.match(source, /\[ground-position-miss\]/);
 });
 
